@@ -24,12 +24,12 @@ class TerminalCannotHide(Exception):
 
 
 class TerminalNotRestored(Exception):
-    """The paste was read, but the terminal could not be set back; the paste was discarded."""
+    """The terminal could not be set back, whether or not reading began; nothing was kept."""
 
     def __init__(self) -> None:
         super().__init__(
-            "the paste was read but the terminal could not be set back, so typing may stay "
-            "hidden; run `stty sane`"
+            "the terminal could not be set back, so typing may stay hidden and nothing was kept; "
+            "run `stty sane`"
         )
 
 

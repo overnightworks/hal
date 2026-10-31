@@ -619,7 +619,7 @@ class EntryRefused(Exception):
 
 
 class EntryNotRestored(Exception):
-    """The terminal could not be set back after a paste at one entry; the paste was discarded."""
+    """The terminal could not be set back at one entry; nothing was kept."""
 
 
 class EntryFailed(Exception):
