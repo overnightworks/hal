@@ -1,8 +1,0 @@
-claim_id = "8a3808fd90d44a2ba6afadda82570c90"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "ed44d3733db1be3a250a9ea7fc9142c11794c814"
-branch = "claude/issue-844-s2-of-674-the-keycloak-probe-measures-u3"
-scope = ["docs/keycloak.md", "probe/keycloak/README.md", "probe/keycloak/scope_measurement_cell.py", "probe/keycloak/service_audience_cell.py"]
-opened_commit = "0824b245914c5fb0ab10efcc4e4f64ffc832ee85"
-whole_reason = "The cell, its call and the docs paragraph land together: a docs answer the probe does not print is unproven, and lines without the docs leave #748 without its answer."
