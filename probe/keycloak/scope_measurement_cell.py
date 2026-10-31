@@ -153,7 +153,8 @@ def line_of(claims: dict[str, Any], workload: bool = False) -> str:
     the role, so only a U3 line says whether it is kept."""
     audience = audiences(claims)
     roles = claims.get("realm_access", {}).get("roles", [])
-    kept = f"role {ROLE} {'kept' if ROLE in roles else 'not kept'}, " if workload else ""
+    held_role = "kept" if ROLE in roles else "not kept"
+    kept = f"role {ROLE} {held_role}, " if workload else ""
     return (
         f"aud {audience} ({'exact' if audience == [TARGET] else 'not exact'}), roles {roles}, "
         f"resource_access {sorted(claims.get('resource_access', {}))}, "
@@ -368,7 +369,7 @@ class ScopeMeasurement:
             "RF0", f"Sc signed in with openid once {SCOPE} was optional: no {TARGET} audience"
         )
         self.refresh(made, "RF1", fresh["refresh_token"], asked)
-        self.silent_sign_in(made, asked)
+        self.silent_sign_in(asked)
 
     def redirect_outcome(self, location: str) -> str:
         """A redirect must go to the callback and carry a code or an RFC 6749 error code."""
@@ -390,7 +391,7 @@ class ScopeMeasurement:
         )
         return f"302 to the callback with error {error}"
 
-    def silent_sign_in(self, made: Made, scope: str) -> None:
+    def silent_sign_in(self, scope: str) -> None:
         """Whether a session's browser gets a code for the scope with no password; not exchanged."""
         query = urlencode(
             {

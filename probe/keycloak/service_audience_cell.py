@@ -87,29 +87,9 @@ class Client(Protocol):
     secret_file: str
 
 
-class Probe(Protocol):
+class Probe(scope_measurement_cell.Probe, Protocol):
     admin: Admin
     secret_values: dict[str, str]
-
-    def through_tunnel(self, method: str, path: str, **kwargs: Any) -> Answer: ...
-
-    def keep_secret(self, name: str, value: str) -> str: ...
-
-    def tokens_from(self, holder: str, response: Answer) -> dict[str, Any]: ...
-
-    def browser(self, name: str) -> Any: ...
-
-    def held(self, proof: str, detail: str) -> None: ...
-
-    def app_client_sign_in(
-        self,
-        client: Any,
-        opener: Any,
-        username: str,
-        password: str,
-        client_secret: str,
-        scope: str = ...,
-    ) -> dict[str, Any]: ...
 
 
 @dataclass(frozen=True)
