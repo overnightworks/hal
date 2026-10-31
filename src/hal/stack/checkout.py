@@ -143,11 +143,13 @@ def run_in_own_group(
     timeout: float | None,
     *,
     own_session: bool = False,
+    started: Callable[[int], None] = lambda _group: None,
 ) -> subprocess.CompletedProcess[bytes]:
     """`command` in its own process group, or with `own_session` in a session of its own that it
-    leads, with no stdin and its output captured; a call that does not finish within `timeout`
-    (None: never), or an exception while it waits, ends with the whole group killed and every pipe
-    read to its end before the exception goes on. Raises OSError when it cannot start."""
+    leads, with no stdin and its output captured; `started` learns the group as soon as the
+    child runs. A call that does not finish within `timeout` (None: never), or an exception while
+    it waits, ends with the whole group killed and every pipe read to its end before the exception
+    goes on. Raises OSError when it cannot start."""
     with subprocess.Popen(
         command,
         env=environment,
@@ -159,6 +161,7 @@ def run_in_own_group(
         process_group=None if own_session else 0,
     ) as child:
         try:
+            started(child.pid)
             stdout, stderr = child.communicate(timeout=timeout)
         except BaseException:
             _kill_group(child)

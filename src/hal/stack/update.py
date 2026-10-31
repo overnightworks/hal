@@ -6,25 +6,27 @@ checkout, `apply.lock` (the same lock, held from before the fetch until the comm
 neither command runs during the other) and a clean `main`. It fetches, shows every waiting commit
 and the changed files by effect, and asks. After the `yes` it rechecks that the checkout is still
 the clean `main` at the planned HEAD and that the pinned sha is a fast-forward of it; then it
-merges that full sha with SIGINT blocked, checks HEAD, the branch and the tree, syncs the
-dependencies through the merged tree's `bin/hal-sync` in its own process group, checks HEAD again
-and writes its closing verdict; SIGINT stays blocked to the verdict's end but for the sync. It
-never writes `applied.json`.
+merges that full sha, checks HEAD, the branch and the tree, syncs the dependencies through the
+merged tree's `bin/hal-sync` in its own process group, checks HEAD again and writes its closing
+verdict. It never writes `applied.json`.
 
 Every handled failure from the merge on is a partial update: one `error:` line with the full sha
-and the step, `next: hal apply`. A Ctrl-C from the merge on is an interrupt with the same line,
-also when it came while a failure or the verdict was being written. Nothing is imported after the
-merge, because the editable install would make a later import read the merged code into this
+and the step, `next: hal apply`. From just before the merge to the end of the run a Ctrl-C is
+recorded, never raised, so it interrupts no wait and no line being written; while the sync runs it
+also kills the sync's process group. The run reads the record after each step's check and after
+the closing verdict and then ends as an interrupt with the same line. Nothing is imported after
+the merge, because the editable install would make a later import read the merged code into this
 process.
 """
 
+import contextlib
 import os
 import signal
-from collections.abc import Collection, Iterable, Iterator, Mapping
-from contextlib import contextmanager
-from dataclasses import dataclass
+from collections.abc import Collection, Iterable, Mapping
+from dataclasses import dataclass, field
 from enum import Enum, StrEnum
 from pathlib import Path
+from types import FrameType
 
 from hal.output import (
     Glyph,
@@ -196,6 +198,37 @@ def _changed_since_planned(git: checkout.Git, origin: checkout.Origin) -> str | 
     return None
 
 
+class _Interrupted(Exception):
+    """A Ctrl-C was recorded; the run ends as an interrupt."""
+
+
+class _CtrlC:
+    """The one record of a Ctrl-C from just before the merge to the end of the run. While a
+    group is registered, a Ctrl-C also kills it; one recorded before the registration kills the
+    group as soon as it is registered."""
+
+    def __init__(self) -> None:
+        self.recorded = False
+        self._group: int | None = None
+
+    def __call__(self, _signal: int, _frame: FrameType | None) -> None:
+        self.recorded = True
+        self._kill()
+
+    def started(self, group: int) -> None:
+        self._group = group
+        if self.recorded:
+            self._kill()
+
+    def ended(self) -> None:
+        self._group = None
+
+    def _kill(self) -> None:
+        if self._group is not None:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(self._group, signal.SIGKILL)
+
+
 class _Stop(Exception):
     """A handled outcome from the merge on: how the run ends and what it says."""
 
@@ -207,53 +240,61 @@ class _Stop(Exception):
 
 @dataclass
 class _Merge:
-    """The steps from the merge to the closing verdict, with SIGINT blocked but for the sync."""
+    """The steps from the merge to the closing verdict, with a Ctrl-C recorded, never raised."""
 
     git: checkout.Git
     origin: checkout.Origin
     step: Step = Step.MERGE
     sync: SyncProgress = SyncProgress.NOT_STARTED
+    ctrl_c: _CtrlC = field(default_factory=_CtrlC)
 
     def run(self) -> UpdateEnd:
-        """Every step and its closing line with SIGINT blocked; a Ctrl-C still pending when the
-        mask is restored came while that line was written, and the restore raises it."""
+        """Every step and its closing line under the recording handler; the previous handler is
+        back on every return."""
+        previous = signal.signal(signal.SIGINT, self.ctrl_c)
         try:
-            with _sigint_blocked():
-                return self._steps()
-        except KeyboardInterrupt:
-            return self._interrupted()
+            return self._steps()
+        finally:
+            signal.signal(signal.SIGINT, previous)
 
     def _steps(self) -> UpdateEnd:
         try:
             self._merge()
             self._check(Step.CHECK_AFTER_MERGE, with_tree=True)
-            _stop_if_interrupted()
+            self._stop_if_interrupted()
             self._sync()
             self._check(Step.CHECK_AFTER_SYNC, with_tree=False)
-            _stop_if_interrupted()
+            self._stop_if_interrupted()
             self.step = Step.VERDICT
             summary = f"checkout updated to {self.origin.short} · dependencies synced"
             write_verdict(Verdict(Glyph.DONE, summary, (), next_step=_APPLY))
-        except KeyboardInterrupt:
+        except _Interrupted:
             return self._interrupted()
         except _Stop as stop:
             return self._failed(str(stop), stop.end, stop.next_step)
         except Exception as error:
             return self._failed(self._partial(f"unexpected error ({type(error).__name__})"))
+        if self.ctrl_c.recorded:
+            return self._interrupted()
         return UpdateEnd.DONE
 
-    def _interrupted(self, meanwhile: str = "") -> UpdateEnd:
-        """O6; `meanwhile` is the failure the step had reached when the Ctrl-C was found."""
+    def _stop_if_interrupted(self) -> None:
+        if self.ctrl_c.recorded:
+            raise _Interrupted
+
+    def _interrupted(self, meanwhile: str = "", next_step: str = _APPLY) -> UpdateEnd:
+        """O6; `meanwhile` is the failure the step had reached when the Ctrl-C was read, and its
+        `next_step` stays: a refused merge that changed nothing is run again."""
         line = f"interrupted at '{self.step}' of the update to {self.origin.sha}, {self.sync}"
-        write_error(f"{line}; {meanwhile}" if meanwhile else line, _APPLY)
+        write_error(f"{line}; {meanwhile}" if meanwhile else line, next_step)
         return UpdateEnd.INTERRUPTED
 
     def _failed(
         self, message: str, end: UpdateEnd = UpdateEnd.FAILED, next_step: str = _APPLY
     ) -> UpdateEnd:
         """The failure's line and end, unless a Ctrl-C came meanwhile: then it is O6 (130)."""
-        if _interrupt_pending():
-            return self._interrupted(message)
+        if self.ctrl_c.recorded:
+            return self._interrupted(message, next_step)
         write_error(message, next_step)
         return end
 
@@ -308,46 +349,18 @@ class _Merge:
         sync = [str(script), str(self.git.tree)]
         if is_verbose():
             write_line(printable(" ".join(sync)), stream=Stream.STDERR)
+        self.sync = SyncProgress.RUNNING
         try:
-            with _sigint_unblocked():
-                self.sync = SyncProgress.RUNNING
-                result = checkout.run_in_own_group(sync, os.environ, None)
+            result = checkout.run_in_own_group(sync, os.environ, None, started=self.ctrl_c.started)
         except OSError as error:
             self.sync = SyncProgress.NOT_STARTED
             raise self._stop(f"cannot start {script} ({error.strerror})") from error
+        finally:
+            self.ctrl_c.ended()
+        self._stop_if_interrupted()
         self.sync = SyncProgress.ENDED
         if result.returncode:
             last = compose.last_line(result.stderr.decode("utf-8", "backslashreplace"))
             raise self._stop(
                 f"the sync exited {result.returncode}: {checkout.without_credentials(last)}"
             )
-
-
-@contextmanager
-def _sigint_blocked() -> Iterator[None]:
-    """SIGINT blocked for the block: a Ctrl-C neither reaches git nor interrupts the wait. One
-    still pending at the end is raised as KeyboardInterrupt by the restore itself."""
-    previous = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT})
-    try:
-        yield
-    finally:
-        signal.pthread_sigmask(signal.SIG_SETMASK, previous)
-
-
-@contextmanager
-def _sigint_unblocked() -> Iterator[None]:
-    signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGINT})
-    try:
-        yield
-    finally:
-        signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT})
-
-
-def _interrupt_pending() -> bool:
-    """Whether a Ctrl-C came while SIGINT was blocked; consumes it."""
-    return signal.sigtimedwait({signal.SIGINT}, 0) is not None
-
-
-def _stop_if_interrupted() -> None:
-    if _interrupt_pending():
-        raise KeyboardInterrupt

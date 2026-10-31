@@ -173,8 +173,8 @@ ein laufender Container eingehaengt hat. Dann fragt es `Type yes to update the c
 Nur das genaue `yes` gilt (alles andere: `aborted, nothing changed`, Exit 1). Nach dem `yes` prueft es
 noch einmal, dass der Baum ein sauberes `main` auf dem geplanten HEAD ist und der gemerkte Hash ein
 Fast-Forward davon ist (sonst Exit 4, nichts geaendert). Dann merged es genau diesen vollen Hash
-(`merge --ff-only` in einer eigenen Sitzung, ohne Hooks, ohne ignorierte Dateien zu ueberschreiben), bei
-geblocktem SIGINT, prueft HEAD, Zweig und Baum, fuehrt `bin/hal-sync` des gemergten Baums aus
+(`merge --ff-only` in einer eigenen Sitzung, ohne Hooks, ohne ignorierte Dateien zu ueberschreiben),
+prueft HEAD, Zweig und Baum, fuehrt `bin/hal-sync` des gemergten Baums aus
 (`uv sync --locked` in einer eigenen Prozessgruppe, ohne den Lock zu erben) und prueft HEAD noch einmal.
 Es endet mit
 `checkout updated to <Hash> · dependencies synced` und `next: hal apply`. Es schreibt nie `applied.json`
@@ -185,11 +185,14 @@ und importiert nach dem Merge nichts mehr. Steht der Checkout schon auf `origin/
 Waechter oder die Pruefung nach dem `yes`), 3 Fehlschlag, 130 Ctrl-C. Ab dem Merge endet jeder behandelte
 Fehler mit 3 und einer `error:`-Zeile mit `partial`, dem vollen Hash und dem Schritt (`merge`,
 `check HEAD after the merge`, `sync the dependencies`, `check HEAD after the sync`,
-`write the closing verdict`), dazu `next: hal apply`; ein Ctrl-C endet mit 130 und denselben Angaben,
-auch einer, der kommt, waehrend ein Fehler oder die Abschlusszeile geschrieben wird; SIGINT bleibt dafuer
-bis zum Ende geblockt, ausser waehrend des Syncs. "nothing changed" steht nur dort, wo HEAD, Zweig und Baum
-es beweisen. Ein Sync, der scheitert, laesst HEAD auf dem Hash; der naechste `hal update` findet nichts
-Wartendes, endet mit 0 und nennt den Apply.
+`write the closing verdict`), dazu `next: hal apply`. Ab kurz vor dem Merge bis zum Ende wird ein Ctrl-C
+nur vermerkt, nie ausgeloest: es unterbricht kein Warten und keine Zeile, die gerade geschrieben wird;
+waehrend des Syncs beendet es zudem dessen ganze Prozessgruppe, bevor der Lock frei wird. Nach jedem
+Schritt mit seiner Pruefung und nach der Abschlusszeile endet ein vermerktes Ctrl-C mit 130 und denselben
+Angaben. "nothing changed" steht nur dort, wo HEAD, Zweig und Baum es beweisen; ein Ctrl-C bei einem
+Merge, den git ohne Aenderung verweigert hat, nennt `next: hal update`. Ein Ctrl-C vor dem Merge (an der
+Frage, bei der Pruefung danach) endet mit 130 ohne Aenderung. Ein Sync, der scheitert, laesst HEAD auf
+dem Hash; der naechste `hal update` findet nichts Wartendes, endet mit 0 und nennt den Apply.
 
 **Nicht behandelbar.** SIGKILL, SIGTERM, SIGHUP und SIGQUIT nach dem Merge beenden den Prozess ohne
 Meldung: der Merge bleibt, der Lock ist frei, `applied.json` unberuehrt, und der naechste `bin/hal`-Lauf
