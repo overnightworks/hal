@@ -8,10 +8,10 @@ are German, the rest English.
 
 ## Running the stack
 
-`~/srv/hal/bin/hal` runs `hal` of the checkout it lives in, from any directory: it syncs that
-checkout's locked dependencies (`uv sync --locked`, never rewriting `uv.lock`) and then becomes
-`.venv/bin/hal`, from the same environment the systemd units call. A failed sync ends with exit 3
-and an `error:`/`next:` pair that names the checkout. It is not on PATH: the operator links it as
+`~/srv/hal/bin/hal` runs `hal` of the checkout it lives in, from any directory: through
+`bin/hal-sync` it syncs that checkout's locked dependencies (`uv sync --locked`, never rewriting
+`uv.lock`) and then becomes `.venv/bin/hal`, from the same environment the systemd units call. A
+failed sync ends with exit 3 and an `error:`/`next:` pair that names the checkout. It is not on PATH: the operator links it as
 `hal` (`hal --help` lists its commands).
 
 ## Configure
@@ -27,16 +27,15 @@ and `hal apply --local` writes it again.
   running. `hal apply` never starts one; it only names a stopped one. Keycloak and its database sit
   behind the compose profile `keycloak`, so a plain `up -d` starts neither; `hal apply` switches them
   by `services.keycloak.run.enabled` in `fleet.yaml`. `fleet.yaml` changes by pull request and reaches
-  the live checkout by `git -C ~/srv/hal pull --ff-only` (until S2.4c); a local edit leaves the tree
-  dirty and the apply refuses it, naming the path.
+  the live checkout by `hal update`; a local edit leaves the tree dirty and the apply refuses it,
+  naming the path.
 - **The legal unit.** `legal` (nginx, profile `legal`, switched by `services.legal.run.enabled`) serves
   the imprint, the privacy notice and the terms from `legal/built/` for `Host: <zone>` on `127.0.0.1:8081`; the stylesheet and appkit's
   tokens and fonts (`legal/assets/appkit-<version>/`, which `hal apply` writes from the installed appkit) answer under `/_rechtliches/`, every other path with 404. The catalog gives
   it the apex as its host, which the Cloudflare redirect leaves to it for the three pages, `/favicon.ico` (answered 404) and
   `/_rechtliches/` (`cloudflare.redirect.serve`). The pages are built by `hal apply` from `legal/frame` and `legal/sections` (the plan names each page that is
   new or changes) and go live when it has written them; every answer carries `Cache-Control: no-cache`, so a cache that
-  stored a page asks again before it shows it; before the first build they answer 404. The stylesheet goes live once the live checkout is
-  pulled; a changed `legal/nginx/default.conf` needs the container restarted with `hal stop legal` and
+  stored a page asks again before it shows it; before the first build they answer 404. The stylesheet goes live once `hal update` has brought the live checkout in; a changed `legal/nginx/default.conf` needs the container restarted with `hal stop legal` and
   `hal start legal`.
 - **Readiness.** The stack is ready when `127.0.0.1:8081` and `127.0.0.1:8090` listen, an unknown host
   gets 404 on 8081, and Keycloak answers the master realm on 8090; Keycloak's start takes
@@ -49,7 +48,7 @@ and `hal apply --local` writes it again.
   removes no volume; never add `--volumes`, because that deletes the Keycloak database.
 - **After a reboot** socket-proxy, traefik, keycloak-db and keycloak come back on their own
   (`restart: unless-stopped`), also without the profile on the command line; `hello` never does.
-- **Switching Keycloak off** (`enabled: false` through a pull request, the pull, `hal apply`) stops and
+- **Switching Keycloak off** (`enabled: false` through a pull request, `hal update`, `hal apply`) stops and
   removes `keycloak-db` and `keycloak` and keeps the volume `keycloak-db`, `~/.secrets/keycloak` and the
   `keycloak` network; switching it on again uses the same database. Removing the entry from `fleet.yaml`
   is not "off": apply then leaves Keycloak as it is. Whether `auth` and `127.0.0.1:8090` answer depends
@@ -139,21 +138,85 @@ nicht, dass er gesund ist; die Gesundheit zeigt `docker compose ps`.
 
 **Wo und woraus er laeuft.** Nur aus dem Live-Checkout `~/srv/hal` als Haupt-Worktree (sonst Exit 3
 mit dem Grund), sonst haengte er das Live-Projekt an einen fremden Baum. Dann, jeweils mit nur der
-ersten verweigernden Zeile: kein anderes `hal apply --local` laeuft (Exit 3; `stop` und `start`
-warten nie darauf), HEAD steht auf `main` (Exit 3), der Baum ist sauber (Exit 3, jeder geaenderte oder
-unverfolgte Pfad auf eigener Zeile; ignorierte wie `.env` zaehlen nicht, "ignoriert" ist nur, was die
-`.gitignore` des Repositorys sagt) und `.env` stimmt (siehe Configure). Git laeuft dabei ohne Hooks,
-ohne fsmonitor und ohne die globale Konfiguration.
+ersten verweigernden Zeile: weder ein anderes `hal apply --local` noch ein `hal update` laeuft
+(Exit 3; `stop` und `start` warten nie darauf), HEAD steht auf `main` (Exit 3) und der Baum ist
+sauber (Exit 3, jeder geaenderte oder unverfolgte Pfad auf eigener Zeile; ignorierte wie `.env`
+zaehlen nicht, "ignoriert" ist nur, was die `.gitignore` des Repositorys sagt). Git laeuft dabei ohne
+Hooks, ohne fsmonitor und ohne die globale Konfiguration.
 
 **Der Abruf.** Danach holt er `main` von `origin` und haelt sich ab da an genau diesen Hash. Nur dieser
 Abruf liest die globale Git-Konfiguration, damit er sich wie `git pull` ueber den `gh`-Credential-Helper
 anmeldet; edge liest, uebergibt und druckt nie ein Credential und verweigert eine URL mit Passwort. Er
 schreibt nur Objekte, `FETCH_HEAD` und `origin/main`; HEAD, Index und Baum bleiben. Scheitert er (kein
 Netz, kein `origin`, Anmeldung, 120 s), oder hat der Checkout Commits, die `origin/main` fehlen, oder
-ist er daneben gewachsen, endet es mit Exit 3 und aendert nichts. Der Checkout steht danach als eine Zeile: `checkout current` oder `checkout N behind`
-mit dem Merge-Befehl darunter. Der Plan wendet HEAD an, nie die wartenden Commits; die bringt der Betreiber
-bis S2.4c mit `git -C ~/srv/hal merge --ff-only <Hash>` selbst herein und ruft den Apply noch
-einmal auf.
+ist er daneben gewachsen, endet es mit Exit 3 und aendert nichts. Wartet `origin/main` mit Commits,
+die dem Checkout fehlen, endet es ebenfalls mit Exit 3 und aendert nichts: die Zeile `checkout N behind`,
+dann `N commits wait on origin main; nothing changed` und `next: hal update`; ein Apply plant nie mit
+Code, der gleich ersetzt wird. Erst danach kommt `.env`: es wird geschrieben, wenn es fehlt, und sonst
+genannt und in Ruhe gelassen, wenn es abweicht (siehe Configure; Exit 3). Der Checkout steht danach als
+eine Zeile `checkout current`, und der Plan wendet HEAD an.
+
+## Den Checkout aktualisieren: `hal update`
+
+`hal update` bringt den Live-Checkout `~/srv/hal` auf `origin/main` und die gesperrten Abhaengigkeiten
+auf ihren Stand; `hal apply` plant danach die Einheiten. Es laeuft nur an einem Terminal.
+
+**Ablauf.** Die Waechter wie beim Apply, jeweils mit nur der ersten verweigernden Zeile (Terminal,
+Live-Checkout, `apply.lock`, sauberes `main`); `.env` prueft nur der Apply. Es haelt `apply.lock` vom
+Abruf bis zum Ende, so laufen `hal apply` und `hal update` nie gleichzeitig. Es holt `main` von `origin`
+und zeigt, was wartet: jeden Commit auf eigener Zeile, dann die geaenderten Dateien nach Wirkung (hals Code
+und Abhaengigkeiten: der naechste hal-Befehl fuehrt sie aus; unter einem Verzeichnis-Bind: die Dateien
+aendern sich an Ort und Stelle, und ob ein Dienst sie vor seinem naechsten Neustart nutzt, haengt vom
+Dienst ab; vom naechsten Apply geplant: Datei-Binds, `compose.yaml`, `fleet.yaml`; sonstige). Die Gruppen
+kommen aus der Konfiguration des Checkouts, nie aus den Containern, und sagen deshalb nichts darueber, was
+ein laufender Container eingehaengt hat. Dann fragt es `Type yes to update the checkout to <Hash>:`.
+Nur das genaue `yes` gilt (alles andere: `aborted, nothing changed`, Exit 1). Nach dem `yes` prueft es
+noch einmal, dass der Baum ein sauberes `main` auf dem geplanten HEAD ist und der gemerkte Hash ein
+Fast-Forward davon ist (sonst Exit 4, nichts geaendert). Dann merged es genau diesen vollen Hash
+(`merge --ff-only`, ohne Hooks, ohne ignorierte Dateien zu ueberschreiben), bei geblocktem SIGINT, prueft
+HEAD, Zweig und Baum, fuehrt `bin/hal-sync` des gemergten Baums aus (`uv sync --locked` in einer eigenen
+Prozessgruppe, ohne den Lock zu erben) und prueft HEAD noch einmal. Es endet mit
+`checkout updated to <Hash> · dependencies synced` und `next: hal apply`. Es schreibt nie `applied.json`
+und importiert nach dem Merge nichts mehr. Steht der Checkout schon auf `origin/main`, druckt es die Zeile
+`checkout current`, `nothing to update` und `next: hal apply` und endet mit 0, ohne Frage.
+
+**Exit.** Die Codes der Grammatik: 0 aktualisiert oder nichts zu tun, 1 abgelehnt, 4 verweigert (ein
+Waechter oder die Pruefung nach dem `yes`), 3 Fehlschlag, 130 Ctrl-C. Ab dem Merge endet jeder behandelte
+Fehler mit 3 und einer `error:`-Zeile mit `partial`, dem vollen Hash und dem Schritt (`merge`,
+`check HEAD after the merge`, `sync the dependencies`, `check HEAD after the sync`), dazu `next: hal apply`;
+ein Ctrl-C endet mit 130 und denselben Angaben. "nothing changed" steht nur dort, wo HEAD, Zweig und Baum
+es beweisen. Ein Sync, der scheitert, laesst HEAD auf dem Hash; der naechste `hal update` findet nichts
+Wartendes, endet mit 0 und nennt den Apply.
+
+**Nicht behandelbar.** SIGKILL, SIGTERM und SIGHUP nach dem Merge sowie Stromausfall beenden den Prozess
+ohne Meldung: der Merge bleibt, der Lock ist frei, `applied.json` unberuehrt. Der naechste `bin/hal`-Lauf
+synct und plant.
+
+**Ueber Revisionen hinweg** gilt ein Name: `bin/hal-sync <Checkout> [<Programm> [<Argument>...]]`. Der alte
+Code ruft das Skript des neuen Baums auf; die Form aendert sich nur, indem beide Schreibweisen fuer ein
+Update nebeneinander gelten. Mit Programm meldet es einen Sync-Fehler selbst (`error:`/`next:`, Exit 3) und
+ersetzt sich durch das Programm; ohne Programm endet es mit 1 und druckt nichts, die Meldung gehoert dem
+Aufrufer.
+
+**Restrisiken.** Ein Timer-Prozess, der zwischen Merge und Ende des Syncs startet, laeuft mit dem
+gemergten Code (editierbare Installation) und alten oder halb synchronisierten Abhaengigkeiten. Ein
+Nachkomme des Syncs, der seine Prozessgruppe verlaesst und die Pipes schliesst, koennte das Beenden
+ueberleben (uv tut das nicht). `bin/hal` synct, bevor Python `apply.lock` nimmt: ein zweites
+`bin/hal apply` oder `bin/hal update` waehrend eines Updates fuehrt sein eigenes `uv sync` derselben
+`.venv` aus, bevor es verweigert wird; allein uvs eigene Sperre schuetzt dort (nicht geprueft). Die Timer
+rufen `.venv/bin/hal` direkt; eine Aenderung an `src/hal/workstation/jobs.py` laesst die Unit-Dateien bis
+zum naechsten `hal setup` veraltet. Das erste Update des Live-Checkouts kommt einmal von Hand
+(`git -C ~/srv/hal pull --ff-only`), weil der dort laufende Code `hal update` noch nicht kennt.
+
+**Wenn die gemergte Revision nicht startet.** Ein Sync, der wegen Netz oder Platte scheitert, wiederholt
+der naechste `hal update` oder `hal apply`. Eine Revision, auf der hal nicht startet, laesst jeden
+`bin/hal`-Lauf vor dem Abruf enden, so dass kein Fix ueber hal ankommt: ein Lock, der nicht synct, endet
+mit dem Paar `error: cannot sync the live checkout's dependencies` / `next: uv sync --locked --project ...`
+und Exit 3; Code, der beim Import scheitert, endet mit Pythons Traceback und Exit 1 (`bin/hal` ersetzt sich
+durch `.venv/bin/hal`, und `hal.cli` importiert alle Befehle vor jedem Handler). Die Reparatur ist der eine
+Handgriff, der bleibt: den Fix per Pull-Request mergen, `git -C ~/srv/hal pull --ff-only` holt ihn herein,
+`hal apply` geht weiter. Der Pull und `uv sync --locked` bleiben sonst nur fuer die Neuinstallation
+([home.md](home.md), Installation).
 
 **Der Kern und die Follower.** Welche Dienste `hal apply --local` neu erstellt, in welcher
 Reihenfolge, und wie der Eintrag in `applied.json` gefuehrt wird:

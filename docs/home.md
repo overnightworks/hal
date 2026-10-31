@@ -808,8 +808,10 @@ und zieht ihn nach, wenn der Checkout umzieht. Die erzeugten systemd-Units rufen
 `~/srv/hal/.venv/bin/hal` direkt auf und hängen so an keinem Link. `hal`
 läuft mit dem Python der `.venv` (`requires-python >= 3.14`). Das
 Paket ist editierbar installiert: eine Änderung unter `src/` wirkt ohne
-Neuinstallation. Nach einem Pull, der Abhängigkeiten ändert, `uv sync --locked`
-ausführen (oder `hal` über `bin/hal` aufrufen), bevor der Timer läuft.
+Neuinstallation. `hal update` synct die Abhängigkeiten nach jedem Update selbst; `uv sync --locked`
+braucht es nur für diese Installation und nach dem Pull, der eine Revision repariert, auf der hal
+nicht startet ([stack.md](stack.md), „Den Checkout aktualisieren“); `hal` über `bin/hal` aufzurufen
+synct ebenfalls, bevor der Timer läuft.
 
 `hal-check.timer` läuft täglich 09:00 (`Persistent=true` holt einen verpassten Lauf
 nach) und fährt nur `hal check`; `hal-alarm.timer` fährt `hal alarm` alle `[alarm] interval` Minuten

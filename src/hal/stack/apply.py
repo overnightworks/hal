@@ -40,17 +40,17 @@ to `appkit-<version>/` in `legal/assets/` and in both Keycloak themes; a missing
 Before any of that it guards, in this order, each refusing with its own lines and nothing else
 (#95): a terminal (exit 1); the live checkout `~/srv/hal`, since from any other tree it would bind
 the live compose project to that tree (#79, exit 2); `apply.lock` in the state directory, held
-non-blocking for the whole run, so a second apply is refused (exit 1) while `hal stop` and
-`hal start` never wait for it; HEAD on `main` (exit 2); a clean tree, every changed path named
-(exit 2), since a change reaches the live checkout through a pull request; and its `.env`, which
-is written when missing and otherwise named and left alone when it differs (exit 2, #136).
+non-blocking for the whole run, so a second apply or a `hal update` is refused (exit 1) while
+`hal stop` and `hal start` never wait for it; HEAD on `main` (exit 2); a clean tree, every changed
+path named (exit 2), since a change reaches the live checkout through a pull request.
 
 Then it fetches origin's `main` through the operator's credential helper and pins its sha (#98): a
 failed fetch is exit 2 with git's last error line; a checkout ahead of or beside it is exit 2,
-nothing reset. The checkout then stands as one row, current or `N behind` with the way to bring the
-waiting commits in by hand under it; the plan that follows applies HEAD, never the waiting
-commits. Nothing in the checkout changes: only `.git` gains the fetched objects, FETCH_HEAD and
-`origin/main`.
+nothing reset; a checkout behind it is exit 2 too, with the waiting commits counted and
+`hal update` named, since the apply plans nothing with code that is about to be replaced. Only then
+its `.env` is written when missing and otherwise named and left alone when it differs (exit 2,
+#136). The checkout stands as one row, current; the plan that follows applies HEAD. Nothing in the
+checkout changes: only `.git` gains the fetched objects, FETCH_HEAD and `origin/main`.
 """
 
 import fcntl
@@ -87,6 +87,7 @@ from hal.stack.plan_rows import (
     local_changes_row,
     plan_groups,
     still_runs_row,
+    waiting_text,
 )
 from hal.stack.realm import reconcile
 from hal.stack.result_rows import result_rows
@@ -107,6 +108,9 @@ from hal.stack.waiting import fetched
 
 EnsureEnvironment = Callable[[Path], environment.Settings | None]
 APPLY_LOCK = "apply.lock"
+APPLY_RUNNING = (
+    f"another `{command(Verb.APPLY)}` or `{command(Verb.UPDATE)}` is running; nothing changed"
+)
 _PRIVATE_DIRECTORY = 0o700
 _PRIVATE_FILE = 0o600
 
@@ -219,18 +223,20 @@ def apply_local(
         write_error(refusal)
         return ApplyExit.CANNOT_PLAN
     try:
-        lock = _take_apply_lock(state_directory)
+        lock = take_apply_lock(state_directory)
     except OSError as error:
         write_error(f"cannot take {state_directory / APPLY_LOCK} ({error.strerror})")
         return ApplyExit.CANNOT_PLAN
     if lock is None:
-        write_error(f"another `{command(Verb.APPLY)}` is running; nothing changed")
+        write_error(APPLY_RUNNING)
         return ApplyExit.REFUSED
     try:
         live = checkout.Git(repository, git)
-        if not (_on_clean_main(live) and _environment_ready(repository, ensure_environment)):
+        if not on_clean_main(live):
             return ApplyExit.CANNOT_PLAN
-        if (origin := fetched(live, write_error)) is None:
+        if (origin := fetched(live, write_error)) is None or _waits_on_origin(origin):
+            return ApplyExit.CANNOT_PLAN
+        if not _environment_ready(repository, ensure_environment):
             return ApplyExit.CANNOT_PLAN
         write_row(checkout_row(origin))
         return _plan_and_apply(
@@ -254,7 +260,7 @@ def _tell(line: str) -> None:
     print(line, flush=True)
 
 
-def _take_apply_lock(state_directory: Path) -> int | None:
+def take_apply_lock(state_directory: Path) -> int | None:
     """The descriptor holding `apply.lock`, or None while another apply holds it; raises OSError.
 
     The file is private and never unlinked, so every apply locks the same inode; the descriptor
@@ -275,7 +281,7 @@ def _take_apply_lock(state_directory: Path) -> int | None:
     return descriptor
 
 
-def _on_clean_main(git: checkout.Git) -> bool:
+def on_clean_main(git: checkout.Git) -> bool:
     """True on a born `main` with nothing changed; else False, after saying why (#95 rules 5, 6)."""
     if (refusal := checkout.not_clean_main(git)) is None:
         return True
@@ -285,6 +291,18 @@ def _on_clean_main(git: checkout.Git) -> bool:
     else:
         write_error(refusal.message)
     return False
+
+
+def _waits_on_origin(origin: checkout.Origin) -> bool:
+    """True, after saying so, when origin's `main` has commits this checkout lacks: the apply
+    plans nothing with code that is about to be replaced."""
+    if origin.standing is not checkout.Standing.BEHIND:
+        return False
+    write_row(checkout_row(origin))
+    write_error(
+        f"{waiting_text(origin.behind)} {checkout.MAIN}; nothing changed", command(Verb.UPDATE)
+    )
+    return True
 
 
 def _environment_ready(repository: Path, ensure_environment: EnsureEnvironment) -> bool:

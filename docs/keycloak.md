@@ -127,7 +127,7 @@ with their licences, so no page asks a third party) come from the installed
 appkit: the appkit step of `hal apply` writes `appkit-<version>/` (git-ignored)
 into each theme's `resources/`, and `styles=` lists its `appkit.css` first, then
 the theme's own `css/edge-2.css` with the app colour and the shapes. The theme
-files reach Keycloak on `git merge --ff-only` in the live checkout, the appkit
+files reach Keycloak on `hal update` of the live checkout, the appkit
 directory on `hal apply`, so a restart between the two serves pages without
 tokens. They are CSS, `footer.ftl` and message texts on top of `keycloak.v2` and
 `keycloak.v3`, never a copy of Keycloak's `template.ftl`. A Keycloak update
@@ -211,7 +211,7 @@ user actions and save. This is also how an existing account is asked once after 
 because Keycloak gives the action by itself only to new accounts. Ask again when the terms change in
 substance; a typo or a new link is no reason.
 
-The action reaches Keycloak in this order: merge the checkout (`git merge --ff-only`), restart Keycloak
+The action reaches Keycloak in this order: update the checkout (`hal update`), restart Keycloak
 (Theme and language), then `hal apply`, which publishes the legal pages and applies the realm. The
 messages must be served before the action is on, or the page shows Keycloak's placeholder text.
 

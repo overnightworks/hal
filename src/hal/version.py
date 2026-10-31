@@ -3,12 +3,11 @@ its tree is clean (as `hal apply` means it), and how it stands to the `origin/ma
 left. It never fetches, so it answers offline and changes nothing in the checkout."""
 
 import argparse
-import subprocess
 from collections.abc import Sequence
 from pathlib import Path
 
 from hal.grammar import Asks, Command, ExitCode
-from hal.output import Stream, is_verbose, printable, write_error, write_line
+from hal.output import is_verbose, printable, write_error, write_line
 from hal.output.command import PROGRAM, Verb, command
 from hal.stack import checkout
 
@@ -27,7 +26,7 @@ def run(arguments: argparse.Namespace) -> ExitCode:
     if not (tree / ".git").exists():
         write_line(NO_CHECKOUT)
         return ExitCode.OK
-    runner = _echoing(checkout.run_git) if is_verbose() else checkout.run_git
+    runner = checkout.echoing(checkout.run_git) if is_verbose() else checkout.run_git
     try:
         line = describe(checkout.Git(tree, runner))
     except checkout.GitError as error:
@@ -63,18 +62,6 @@ def _standing(git: checkout.Git) -> str:
     if standing is checkout.Standing.AHEAD:
         return f"{ahead} ahead of {ORIGIN}"
     return f"diverged from {ORIGIN} ({ahead} ahead, {behind} behind)"
-
-
-def _echoing(runner: checkout.Runner) -> checkout.Runner:
-    """`runner` that first prints the git call it makes on stderr, never its environment."""
-
-    def echo(
-        tree: Path, arguments: Sequence[str], profile: checkout.Profile
-    ) -> subprocess.CompletedProcess[bytes]:
-        write_line(f"git {printable(' '.join(arguments))}", stream=Stream.STDERR)
-        return runner(tree, arguments, profile)
-
-    return echo
 
 
 COMMAND = Command(

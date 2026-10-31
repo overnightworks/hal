@@ -36,9 +36,11 @@ both strings, and the apply still changes nothing and asks nothing; Z3 reverted,
 The copy is a clean `main` with a bare remote: every edit above is published (committed and
 pushed) before the apply that follows it (#95 P1); the #95 cell P2, after P2, applies with one
 unpublished `traefik.yml` edit and requires exit 3 naming it, with traefik's container kept. The
-#98 cell P1 pushes one commit to the remote from a work clone: the copy's apply shows it as one
-behind row, changes nothing, and the shown `git merge --ff-only <sha>` makes the copy current.
-Every transcript line names its item. It runs beside the live stack (#592): its Traefik listens on
+#783 cells P1-P4 (`checkout_update.py`) push commits to the remote from a work clone and drive
+`hal update` and `hal apply --local` through the copy's `bin/hal`: apply refuses behind origin and
+names `hal update`, the update syncs the new lock and the next apply runs the merged code, and a
+lock that does not sync or code that fails at import is repaired by a hand pull. Every transcript
+line names its item. It runs beside the live stack (#592): its Traefik listens on
 `edge_copy.PROBE_HOST` and routes only its project, behind a network guard. Residual: the live
 Traefik also routes the probe's `hello` until teardown.
 
@@ -66,8 +68,10 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "probe"))  # the helper of the probes, importable by path too
-sys.path.insert(0, str(REPO / "src"))  # edge's own facts; its modules need only the stdlib
+sys.path.insert(0, str(REPO / "probe" / "switches"))  # the cells of #783, beside this file
+sys.path.insert(0, str(REPO / "src"))  # edge's own modules; hal.stack imports PyYAML too
 
+import checkout_update  # noqa: E402
 import edge_copy  # noqa: E402
 from edge_copy import ProbeFailed, expect  # noqa: E402
 
@@ -95,8 +99,6 @@ CORE_CURRENT = "the core is current"
 CORE = ("socket-proxy", "traefik")
 COMPOSE_FILE = "compose.yaml"
 HARMLESS_EDIT = "# an edit that changes no setting\n"
-WAITING_NOTE = "\n"  # a change that touches no setting, waiting on origin (#98 P1)
-WAITING_SUBJECT = "probe: a commit waiting on origin"
 READY_SECONDS = 90
 BEHIND_BARRIER_SECONDS = 10
 REQUEST_SECONDS = 3
@@ -207,15 +209,22 @@ class Probe:
         return states[0] if states else "absent"
 
     def hal(
-        self, *arguments: str, terminal: bool, exit_code: int = 0, typed: bytes = b"yes\n"
+        self,
+        *arguments: str,
+        terminal: bool,
+        exit_code: int = 0,
+        typed: bytes = b"yes\n",
+        launcher: bool = False,
+        extra_environment: dict[str, str] | None = None,
     ) -> str:
         return edge_copy.run_hal(
             self.copy,
-            self.environment,
+            {**self.environment, **(extra_environment or {})},
             *arguments,
             terminal=terminal,
             exit_code=exit_code,
             typed=typed,
+            launcher=launcher,
         )
 
     def teardown(self) -> None:
@@ -351,30 +360,6 @@ class Probe:
         expect(self.container_ids()["traefik"] == before, "an unpublished edit recreated traefik")
         write_line(
             f"#95 P2 held: an unpublished {TRAEFIK_FILE} edit is named, exit 3, traefik kept"
-        )
-
-    def cell_98_p1_commits_waiting(self) -> None:
-        """#98 P1: a commit pushed from a work clone waits on origin; the copy's apply shows it as
-        one behind row, plans HEAD and changes nothing; the shown merge line brings it in."""
-        head = checkout.Git(self.copy).short()
-        before = self.container_ids()
-        waiting = edge_copy.advance_origin(
-            self.scratch,
-            WAITING_SUBJECT,
-            {"dynamic/.gitkeep": WAITING_NOTE, "README.md": WAITING_NOTE},
-        )
-        out = self.hal("apply", "--local", terminal=True, typed=b"no\n")
-        shown = (f"! checkout 1 behind plan applies {head} without them", NOTHING_TO_CHANGE)
-        expect(all(line in out for line in shown), f"apply behind origin said: {out[-400:]}")
-        expect(checkout.Git(self.copy).short() == head, "apply behind origin moved HEAD")
-        expect(self.container_ids() == before, "apply behind origin replaced a container")
-        merge = out.split("git -C ")[1].split()[:4]
-        expect(merge[:3] == [checkout.LIVE_CHECKOUT, "merge", "--ff-only"], f"the merge is {merge}")
-        edge_copy.git(self.copy, *merge[1:])
-        current = self.hal("apply", "--local", terminal=True, typed=b"no\n")
-        expect(f"✓ checkout current {waiting}" in current, f"after the merge: {current[-200:]}")
-        write_line(
-            f"#98 P1 held: {waiting} waiting shown as one behind row, HEAD {head} planned and kept"
         )
 
     def cell_p3_edited_traefik_yml(self) -> None:
@@ -751,7 +736,6 @@ def prove(probe: Probe) -> int:
         probe.cell_q1_the_definition_fact("after edge's socket-proxy recreate", must_match=CORE)
         probe.cell_p2_second_apply()
         probe.cell_95_p2_an_unpublished_edit()
-        probe.cell_98_p1_commits_waiting()
         probe.cell_1_control()
         probe.cell_2_stop()
         probe.cell_3_up_behind_the_barrier()
@@ -772,6 +756,7 @@ def prove(probe: Probe) -> int:
         probe.cell_z1_the_image_fact()
         probe.cell_z2_a_respelled_image()
         probe.cell_z3_reverted()
+        checkout_update.cells(probe)
     except (ProbeFailed, subprocess.TimeoutExpired, OSError) as failure:
         write_line(f"PROBE FAILED: {failure}")
         return 1
@@ -788,7 +773,7 @@ def main(argv: list[str] | None = None) -> int:
         Probe,
         prove,
         "PROBE PASSED: #61 proofs 1-7, #70 proof 8, #85 P1-P7, #87 Q1-Q6, #91 Z1-Z3, "
-        "#95 P1-P2, #98 P1, #592 V1, V4, V6-V8 hold",
+        "#95 P1-P2, #592 V1, V4, V6-V8, #783 P1-P4 hold",
     )
 
 

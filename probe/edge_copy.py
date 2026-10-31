@@ -431,9 +431,15 @@ def publish(copy: Path, message: str) -> None:
     git(copy, "push", "--quiet", "origin", checkout.MAIN)
 
 
-def advance_origin(scratch: Path, message: str, appended: Mapping[str, str]) -> str:
+def advance_origin(
+    scratch: Path,
+    message: str,
+    appended: Mapping[str, str],
+    replaced: Mapping[str, tuple[str, str]] | None = None,
+) -> str:
     """One commit pushed to the bare remote from the work clone `<scratch>/work`, appending each
-    text to its file there, so the copy is behind origin's `main` until it merges; the commit's
+    text to its file there and replacing, in each file of `replaced`, the one occurrence of the
+    first text by the second, so the copy is behind origin's `main` until it merges; the commit's
     short sha."""
     work = scratch / WORK_CLONE
     if (work / ".git").is_dir():
@@ -445,6 +451,12 @@ def advance_origin(scratch: Path, message: str, appended: Mapping[str, str]) -> 
     for name, text in appended.items():
         with (work / name).open("a") as file:
             file.write(text)
+    for name, (old, new) in (replaced or {}).items():
+        content = (work / name).read_text()
+        expect(
+            content.count(old) == 1, f"{name} holds {old!r} {content.count(old)} times, not once"
+        )
+        (work / name).write_text(content.replace(old, new))
     publish(work, message)
     return checkout.Git(work).short()
 
@@ -463,11 +475,14 @@ def run_hal(
     terminal: bool,
     exit_code: int = 0,
     typed: bytes = b"yes\n",
+    launcher: bool = False,
 ) -> str:
     """`hal <arguments>` in the copy: at a pty with the operator typing `typed`, or with stdin and
     stdout that are no terminal. The whitespace-normalised output of a run that exits
-    `exit_code`."""
-    command = [str(copy / ".venv" / "bin" / "hal"), *arguments]
+    `exit_code`. With `launcher` it runs the copy's `bin/hal`, which syncs the dependencies first,
+    where the default runs the copy's venv program as it is."""
+    program = copy / "bin" / "hal" if launcher else copy / ".venv" / "bin" / "hal"
+    command = [str(program), *arguments]
     if terminal:
         result = subprocess.run(
             ["script", "-qec", shlex.join(command), DISCARD_OUTPUT],

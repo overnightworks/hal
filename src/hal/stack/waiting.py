@@ -1,5 +1,5 @@
-"""origin's `main` fetched and pinned for `hal apply`, and the refusals when the live checkout
-cannot go on from it (#98)."""
+"""origin's `main` fetched and pinned for `hal apply` and `hal update`, and the refusals when the
+live checkout cannot go on from it (#98)."""
 
 from collections.abc import Callable
 
@@ -7,8 +7,8 @@ from hal.stack import checkout
 
 
 def fetched(git: checkout.Git, say: Callable[[str], None]) -> checkout.Origin | None:
-    """origin's `main` fetched and pinned; None after saying why the apply stops there: the fetch
-    failed (S4), or HEAD is ahead of or beside it (S3) (#98 rules 2, 3)."""
+    """origin's `main` fetched and pinned; None after saying why the apply or the update stops
+    there: the fetch failed (S4), or HEAD is ahead of or beside it (S3) (#98 rules 2, 3)."""
     try:
         origin = checkout.fetch_origin(git)
     except checkout.GitError as error:

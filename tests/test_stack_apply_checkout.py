@@ -2,9 +2,8 @@
 real git repository on the scripted boundaries of `tests/support/stack_apply.py`."""
 
 import pytest
-from support.git_support import advance, checkout_state, subjects
+from support.git_support import FETCH_WRITES, advance, checkout_state, subjects
 from support.stack_apply import (
-    DISABLED,
     ENABLED,
     ZONE,
     applied_core,  # noqa: F401 the fixture, requested by name below
@@ -23,12 +22,13 @@ from support.stack_apply import (
     short,
     state,  # noqa: F401 the fixture, requested by name below
     switch,  # noqa: F401 the fixture, requested by name below
+    writing_environment,
 )
 from support.stack_plan_rows import detail_lines, find_row, plain
 
 from hal.stack import checkout
 from hal.stack.apply import ApplyExit
-from hal.stack.plan_rows import CHECKOUT, CheckoutEvent, PlanEvent
+from hal.stack.plan_rows import CHECKOUT, CheckoutEvent
 
 OLD_TEXT = (
     "fetched main from",
@@ -47,44 +47,56 @@ def test_an_equal_main_is_one_current_row_before_the_plan(switch, real_main, ori
     assert not [text for text in OLD_TEXT if text in out]
 
 
+ENVIRONMENTS = ("present", "missing", "differing")
+
+
+@pytest.mark.parametrize("environment", ENVIRONMENTS)
 @pytest.mark.parametrize("waiting", [1, 3])
-def test_waiting_commits_are_one_row_with_the_merge_command_and_head_is_planned(
-    switch, scripted, real_main, origin, waiting  # noqa: F811
+def test_a_behind_checkout_is_refused_naming_hal_update_and_writes_nothing(
+    switch, scripted, real_main, origin, repository, waiting, environment  # noqa: F811
 ):  # fmt: skip
-    """The plan applies HEAD, whose fleet.yaml still enables step-ca; HEAD, the index and the
-    working tree stay byte-identical."""
-    tip = advance(
-        origin,
-        *subjects(*(f"waiting {n}" for n in range(waiting - 1))),
-        (b"waiting last", {b"fleet.yaml": DISABLED.encode()}),
-    )
-    before = checkout_state(real_main)
+    """#783 F2: behind origin, whatever `.env` holds, the apply names the waiting commits and
+    `hal update`; no `.env` is written or refused, nothing is planned or asked."""
+    advance(origin, *subjects(*(f"waiting {n}" for n in range(waiting))))
+    if environment == "missing":
+        (repository / ".env").unlink()
+    if environment == "differing":
+        (repository / ".env").write_text("EDGE_DOMAIN=old.invalid\n")
+    env_before = (repository / ".env").read_bytes() if environment != "missing" else None
+    before = checkout_state(real_main, (*FETCH_WRITES, ".env"))
 
-    exit_code, out, _ = switch("no", git=checkout.run_git)
+    exit_code, out, err = switch(git=checkout.run_git, ensure_environment=writing_environment())
 
+    assert exit_code == ApplyExit.CANNOT_PLAN
     assert find_row(
-        out, CHECKOUT, CheckoutEvent.BEHIND, f"plan applies {short(real_main)} without them"
+        out, CHECKOUT, CheckoutEvent.BEHIND, f"origin/main {short(real_main, 'origin/main')}"
     )
     assert f"{waiting} behind" in plain(out)
-    assert detail_lines(out)[0] == f"git -C {checkout.LIVE_CHECKOUT} merge --ff-only {tip}"
-    assert find_row(out, "step-ca", PlanEvent.SWITCH_ON)
-    assert not [text for text in OLD_TEXT if text in out]
-    assert exit_code == 1
-    assert checkout_state(real_main) == before
+    assert err.splitlines() == [
+        f"error: {waiting} commit{'s' if waiting - 1 else ''} wait{'' if waiting - 1 else 's'}"
+        " on origin main; nothing changed",
+        "next: hal update",
+    ]
+    assert not detail_lines(out)
+    assert "the plan" not in out and ".env" not in out
+    assert scripted.calls == []
+    assert checkout_state(real_main, (*FETCH_WRITES, ".env")) == before
+    if environment == "missing":
+        assert not (repository / ".env").exists()
+    else:
+        assert (repository / ".env").read_bytes() == env_before
 
 
-def test_a_behind_checkout_with_nothing_to_change_prints_its_row_first_and_exits_0(
-    applied_core, switch, real_main, origin  # noqa: F811
+def test_a_current_checkout_prints_the_environment_row_before_its_own(
+    switch, real_main, origin, repository  # noqa: F811
 ):  # fmt: skip
-    advance(origin, *subjects("waiting 0"))
+    """#783 F1: current, a written `.env` is still announced before the checkout row."""
+    (repository / ".env").unlink()
 
-    exit_code, out, _ = switch(git=checkout.run_git)
+    exit_code, out, _ = switch(git=checkout.run_git, ensure_environment=writing_environment())
 
     assert exit_code == 0
-    assert find_row(
-        out, CHECKOUT, CheckoutEvent.BEHIND, f"plan applies {short(real_main)} without them"
-    )
-    assert plain(out).index("  ! checkout") < plain(out).index("nothing to change")
+    assert plain(out).index("  ✓ .env") < plain(out).index("  ✓ checkout")
 
 
 @pytest.fixture
@@ -94,15 +106,11 @@ def unplannable_fleet(repository):  # noqa: F811
     (repository / "fleet.yaml").write_text(f"cloudflare:\n  zone: {ZONE}\n{ENABLED}{other}")
 
 
-def test_a_behind_checkout_still_prints_its_row_when_planning_then_refuses(
+def test_a_current_checkout_still_prints_its_row_when_planning_then_refuses(
     unplannable_fleet, switch, real_main, origin  # noqa: F811
 ):  # fmt: skip
-    advance(origin, *subjects("waiting 0"))
-
     exit_code, out, err = switch(git=checkout.run_git)
 
     assert exit_code == ApplyExit.CANNOT_PLAN
     assert "cannot plan, services.other.run.enabled: must be true or false" in err
-    assert find_row(
-        out, CHECKOUT, CheckoutEvent.BEHIND, f"plan applies {short(real_main)} without them"
-    )
+    assert find_row(out, CHECKOUT, CheckoutEvent.CURRENT, f"{short(real_main)} · origin/main")

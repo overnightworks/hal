@@ -8,6 +8,7 @@ PROGRAM = "hal"
 
 class Verb(StrEnum):
     APPLY = "apply"
+    UPDATE = "update"
     STOP = "stop"
     START = "start"
     OFFLINE = "offline"

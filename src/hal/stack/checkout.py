@@ -16,8 +16,9 @@ The one step that reaches beyond the machine is the fetch of origin's `main` (#9
 transfer profile, which keeps the global configuration for the operator's credential helper,
 refuses a URL that carries a password and never prompts. From the fetch on, the fetched sha is
 pinned: the comparison with HEAD is read against it. The fetch writes only objects, FETCH_HEAD and
-`origin/main`; HEAD, the index and the tree stay as they are. A credential is never printed:
-whatever stands before `@` in a URL is redacted.
+`origin/main`; HEAD, the index and the tree stay as they are. Only `hal update` moves HEAD, with the
+merge profile: the isolation of the local profile, no kill timeout, since a killed merge could leave
+a half-updated tree. A credential is never printed: whatever stands before `@` in a URL is redacted.
 """
 
 import contextlib
@@ -30,13 +31,14 @@ from dataclasses import dataclass
 from enum import Enum, StrEnum
 from pathlib import Path
 
-from hal.output import printable
+from hal.output import Stream, printable, write_line
+from hal.output.command import Verb, command
 from hal.stack import compose
 
 LIVE_CHECKOUT = "~/srv/hal"
 MAIN = "main"
 DIRTY_TREE = "the live checkout has local changes, nothing changed"
-PULL_REQUEST_ROUTE = "a change reaches it through a pull request and `git pull --ff-only`"
+PULL_REQUEST_ROUTE = f"a change reaches it through a pull request and `{command(Verb.UPDATE)}`"
 _BRANCH_PREFIX = "refs/heads/"
 _ISOLATION = (
     "-c", "core.hooksPath=/dev/null",
@@ -55,15 +57,18 @@ ORIGIN_MAIN = f"refs/remotes/{_ORIGIN}/{MAIN}"  # origin's `main` as the last fe
 
 class Profile(Enum):
     """LOCAL for every step but a fetch: no global or system configuration. TRANSFER for a fetch
-    (S2.4b): the global configuration stays, for the operator's credential helper."""
+    (S2.4b): the global configuration stays, for the operator's credential helper. MERGE for the
+    fast-forward of `hal update`: LOCAL's isolation and no timeout."""
 
     LOCAL = "local"
     TRANSFER = "transfer"
+    MERGE = "merge"
 
 
 _PROFILE_ENVIRONMENT = {
     Profile.LOCAL: {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"},
     Profile.TRANSFER: {},
+    Profile.MERGE: {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"},
 }
 _PROFILE_ARGUMENTS = {
     Profile.LOCAL: (
@@ -71,8 +76,16 @@ _PROFILE_ARGUMENTS = {
         "-c", f"core.attributesFile={os.devnull}",
     ),
     Profile.TRANSFER: ("-c", "transfer.credentialsInUrl=die"),
+    Profile.MERGE: (
+        "-c", f"core.excludesFile={os.devnull}",
+        "-c", f"core.attributesFile={os.devnull}",
+    ),
 }  # fmt: skip
-TIMEOUT_SECONDS = {Profile.LOCAL: 30, Profile.TRANSFER: 120}
+TIMEOUT_SECONDS: dict[Profile, float | None] = {
+    Profile.LOCAL: 30,
+    Profile.TRANSFER: 120,
+    Profile.MERGE: None,
+}
 
 
 class Standing(Enum):
@@ -113,34 +126,56 @@ Runner = Callable[[Path, Sequence[str], Profile], subprocess.CompletedProcess[by
 def run_git(
     tree: Path, arguments: Sequence[str], profile: Profile
 ) -> subprocess.CompletedProcess[bytes]:
-    """One git call on `tree`, isolated as rule 7 says; raises OSError or TimeoutExpired. git runs
-    in its own process group, and a call that does not finish ends with that whole group killed:
-    a fetch's transport helpers would otherwise outlive the cut and go on writing objects after
-    edge has said nothing changed (#98 rule 2)."""
+    """One git call on `tree`, isolated as rule 7 says; raises OSError or TimeoutExpired. A call
+    that does not finish ends with git's whole process group killed: a fetch's transport helpers
+    would otherwise outlive the cut and go on writing objects after edge has said nothing changed
+    (#98 rule 2)."""
     command = ["git", "--no-pager", "-C", str(tree), *_ISOLATION, *_PROFILE_ARGUMENTS[profile],
                *arguments]  # fmt: skip
+    return run_in_own_group(command, git_environment(os.environ, profile), TIMEOUT_SECONDS[profile])
+
+
+def run_in_own_group(
+    command: Sequence[str], environment: Mapping[str, str], timeout: float | None
+) -> subprocess.CompletedProcess[bytes]:
+    """`command` in its own process group with no stdin and its output captured; a call that does
+    not finish within `timeout` (None: never), or an exception while it waits, ends with the whole
+    group killed and every pipe read to its end before the exception goes on. Raises OSError when
+    it cannot start."""
     with subprocess.Popen(
         command,
-        env=git_environment(os.environ, profile),
+        env=environment,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         close_fds=True,
         process_group=0,
-    ) as git:
+    ) as child:
         try:
-            stdout, stderr = git.communicate(timeout=TIMEOUT_SECONDS[profile])
+            stdout, stderr = child.communicate(timeout=timeout)
         except BaseException:
-            _kill_group(git)
+            _kill_group(child)
             raise
-    return subprocess.CompletedProcess(command, git.returncode, stdout, stderr)
+    return subprocess.CompletedProcess(command, child.returncode, stdout, stderr)
 
 
-def _kill_group(git: subprocess.Popen[bytes]) -> None:
-    """Kill every process of `git`'s group and wait until the last has closed its pipes."""
+def _kill_group(child: subprocess.Popen[bytes]) -> None:
+    """Kill every process of `child`'s group and wait until the last has closed its pipes."""
     with contextlib.suppress(ProcessLookupError):
-        os.killpg(git.pid, signal.SIGKILL)
-    git.communicate()
+        os.killpg(child.pid, signal.SIGKILL)
+    child.communicate()
+
+
+def echoing(runner: Runner) -> Runner:
+    """`runner` that first prints the git call it makes on stderr, never its environment."""
+
+    def echo(
+        tree: Path, arguments: Sequence[str], profile: Profile
+    ) -> subprocess.CompletedProcess[bytes]:
+        write_line(f"git {printable(' '.join(arguments))}", stream=Stream.STDERR)
+        return runner(tree, arguments, profile)
+
+    return echo
 
 
 def git_environment(inherited: Mapping[str, str], profile: Profile) -> dict[str, str]:
@@ -157,6 +192,7 @@ class Origin:
     sha: str
     short: str
     head: str  # HEAD's short sha
+    head_sha: str  # HEAD's full sha
     ahead: int  # commits HEAD has that the fetched main lacks
     behind: int  # commits the fetched main has that HEAD lacks
 
@@ -175,8 +211,15 @@ def standing_of(ahead: int, behind: int) -> Standing:
 
 
 @dataclass(frozen=True)
+class Commit:
+    short: str
+    subject: str
+
+
+@dataclass(frozen=True)
 class Git:
-    """The questions `hal apply` asks of a checkout; only the fetch writes, and only to `.git`."""
+    """The questions `hal apply` and `hal update` ask of a checkout; only the fetch writes, and only
+    to `.git`, and the one write to the tree is `hal update`'s merge."""
 
     tree: Path
     run: Runner = run_git
@@ -195,6 +238,39 @@ class Git:
         return _sha(
             _text(self.call(["rev-parse", "--short", revision]).stdout).strip(), "rev-parse"
         )
+
+    def full(self, revision: str = "HEAD") -> str:
+        return _sha(
+            _text(self.call(["rev-parse", "--verify", f"{revision}^{{commit}}"]).stdout).strip(),
+            "rev-parse",
+        )
+
+    def is_commit(self, sha: str) -> bool:
+        """Whether `sha` names a commit this repository holds."""
+        verified = ["rev-parse", "--verify", "--quiet", f"{sha}^{{commit}}"]
+        return self.call(verified, accepted=(0, 1)).returncode == 0
+
+    def is_ancestor(self, ancestor: str, descendant: str) -> bool:
+        return self.call(["merge-base", "--is-ancestor", ancestor, descendant],
+                         accepted=(0, 1)).returncode == 0  # fmt: skip
+
+    def commits_to(self, sha: str) -> list[Commit]:
+        """The commits `sha` has that HEAD lacks, newest first."""
+        listing = ["log", "-z", "--no-show-signature", "--format=%h%x09%s", f"HEAD..{sha}"]
+        records = _text(self.call(listing).stdout).split("\0")
+        return [Commit(*record.partition("\t")[::2]) for record in records if record]
+
+    def files_changed_to(self, sha: str) -> list[str]:
+        """The paths that differ between HEAD and `sha`, in git's order."""
+        diff = ["diff", "--name-only", "-z", "--no-renames", "--no-ext-diff", "HEAD", sha]
+        return [os.fsdecode(path) for path in self.call(diff).stdout.split(b"\0") if path]
+
+    def merge_fast_forward(self, sha: str) -> None:
+        """Move HEAD, the index and the tree to the commit `sha`, which must be a fast-forward. It
+        overwrites no ignored file, stashes nothing and runs no hook."""
+        merge = ["merge", "--ff-only", "--no-overwrite-ignore", "--no-autostash",
+                 "--no-verify-signatures", sha]  # fmt: skip
+        self.call(merge, profile=Profile.MERGE)
 
     def has_commit(self) -> bool:
         """Whether HEAD names a commit; a branch without one is unborn."""
@@ -262,7 +338,7 @@ def fetch_origin(git: Git) -> Origin:
     """origin's `main`, fetched and pinned, and how HEAD stands to it; raises GitError."""
     sha = git.fetch_main()
     ahead, behind = git.divergence(sha)
-    return Origin(sha, git.short(sha), git.short(), ahead, behind)
+    return Origin(sha, git.short(sha), git.short(), git.full(), ahead, behind)
 
 
 def without_credentials(text: str) -> str:
