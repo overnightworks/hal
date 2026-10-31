@@ -93,7 +93,8 @@ def _turns_echo_off(settings: list) -> bool:
 
 def _wrap_the_terminal(config: ChildConfig) -> None:
     """Delegating wrappers: an acknowledgement per terminal read, a report when echo goes off, and
-    the named call failing with EIO or held until the go byte, and the prompt's write failing; everything else is the real call."""
+    the named call failing with EIO or held until the go byte, and the prompt's write failing;
+    everything else is the real call."""
     calls = {"get": 0, "set": 0}
 
     def acknowledged_read(descriptor: int, size: int) -> bytes:
