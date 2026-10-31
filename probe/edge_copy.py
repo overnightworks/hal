@@ -12,7 +12,7 @@ probe advances origin from a work clone `<scratch>/work` (#98 P1). A probe adds 
 the repository's `src` to `sys.path` before importing it, which also works when the probe is
 loaded by path.
 
-`run_probe` leaves `--scratch` empty on every way out (#842): after the teardown, whether the run
+`run_probe` leaves `--scratch` empty on every way out: after the teardown, whether the run
 passed, failed or was stopped, it removes every entry through the directory it opened first, never
 the directory itself, a parent or a path a symlink names. A failed removal exits 1.
 """
@@ -514,10 +514,6 @@ def compose_engine(environment: Mapping[str, str], copy: Path) -> compose.Compos
     return compose.Compose(run, copy)
 
 
-def _raise_interrupt(_signal: int, _frame: object) -> None:
-    raise KeyboardInterrupt
-
-
 def begin_teardown() -> None:
     """From here an alarm or a SIGTERM cannot abort the teardown and leave the stack, and with it
     the operator's login bind, standing."""
@@ -536,11 +532,29 @@ def _empty_directory(descriptor: int) -> None:
             os.unlink(name, dir_fd=descriptor)
 
 
-def _tear_down_and_empty(probe: Any, descriptor: int, scratch: Path, exit_code: int) -> int:
-    """The probe's teardown, then the emptying of the scratch, with SIGTERM and SIGINT ignored; the
-    exit code, or 1 when either failed."""
+class _Stops:
+    """The SIGTERM and SIGINT handler of a run. Until the cleanup begins a stop raises
+    KeyboardInterrupt; from then until both signals are ignored it is only kept, because a raise
+    there would skip the teardown and the emptying."""
+
+    def __init__(self) -> None:
+        self.cleanup_began = False
+        self.kept: KeyboardInterrupt | None = None
+
+    def __call__(self, _signal: int, _frame: object) -> None:
+        if not self.cleanup_began:
+            raise KeyboardInterrupt
+        self.kept = self.kept or KeyboardInterrupt()
+
+
+def _tear_down_and_empty(
+    probe: Any, descriptor: int, scratch: Path, exit_code: int
+) -> tuple[int, Exception | None]:
+    """The probe's teardown, then the emptying of the scratch, with SIGTERM and SIGINT ignored: the
+    exit code, or 1 when either failed, and an unforeseen exception the teardown raised."""
     begin_teardown()
     signal.signal(signal.SIGINT, signal.SIG_IGN)
+    unforeseen = None
     try:
         if probe is not None:
             try:
@@ -548,12 +562,38 @@ def _tear_down_and_empty(probe: Any, descriptor: int, scratch: Path, exit_code: 
             except (ProbeFailed, subprocess.TimeoutExpired) as failure:
                 print(f"PROBE FAILED: teardown, {failure}")
                 exit_code = 1
+            except Exception as failure:  # the caller raises it unless another one propagates
+                print(f"PROBE FAILED: teardown, {failure!r}")
+                unforeseen = failure
     finally:
         try:
             _empty_directory(descriptor)
         except OSError as failure:
             print(f"PROBE FAILED: --scratch not emptied, {scratch}: {failure}")
             exit_code = 1
+    return exit_code, unforeseen
+
+
+def _run_and_clean_up(
+    scratch: Path, descriptor: int, create: Callable[[Path], Any], prove: Callable[[Any], int]
+) -> int:
+    """Create and prove the probe, then tear it down and empty the scratch on every way out. The
+    first of an escaped exception, a stop and an unforeseen teardown exception propagates."""
+    stops = _Stops()
+    signal.signal(signal.SIGTERM, stops)
+    signal.signal(signal.SIGINT, stops)
+    probe, exit_code = None, 1
+    try:
+        probe = create(scratch)
+        exit_code = prove(probe)
+    finally:
+        # CPython runs a signal's Python handler only at a call, a function entry or a backward
+        # jump, and this store comes before the first of them, so no stop can raise past it.
+        stops.cleanup_began = True
+        exit_code, unforeseen = _tear_down_and_empty(probe, descriptor, scratch, exit_code)
+    escaped = stops.kept or unforeseen
+    if escaped is not None:
+        raise escaped
     return exit_code
 
 
@@ -578,13 +618,7 @@ def run_probe(
             if any(True for _ in entries):
                 print("PROBE FAILED: --scratch is not empty")
                 return NOT_RUNNABLE
-        signal.signal(signal.SIGTERM, _raise_interrupt)
-        probe, exit_code = None, 1
-        try:
-            probe = create(scratch)
-            exit_code = prove(probe)
-        finally:
-            exit_code = _tear_down_and_empty(probe, descriptor, scratch, exit_code)
+        exit_code = _run_and_clean_up(scratch, descriptor, create, prove)
     finally:
         for number, handler in handlers.items():
             signal.signal(number, handler)

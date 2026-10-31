@@ -1,4 +1,4 @@
-"""The probes' shared run loop (#842): `edge_copy.run_probe` and `run_main` empty --scratch after
+"""The probes' shared run loop: `edge_copy.run_probe` and `run_main` empty --scratch after
 the teardown on every way out, and remove only what lies under the directory they opened first."""
 
 import os
@@ -216,6 +216,35 @@ def test_a_ctrl_c_during_the_teardown_and_the_removal_cuts_neither_short(scratch
     assert listing(scratch) == []
 
 
+@pytest.mark.parametrize(
+    ("prove_action", "escaping"),
+    [(lambda: 0, KeyboardInterrupt), (raising(ValueError("proof")), ValueError)],
+    ids=["after-a-proof", "after-an-exception"],
+)
+def test_a_stop_as_the_cleanup_starts_cuts_neither_the_teardown_nor_the_removal(
+    scratch, capsys, monkeypatch, prove_action, escaping
+):
+    real_begin_teardown = edge_copy.begin_teardown
+    stops = []
+
+    def stopped_begin_teardown() -> None:
+        if not stops:
+            stops.append("SIGTERM")
+            os.kill(os.getpid(), signal.SIGTERM)
+        real_begin_teardown()
+
+    monkeypatch.setattr(edge_copy, "begin_teardown", stopped_begin_teardown)
+    run = Scenario(scratch, prove_action=prove_action)
+
+    with pytest.raises(escaping):
+        run.run()
+
+    assert stops == ["SIGTERM"]
+    assert "teardown ended" in run.events
+    assert listing(scratch) == []
+    assert PASSED not in printed(capsys)
+
+
 def test_a_failed_removal_names_the_path_and_exits_one(scratch, capsys, unlockable):
     run = Scenario(scratch, extra=make_unwritable(unlockable))
 
@@ -226,11 +255,19 @@ def test_a_failed_removal_names_the_path_and_exits_one(scratch, capsys, unlockab
     assert PASSED not in lines
 
 
+@pytest.mark.parametrize(
+    "teardown_action",
+    [lambda: None, raising(RuntimeError("teardown"))],
+    ids=["teardown-passes", "teardown-raises-later"],
+)
 def test_a_failed_removal_while_an_exception_propagates_still_names_the_path(
-    scratch, capsys, unlockable
+    scratch, capsys, unlockable, teardown_action
 ):
     run = Scenario(
-        scratch, prove_action=raising(ValueError("proof")), extra=make_unwritable(unlockable)
+        scratch,
+        prove_action=raising(ValueError("proof")),
+        teardown_action=teardown_action,
+        extra=make_unwritable(unlockable),
     )
 
     with pytest.raises(ValueError, match="proof"):
