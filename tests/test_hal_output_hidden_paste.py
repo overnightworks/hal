@@ -42,6 +42,7 @@ FINISHED = b"f"
 GO = b"g"
 
 _REAL_READ = os.read
+_REAL_WRITE = os.write
 _REAL_GET = termios.tcgetattr
 _REAL_SET = termios.tcsetattr
 
@@ -75,6 +76,7 @@ class ChildConfig:
     controlling_terminal: bool = True
     failing_get: int | None = None
     failing_set: int | None = None
+    failing_prompt: bool = False
     held_set: int | None = None
     rest_expected: bool = False
     home: str = ""
@@ -91,7 +93,7 @@ def _turns_echo_off(settings: list) -> bool:
 
 def _wrap_the_terminal(config: ChildConfig) -> None:
     """Delegating wrappers: an acknowledgement per terminal read, a report when echo goes off, and
-    the named call failing with EIO or held until the go byte; everything else is the real call."""
+    the named call failing with EIO or held until the go byte, and the prompt's write failing; everything else is the real call."""
     calls = {"get": 0, "set": 0}
 
     def acknowledged_read(descriptor: int, size: int) -> bytes:
@@ -118,7 +120,13 @@ def _wrap_the_terminal(config: ChildConfig) -> None:
         if _turns_echo_off(settings):
             os.write(config.report, HIDDEN)
 
+    def prompt_failing_write(descriptor: int, data: bytes) -> int:
+        if config.failing_prompt and os.isatty(descriptor) and data == PROMPT.encode():
+            raise OSError(errno.EIO, os.strerror(errno.EIO))
+        return _REAL_WRITE(descriptor, data)
+
     os.read = acknowledged_read
+    os.write = prompt_failing_write
     termios.tcgetattr = get
     termios.tcsetattr = set_
 
@@ -434,12 +442,26 @@ def test_a_paste_ended_by_the_person_raises_and_leaves_nothing(
 ) -> None:
     child = spawn()
     child.paste(b"part1\r", acknowledged=True)
-    child.type(ending)
+    child.type(ending + b"late-1\r")
 
     outcome = child.finish()
 
     assert (outcome.error, outcome.value) == (error, None)
     assert_nothing_left_and_restored(outcome)
+
+
+def test_a_prompt_that_cannot_be_written_surfaces_and_sets_the_terminal_back(
+    spawn: Callable[..., PtyChild],
+) -> None:
+    """E2: the failure after echo went off is not a way out that skips the restore."""
+    child = spawn(failing_prompt=True)
+    child.await_report(HIDDEN)
+
+    outcome = child.finish()
+
+    assert (outcome.error, outcome.value) == ("OSError", None)
+    assert outcome.settings_kept
+    assert outcome.echo_on
 
 
 def test_a_rest_typed_after_the_reader_returned_stays_in_the_input(

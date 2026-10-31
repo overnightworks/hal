@@ -63,8 +63,8 @@ def _hidden_lines(terminal: int, prompt: str) -> list[bytes]:
         termios.tcsetattr(terminal, termios.TCSAFLUSH, hidden)
     except termios.error:
         raise TerminalCannotHide("the terminal cannot turn its echo off") from None
-    os.write(terminal, prompt.encode())
     try:
+        os.write(terminal, prompt.encode())
         lines = _lines_up_to_the_empty_one(terminal)
     finally:
         rest = _drained_and_restored(terminal, settings)
