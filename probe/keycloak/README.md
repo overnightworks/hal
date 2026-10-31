@@ -109,6 +109,7 @@ stack behind, ends with `PROBE FAILED` and exit 1.
   member's person token carries the audience only when asked and `/services/speech-service` either way, as the default `groups`
   scope gives it, and its ID token never the audience (SP3); a non-member's token without the scope carries no audience (SP4); songmaker and presentator are refused the scope and
   never get the audience (SP5); `agent-service` and `speech-service` are bearer-only with every flow off (W4, SP6); the group has no subgroup (SP8).
+  Cells F0, U3, U4, RF0 to RF2 (#844) run last in hopin's branch of the same proof, on a target, a scope copied from `speech-service-audience`, a role and two clients the probe makes: the probe holds the setup and prints, as measured and not held, what a workload token's `aud` and roles are under Keycloak's defaults, without the default roles, with `fullScopeAllowed` off and with a role scope mapping (U3), and what refreshes and a new authorization request give sessions signed in before and after the scope turned optional (U4, RF1, RF2); `docs/keycloak.md` states the answers for the pinned Keycloak.
 - `hold` brings the same stack up, runs no proof and keeps it for another repository's proof.
   It seeds nothing beyond the realm's `songmaker`, `hopin` and `presentator` clients, which callers must not create
   themselves; they create their other clients and users through the admin API. A hallucinai user created there carries
