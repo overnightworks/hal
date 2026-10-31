@@ -7,6 +7,7 @@ import subprocess
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 
 import pytest
@@ -23,11 +24,9 @@ SENTINEL = "sentinel"
 
 
 @pytest.fixture(autouse=True)
-def restored_signal_handlers():
-    before = {number: signal.getsignal(number) for number in (signal.SIGTERM, signal.SIGINT)}
-    yield
-    for number, handler in before.items():
-        signal.signal(number, handler)
+def restored_signal_handlers(request):
+    for number in (signal.SIGTERM, signal.SIGINT):
+        request.addfinalizer(partial(signal.signal, number, signal.getsignal(number)))
 
 
 @pytest.fixture
