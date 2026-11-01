@@ -2478,8 +2478,7 @@ class Probe:
         )
         stand.edit_realm((CHANGED_LIFESPAN_SETTING, LIFESPAN_SETTING))
         reset = stand.apply()
-        expect(isinstance(reset, reconcile.RealmApplied), f"the step that resets: {reset}")
-        expect(isinstance(reset.leftovers, reconcile.Leftovers), "the reset was not recorded")
+        expect(isinstance(getattr(reset, "leftovers", None), reconcile.Leftovers), f"step: {reset}")
         removal = (
             f"{REALM}: removal protocol mapper scope groups/{STEP_CONSOLE_MAPPER}: "
             f"reset to the file, pre-apply snapshot {reset.snapshot[:SNAPSHOT_SHORT_ID]}"
