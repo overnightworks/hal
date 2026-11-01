@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import getpass
 import logging
 import os
 import signal
@@ -16,12 +15,12 @@ from support.workstation_secrets_support import (
     FakeCli,
     FakeSync,
     FakeTerminal,
-    guided_boundaries,
     private_directory,
     run_wizard,
     squeezed,
 )
 
+from hal.output.hidden_paste import TerminalCannotHide, TerminalNotRestored
 from hal.workstation import secrets_setup
 from hal.workstation.secrets_setup import (
     CLOUDFLARE_TOKEN_PAGE,
@@ -551,14 +550,30 @@ def test_entries_without_a_wizard_are_named_with_their_page_and_unknown_or_retir
     assert not [line for line in lines if line.startswith("next:") or "offen" in line]
 
 
-def test_a_terminal_that_cannot_hide_the_paste_is_refused_before_anything_is_read(
-    home: Path, verifier: FakeVerifier, capsys
+@pytest.mark.parametrize(
+    ("failure", "end", "pair"),
+    [
+        pytest.param(
+            TerminalCannotHide, WalkEnd.CANNOT_HIDE_INPUT,
+            ["error: this terminal cannot hide what you type · nothing read", "next: hal setup in another terminal window"],
+            id="cannot hide",
+        ),
+        pytest.param(
+            TerminalNotRestored, WalkEnd.ENTRY_FAILED,
+            [f"error: {TerminalNotRestored()} · nothing stored for cloudflare/read", "next: stty sane, then hal setup"],
+            id="not restored",
+        ),
+    ],
+)
+def test_a_terminal_that_fails_at_the_paste_ends_the_walk_with_its_pair_and_stores_nothing(
+    home: Path, terminal: FakeTerminal, boundaries: Boundaries, verifier: FakeVerifier, capsys, failure: type[Exception], end: WalkEnd, pair: list[str]
 ) -> None:
-    """#36 rule 2.3 / #10 line 3: a terminal that cannot hide the paste is refused before anything is read."""
-    end = run_wizard(home, guided_boundaries(getpass.fallback_getpass, verifier))
+    """#36 rule 2.3 / #10 line 3: a terminal that cannot hide the paste is refused before anything is read; one that cannot be set back
+    after the paste ends the walk without claiming nothing was read."""
+    terminal.pastes = [failure]
 
-    assert end is WalkEnd.CANNOT_HIDE_INPUT
-    assert capsys.readouterr().err.endswith("error: this terminal cannot hide what you type · nothing read\nnext: hal setup in another terminal window\n")
+    assert run_wizard(home, boundaries) is end
+    assert capsys.readouterr().err.splitlines()[-2:] == pair
     assert verifier.checked == []
     assert files_under(home) == set()
 
