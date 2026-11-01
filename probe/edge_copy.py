@@ -11,6 +11,10 @@ applies (#95 rule 10). To put the copy behind origin, as a pull request merged e
 probe advances origin from a work clone `<scratch>/work` (#98 P1). A probe adds this directory and
 the repository's `src` to `sys.path` before importing it, which also works when the probe is
 loaded by path.
+
+`run_probe` leaves `--scratch` empty on every way out: after the teardown, whether the run
+passed, failed or was stopped, it removes every entry through the directory it opened first, never
+the directory itself, a parent or a path a symlink names. A failed removal exits 1.
 """
 
 from __future__ import annotations
@@ -508,7 +512,7 @@ def run_hal(
 def scratch_directory(text: str) -> Path:
     """The `--scratch` argument as an absolute path of an existing directory the operator can
     write to; anything else is refused where the command line is read."""
-    path = Path(text).resolve()
+    path = Path(os.path.abspath(text))  # not resolved: run_probe refuses a symlink
     if not path.is_dir() or not os.access(path, os.W_OK):
         raise argparse.ArgumentTypeError(f"{text} is not a writable directory")
     return path
@@ -526,15 +530,87 @@ def compose_engine(environment: Mapping[str, str], copy: Path) -> compose.Compos
     return compose.Compose(run, copy)
 
 
-def _raise_interrupt(_signal: int, _frame: object) -> None:
-    raise KeyboardInterrupt
-
-
 def begin_teardown() -> None:
     """From here an alarm or a SIGTERM cannot abort the teardown and leave the stack, and with it
     the operator's login bind, standing."""
     signal.alarm(0)
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
+
+
+def _empty_directory(descriptor: int) -> None:
+    """Remove every entry of the directory `descriptor` holds open, symlinks as links."""
+    with os.scandir(descriptor) as entries:
+        found = [(entry.name, entry.is_dir(follow_symlinks=False)) for entry in entries]
+    for name, is_directory in found:
+        if is_directory:
+            shutil.rmtree(name, dir_fd=descriptor)
+        else:
+            os.unlink(name, dir_fd=descriptor)
+
+
+class _Stops:
+    """The SIGTERM and SIGINT handler of a run. Until the cleanup begins a stop raises
+    KeyboardInterrupt; from then until both signals are ignored it is only kept, because a raise
+    there would skip the teardown and the emptying."""
+
+    def __init__(self) -> None:
+        self.cleanup_began = False
+        self.kept: KeyboardInterrupt | None = None
+
+    def __call__(self, _signal: int, _frame: object) -> None:
+        if not self.cleanup_began:
+            raise KeyboardInterrupt
+        self.kept = self.kept or KeyboardInterrupt()
+
+
+def _tear_down_and_empty(
+    probe: Any, descriptor: int, scratch: Path, exit_code: int
+) -> tuple[int, Exception | None]:
+    """The probe's teardown, then the emptying of the scratch, with SIGTERM and SIGINT ignored: the
+    exit code, or 1 when either failed, and an unforeseen exception the teardown raised."""
+    begin_teardown()
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    unforeseen = None
+    try:
+        if probe is not None:
+            try:
+                probe.teardown()
+            except (ProbeFailed, subprocess.TimeoutExpired) as failure:
+                print(f"PROBE FAILED: teardown, {failure}")
+                exit_code = 1
+            except Exception as failure:  # the caller raises it unless another one propagates
+                print(f"PROBE FAILED: teardown, {failure!r}")
+                unforeseen = failure
+    finally:
+        try:
+            _empty_directory(descriptor)
+        except OSError as failure:
+            print(f"PROBE FAILED: --scratch not emptied, {scratch}: {failure}")
+            exit_code = 1
+    return exit_code, unforeseen
+
+
+def _run_and_clean_up(
+    scratch: Path, descriptor: int, create: Callable[[Path], Any], prove: Callable[[Any], int]
+) -> int:
+    """Create and prove the probe, then tear it down and empty the scratch on every way out. The
+    first of an escaped exception, a stop and an unforeseen teardown exception propagates."""
+    stops = _Stops()
+    signal.signal(signal.SIGTERM, stops)
+    signal.signal(signal.SIGINT, stops)
+    probe, exit_code = None, 1
+    try:
+        probe = create(scratch)
+        exit_code = prove(probe)
+    finally:
+        # CPython runs a signal's Python handler only at a call, a function entry or a backward
+        # jump, and this store comes before the first of them, so no stop can raise past it.
+        stops.cleanup_began = True
+        exit_code, unforeseen = _tear_down_and_empty(probe, descriptor, scratch, exit_code)
+    escaped = stops.kept or unforeseen
+    if escaped is not None:
+        raise escaped
+    return exit_code
 
 
 def run_probe(
@@ -543,21 +619,30 @@ def run_probe(
     prove: Callable[[Any], int],
     passed: str,
 ) -> int:
-    """A probe's run in `scratch`: refuse a scratch that is not empty, create the probe, prove it,
-    and tear it down even when `timeout` ends the proof with SIGTERM. The exit code is the
-    proof's, or 1 when the teardown fails; `passed` is printed on success."""
-    if any(scratch.iterdir()):
-        print("PROBE FAILED: --scratch is not empty")
-        return NOT_RUNNABLE
-    probe = create(scratch)
-    signal.signal(signal.SIGTERM, _raise_interrupt)
-    exit_code = prove(probe)
-    begin_teardown()
+    """A probe's run in `scratch`: refuse a scratch that is a symlink or not empty, create the
+    probe, prove it, tear it down even when `timeout` ends the proof with SIGTERM or anything
+    escapes, and then empty the scratch. The exit code is the proof's, or 1 when the teardown or
+    the emptying fails; `passed` is printed on success."""
     try:
-        probe.teardown()
-    except (ProbeFailed, subprocess.TimeoutExpired) as failure:
-        print(f"PROBE FAILED: teardown, {failure}")
-        exit_code = 1
+        # The operator chooses --scratch (made absolute at the argparse boundary) and any directory
+        # they name is valid, so there is nothing to sanitise; O_NOFOLLOW refuses a symlink.
+        descriptor = os.open(  # NOSONAR(S8707)
+            scratch, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        )
+    except OSError as failure:
+        print(f"PROBE FAILED: --scratch cannot be opened, {failure}")
+        return NOT_RUNNABLE
+    handlers = {number: signal.getsignal(number) for number in (signal.SIGTERM, signal.SIGINT)}
+    try:
+        with os.scandir(descriptor) as entries:
+            if any(True for _ in entries):
+                print("PROBE FAILED: --scratch is not empty")
+                return NOT_RUNNABLE
+        exit_code = _run_and_clean_up(scratch, descriptor, create, prove)
+    finally:
+        for number, handler in handlers.items():
+            signal.signal(number, handler)
+        os.close(descriptor)
     if exit_code == 0:
         print(passed)
     return exit_code

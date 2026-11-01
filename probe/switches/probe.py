@@ -49,7 +49,7 @@ Traefik also routes the probe's `hello` until teardown.
 
 Measured teardown: 2.8 s after a SIGTERM at 120 s (K 30 s, CAP 900 s; the full run took under
 643 s with the lock wait). Needs an existing, empty --scratch directory, and `uv`: it runs
-`uv sync` in the copy.
+`uv sync` in the copy. It leaves --scratch empty, passed or failed (`edge_copy`).
 """
 
 from __future__ import annotations

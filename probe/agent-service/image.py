@@ -126,8 +126,8 @@ def build(context: Path, transcript: Path, *extra: str, tag: str = IMAGE, cache:
         ],
         timeout=BUILD_SECONDS,
     )
-    # The path is the operator's own --output, resolved once at the argparse boundary by
-    # egress.scratch_directory; Sonar does not follow that resolution across calls.
+    # The path is the operator's own --output, made absolute and checked once at the argparse
+    # boundary by egress.scratch_directory; Sonar does not follow that check across calls.
     transcript.write_text(result.stdout + result.stderr, encoding="utf-8")  # NOSONAR(S8707)
     return result
 
@@ -412,8 +412,8 @@ def cell_i5(output: Path, scratch: Path) -> None:
         status = unauthenticated_run_status(port)
     finally:
         logs = docker(["logs", PROBE_NAME])
-        # The path is the operator's own --output, resolved once at the argparse boundary by
-        # egress.scratch_directory; Sonar does not follow that resolution across calls.
+        # The path is the operator's own --output, made absolute and checked once at the argparse
+        # boundary by egress.scratch_directory; Sonar does not follow that check across calls.
         (output / "i5-service.txt").write_text(  # NOSONAR(S8707)
             logs.stdout + logs.stderr, encoding="utf-8"
         )

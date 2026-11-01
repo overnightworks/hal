@@ -114,14 +114,6 @@ def test_teardown_says_removed_only_when_nothing_of_the_stack_is_left(
     assert docker_host.containers == containers_left
 
 
-@pytest.fixture
-def restored_signal_handlers() -> Iterator[None]:
-    saved = {name: signal.getsignal(name) for name in (signal.SIGTERM, signal.SIGINT)}
-    yield
-    for name, handler in saved.items():
-        signal.signal(name, handler)
-
-
 def run_main(
     probe: ModuleType,
     monkeypatch: pytest.MonkeyPatch,

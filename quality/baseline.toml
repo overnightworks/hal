@@ -12,7 +12,7 @@
 "src/hal/workstation/secrets_view.py" = 827
 "tests/test_backup_runner.py" = 1171
 "tests/test_keycloak_go_live.py" = 1715
-"tests/test_keycloak_probe.py" = 997
+"tests/test_keycloak_probe.py" = 989
 "tests/test_stack_apply.py" = 3779
 "tests/test_stack_cloudflare_read.py" = 906
 "tests/test_stack_external.py" = 2242
