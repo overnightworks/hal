@@ -4,6 +4,7 @@ workstation fixtures that test modules share."""
 import json
 import os
 import shutil
+import signal
 import socket
 import time
 from collections.abc import Callable, Iterator
@@ -108,6 +109,14 @@ def fake_host(monkeypatch, tmp_path):
         monkeypatch.setenv("PATH", f"{directory}:{os.environ['PATH']}")
 
     return install
+
+
+@pytest.fixture
+def restored_signal_handlers() -> Iterator[None]:
+    saved = {name: signal.getsignal(name) for name in (signal.SIGTERM, signal.SIGINT)}
+    yield
+    for name, handler in saved.items():
+        signal.signal(name, handler)
 
 
 @pytest.fixture

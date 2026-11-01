@@ -608,7 +608,11 @@ def run_probe(
     escapes, and then empty the scratch. The exit code is the proof's, or 1 when the teardown or
     the emptying fails; `passed` is printed on success."""
     try:
-        descriptor = os.open(scratch, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        # The operator chooses --scratch (made absolute at the argparse boundary) and any directory
+        # they name is valid, so there is nothing to sanitise; O_NOFOLLOW refuses a symlink.
+        descriptor = os.open(  # NOSONAR(S8707)
+            scratch, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        )
     except OSError as failure:
         print(f"PROBE FAILED: --scratch cannot be opened, {failure}")
         return NOT_RUNNABLE

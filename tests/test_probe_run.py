@@ -7,7 +7,6 @@ import subprocess
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from functools import partial
 from pathlib import Path
 
 import pytest
@@ -23,10 +22,7 @@ PASSED = "PROBE PASSED"
 SENTINEL = "sentinel"
 
 
-@pytest.fixture(autouse=True)
-def restored_signal_handlers(request):
-    for number in (signal.SIGTERM, signal.SIGINT):
-        request.addfinalizer(partial(signal.signal, number, signal.getsignal(number)))
+pytestmark = pytest.mark.usefixtures("restored_signal_handlers")
 
 
 @pytest.fixture
