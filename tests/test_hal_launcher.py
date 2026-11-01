@@ -8,7 +8,9 @@ from pathlib import Path
 
 import pytest
 
-LAUNCHER = Path(__file__).resolve().parents[1] / "bin/hal"
+BIN = Path(__file__).resolve().parents[1] / "bin"
+LAUNCHER = BIN / "hal"
+SYNC = BIN / "hal-sync"
 
 FAKE_UV = """#!/bin/sh
 printf '%s\\0' "$@" > "$FAKE_LOG/uv.args"
@@ -65,6 +67,7 @@ def machine(tmp_path) -> Machine:
     checkout = tmp_path / "checkout"
     (checkout / "bin").mkdir(parents=True)
     shutil.copy2(LAUNCHER, checkout / "bin/hal")
+    shutil.copy2(SYNC, checkout / "bin/hal-sync")
     _executable(checkout / ".venv/bin/hal", FAKE_HAL)
     fake_bin = tmp_path / "fake-bin"
     _executable(fake_bin / "uv", FAKE_UV)
@@ -143,3 +146,38 @@ def test_finds_its_checkout_through_a_symlink_in_another_directory(machine, tmp_
     assert result.returncode == 0, result.stderr
     assert machine.logged_args("uv.args")[-1] == str(machine.checkout)
     assert machine.logged_args("hal.args") == ["--help"]
+
+
+def test_sync_without_a_program_runs_nothing_after_uv(machine):
+    """#783 cell N2: without a program the script only syncs and runs no hal."""
+    result = subprocess.run(
+        [str(machine.checkout / "bin/hal-sync"), str(machine.checkout)],
+        env={
+            "PATH": machine.path,
+            "FAKE_LOG": str(machine.log),
+            "VIRTUAL_ENV": "/other/.venv",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert machine.logged_args("uv.args")[-1] == str(machine.checkout)
+    assert machine.logged("uv.env") == "unset unset"
+    assert not (machine.log / "hal.args").exists()
+
+
+def test_failed_sync_without_a_program_exits_1_and_prints_only_uvs_line(machine):
+    """#783 cell N2: the caller reports a failed sync; the script adds no error pair."""
+    result = subprocess.run(
+        [str(machine.checkout / "bin/hal-sync"), str(machine.checkout)],
+        env={"PATH": machine.path, "FAKE_LOG": str(machine.log), "FAKE_UV_FAILS": "1"},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert result.stderr == "uv: lock file is out of date\n"

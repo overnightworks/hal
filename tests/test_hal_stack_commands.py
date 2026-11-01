@@ -49,8 +49,9 @@ from support.stack_global_stop import hosts_asked  # noqa: F401 the fixture, use
 
 from hal import cli, stack_commands
 from hal.grammar import ExitCode
-from hal.stack import apply, emergency, switches, tunnel
+from hal.stack import apply, checkout, emergency, switches, tunnel
 from hal.stack import cli as stack
+from hal.stack.update import UpdateEnd
 
 (
     applying,
@@ -96,7 +97,7 @@ def run_door(tmp_path: Path, guard: Guard, *arguments: str):
 # --- the door --------------------------------------------------------------------------------
 
 
-def test_the_help_lists_the_five_beside_version_and_stop_names_its_unit(
+def test_the_help_lists_the_six_beside_version_and_stop_names_its_unit(
     tmp_path, system_commands, empty_home
 ):
     """D1"""
@@ -104,11 +105,15 @@ def test_the_help_lists_the_five_beside_version_and_stop_names_its_unit(
     stop_help = run_door(tmp_path, system_commands, "stop", "--help")
 
     assert listing.returncode == ExitCode.OK
-    for name in ("apply", "stop", "start", "offline", "online", "version"):
+    for name in ("apply", "update", "stop", "start", "offline", "online", "version"):
         assert name in listing.stdout
     assert "external" not in listing.stdout
     assert stop_help.returncode == ExitCode.OK
     assert "unit" in stop_help.stdout
+    update_help = run_door(tmp_path, system_commands, "update", "--help")
+    assert update_help.returncode == ExitCode.OK
+    assert "fast-forwards the checkout" in update_help.stdout
+    assert "hal apply" in update_help.stdout
 
 
 @pytest.mark.parametrize(
@@ -162,6 +167,29 @@ def test_every_outcome_of_the_stack_has_one_exit_of_hal(monkeypatch, stack_exit,
     assert cli.main(["offline"]) == hal_exit
 
 
+@pytest.mark.parametrize(
+    ("update_end", "hal_exit"),
+    [
+        (UpdateEnd.DONE, ExitCode.OK),
+        (UpdateEnd.DECLINED, ExitCode.FINDINGS),
+        (UpdateEnd.REFUSED, ExitCode.REFUSED),
+        (UpdateEnd.FAILED, ExitCode.FAILURE),
+        (UpdateEnd.INTERRUPTED, ExitCode.INTERRUPTED),
+    ],
+    ids=lambda value: value.name,
+)
+def test_every_end_of_the_update_has_its_public_exit(monkeypatch, update_end, hal_exit):
+    """#783 D1: the grammar's codes, one per end."""
+    monkeypatch.setattr(stack, "update_checkout", lambda: update_end)
+
+    assert cli.main(["update"]) == hal_exit
+
+
+def test_the_update_table_names_every_member_of_its_enum():
+    """#783 D1: an end added without an exit fails here."""
+    assert set(stack_commands.EXIT_OF_UPDATE) == set(UpdateEnd)
+
+
 def test_the_table_names_every_member_of_the_stack_enum():
     """D3: a member added to `ApplyExit` without an exit fails here, not at night in `hal stop`."""
     assert set(stack_commands.EXIT_OF_STACK) == set(apply.ApplyExit)
@@ -209,7 +237,21 @@ def test_apply_while_another_apply_runs_changes_nothing(hal, applying):
     result = hal("apply", answers=("yes",))
 
     assert result.exit_code == ExitCode.FAILURE
-    assert "another `hal apply` is running; nothing changed" in result.err
+    assert "another `hal apply` or `hal update` is running; nothing changed" in result.err
+    assert "hal apply: nothing published" in result.err
+    assert applying.scripted.changing_verbs() == []
+    assert applying.publish_never_began()
+
+
+def test_apply_behind_origin_names_hal_update_and_publishes_nothing(hal, applying, monkeypatch):
+    """#783 F2: the full apply ends with 3 and `nothing published`, no plan and no question."""
+    monkeypatch.setattr(checkout.Git, "divergence", lambda _self, _sha: (0, 2))
+
+    result = hal("apply", answers=("yes",))
+
+    assert result.exit_code == ExitCode.FAILURE
+    assert "2 commits wait on origin main; nothing changed" in result.err
+    assert "next: hal update" in result.err
     assert "hal apply: nothing published" in result.err
     assert applying.scripted.changing_verbs() == []
     assert applying.publish_never_began()
