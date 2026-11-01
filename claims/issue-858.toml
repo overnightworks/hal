@@ -1,0 +1,8 @@
+claim_id = "2e10162b559043ec8b9aa4c8a0b957e9"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "984551884895ee3606316f10da6dd317168d269c"
+branch = "claude/issue-858-s1-of-790-final-tunnel-pair"
+scope = ["docs/home.md", "scripts/system-proof/drive.sh", "scripts/system-proof/run.sh", "src/hal/workstation/system/playbook.yml", "tests/test_stack_tunnel_files.py", "tunnel/cloudflared.service.d/30-hal-global-stop.conf", "tunnel/polkit/10-hal-cloudflared-stop.rules"]
+opened_commit = "29da1543dae1c02d32df797c596ecc41229c3079"
+whole_reason = "Two new files and their one install line only prove themselves together with their pins and the system proof's cell; split apart, each piece is dead or red."
