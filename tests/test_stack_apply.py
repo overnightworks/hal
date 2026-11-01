@@ -879,7 +879,7 @@ def test_a_matching_environment_file_is_untouched_and_silent(switch, repository)
 def test_a_differing_environment_file_is_named_and_left_alone(
     switch, scripted, scripted_git, repository
 ):
-    """#136 E4, rule 4: exit 2 with the key, both values and the way out; no fetch, no compose."""
+    """#136 E4, rule 4: exit 2 with the key, both values, the way out; after the fetch."""
     (repository / ".env").write_text(f"EDGE_DOMAIN=old.invalid\nDOCKER_GID={DOCKER_GID}\n")
 
     exit_code, _, err = switch(ensure_environment=writing_environment())
@@ -891,7 +891,7 @@ def test_a_differing_environment_file_is_named_and_left_alone(
     ]
     assert (repository / ".env").read_text().startswith("EDGE_DOMAIN=old.invalid")
     assert scripted.calls == []
-    assert "fetch" not in [call[0] for call in scripted_git.calls]
+    assert "fetch" in [call[0] for call in scripted_git.calls]
 
 
 def test_without_a_docker_group_it_refuses_and_writes_nothing(switch, repository):
@@ -948,13 +948,13 @@ def test_while_another_apply_runs_it_never_writes_an_environment_file(switch, re
 def test_while_another_apply_runs_it_refuses_and_touches_nothing(
     switch, scripted, scripted_git, state
 ):
-    """#95 rule 4, S8 and G8: exit 1, "another `hal apply` is running"; no git or
-    compose call."""
+    """#95 rule 4, S8, G8: exit 1, the line names both commands (#783);
+    no git or compose call."""
     with apply_lock_held(state):
         exit_code, _, err = switch()
 
     assert exit_code == 1
-    assert err.splitlines() == ["error: another `hal apply` is running; nothing changed"]
+    assert err == "error: another `hal apply` or `hal update` is running; nothing changed\n"
     assert scripted.calls == []
     assert scripted_git.calls == []
 

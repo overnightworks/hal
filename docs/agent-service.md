@@ -55,7 +55,7 @@ names the recreate, which ends every run in flight, and the one `yes` covers it.
 `service.toml` alone is not seen by apply yet (the file is bound from the checkout), so it still
 needs the hand recreate
 `docker compose --profile agent-service up -d --force-recreate agent-service`, in the live checkout
-after `git -C ~/srv/hal pull --ff-only`.
+after `hal update`.
 
 ## The login
 
