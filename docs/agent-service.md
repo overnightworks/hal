@@ -222,17 +222,19 @@ The content of
 a turn leaves this PC for Anthropic, which generates the answer.
 
 **The API route keeps no content, as evidence for the paths exercised only.** LiteLLM logs no
-message and redacts exceptions, and neither it nor the front configures a callback, cache, database
-or spend log; the front logs at INFO without an access log. The retention census
-(`agent-service/retention_census.py`, driven by `probe/agent-service/litellm_retention.py` on the
-fake-only stack) searches a request and an answer canary in every writable mount and every log of
+message and redacts the `Messages:` suffix of its exceptions, and neither it nor the front
+configures a callback, cache, database or spend log; the front logs at INFO without an access log.
+The retention census (`agent-service/retention_census.py`, driven by
+`probe/agent-service/litellm_retention.py` on the fake-only stack) searches a request and an answer canary in every writable mount and every log of
 the front, the gateway, LiteLLM and the service. After a success, an upstream 500, an upstream error
 body that echoes the request, a refused model, a cancel and a hook refusal it finds none, and each
 search is proven by a control that plants a canary where it must be found. LiteLLM runs at log level
-`CRITICAL`: it writes no error line that could carry a provider's text, and a provider failure shows
-at the caller. Not measured: whether LiteLLM's own start-up failures still reach its log at that
-level; a failed start shows as the container's exit. Memory holds the content while a run is in
-flight, and tmpfs may be paged to swap. The Docker log driver's retention is the daemon's
+`CRITICAL`: its own logging sites and uvicorn's write no error line that could carry a provider's
+text, and a provider failure shows at the caller. One channel stays open: `logging.lastResort` and
+`warnings.warn` reach LiteLLM's standard error, and whether a real path sends a provider's text
+through them is not measured. Not measured either: whether LiteLLM's own start-up failures still
+reach its log at that level; a failed start shows as the container's exit. Memory holds the content
+while a run is in flight, and tmpfs may be paged to swap. The Docker log driver's retention is the daemon's
 (edge#167); the census proves that no content reaches the logs, not how long they live. Any other
 path is not covered by this.
 
@@ -293,9 +295,10 @@ has no `[api]` table.
   529, timeout, reset or broken answer, an untrusted certificate, a refused credential and
   Anthropic's refusal of a used-up balance (a 402 `billing_error`, or a 400 saying the credit
   balance is too low) all end the run as `failed: provider_unavailable` on route `api`;
-  the run never falls back to the subscription. A used-up balance therefore looks like an outage
-  until the operator checks his credit. A cancelled run ends `cancelled` and starts no further provider
-  request; the cancel does not close the request in flight, which may finish and is billed.
+  the run never falls back to the subscription. A bad key, a used-up balance and an outage
+  therefore look the same, and no log tells them apart, because LiteLLM logs at `CRITICAL`, so
+  the operator checks his credit and his key. A cancelled run ends `cancelled` and starts no
+  further provider request; the cancel does not close the request in flight, which may finish and is billed.
 - **Rotating a key is a recreate.** A replaced provider key file reaches LiteLLM only through its
   recreate, until then it keeps sending the old key. A replaced service credential reaches each
   reader only through its own recreate, LiteLLM first, then `agent-service`; in between every run

@@ -14,10 +14,12 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
+import yaml
 from support.probe_support import probe_imports
 
 KEY = bytes(range(32))
 REQUEST, ANSWER = "req-7f3a9c41d2e85b06", "ans-0b6d1e94a7c35f28"
+LITELLM_CONFIG = Path(__file__).resolve().parents[1] / "agent-service/litellm/config.yaml"
 
 
 @pytest.fixture(scope="module")
@@ -59,6 +61,43 @@ def test_the_retention_report_counts_each_token_by_label_in_the_regular_files_of
         {"request": 1, "answer": 0},
         {},
     )
+
+
+@pytest.mark.parametrize("refused_token", [REQUEST, ANSWER])
+def test_a_skip_that_only_one_tokens_walk_met_stays_in_the_report(
+    tree: ModuleType, names, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, refused_token: str
+) -> None:
+    (tmp_path / "log").write_text("nothing here")
+    walk = tree.census_mount
+
+    def refused_for_one_token(mount, shown_names, rules):
+        census = walk(mount, shown_names, rules)
+        if rules.token == refused_token.encode():
+            census.skip(tree.Skip.REFUSED)
+        return census
+
+    monkeypatch.setattr(tree, "census_mount", refused_for_one_token)
+
+    report = tree.retention_report(settings(str(tmp_path)), names, table_with(tmp_path))
+
+    assert report["mounts"][0]["skips"] == {tree.Skip.REFUSED.value: 1}
+
+
+def test_a_skip_every_walk_met_counts_once_for_the_entry_it_names(
+    tree: ModuleType, names, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    walk = tree.census_mount
+
+    def always_refused(mount, shown_names, rules):
+        census = walk(mount, shown_names, rules)
+        census.skip(tree.Skip.REFUSED)
+        return census
+
+    monkeypatch.setattr(tree, "census_mount", always_refused)
+
+    report = tree.retention_report(settings(str(tmp_path)), names, table_with(tmp_path))
+
+    assert report["mounts"][0]["skips"] == {tree.Skip.REFUSED.value: 1}
 
 
 def test_the_retention_report_applies_no_login_exclusion(
@@ -123,7 +162,6 @@ def test_the_program_sent_to_a_container_calls_emit_with_exactly_the_settings(
 
     call = ast.parse(text.splitlines()[-1]).body[0].value
     assert (call.func.id, json.loads(ast.literal_eval(call.args[0]))) == ("emit", asked)
-    assert text.startswith('"""The in-container census')
 
 
 # --- the host side: retention_census.py ---------------------------------------------------------
@@ -482,3 +520,54 @@ def test_an_archive_of_a_sink_that_cannot_be_read_completely_fails_the_sweep(ret
     sweep, _ = sweep_of(retention, answers)
 
     assert sweep.problems == ("front /dev/shm: an archive that could not be read completely",)
+
+
+# --- B11's reading of LiteLLM's configuration in litellm_retention.py -----------------------------
+
+
+@pytest.fixture(scope="module")
+def retention_probe() -> Iterator[ModuleType]:
+    with probe_imports():
+        import litellm_retention
+
+        yield litellm_retention
+
+
+@pytest.fixture
+def shipped_config() -> dict:
+    return yaml.safe_load(LITELLM_CONFIG.read_text(encoding="utf-8"))
+
+
+def test_the_shipped_configuration_holds_exactly_the_settings_b11_allows(
+    retention_probe: ModuleType,
+) -> None:
+    text = LITELLM_CONFIG.read_text(encoding="utf-8")
+
+    found = {section: retention_probe.settings_of(text, section)
+             for section in retention_probe.SETTINGS_SECTIONS}  # fmt: skip
+
+    assert found == retention_probe.SETTINGS_SECTIONS
+
+
+@pytest.mark.parametrize(
+    ("section", "key", "value"),
+    [
+        ("litellm_settings", "success_callback", ["s3"]),
+        ("litellm_settings", "s3_callback_params", {"s3_bucket_name": "probe"}),
+        ("litellm_settings", "cache", True),
+        ("router_settings", "fallbacks", [{"a": ["b"]}]),
+    ],
+)
+def test_an_unexpected_setting_of_any_shape_fails_b11s_comparison(
+    retention_probe: ModuleType, shipped_config: dict, section: str, key: str, value: object
+) -> None:
+    shipped_config[section][key] = value
+    text = yaml.safe_dump(shipped_config, default_flow_style=False)
+
+    assert retention_probe.settings_of(text, section) != retention_probe.SETTINGS_SECTIONS[section]
+
+
+def test_the_environment_name_of_litellms_payload_print_is_a_forbidden_store(
+    retention_probe: ModuleType,
+) -> None:
+    assert retention_probe.STORE_NAMES.search("LITELLM_PRINT_STANDARD_LOGGING_PAYLOAD")

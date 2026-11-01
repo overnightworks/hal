@@ -35,6 +35,8 @@ import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+import yaml
+
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(REPO / "agent-service"))
@@ -66,13 +68,16 @@ SCAN_DEADLINE_SECONDS = 60
 UPSTREAM_ERROR = 400
 SETTINGS_SECTIONS = {
     "litellm_settings": {
-        "turn_off_message_logging": "true",
-        "redact_messages_in_exceptions": "true",
+        "turn_off_message_logging": True,
+        "redact_messages_in_exceptions": True,
     },
     "general_settings": {"custom_auth": "auth.user_api_key_auth"},
-    "router_settings": {"num_retries": "0"},
+    "router_settings": {"num_retries": 0},
 }
-STORE_NAMES = re.compile(r"DATABASE|REDIS|CALLBACK|LANGFUSE|VERBOSE|SPEND|S3_", re.I)
+STORE_NAMES = re.compile(
+    r"DATABASE|REDIS|CALLBACK|LANGFUSE|VERBOSE|SPEND|S3_|LITELLM_PRINT_STANDARD_LOGGING_PAYLOAD",
+    re.I,
+)
 PYTHON_CONTAINERS = frozenset({LITELLM, SERVICE})
 
 
@@ -87,16 +92,9 @@ def canary(label: str) -> str:
     return f"{label}-{secrets.token_hex(10)}"
 
 
-def settings_of(text: str, section: str) -> dict[str, str]:
-    """The `key: value` lines indented once under the top-level `section` of a flat YAML file."""
-    found: dict[str, str] = {}
-    inside = False
-    for line in text.splitlines():
-        if line and not line.startswith((" ", "#")):
-            inside = line.rstrip() == f"{section}:"
-        elif inside and (match := re.fullmatch(r"  ([A-Za-z_]+): (\S+)\s*", line)):
-            found[match[1]] = match[2]
-    return found
+def settings_of(text: str, section: str) -> object:
+    """The whole top-level `section` of a YAML file, so a nested list or block compares as one."""
+    return yaml.safe_load(text).get(section)
 
 
 class RetentionProbe(FailureProbe):
@@ -388,17 +386,11 @@ class RetentionProbe(FailureProbe):
         )
 
     def cell_b10(self) -> None:
-        """The sinks of the front, the gateway and the service over B4 to B9. LiteLLM's own sinks
-        are judged by the cell that wrote them."""
+        """Every sink of the route over B4 to B9."""
         found = self.sweep(self.clean).found
-        litellm = self.container_name(LITELLM)
-        elsewhere = {
-            label: [sink for sink in sinks if not sink.startswith(f"{litellm} ")]
-            for label, sinks in found.items()
-        }
-        expect(not any(elsewhere.values()), f"B10: retained outside LiteLLM: {elsewhere}")
-        self.hold("B10", f"the mounts and logs of the front, the gateway and the service hold none "
-                  f"of {len(self.clean)} canaries of B4 to B9")  # fmt: skip
+        expect(not found, f"B10: retained in {found}")
+        self.hold("B10", f"the mounts and logs of the front, the gateway, LiteLLM and the service "
+                  f"hold none of {len(self.clean)} canaries of B4 to B9")  # fmt: skip
 
     def cell_b11(self) -> None:
         litellm, front = self.container_name(LITELLM), self.container_name(FRONT)
@@ -406,7 +398,7 @@ class RetentionProbe(FailureProbe):
         for section, wanted in SETTINGS_SECTIONS.items():
             found = settings_of(config, section)
             expect(found == wanted, f"B11: {section} holds {found}, not {wanted}")
-        top = {line.split(":")[0] for line in config.splitlines() if re.match(r"[a-z_]+:", line)}
+        top = set(yaml.safe_load(config))
         expect(top == {"model_list", *SETTINGS_SECTIONS}, f"B11: LiteLLM's sections {sorted(top)}")
         names = self.run(["docker", "exec", litellm, "env"]).stdout
         stores = sorted({n.split("=")[0] for n in names.splitlines() if STORE_NAMES.search(n)})

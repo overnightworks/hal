@@ -26,7 +26,7 @@ import re
 import stat
 import sys
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
@@ -568,6 +568,16 @@ def _shown(entry_point: str, plain: bool, names: Names) -> str:
     return entry_point if plain else names.show_mount(entry_point)
 
 
+def _every_skip(walks: Iterable[Census]) -> dict[str, int]:
+    """The skips of all walks of one mount, each reason at its highest count: an entry can refuse
+    one walk and not the next, and the walk it refused did not search it for that token."""
+    skips: dict[str, int] = {}
+    for walk in walks:
+        for reason, count in walk.skips.items():
+            skips[reason] = max(skips.get(reason, 0), count)
+    return skips
+
+
 def retention_report(settings: dict, names: Names, mountinfo_text: bytes) -> dict:
     """The retention mode (#814): every writable mount is walked once per token, with no login
     exclusion, and the whole mount table leaves with the filesystem types, before any filter. A
@@ -591,12 +601,11 @@ def retention_report(settings: dict, names: Names, mountinfo_text: bytes) -> dic
             label: census_mount(mount, names, WalkRules(token=token))
             for label, token in tokens.items()
         }
-        first = next(iter(walks.values()))
         mounts.append(
             {
                 "mount": _shown(mount.point, mount.point in known, names),
-                "listings": len(first.listings),
-                "skips": first.skips,
+                "listings": len(next(iter(walks.values())).listings),
+                "skips": _every_skip(walks.values()),
                 "found": {label: walk.token_files for label, walk in walks.items()},
             }
         )

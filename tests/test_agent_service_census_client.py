@@ -6,13 +6,16 @@ from __future__ import annotations
 import ast
 import json
 import subprocess
+import sys
 from collections.abc import Iterator
+from pathlib import Path
 from types import ModuleType
 
 import pytest
 from support.probe_support import probe_imports
 
 KEY_MARKER = "KEY-MARKER-IN-STDERR"
+PROBES = Path(__file__).resolve().parents[1] / "probe" / "agent-service"
 
 
 @pytest.fixture(scope="module")
@@ -81,3 +84,14 @@ def test_a_watch_sends_its_settings_and_parses_the_report(census_client):
     settings = json.loads(ast.literal_eval(literal))
     expected = ("watch", "/work", 120)
     assert (settings["mode"], settings["working_root"], settings["deadline"]) == expected
+
+
+@pytest.mark.parametrize("module", ["census_client", "containment", "login_checks"])
+def test_a_module_of_the_probes_imports_as_the_first_one(module: str) -> None:
+    program = f"import sys; sys.path.insert(0, {str(PROBES)!r}); import {module}"
+
+    result = subprocess.run(  # noqa: S603 - argv is built by the test itself and no shell runs
+        [sys.executable, "-I", "-c", program], capture_output=True, text=True, check=False
+    )
+
+    assert result.returncode == 0, result.stderr

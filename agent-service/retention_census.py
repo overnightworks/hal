@@ -29,7 +29,10 @@ from tree_census import Skip
 
 MAXIMUM_ARCHIVED_FILE = 1 << 26  # a larger file is not read, so it is an unexamined sink
 # Docker's per-container writable mounts: the three files it binds in, /dev and /dev/shm.
-DOCKER_OWN = frozenset({"/etc/hosts", "/etc/hostname", "/etc/resolv.conf", "/dev", "/dev/shm"})
+DOCKER_OWN = frozenset({
+    "/etc/hosts", "/etc/hostname", "/etc/resolv.conf", "/dev",
+    "/dev/shm",  # NOSONAR(S5443) inspected, never written; a split literal would only hide it
+})  # fmt: skip
 HANDED_OVER = frozenset({Skip.NESTED_MOUNT.value, Skip.FILE_MOUNT.value})
 COMMAND_NOT_FOUND = frozenset({126, 127})
 MOUNT_TABLE = "/proc/1/mountinfo"

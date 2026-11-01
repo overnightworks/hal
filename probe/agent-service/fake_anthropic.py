@@ -15,11 +15,12 @@ The `provider` role re-reads `/fake/control.json` on every request, so one conta
 cell of the failure probe (probe/agent-service/litellm_failures.py). The file holds `mode`:
 `answer` (the default), `status` (with `status`: 500 or 529), `billing`, `low_credit`, `broken` (a
 200 whose body is no JSON), `reset` (the connection is reset), `hold` (the request is held until
-the client disconnects or `hold_seconds` (default 120) have passed, and the log gets `held
-disconnected` or `held timed out` afterwards; the held request is then answered) or `echo` (an
-error of `status` whose message is the request's body, as an upstream that quotes its input); and
-optionally `provider_key`, `credential` and `marker`, which stand in for the values of
-`expect.json`, and `request_canary`, whose occurrences in a request the log line counts.
+the client disconnects or `hold_seconds` (at most 120, the default) have passed, and the log gets
+`held disconnected` or `held timed out` afterwards; the held request is then answered) or `echo`
+(an error of `status` whose message is `request_canary` when the request holds it, as an upstream
+that quotes its input); and optionally `provider_key`, `credential` and `marker`, which stand in
+for the values of `expect.json`, and `request_canary`, whose occurrences in a request the log line
+counts.
 The error bodies are Anthropic's own shapes, https://docs.anthropic.com/en/api/errors: 500
 `api_error`, 529 `overloaded_error`, 402 `billing_error`; `low_credit` is the other answer a
 used-up balance gets, as clients report it: 400 `invalid_request_error` saying the credit balance
@@ -66,9 +67,16 @@ def error_body(status: int, text: str = "probe") -> bytes:
     }).encode()  # fmt: skip
 
 
+def quoted(steering: dict, body: bytes) -> str:
+    """The canary the request holds, taken from the control file: the bytes of a request never
+    go back out."""
+    canary = steering["request_canary"]
+    return canary if canary.encode() in body else "probe"
+
+
 def wait_for_disconnect(connection: socket.socket, seconds: float) -> str:
     """Holds until the client closes its side, and says so; gives up after `seconds`."""
-    deadline = time.monotonic() + seconds
+    deadline = time.monotonic() + min(seconds, HOLD_SECONDS)
     while time.monotonic() < deadline:
         readable, _, _ = select.select([connection], [], [], HOLD_POLL_SECONDS)
         if readable:
@@ -131,9 +139,7 @@ def handler(role: str, expect: dict) -> type[http.server.BaseHTTPRequestHandler]
             if mode == "status":
                 return steering["status"], error_body(steering["status"])
             if mode == "echo":
-                return steering["status"], error_body(
-                    steering["status"], body.decode("utf-8", "replace")
-                )
+                return steering["status"], error_body(steering["status"], quoted(steering, body))
             if mode == "billing":
                 return 402, error_body(402)
             if mode == "low_credit":

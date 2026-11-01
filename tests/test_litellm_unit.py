@@ -282,6 +282,28 @@ def test_start_never_prints_a_key_it_refuses(stub_path, tmp_path):
 
 
 @pytest.fixture(scope="module")
+def fake_provider():
+    path = ROOT / "probe" / "agent-service" / "fake_anthropic.py"
+    yield from loaded_script("fake_anthropic", path)
+
+
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [(b'{"prompt": "before CANARY after"}', "CANARY"), (b'{"prompt": "other"}', "probe")],
+)
+def test_the_fake_quotes_the_canary_a_request_holds_and_nothing_else_of_it(
+    fake_provider, body, expected
+):
+    steering = {"mode": "echo", "status": 400, "request_canary": "CANARY"}
+
+    handler = fake_provider.handler("provider", {})
+
+    status, reply = handler.provider_answer(None, steering, body)
+
+    assert (status, json.loads(reply)["error"]["message"]) == (400, expected)
+
+
+@pytest.fixture(scope="module")
 def canary():
     with pytest.MonkeyPatch.context() as patch:
         patch.syspath_prepend(str(ROOT / "agent-service"))  # the canary imports smoke.py

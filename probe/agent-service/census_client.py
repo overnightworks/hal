@@ -7,9 +7,12 @@ from __future__ import annotations
 
 import json
 import secrets
+import sys
 import tomllib
 from pathlib import Path
 from typing import NamedTuple
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "agent-service"))  # tree_census.py
 
 import tree_census
 from egress import Probe, ProbeFailed, expect
