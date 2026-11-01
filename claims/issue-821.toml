@@ -1,0 +1,8 @@
+claim_id = "d6c2c03ed29c41efb6e19efe79abbc87"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "35f2b52c910ed3cc62b8f23704cf928c45e5ece8"
+branch = "claude/issue-821-h5i-s2-of-789-compose-yaml-names-hal-kee"
+scope = ["backup/apps.toml", "compose.yaml", "docs/architecture.md", "docs/backup.md", "docs/internal-ca.md", "docs/naming.md", "docs/stack.md", "keycloak/bootstrap.compose.yaml", "keycloak/go-live", "probe/agent-service/egress.py", "probe/apps/probe.py", "probe/edge_copy.py", "probe/keycloak/compose.probe.yaml", "probe/keycloak/probe.py", "probe/step-ca/probe.py", "probe/switches/built_image.py", "tests/support/stack_apply.py", "tests/test_keycloak_go_live.py", "tests/test_probe_isolation.py"]
+opened_commit = "6b937bbcd1b59c5572f93dc4072baf4bcc6acbc8"
+whole_reason = "A project name without the matching backup project makes the backup fail blind, the explicit names without the probe renaming give every probe a path to the live volumes, and the /opt paths of compose.yaml and keycloak/ must match (#789 decision 13)."
