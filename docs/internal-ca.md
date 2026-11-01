@@ -63,7 +63,7 @@ partial-state behaviour) and of the gateway (reachable only with the root, 24-ho
 http refused, the network split as ruled, songmaker's route (exactly `/mcp`, no other path or
 name reaches the stand-in), no new host listener, renewal without restart, apply on and off
 keeping both volumes, the emergency switch, setup asked by apply, the follower recreate rules). Its
-compose calls run from a copy of `compose.yaml` whose fixed network and volume names are moved into the
+compose calls and `step-ca/init` run from a copy of `compose.yaml` whose fixed network and volume names are moved into the
 probe's project, and each checks first that it resolves no other network or volume, so it never touches a live
 one. It takes 13 to 20 minutes and, like every probe stack, runs under `/tmp/probe-stack.lock` with a time cap (its
 docstring gives the command line). Re-run it for every step-ca or Traefik upgrade.

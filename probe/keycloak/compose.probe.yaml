@@ -47,7 +47,16 @@ services:
       - ./probe/keycloak/backchannel_client.py:/cell/backchannel_client.py:ro
 
 networks:
-  # The project's own copies of the back-channel networks, not the live ones.
+  # compose.yaml gives these networks fixed names; here they belong to the probe's project, on
+  # every profile, the realm engine's `*` included.
+  mcp-songmaker:
+    name: ${COMPOSE_PROJECT_NAME}_mcp_songmaker
+  agent-songmaker:
+    name: ${COMPOSE_PROJECT_NAME}_agent_songmaker
+  agent-presentator:
+    name: ${COMPOSE_PROJECT_NAME}_agent_presentator
+  agent-hopin:
+    name: ${COMPOSE_PROJECT_NAME}_agent_hopin
   backchannel-songmaker:
     name: ${COMPOSE_PROJECT_NAME}_backchannel_songmaker
   backchannel-hopin:

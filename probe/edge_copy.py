@@ -107,6 +107,26 @@ def namespaced_compose(text: str, project: str) -> str:
     return namespaced
 
 
+def write_namespaced_compose(repository: Path, directory: Path, project: str) -> Path:
+    """The path of `repository`'s compose.yaml written into `directory` with its names moved
+    (namespaced_compose). The text is moved before anything is written: a compose.yaml a probe owns
+    never holds a live name, however early its setup is cut."""
+    moved = namespaced_compose((repository / deploy_checkout.COMPOSE_FILE).read_text(), project)
+    target = directory / deploy_checkout.COMPOSE_FILE
+    target.write_text(moved)
+    return target
+
+
+def shipped_script_copy(repository: Path, directory: Path, script: str) -> Path:
+    """The path of a copy of `repository`'s `script` at the same place under `directory`. A shipped
+    script resolves the compose file of the tree it stands in, and a project name moves no fixed
+    name, so a probe runs it only from beside a `write_namespaced_compose` file."""
+    target = directory / script
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(repository / script, target)
+    return target
+
+
 def beside_the_live_edge(text: str, project: str) -> str:
     """`text` of traefik.yml with every entrypoint address moved to `PROBE_HOST` (its own port
     kept) and the Docker provider's constraint narrowed to `<live constraint> &&
@@ -422,30 +442,26 @@ def expect_live_project_unchanged(before: LiveProject, repository: Path) -> str:
     return f"the live project {before.name} is untouched: {after.counts()}"
 
 
-def repository_copy(
-    repository: Path, home: Path, scratch: Path, project: str | None = None
-) -> Path:
+def repository_copy(repository: Path, home: Path, scratch: Path, project: str) -> Path:
     """The files of `repository` that git tracks or would track, as the live checkout of `home`: a
     `main` pushed to the bare remote `<scratch>/origin.git`, with its ignored `.env` written by the
-    first `hal apply --local` and its own venv from `uv sync`. With a `project`, the copy's
-    compose.yaml names its fixed networks `<project>_...` (namespaced_compose), so the copy's
-    `hal apply` touches no live network. Its fleet.yaml has no app entry (without_inherited_apps),
-    with or without a `project`: a probe adds its own fixture apps.
-    Copying again over an existing copy publishes what differs."""
+    first `hal apply --local` and its own venv from `uv sync`. The copy's compose.yaml is never the
+    original: it is written with every fixed network and volume name moved to `<project>_...`
+    (write_namespaced_compose), so neither the copy's `hal apply` nor a teardown after a cut setup
+    reaches a live one. Its fleet.yaml has no app entry (without_inherited_apps): a probe adds its
+    own fixture apps. Copying again over an existing copy publishes what differs."""
     copy = checkout.live_checkout(home)
     listing = subprocess.run(
         ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
         capture_output=True, cwd=repository, check=True, timeout=APPLY_SECONDS,
     )  # fmt: skip
     for name in filter(None, listing.stdout.decode().split("\0")):
-        if (repository / name).is_file():
+        if name != deploy_checkout.COMPOSE_FILE and (repository / name).is_file():
             (copy / name).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(repository / name, copy / name)
     fleet_file = copy / catalog.FLEET_FILE
     fleet_file.write_text(without_inherited_apps(fleet_file.read_text()))
-    if project:
-        compose_file = copy / deploy_checkout.COMPOSE_FILE
-        compose_file.write_text(namespaced_compose(compose_file.read_text(), project))
+    write_namespaced_compose(repository, copy, project)
     if not (copy / ".git").is_dir():
         remote = scratch / REMOTE
         git(scratch, "init", "--quiet", "--bare", "--initial-branch", checkout.MAIN, str(remote))

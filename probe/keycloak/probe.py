@@ -617,9 +617,9 @@ class Stack:
         return output
 
     def move_master_to_admin_entrypoint(self) -> None:
-        result = self.compose(
-            "exec", "-T", "keycloak", "/opt/hal/admin-frontend.sh", bootstrap=True
-        )
+        overlay = (REPO / "keycloak" / "bootstrap.compose.yaml").read_text()
+        script = re.search(r":(/\S+/admin-frontend\.sh):ro", overlay)[1]
+        result = self.compose("exec", "-T", "keycloak", script, bootstrap=True)
         output = result.stdout + result.stderr
         expect(
             result.returncode == 0, f"admin-frontend.sh exited {result.returncode}:\n{tail(output)}"
