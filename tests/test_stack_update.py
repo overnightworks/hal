@@ -1,209 +1,38 @@
 """`hal update` at its entry point (#783): the checkout of the live tree brought to origin's `main`
-after one `yes`, on real git in `tmp_path`, with a real child as the sync and real signals where a
-cell names them. The sync is a fake `bin/hal-sync` that the repository itself carries."""
+after one `yes`, on real git in `tmp_path`, with a real child as the sync. A real Ctrl-C has its own
+module, `test_stack_update_ctrl_c`."""
 
 import fcntl
 import json
 import os
 import shutil
 import signal
-import subprocess
 import sys
-from collections.abc import Callable, Iterator
-from dataclasses import dataclass
-from pathlib import Path
 
 import pytest
+import support.stack_update as stack_update_support
 import support.throwaway_home as throwaway_home
-from support.git_support import advance, committed_main, head_of, plain_git, subjects, with_origin
-from support.process_support import group_is_gone
+from support.git_support import head_of, plain_git, subjects
 from support.stack_apply_fakes import Terminal
-from support.stack_plan_rows import plain
+from support.stack_update import (
+    APPLIED_RECORD,
+    FAKE_SYNC,
+    Engine,
+    Tamper,
+    answered,
+    edit,
+    errors,
+)
 
 from hal import cli
 from hal.grammar import ExitCode
 from hal.output import verbose_run
-from hal.stack import apply, checkout, compose, switches, update
+from hal.stack import apply, checkout
 from hal.stack import cli as stack_cli
 from hal.stack.update import UpdateEnd
 
 home = throwaway_home.home
-
-FAKE_SYNC = """#!/bin/sh
-echo "$$" > "$FAKE_LOG/sync.pid"
-printf '%s\\n' "$@" > "$FAKE_LOG/sync.args"
-for descriptor in /proc/$$/fd/*; do readlink "$descriptor"; done > "$FAKE_LOG/sync.fds"
-grep -E 'SigBlk|SigIgn' /proc/$$/status > "$FAKE_LOG/sync.mask"
-ps -o pgid=,sid= -p $$ > "$FAKE_LOG/sync.ids"
-case "${FAKE_SYNC-}" in
-fail) echo "uv: cannot fetch https://operator:hunter2@pypi.invalid/simple" >&2; exit 1 ;;
-lock) flock -n -x "$FAKE_LOCK" -c true; echo $? > "$FAKE_LOG/sync.lock" ;;
-interrupt)
-    sleep 300 &
-    echo $! > "$FAKE_LOG/sync.child"
-    kill -INT "$PPID"
-    wait ;;
-hold) sleep 10 ;;
-esac
-touch "$FAKE_LOG/sync.done"
-"""
-SIGNALLING_GIT = """#!/bin/sh
-case "${FAKE_SIGNAL-}:$*" in
-merge:*" merge "*|synced:*" rev-parse "*)
-    if [ "$FAKE_SIGNAL" = merge ] || [ -e "$FAKE_LOG/sync.done" ]; then
-        kill -INT -"$(ps -o pgid= -p "$PPID" | tr -d ' ')"
-    fi ;;
-esac
-exec "$REAL_GIT" "$@"
-"""
-APPLIED_RECORD = b'{"recorded": "before"}\n'
-
-
-@dataclass
-class World:
-    live: Path
-    origin: Path
-    log: Path
-    state: Path
-    output: Terminal
-
-    def run(self, answer: str | None = "yes", **options) -> UpdateEnd:
-        keyboard = Terminal("" if answer is None else f"{answer}\n")  # None: stdin closed
-        keyboard.while_prompt_waits = options.pop("at_the_question", None)
-        sys.stdin, sys.stdout = keyboard, self.output
-        sys.stderr = options.pop("stderr", sys.stderr)
-        return update.update_checkout(
-            self.state,
-            options.pop("repository", self.live),
-            options.pop("home", None),
-            options.pop("git", checkout.run_git),
-            options.pop("engine", Engine(self.live)),
-        )
-
-    @property
-    def lock_is_free(self) -> bool:
-        with (self.state / apply.APPLY_LOCK).open("w") as lock:
-            try:
-                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                return False
-            return True
-
-    def wait(self, *commits: tuple[bytes, dict[bytes, bytes]]) -> str:
-        return advance(self.origin, *commits)
-
-    def logged(self, name: str) -> str:
-        return (self.log / name).read_text()
-
-    def stdout(self) -> str:
-        return plain(self.output.getvalue())
-
-    def record(self) -> bytes:
-        return (self.state / "applied.json").read_bytes()
-
-
-@dataclass
-class Engine:
-    """Compose as the update reads it: the binds `compose.json` of the tree names."""
-
-    tree: Path
-    fails: bool = False
-
-    def resolved_configuration(self) -> dict:
-        if self.fails:
-            raise compose.ComposeError("`docker compose config` exited 1: broken")
-        binds = json.loads((self.tree / "compose.json").read_text())
-        mounts = [{"type": "bind", "source": str(self.tree / bind)} for bind in binds]
-        return {"services": {"web": {"volumes": mounts}}}
-
-
-def edit(path: str, content: str = "changed\n") -> tuple[bytes, dict[bytes, bytes]]:
-    return (f"edit {path}".encode(), {path.encode(): content.encode()})
-
-
-@pytest.fixture
-def world(home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys) -> Iterator[World]:
-    live = checkout.live_checkout(home)
-    for name, text in {
-        "README.md": "readme\n",
-        "dynamic/.gitkeep": "",
-        "legal/nginx/default.conf": "server {}\n",
-        "traefik.yml": "entryPoints: {}\n",
-        "fleet.yaml": "services: {}\n",
-        "compose.json": json.dumps(["dynamic", "legal/nginx", "traefik.yml"]),
-        "bin/hal-sync": FAKE_SYNC,
-    }.items():
-        (live / name).parent.mkdir(parents=True, exist_ok=True)
-        (live / name).write_text(text)
-    (live / "bin/hal-sync").chmod(0o755)
-    committed_main(live)
-    with_origin(live, tmp_path / "origin.git")
-    log = tmp_path / "log"
-    log.mkdir()
-    state = switches.default_state_directory()
-    state.mkdir(parents=True)
-    (state / "applied.json").write_bytes(APPLIED_RECORD)
-    monkeypatch.setenv("FAKE_LOG", str(log))
-    monkeypatch.setenv("FAKE_LOCK", str(state / apply.APPLY_LOCK))
-    monkeypatch.setenv("REAL_GIT", shutil.which("git"))
-    saved = sys.stdin, sys.stdout, sys.stderr
-    yield World(live, tmp_path / "origin.git", log, state, Terminal())
-    sys.stdin, sys.stdout, sys.stderr = saved
-
-
-def errors(capsys) -> str:
-    return capsys.readouterr().err
-
-
-@pytest.fixture
-def signalling_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Callable]:
-    """A `git` on PATH that sends SIGINT to the run's process group, as a terminal's Ctrl-C does,
-    on the call the returned setter names. pytest leads its own group meanwhile, so the signal
-    reaches nothing of the group that started it (a session leader leads one already)."""
-    shim = tmp_path / "shim"
-    shim.mkdir()
-    (shim / "git").write_text(SIGNALLING_GIT)
-    (shim / "git").chmod(0o755)
-    monkeypatch.setenv("PATH", f"{shim}{os.pathsep}{os.environ['PATH']}")
-    started_in = os.getpgrp()
-    if started_in != os.getpid():
-        os.setpgid(0, 0)
-    yield lambda signal_on: monkeypatch.setenv("FAKE_SIGNAL", signal_on)
-    monkeypatch.delenv("FAKE_SIGNAL", raising=False)
-    if started_in != os.getpid():
-        os.setpgid(0, started_in)
-
-
-def interrupt(*_) -> None:
-    os.kill(os.getpid(), signal.SIGINT)
-
-
-def answered(code: int, stdout: bytes = b"", stderr: bytes = b"") -> Callable[..., object]:
-    return lambda *_: subprocess.CompletedProcess([], code, stdout, stderr)
-
-
-@dataclass
-class Tamper:
-    """The real git, but one verb answers otherwise, without running, once the stage is reached:
-    `merged` from the merge on, `synced` once the sync has ended; `effect` runs first on the real
-    checkout."""
-
-    world: World
-    verb: str
-    answer: Callable[..., object]
-    stage: str = "merged"
-    effect: Callable[[], None] = lambda: None
-    merged: bool = False
-
-    def __call__(self, tree, arguments, profile):
-        verb = next(argument for argument in arguments if not argument.startswith("-"))
-        synced = (self.world.log / "sync.done").exists()
-        if verb == self.verb and (synced if self.stage == "synced" else self.merged):
-            self.effect()
-            return self.answer(tree, arguments, profile)
-        real = checkout.run_git(tree, arguments, profile)
-        self.merged = self.merged or (verb == "merge" and real.returncode == 0)
-        return real
+world = stack_update_support.world
 
 
 # --- guards and the fetch ----------------------------------------------------------------------
@@ -226,7 +55,8 @@ def test_without_a_terminal_or_off_the_live_checkout_it_refuses_with_that_line_o
     end = world.run(home=tmp_path / "elsewhere" if guard == "another tree" else None)
 
     assert end is UpdateEnd.REFUSED
-    assert errors(capsys).splitlines()[0].startswith(line) and world.stdout() == ""
+    assert errors(capsys).splitlines()[0].startswith(line)
+    assert world.stdout() == ""
 
 
 @pytest.mark.parametrize("trouble", ["branch", "dirty"])
@@ -323,7 +153,8 @@ def test_a_current_checkout_prints_its_row_and_the_next_step_without_a_question(
     end = world.run()
 
     assert end is UpdateEnd.DONE
-    assert "✓ checkout" in world.stdout() and "current" in world.stdout()
+    assert "✓ checkout" in world.stdout()
+    assert "current" in world.stdout()
     assert world.stdout().splitlines()[-2:] == ["✓ nothing to update", "next: hal apply"]
     assert "Type yes" not in world.stdout()
     assert not (world.log / "sync.args").exists()
@@ -338,7 +169,8 @@ def test_anything_but_yes_changes_nothing_and_exits_declined(world, capsys, monk
 
     assert cli.main(["update"]) == ExitCode.FINDINGS
     assert errors(capsys) == "error: aborted, nothing changed; 2 commits wait on origin\n"
-    assert head_of(world.live) == before and world.lock_is_free
+    assert head_of(world.live) == before
+    assert world.lock_is_free
     assert not (world.log / "sync.args").exists()
     assert world.record() == APPLIED_RECORD
 
@@ -350,7 +182,8 @@ def test_every_waiting_commit_is_a_line_escaped_and_untruncated(world):
     world.run("no")
 
     shown = world.stdout()
-    assert shown.count("commit ") >= 499 and "red \\x1b[31m" in shown
+    assert shown.count("commit ") >= 499
+    assert "red \\x1b[31m" in shown
     assert "\x1b" not in shown
 
 
@@ -386,7 +219,8 @@ def test_files_that_cannot_be_classified_are_one_line_and_the_question_stands(wo
     end = world.run(engine=Engine(world.live, fails=True))
 
     assert end is UpdateEnd.DONE
-    assert "not classified" in world.stdout() and "Type yes to update" in world.stdout()
+    assert "not classified" in world.stdout()
+    assert "Type yes to update" in world.stdout()
 
 
 def test_two_updates_without_an_apply_between_follow_the_configuration_at_head(world):
@@ -410,25 +244,6 @@ def test_two_updates_without_an_apply_between_follow_the_configuration_at_head(w
 
 
 # --- the recheck after the yes ----------------------------------------------------------------
-
-
-@pytest.mark.parametrize("moment", ["at the question", "during the recheck"])
-def test_a_ctrl_c_before_the_merge_is_the_doors_130_and_changes_nothing(
-    world, capsys, monkeypatch, moment
-):
-    """A4: a real SIGINT while the question waits or while the recheck asks git."""
-    world.wait(*subjects("waiting"))
-    before = head_of(world.live)
-    recheck = Tamper(world, "merge-base", interrupt, merged=True)
-    hit = {
-        "at the question": {"at_the_question": interrupt},
-        "during the recheck": {"git": recheck},
-    }
-    monkeypatch.setattr(stack_cli, "update_checkout", lambda: world.run(**hit[moment]))
-
-    assert cli.main(["update"]) == ExitCode.INTERRUPTED
-    assert head_of(world.live) == before and world.lock_is_free
-    assert errors(capsys) == "" and "updated" not in world.stdout()
 
 
 @pytest.mark.parametrize(
@@ -458,7 +273,8 @@ def test_a_checkout_that_changed_after_the_yes_is_refused_saying_how(world, caps
         "tracked edit": "README.md",
         "untracked file": "stray.txt",
     }
-    assert said[change] in seen and "nothing changed" in seen
+    assert said[change] in seen
+    assert "nothing changed" in seen
     assert err.endswith("next: hal update\n")
 
 
@@ -476,7 +292,8 @@ def test_a_pinned_sha_that_is_no_commit_any_more_is_refused(world, capsys):
 
     assert end is UpdateEnd.REFUSED
     err = errors(capsys)
-    assert tip in err and "nothing changed" in err
+    assert tip in err
+    assert "nothing changed" in err
 
 
 @pytest.mark.parametrize(
@@ -525,8 +342,11 @@ def test_a_merge_git_refuses_before_changing_anything_is_failed_with_nothing_cha
     end = world.run(at_the_question=lock)
 
     err = errors(capsys)
-    assert end is UpdateEnd.FAILED and head_of(world.live) == before
-    assert tip in err and "nothing changed" in err and err.endswith("next: hal update\n")
+    assert end is UpdateEnd.FAILED
+    assert head_of(world.live) == before
+    assert tip in err
+    assert "nothing changed" in err
+    assert err.endswith("next: hal update\n")
     assert (world.live / ".env").read_text() == "local\n"
 
 
@@ -549,38 +369,11 @@ def test_a_refused_merge_that_left_a_mark_is_partial_never_nothing_changed(world
 
     err = errors(capsys)
     assert end is UpdateEnd.FAILED
-    assert tip in err and "partial" in err and "merge" in err
-    assert "nothing changed" not in err and err.endswith("next: hal apply\n")
-
-
-@pytest.mark.parametrize("moment", ["merge succeeds", "merge refused", "check fails", "synced"])
-def test_a_real_ctrl_c_from_the_merge_on_waits_and_ends_interrupted_with_its_line_only(
-    world, capsys, signalling_git, moment
-):
-    """M4: the group's SIGINT reaches the run while git merges in its own session; the merge ends
-    and the sync never starts. O6: a merge git refuses, or a failed check after it, still ends
-    130, with only its line; a refusal that changed nothing says so and names `hal update`. S6:
-    a SIGINT after the sync names the HEAD check."""
-    start, tip = head_of(world.live), world.wait(*subjects("waiting"))
-    refused, synced = moment == "merge refused", moment == "synced"
-    signalling_git("synced" if synced else "merge")
-    hit = {
-        "merge refused": {"at_the_question": (world.live / ".git/index.lock").touch},
-        "check fails": {"git": Tamper(world, "status", answered(0, b" M README.md\0"))},
-    }
-
-    end = world.run(**hit.get(moment, {}))
-    signalling_git("")
-
-    error, next_line = errors(capsys).splitlines()
-    assert end is UpdateEnd.INTERRUPTED and head_of(world.live) == (start if refused else tip)
-    assert error.startswith("error: interrupted at '") and tip in error
-    assert f"the sync had {'ended' if synced else 'not started'}" in error
-    assert ("nothing changed" in error) == refused
-    assert ("'check HEAD after the sync'" in error) == synced
-    assert next_line == f"next: hal {'update' if refused else 'apply'}"
-    assert (world.log / "sync.args").exists() == synced and world.lock_is_free
-    assert world.record() == APPLIED_RECORD
+    assert tip in err
+    assert "partial" in err
+    assert "merge" in err
+    assert "nothing changed" not in err
+    assert err.endswith("next: hal apply\n")
 
 
 # --- the checks after the merge -----------------------------------------------------------------
@@ -614,9 +407,14 @@ def test_a_head_branch_or_tree_that_is_not_the_approved_one_after_a_step_is_part
 
     err = errors(capsys)
     step = f"check HEAD after the {'merge' if stage == 'merged' else 'sync'}"
-    assert end is UpdateEnd.FAILED and tip in err and "partial" in err and step in err
-    assert "nothing changed" not in err and err.endswith("next: hal apply\n")
-    assert (world.log / "sync.args").exists() == (stage == "synced") and head_of(world.live) == tip
+    assert end is UpdateEnd.FAILED
+    assert tip in err
+    assert "partial" in err
+    assert step in err
+    assert "nothing changed" not in err
+    assert err.endswith("next: hal apply\n")
+    assert (world.log / "sync.args").exists() == (stage == "synced")
+    assert head_of(world.live) == tip
 
 
 def test_an_unexpected_error_after_the_merge_is_partial_with_its_type_only(world, capsys):
@@ -630,7 +428,9 @@ def test_an_unexpected_error_after_the_merge_is_partial_with_its_type_only(world
 
     err = errors(capsys)
     assert end is UpdateEnd.FAILED
-    assert tip in err and "unexpected error (RuntimeError)" in err and "secret text" not in err
+    assert tip in err
+    assert "unexpected error (RuntimeError)" in err
+    assert "secret text" not in err
 
 
 # --- the sync ----------------------------------------------------------------------------------
@@ -646,7 +446,8 @@ def test_the_sync_is_the_merged_trees_script_with_the_checkout_alone_and_inherit
     assert world.logged("sync.args").splitlines() == [str(world.live)]
     assert str(world.state / apply.APPLY_LOCK) not in world.logged("sync.fds")
     masks = [int(line.split()[1], 16) for line in world.logged("sync.mask").splitlines()]
-    assert len(masks) == 2 and not any(mask & 1 << (signal.SIGINT - 1) for mask in masks)
+    assert len(masks) == 2
+    assert not any(mask & 1 << (signal.SIGINT - 1) for mask in masks)
     assert world.logged("sync.ids").split() == [world.logged("sync.pid").strip(), str(os.getsid(0))]
 
 
@@ -665,78 +466,18 @@ def test_a_failed_sync_is_partial_and_never_names_uv_sync(world, capsys, monkeyp
 
     err = errors(capsys)
     assert end is UpdateEnd.FAILED
-    assert tip in err and "sync the dependencies" in err and "hunter2" not in err
+    assert tip in err
+    assert "sync the dependencies" in err
+    assert "hunter2" not in err
     uv_line = "uv: cannot fetch https://<redacted>@pypi.invalid/simple"
     assert (uv_line in err) == (sync == "exits 1")
-    assert "uv sync" not in err + world.stdout() and err.endswith("next: hal apply\n")
-    assert head_of(world.live) == tip and world.record() == APPLIED_RECORD
+    assert "uv sync" not in err + world.stdout()
+    assert err.endswith("next: hal apply\n")
+    assert head_of(world.live) == tip
+    assert world.record() == APPLIED_RECORD
     world.output = Terminal()
     assert world.run() is UpdateEnd.DONE
     assert world.stdout().splitlines()[-1] == "next: hal apply"
-
-
-@pytest.mark.parametrize("moment", ["while it runs", "before it is registered"])
-def test_a_real_ctrl_c_at_the_sync_kills_its_whole_group_before_the_lock_is_freed(
-    world, capsys, monkeypatch, moment
-):
-    """S4: the stand-in has a child of its own; no process of its group is alive when the update
-    returns, also after a Ctrl-C between the sync's start and its registration, and it never
-    finished (`hold` would finish after a while)."""
-    tip, sync = world.wait(*subjects("waiting")), str(world.live / update.SYNC_SCRIPT)
-    monkeypatch.setenv("FAKE_SYNC", "interrupt" if moment == "while it runs" else "hold")
-    started = []
-
-    class Started(subprocess.Popen):
-        def __init__(self, command, **options) -> None:
-            super().__init__(command, **options)
-            if command[0] == sync:
-                started.append(self.pid)
-                if moment == "before it is registered":
-                    interrupt()
-
-    monkeypatch.setattr(subprocess, "Popen", Started)
-    end = world.run()
-
-    err = errors(capsys)
-    assert end is UpdateEnd.INTERRUPTED and tip in err and "half synced" in err
-    assert group_is_gone(started[0]) and world.lock_is_free
-    assert not (world.log / "sync.done").exists()
-
-
-class Troubled(Terminal):
-    """A terminal on which writing a text that holds `on` runs `trouble` first."""
-
-    def __init__(self, trouble: Callable[[], None], on: str = "checkout updated") -> None:
-        super().__init__()
-        self.trouble, self.on = trouble, on
-
-    def write(self, text: str) -> int:
-        if self.on in text:
-            self.trouble()
-        return super().write(text)
-
-
-def broken_pipe() -> None:
-    raise BrokenPipeError
-
-
-@pytest.mark.parametrize("trouble", [interrupt, broken_pipe], ids=["Ctrl-C", "output fails"])
-def test_a_ctrl_c_or_an_output_failure_at_the_closing_verdict_names_the_sha_and_the_step(
-    world, monkeypatch, trouble
-):
-    """O6: a real SIGINT while the closing verdict is written ends 130, and a second one while
-    the O6 line is written still leaves that whole line; O8: a failing output 3."""
-    tip = world.wait(*subjects("waiting"))
-    world.output, stderr = Troubled(trouble), Troubled(interrupt, on="interrupted")
-    monkeypatch.setattr(stack_cli, "update_checkout", lambda: world.run(stderr=stderr))
-
-    code = cli.main(["update"])
-
-    err = plain(stderr.getvalue())
-    assert code == (ExitCode.INTERRUPTED if trouble is interrupt else ExitCode.FAILURE)
-    assert tip in err and "'write the closing verdict'" in err and err.endswith("next: hal apply\n")
-    assert ("unexpected error (BrokenPipeError)" in err) == (trouble is broken_pipe)
-    assert head_of(world.live) == tip and world.lock_is_free
 
 
 # --- the whole run ----------------------------------------------------------------------------
@@ -754,9 +495,12 @@ def test_a_yes_fast_forwards_syncs_and_names_the_apply_without_touching_the_reco
     assert head_of(world.live) == tip
     assert (world.live / "README.md").read_text() == "changed\n"
     assert plain_git(world.live, "status", "--porcelain").stdout == ""
-    assert world.record() == APPLIED_RECORD and world.lock_is_free
-    assert out[-2].startswith("✓ checkout updated to ") and out[-2].endswith("dependencies synced")
-    assert out[-1] == "next: hal apply" and short in out[-2]
+    assert world.record() == APPLIED_RECORD
+    assert world.lock_is_free
+    assert out[-2].startswith("✓ checkout updated to ")
+    assert out[-2].endswith("dependencies synced")
+    assert out[-1] == "next: hal apply"
+    assert short in out[-2]
     assert errors(capsys) == ""
 
 
@@ -786,6 +530,8 @@ def test_verbose_echoes_every_git_call_and_the_sync_command_without_the_environm
         world.run()
 
     err = errors(capsys)
-    assert "git fetch" in err and "git merge --ff-only" in err
+    assert "git fetch" in err
+    assert "git merge --ff-only" in err
     assert f"{world.live / 'bin/hal-sync'} {world.live}" in err
-    assert "hunter2" not in err and "SECRET_TOKEN" not in err
+    assert "hunter2" not in err
+    assert "SECRET_TOKEN" not in err

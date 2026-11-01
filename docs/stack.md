@@ -187,11 +187,15 @@ Fehler mit 3 und einer `error:`-Zeile mit `partial`, dem vollen Hash und dem Sch
 `check HEAD after the merge`, `sync the dependencies`, `check HEAD after the sync`,
 `write the closing verdict`), dazu `next: hal apply`. Ab kurz vor dem Merge bis zum Ende wird ein Ctrl-C
 nur vermerkt, nie ausgeloest: es unterbricht kein Warten und keine Zeile, die gerade geschrieben wird;
-waehrend des Syncs beendet es zudem dessen ganze Prozessgruppe, bevor der Lock frei wird. Nach jedem
-Schritt mit seiner Pruefung und nach der Abschlusszeile endet ein vermerktes Ctrl-C mit 130 und denselben
-Angaben. "nothing changed" steht nur dort, wo HEAD, Zweig und Baum es beweisen; ein Ctrl-C bei einem
-Merge, den git ohne Aenderung verweigert hat, nennt `next: hal update`. Ein Ctrl-C vor dem Merge (an der
-Frage, bei der Pruefung danach) endet mit 130 ohne Aenderung. Ein Sync, der scheitert, laesst HEAD auf
+waehrend des Syncs beendet es zudem dessen ganze Prozessgruppe, bevor der Lock frei wird, aber nur,
+solange hal den Anfuehrer der Gruppe noch nicht abgeholt (reaped) hat: bis dahin bleibt die Gruppen-ID
+belegt, danach kann sie einem anderen Prozess gehoeren. Den Vermerk liest hal nach jedem Schritt mit
+seiner Pruefung und ein letztes Mal kurz vor der letzten Zeile (der Abschlusszeile oder der
+`error:`-Zeile eines Fehlers); ein bis dahin vermerktes Ctrl-C macht diese Zeile zur Unterbrechung mit
+130 und denselben Angaben. Ein Ctrl-C ab der letzten Zeile aendert nichts: sie wird ganz geschrieben,
+und der Lauf endet mit ihrem Code. "nothing changed" steht nur dort, wo HEAD, Zweig und Baum es
+beweisen; ein Ctrl-C bei einem Merge, den git ohne Aenderung verweigert hat, nennt `next: hal update`.
+Ein Ctrl-C vor dem Merge (an der Frage, bei der Pruefung danach) endet mit 130 ohne Aenderung. Ein Sync, der scheitert, laesst HEAD auf
 dem Hash; der naechste `hal update` findet nichts Wartendes, endet mit 0 und nennt den Apply.
 
 **Nicht behandelbar.** SIGKILL, SIGTERM, SIGHUP und SIGQUIT nach dem Merge beenden den Prozess ohne

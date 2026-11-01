@@ -24,6 +24,7 @@ from edge_copy import HAL_FAILURE, NOTHING_TO_CHANGE, ProbeFailed, advance_origi
 
 from hal.grammar import ExitCode
 from hal.output import write_line
+from hal.output.command import Verb, command
 from hal.stack import checkout
 
 if TYPE_CHECKING:
@@ -32,10 +33,13 @@ if TYPE_CHECKING:
 DECLINED = ExitCode.FINDINGS  # hal's exit for an update answered `no`
 IMPORT_FAILED = 1  # Python's exit for a traceback
 MARKER_VARIABLE = "HAL_PROBE_MARKER"
-PYPROJECT = Path(__file__).resolve().parents[2] / "pyproject.toml"
+PROJECT_FILE = "pyproject.toml"
+PYPROJECT = Path(__file__).resolve().parents[2] / PROJECT_FILE
 PROJECT_NAME = tomllib.loads(PYPROJECT.read_text())["project"]["name"]
 WAITING_NOTE = "\n"  # a change that touches no setting
 APPLY_MODULE = "src/hal/stack/apply.py"
+BIND_FILE = "dynamic/.gitkeep"  # under a directory bind source of the copy
+NEXT_APPLY = f"next: {command(Verb.APPLY)}"
 MARKER_CODE = f"""
 import os as _probe_os
 
@@ -61,7 +65,7 @@ def installed_version(copy: Path) -> str:
 
 
 def project_version(copy: Path) -> str:
-    [version] = re.findall(r'^version = "(.*)"$', (copy / "pyproject.toml").read_text(), re.M)
+    [version] = re.findall(r'^version = "(.*)"$', (copy / PROJECT_FILE).read_text(), re.M)
     return version
 
 
@@ -72,7 +76,7 @@ def bumped(version: str) -> str:
 
 def pyproject_edit(old: str, new: str) -> dict[str, tuple[str, str]]:
     """The edit that moves the project's version in `pyproject.toml` from `old` to `new`."""
-    return {"pyproject.toml": (f'version = "{old}"', f'version = "{new}"')}
+    return {PROJECT_FILE: (f'version = "{old}"', f'version = "{new}"')}
 
 
 def lock_edit(old: str, new: str) -> dict[str, tuple[str, str]]:
@@ -117,15 +121,15 @@ def cell_p1_behind_and_declined(probe: Probe) -> None:
     waiting = advance_origin(
         probe.scratch,
         "probe: a commit waiting on origin",
-        {"dynamic/.gitkeep": WAITING_NOTE, "README.md": WAITING_NOTE},
+        {BIND_FILE: WAITING_NOTE, "README.md": WAITING_NOTE},
     )
     refused = apply_local(probe, exit_code=HAL_FAILURE)
     for shown in ("! checkout 1 behind", "1 commit waits on origin main", "next: hal update"):
         expect(shown in refused, f"apply behind origin said {shown!r}? {refused[-300:]}")
     declined = update(probe, typed=b"no\n", exit_code=DECLINED)
-    for shown in ("aborted, nothing changed", "directory bind", "dynamic/.gitkeep", "other"):
+    for shown in ("aborted, nothing changed", "directory bind", BIND_FILE, "other"):
         expect(shown in declined, f"the declined update said {shown!r}? {declined[-400:]}")
-    expect(declined.index("dynamic/.gitkeep") < declined.index("README.md"), "groups out of order")
+    expect(declined.index(BIND_FILE) < declined.index("README.md"), "groups out of order")
     expect(live.full() == head, "a declined update moved HEAD")
     expect(probe.container_ids() == containers, "a declined update touched a container")
     expect(record_bytes(probe) == record, "a declined update wrote applied.json")
@@ -150,7 +154,7 @@ def cell_p2_new_lock_and_new_code(probe: Probe) -> None:
     tip = checkout.Git(probe.scratch / "work").full()
     watching = {MARKER_VARIABLE: str(marker)}
     out = update(probe, extra_environment=watching)
-    expect("next: hal apply" in out, f"the update said: {out[-300:]}")
+    expect(NEXT_APPLY in out, f"the update said: {out[-300:]}")
     expect(checkout.Git(copy).full() == tip, "HEAD is not the pushed sha after the update")
     expect(installed_version(copy) == new, f"the venv holds {installed_version(copy)}, not {new}")
     expect(not marker.exists(), "the old process ran merged code")
@@ -172,7 +176,7 @@ def cell_p3_lock_that_does_not_sync(probe: Probe) -> None:
     tip = checkout.Git(probe.scratch / "work").full()
     record = record_bytes(probe)
     out = update(probe, exit_code=HAL_FAILURE)
-    for shown in (tip, "sync the dependencies", "next: hal apply"):
+    for shown in (tip, "sync the dependencies", NEXT_APPLY):
         expect(shown in out, f"the failed sync said {shown!r}? {out[-400:]}")
     expect(checkout.Git(copy).full() == tip, "HEAD is not at the sha after the failed sync")
     expect(record_bytes(probe) == record, "a failed sync wrote applied.json")
@@ -183,7 +187,7 @@ def cell_p3_lock_that_does_not_sync(probe: Probe) -> None:
     advance_origin(probe.scratch, "probe: the lock follows", {}, lock_edit(old, new))
     pull(copy)
     current = update(probe)
-    expect("nothing to update" in current and "next: hal apply" in current, current[-300:])
+    expect("nothing to update" in current and NEXT_APPLY in current, current[-300:])
     expect(NOTHING_TO_CHANGE in apply_local(probe), "the apply after the repair planned a change")
     expect(probe.container_ids() == containers, "the repair replaced a container")
     write_line(
@@ -198,7 +202,7 @@ def cell_p4_code_that_fails_at_import(probe: Probe) -> None:
     advance_origin(probe.scratch, "probe: code that fails at import", {APPLY_MODULE: BROKEN_IMPORT})
     tip = checkout.Git(probe.scratch / "work").full()
     out = update(probe)
-    expect("next: hal apply" in out, f"the update said: {out[-300:]}")
+    expect(NEXT_APPLY in out, f"the update said: {out[-300:]}")
     expect(checkout.Git(copy).full() == tip, "HEAD is not the pushed sha after the update")
     seen = fetched_state(copy)
     for broken in (
@@ -211,7 +215,7 @@ def cell_p4_code_that_fails_at_import(probe: Probe) -> None:
         probe.scratch, "probe: the import is fixed", {}, {APPLY_MODULE: (BROKEN_IMPORT, "")}
     )
     pull(copy)
-    expect("next: hal apply" in update(probe), "the update after the repair did not name the apply")
+    expect(NEXT_APPLY in update(probe), "the update after the repair did not name the apply")
     expect(NOTHING_TO_CHANGE in apply_local(probe), "the apply after the repair planned a change")
     write_line(
         "#783 P4 held: a failing import ends every run with a traceback, the pull repairs it"

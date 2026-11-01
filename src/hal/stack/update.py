@@ -12,9 +12,11 @@ verdict. It never writes `applied.json`.
 
 Every handled failure from the merge on is a partial update: one `error:` line with the full sha
 and the step, `next: hal apply`. From just before the merge to the end of the run a Ctrl-C is
-recorded, never raised, so it interrupts no wait and no line being written; while the sync runs it
-also kills the sync's process group. The run reads the record after each step's check and after
-the closing verdict and then ends as an interrupt with the same line. Nothing is imported after
+recorded, never raised, so it interrupts no wait and no line being written; while the sync runs and
+its leader is not yet reaped, it also kills the sync's process group. The run reads the record
+after each step's check and a last time just before its final line, the closing verdict or a
+failure's `error:` line; a Ctrl-C recorded by then makes that line the interrupt's. A Ctrl-C from
+the final line on changes nothing: that line already names the state. Nothing is imported after
 the merge, because the editable install would make a later import read the merged code into this
 process.
 """
@@ -204,8 +206,8 @@ class _Interrupted(Exception):
 
 class _CtrlC:
     """The one record of a Ctrl-C from just before the merge to the end of the run. While a
-    group is registered, a Ctrl-C also kills it; one recorded before the registration kills the
-    group as soon as it is registered."""
+    group is registered and its leader not yet reaped, a Ctrl-C also kills it; one recorded before
+    the registration kills the group as soon as it is registered."""
 
     def __init__(self) -> None:
         self.recorded = False
@@ -224,9 +226,16 @@ class _CtrlC:
         self._group = None
 
     def _kill(self) -> None:
-        if self._group is not None:
-            with contextlib.suppress(ProcessLookupError):
-                os.killpg(self._group, signal.SIGKILL)
+        if self._group is None:
+            return
+        try:
+            # An unreaped leader keeps the group id taken; once reaped, the id may be another's.
+            # The reap and this handler both run on the main thread, so they cannot interleave.
+            os.waitid(os.P_PID, self._group, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+        except ChildProcessError:
+            return
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(self._group, signal.SIGKILL)
 
 
 class _Stop(Exception):
@@ -259,7 +268,7 @@ class _Merge:
 
     def _steps(self) -> UpdateEnd:
         try:
-            self._merge()
+            self._fast_forward()
             self._check(Step.CHECK_AFTER_MERGE, with_tree=True)
             self._stop_if_interrupted()
             self._sync()
@@ -274,8 +283,6 @@ class _Merge:
             return self._failed(str(stop), stop.end, stop.next_step)
         except Exception as error:
             return self._failed(self._partial(f"unexpected error ({type(error).__name__})"))
-        if self.ctrl_c.recorded:
-            return self._interrupted()
         return UpdateEnd.DONE
 
     def _stop_if_interrupted(self) -> None:
@@ -292,7 +299,8 @@ class _Merge:
     def _failed(
         self, message: str, end: UpdateEnd = UpdateEnd.FAILED, next_step: str = _APPLY
     ) -> UpdateEnd:
-        """The failure's line and end, unless a Ctrl-C came meanwhile: then it is O6 (130)."""
+        """The failure's line and end, unless a Ctrl-C was recorded by this last read: then it is
+        O6 (130)."""
         if self.ctrl_c.recorded:
             return self._interrupted(message, next_step)
         write_error(message, next_step)
@@ -304,7 +312,7 @@ class _Merge:
     def _stop(self, reason: str) -> _Stop:
         return _Stop(UpdateEnd.FAILED, self._partial(reason), _APPLY)
 
-    def _merge(self) -> None:
+    def _fast_forward(self) -> None:
         try:
             self.git.merge_fast_forward(self.origin.sha)
         except checkout.GitError as refused:
