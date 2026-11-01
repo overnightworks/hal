@@ -3,7 +3,8 @@ through the client scope that names it. The agent service's scope is a default o
 client; the speech service's is an optional scope of hopin alone, so a token carries
 `speech-service` only when hopin asks for it, and songmaker and presentator cannot ask. Each
 service is a bearer-only client, and `/services/speech-service` has no subgroup. The held lines
-print the decoded claims the speech service reads and never a token."""
+print the decoded claims the speech service reads and never a token. After them, hopin's branch
+runs the measurements of `scope_measurement_cell` on clients the probe makes."""
 
 from __future__ import annotations
 
@@ -12,6 +13,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+import scope_measurement_cell
 from test_rp import token_claims
 
 REALM = "hallucinai"
@@ -85,29 +87,9 @@ class Client(Protocol):
     secret_file: str
 
 
-class Probe(Protocol):
+class Probe(scope_measurement_cell.Probe, Protocol):
     admin: Admin
     secret_values: dict[str, str]
-
-    def through_tunnel(self, method: str, path: str, **kwargs: Any) -> Answer: ...
-
-    def keep_secret(self, name: str, value: str) -> str: ...
-
-    def tokens_from(self, holder: str, response: Answer) -> dict[str, Any]: ...
-
-    def browser(self, name: str) -> Any: ...
-
-    def held(self, proof: str, detail: str) -> None: ...
-
-    def app_client_sign_in(
-        self,
-        client: Any,
-        opener: Any,
-        username: str,
-        password: str,
-        client_secret: str,
-        scope: str = ...,
-    ) -> dict[str, Any]: ...
 
 
 @dataclass(frozen=True)
@@ -237,3 +219,4 @@ def prove(
     cell.workload_with_and_without_the_scope()
     cell.member_token_with_the_scope()
     cell.person_token_without_the_scope(person_access_token)
+    scope_measurement_cell.prove(probe, expect)
