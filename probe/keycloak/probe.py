@@ -2519,6 +2519,7 @@ class Probe:
         before, failed = len(stand.asked), stand.apply()
         proved = stand.asked[-1][-1]
         shown = [row.details for row in result_rows(failed)]
+        self.say(f"failed realm step: {[(row.fact, *row.details) for row in result_rows(failed)]}")
         expect(
             isinstance(failed, reconcile.RealmFailed)
             and shown == [(f"pre-apply snapshot {proved[:SNAPSHOT_SHORT_ID]} · proven", WAY_BACK)]
