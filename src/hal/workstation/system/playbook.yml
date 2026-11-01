@@ -69,7 +69,9 @@
       - { src: cloudflared.service, dest: "{{ unit_dir }}/cloudflared.service" }
       - { src: cloudflared.service.d/20-nonroot.conf, dest: "{{ drop_in_dir }}/20-nonroot.conf" }
       - { src: cloudflared.service.d/30-edge-global-stop.conf, dest: "{{ drop_in_dir }}/30-edge-global-stop.conf" }
+      - { src: cloudflared.service.d/30-hal-global-stop.conf, dest: "{{ drop_in_dir }}/30-hal-global-stop.conf" }
       - { src: polkit/10-edge-cloudflared-stop.rules, dest: /etc/polkit-1/rules.d/10-edge-cloudflared-stop.rules }
+      - { src: polkit/10-hal-cloudflared-stop.rules, dest: /etc/polkit-1/rules.d/10-hal-cloudflared-stop.rules }
 
   tasks:
     - name: Read cloudflared's config for the tunnel id
