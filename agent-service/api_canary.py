@@ -1,12 +1,13 @@
 """The API route's canary: one run of a person on the API route, and only verdict lines on stdout.
 
-    python -B /opt/canary/api_canary.py --marker TEXT [--cancel]
+    python -B /opt/canary/api_canary.py --marker TEXT [--request-marker TEXT] [--cancel]
 
 Stdin holds the person's token and then the workload's, as smoke.py reads them. It prints
 `answer <status>`, one `event <name>` per frame, `route <word>` for the route `run_started` names,
 `code <code>` for a failed run and `marker yes|no`: whether the text of the answer holds TEXT. It
-never prints a message, a token or a run id. Exit 0 when the run succeeded and the answer held the
-marker.
+never prints a message, a token or a run id. `--request-marker` adds its text to the prompt, so a
+retention census can look for the request's content. Exit 0 when the run succeeded and the answer
+held the marker.
 
 With `--cancel` it holds the stream open for smoke.py's hold, then closes it, reads the run's record
 (`GET /runs/{id}`) until it has ended and prints `status <state>`: a client that closes its stream
@@ -102,6 +103,7 @@ def read_answer(
 def main(argv: list[str], stdin=sys.stdin, out=sys.stdout) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--marker", required=True)
+    parser.add_argument("--request-marker", default="")
     parser.add_argument("--cancel", action="store_true")
     arguments = parser.parse_args(argv)
     tokens = read_tokens(stdin)
@@ -111,7 +113,12 @@ def main(argv: list[str], stdin=sys.stdin, out=sys.stdout) -> int:
         "Authorization": f"Bearer {tokens.person}",
         WORKLOAD_TOKEN_HEADER: tokens.workload,
     }
-    connection.request("POST", "/runs", request_body(ANSWER_PROMPT), headers)
+    connection.request(
+        "POST",
+        "/runs",
+        request_body(f"{ANSWER_PROMPT} {arguments.request_marker}".strip()),
+        headers,
+    )
     response = connection.getresponse()
     print(f"answer {response.status}", file=out, flush=True)
     answer = frames(response) if response.status == http.HTTPStatus.OK else ()

@@ -19,7 +19,7 @@ from types import ModuleType
 import pytest
 from support.script_module import loaded_script
 
-PROGRAM = Path(__file__).resolve().parent.parent / "probe" / "agent-service" / "tree_census.py"
+PROGRAM = Path(__file__).resolve().parent.parent / "agent-service" / "tree_census.py"
 KEY = bytes(range(32))
 SOCKS_UID = 1000
 OPAQUE = re.compile(r"n-[0-9a-f]{8}")

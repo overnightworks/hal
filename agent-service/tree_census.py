@@ -26,9 +26,10 @@ import re
 import stat
 import sys
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
+from pathlib import Path
 from typing import cast
 
 Identity = tuple[int, int]  # (st_dev, st_ino)
@@ -112,29 +113,44 @@ def _relative(point: str, below: str) -> tuple[str, ...] | None:
     return tuple(part for part in below[len(prefix) :].split("/") if part)
 
 
-def writable_mounts(mountinfo_text: bytes) -> tuple[WritableMount, ...]:
-    """Mounts whose own options (field 6) hold `rw`; the superblock options after ` - ` do not
-    count. Pseudo filesystems are left out."""
-    mounts: list[tuple[str, bool, tuple[int, int]]] = []
+@dataclass(frozen=True)
+class MountEntry:
+    point: str
+    filesystem: str
+    writable: bool  # the mount's own options (field 6) hold `rw`
+    device: tuple[int, int]  # major, minor
+
+
+def mount_entries(mountinfo_text: bytes) -> tuple[MountEntry, ...]:
+    """Every line of the mount table, before any filter."""
+    entries = []
     for line in mountinfo_text.split(b"\n"):
         head, separator, tail = line.partition(b" - ")
         fields = head.split(b" ")
         if not separator or len(fields) < 6 or not tail:
             continue
         filesystem = tail.split(b" ")[0].decode("ascii", "replace")
-        options = fields[5].split(b",")
-        writable = b"rw" in options and filesystem not in EXCLUDED_FILESYSTEMS
-        mounts.append((_decode_escapes(fields[4]), writable, _device(fields[2])))
+        writable = b"rw" in fields[5].split(b",")
+        entries.append(
+            MountEntry(_decode_escapes(fields[4]), filesystem, writable, _device(fields[2]))
+        )
+    return tuple(entries)
+
+
+def writable_mounts(mountinfo_text: bytes) -> tuple[WritableMount, ...]:
+    """Mounts whose own options (field 6) hold `rw`; the superblock options after ` - ` do not
+    count. Pseudo filesystems are left out."""
+    entries = mount_entries(mountinfo_text)
     return tuple(
         WritableMount(
-            point,
+            entry.point,
             frozenset(
-                rel for other, _, _ in mounts if (rel := _relative(point, other)) is not None
+                rel for other in entries if (rel := _relative(entry.point, other.point)) is not None
             ),
-            device,
+            entry.device,
         )
-        for point, writable, device in mounts
-        if writable
+        for entry in entries
+        if entry.writable and entry.filesystem not in EXCLUDED_FILESYSTEMS
     )
 
 
@@ -548,6 +564,54 @@ def _census_report(settings: dict, names: Names) -> dict:
     return {"mounts": mounts}
 
 
+def _shown(entry_point: str, plain: bool, names: Names) -> str:
+    return entry_point if plain else names.show_mount(entry_point)
+
+
+def _every_skip(walks: Iterable[Census]) -> dict[str, int]:
+    """The skips of all walks of one mount, each reason at its highest count: an entry can refuse
+    one walk and not the next, and the walk it refused did not search it for that token."""
+    skips: dict[str, int] = {}
+    for walk in walks:
+        for reason, count in walk.skips.items():
+            skips[reason] = max(skips.get(reason, 0), count)
+    return skips
+
+
+def retention_report(settings: dict, names: Names, mountinfo_text: bytes) -> dict:
+    """The retention mode (#814): every writable mount is walked once per token, with no login
+    exclusion, and the whole mount table leaves with the filesystem types, before any filter. A
+    point shows as itself when the host named it in `known` or its filesystem holds no content,
+    else as an opaque id. The host decides what an unresolved skip or an unaccounted mount means."""
+    known = frozenset(settings["known"])
+    tokens = {label: text.encode() for label, text in settings["tokens"].items()}
+    table = [
+        [
+            _shown(
+                entry.point, entry.point in known or entry.filesystem in EXCLUDED_FILESYSTEMS, names
+            ),
+            entry.filesystem,
+            entry.writable,
+        ]
+        for entry in mount_entries(mountinfo_text)
+    ]
+    mounts = []
+    for mount in writable_mounts(mountinfo_text):
+        walks = {
+            label: census_mount(mount, names, WalkRules(token=token))
+            for label, token in tokens.items()
+        }
+        mounts.append(
+            {
+                "mount": _shown(mount.point, mount.point in known, names),
+                "listings": len(next(iter(walks.values())).listings),
+                "skips": _every_skip(walks.values()),
+                "found": {label: walk.token_files for label, walk in walks.items()},
+            }
+        )
+    return {"table": table, "mounts": mounts}
+
+
 def _sample_report(settings: dict, names: Names) -> dict:
     records = sample_for(settings["proc"], names, settings["duration"], settings["interval"])
     only_expected, children = start_up_children_only(records, settings["group_leader"])
@@ -574,7 +638,14 @@ def run(settings_text: str) -> dict:
         return _census_report(settings, names)
     if settings["mode"] == "watch":
         return _watch_report(settings, names)
+    if settings["mode"] == "retention":
+        return retention_report(settings, names, _read_small(f"/proc/{os.getpid()}/mountinfo"))
     return _sample_report(settings, names)
+
+
+def program(settings: dict) -> str:
+    """What the host sends on the stdin of `python -I -`: this file and the call of `emit`."""
+    return Path(__file__).read_text(encoding="utf-8") + f"\nemit({json.dumps(settings)!r})\n"
 
 
 def emit(settings_text: str) -> None:

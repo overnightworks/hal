@@ -427,6 +427,8 @@ services:
       PYTHONPATH: /etc/litellm
       LITELLM_LOCAL_MODEL_COST_MAP: "True"
       LITELLM_TELEMETRY: "False"
+      # LiteLLM logs a provider's error text at ERROR, which can echo request content (E13).
+      LITELLM_LOG: CRITICAL
     tmpfs:
       - /tmp:uid=1000,gid=1000,mode=0700,size=64m,nosuid,nodev
     secrets: [litellm_anthropic_key, litellm_master_key, agent_service_api_credential]

@@ -221,6 +221,23 @@ stated in agent-runtime's section
 The content of
 a turn leaves this PC for Anthropic, which generates the answer.
 
+**The API route keeps no content, as evidence for the paths exercised only.** LiteLLM logs no
+message and redacts the `Messages:` suffix of its exceptions, and neither it nor the front
+configures a callback, cache, database or spend log; the front logs at INFO without an access log.
+The retention census (`agent-service/retention_census.py`, driven by
+`probe/agent-service/litellm_retention.py` on the fake-only stack) searches a request and an answer canary in every writable mount and every log of
+the front, the gateway, LiteLLM and the service. After a success, an upstream 500, an upstream error
+body that echoes the request, a refused model, a cancel and a hook refusal it finds none, and each
+search is proven by a control that plants a canary where it must be found. LiteLLM runs at log level
+`CRITICAL`: its own logging sites and uvicorn's write no error line that could carry a provider's
+text, and a provider failure shows at the caller. One channel stays open: `logging.lastResort` and
+`warnings.warn` reach LiteLLM's standard error, and whether a real path sends a provider's text
+through them is not measured. Not measured either: whether LiteLLM's own start-up failures still
+reach its log at that level; a failed start shows as the container's exit. Memory holds the content
+while a run is in flight, and tmpfs may be paged to swap. The Docker log driver's retention is the daemon's
+(edge#167); the census proves that no content reaches the logs, not how long they live. Any other
+path is not covered by this.
+
 **Whose account.** Only the operator and his own test accounts are members of `/services/agent-service/subscription`, so his
 Claude subscription serves only his own use. Every other person reaches the service only through the
 API route (`/services/agent-service/api`), under Anthropic's commercial API terms. That route is not
@@ -278,9 +295,10 @@ has no `[api]` table.
   529, timeout, reset or broken answer, an untrusted certificate, a refused credential and
   Anthropic's refusal of a used-up balance (a 402 `billing_error`, or a 400 saying the credit
   balance is too low) all end the run as `failed: provider_unavailable` on route `api`;
-  the run never falls back to the subscription. A used-up balance therefore looks like an outage
-  until the operator checks his credit. A cancelled run ends `cancelled` and starts no further provider
-  request; the cancel does not close the request in flight, which may finish and is billed.
+  the run never falls back to the subscription. A bad key, a used-up balance and an outage
+  therefore look the same, and no log tells them apart, because LiteLLM logs at `CRITICAL`, so
+  the operator checks his credit and his key. A cancelled run ends `cancelled` and starts no
+  further provider request; the cancel does not close the request in flight, which may finish and is billed.
 - **Rotating a key is a recreate.** A replaced provider key file reaches LiteLLM only through its
   recreate, until then it keeps sending the old key. A replaced service credential reaches each
   reader only through its own recreate, LiteLLM first, then `agent-service`; in between every run
@@ -291,7 +309,7 @@ has no `[api]` table.
   docstring gives the command line): the fake Anthropic and a fake issuer sit on `internet`, made
   internal, and the probe refuses to start otherwise. Re-run it for every LiteLLM, Traefik or Docker
   bump. `probe/agent-service/litellm_failures.py` drives the failure, key and rotation
-  cases on the same stack. The CI job `front` runs the front's table of requests (`tests/test_litellm_front.py`) for
+  cases on the same stack, and `litellm_retention.py` the retention census of the route. The CI job `front` runs the front's table of requests (`tests/test_litellm_front.py`) for
   every Traefik bump; a LiteLLM bump still needs the probe.
 
 ## Proofs
