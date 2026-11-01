@@ -55,6 +55,7 @@ checkout changes: only `.git` gains the fetched objects, FETCH_HEAD and `origin/
 
 import fcntl
 import os
+import sys
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import IntEnum
@@ -80,7 +81,6 @@ from hal.stack.legal_step import RECORD_FILE, plan_legal
 from hal.stack.plan import Plan
 from hal.stack.plan_rows import (
     ChangeNoun,
-    PlanEvent,
     changes_in,
     checkout_row,
     environment_row,
@@ -90,7 +90,7 @@ from hal.stack.plan_rows import (
     waiting_text,
 )
 from hal.stack.realm import reconcile
-from hal.stack.result_rows import result_rows
+from hal.stack.result_rows import partial_error, result_rows, waiting_row
 from hal.stack.terminal import NEEDS_TERMINAL, at_terminal
 from hal.stack.unit_plans import (
     Action,
@@ -247,7 +247,7 @@ def apply_local(
             run_setup,
             verifier,
             watch,
-            realm_backup or reconcile.Backup.installed(repository, _tell),
+            realm_backup or reconcile.Backup.installed(repository, _say_waiting),
             app_runtime or AppRuntime.of(home or Path.home(), state_directory),
             rename,
             lambda: verifier.clock() - started,
@@ -256,8 +256,9 @@ def apply_local(
         os.close(lock)
 
 
-def _tell(line: str) -> None:
-    print(line, flush=True)
+def _say_waiting(grace_seconds: float) -> None:
+    write_row(waiting_row(grace_seconds))
+    sys.stdout.flush()  # the wait is minutes long: the row must not sit in a pipe's buffer
 
 
 def take_apply_lock(state_directory: Path) -> int | None:
@@ -525,12 +526,10 @@ def _apply_realm(
     result = _realm_step(engine, planned, marks, core_phase, backup).run(planned.realm)
     for row in result_rows(result):
         write_row(row)
-    failure = result.failure
-    if result.skipped is not None:
-        failure = f"{reconcile.REALM_UNIT} {PlanEvent.REALM_SKIPPED}"
-    if failure:
-        write_error(f"partial, {failure}", command(Verb.APPLY))
-    return bool(failure)
+    error = partial_error(result)
+    if error:
+        write_error(f"partial, {error}", command(Verb.APPLY))
+    return error is not None
 
 
 def _apply_apps(planned: Plan, marks: switches.Switches, progress: Progress) -> bool:
