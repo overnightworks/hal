@@ -288,14 +288,14 @@ The plan names the step in one line. After your yes it takes a Keycloak-only bac
 `pre-apply` (the last ten are kept) and restore-tests that snapshot, observes both realms, runs
 config-cli, observes again and prints one line per change. A Keycloak that should run and cannot be read is skipped: the step prints a `!` row,
 `keycloak  realm skipped` with the reason, and the run ends partial (`error: partial, keycloak realm
-skipped`, `next: hal apply`) with exit 1; when that is the only change, hal asks no yes and ends
-`error: realm: Keycloak could not be read; not checked (…)`, `next: hal apply`, exit 1.
+skipped`, `next: hal apply`) and hal exits 3; when that is the only change, hal asks no yes and ends
+`error: realm: Keycloak could not be read; not checked (…)`, `next: hal apply`, exit 3.
 `hal backup` runs in a process group of its own, so Ctrl-C does not reach it. A step
 that outlives its time or is interrupted sends it SIGTERM, as a systemd stop does, and waits two
-minutes for its cleanup, which a further Ctrl-C does not shorten; only then it kills the group, and
-a `› keycloak  waiting  up to 2m00s for hal to clean up` row says so.
+minutes for its cleanup, which a further Ctrl-C does not shorten, and a `› keycloak  waiting  up to
+2m00s for hal to clean up` row says so; only after that wait it kills the group.
 
-A step that fails ends the run partial with exit 1 and prints one red row, `✗ keycloak  realm failed
+A step that fails ends the run partial, hal exits 3, and it prints one red row, `✗ keycloak  realm failed
 <cause> · <nothing applied | may be partly applied | applied, not observed>`. Under it, dim, stands
 `pre-apply snapshot 37c2a560 · proven` (or `unproven`, when its restore test did not pass) once a
 snapshot exists, and from the start of config-cli on `way back: docs/backup.md "Restore Keycloak" ·

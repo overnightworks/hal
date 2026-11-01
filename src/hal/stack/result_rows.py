@@ -47,15 +47,17 @@ class UnobservedNoun(Noun):
 
 def result_rows(result: StepResult) -> tuple[Row, ...]:
     """The rows of one step's result: none when the plan was settled."""
+    return () if result is None else (_row(result),)
+
+
+def _row(result: RealmSkipped | RealmFailed | RealmApplied) -> Row:
     match result:
         case RealmSkipped(reason):
-            return (Row(Glyph.NEEDS_YOU, REALM_UNIT, PlanEvent.REALM_SKIPPED, reason),)
+            return Row(Glyph.NEEDS_YOU, REALM_UNIT, PlanEvent.REALM_SKIPPED, reason)
         case RealmFailed():
-            return (_failed_row(result),)
+            return _failed_row(result)
         case RealmApplied():
-            return (_applied_row(result),)
-        case None:
-            return ()
+            return _applied_row(result)
 
 
 def partial_error(result: StepResult) -> str | None:
@@ -69,7 +71,7 @@ def partial_error(result: StepResult) -> str | None:
         case RealmApplied(leftovers=NotRecorded(error)):
             return (
                 "realm: applied and observed, but the record could not be written "
-                f"({printable(error)}); the next run repeats the step"
+                f"({error}); the next run repeats the step"
             )
         case _:
             return None

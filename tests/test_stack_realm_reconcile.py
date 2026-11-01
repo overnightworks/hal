@@ -563,10 +563,10 @@ def test_the_installed_backup_is_the_checkouts_own_hal(tmp_path: Path) -> None:
     assert backup.command == (str(tmp_path / ".venv" / "bin" / "hal"),)
 
 
-def test_the_installed_backup_says_the_waiting_line_through_the_line_it_was_given(
+def test_the_installed_backup_says_its_grace_to_the_callback_while_it_waits(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Cell 7: the waiting line leaves through the channel that carries the step's prefix."""
+    """Cell 7: the callback is given the grace the stopped step waits for."""
     monkeypatch.setattr(reconcile, "STOP_GRACE_SECONDS", 0.2)
     said: list[float] = []
     backup = reconcile.Backup.installed(tmp_path, said.append)

@@ -203,6 +203,7 @@ SERVICE_ACCOUNT_CLIENT = "songmaker"  # a listed service account
 ENABLED_SERVICE_ACCOUNT_CLIENT = "hopin"  # its service account, which the console turns off
 BACKUP_ASKED = ["backup", "keycloak", "--pre-apply", "--json"]  # what hal was asked first
 RESTORE_TEST_ASKED = ["restore", "--test", "keycloak", "--snapshot"]  # then the snapshot just made
+WAY_BACK = 'way back: docs/backup.md "Restore Keycloak" · the next apply repeats the step'
 LIFESPAN_SETTING = "accessTokenLifespan: 300 "  # as realm.yaml sets it
 CHANGED_LIFESPAN_SETTING = f"accessTokenLifespan: {CHANGED_ACCESS_TOKEN_LIFESPAN} "
 STEP_GROUP = "probe-realm-step"  # a group proof 12 adds to realm.yaml
@@ -2478,6 +2479,7 @@ class Probe:
         stand.edit_realm((CHANGED_LIFESPAN_SETTING, LIFESPAN_SETTING))
         reset = stand.apply()
         expect(isinstance(reset, reconcile.RealmApplied), f"the step that resets: {reset}")
+        expect(isinstance(reset.leftovers, reconcile.Leftovers), "the reset was not recorded")
         removal = (
             f"{REALM}: removal protocol mapper scope groups/{STEP_CONSOLE_MAPPER}: "
             f"reset to the file, pre-apply snapshot {reset.snapshot[:SNAPSHOT_SHORT_ID]}"
@@ -2515,17 +2517,15 @@ class Probe:
 
     def failed_realm_step_shows_its_way_back(self, stand: RealmStepStand) -> None:
         """Proof 12e: the red row of a config-cli that fails shows the snapshot it proved."""
-        failed = stand.apply()
-        (row,) = result_rows(failed)
-        self.say(" | ".join(("failed realm step:", row.fact, *row.details)))
+        before, failed = len(stand.asked), stand.apply()
         proved = stand.asked[-1][-1]
+        shown = [row.details for row in result_rows(failed)]
         expect(
             isinstance(failed, reconcile.RealmFailed)
-            and row.details[0] == f"pre-apply snapshot {proved[:SNAPSHOT_SHORT_ID]} · proven"
-            and "Restore Keycloak" in row.details[1]
-            and stand.asked[-2:] == [BACKUP_ASKED, [*RESTORE_TEST_ASKED, proved]]
+            and shown == [(f"pre-apply snapshot {proved[:SNAPSHOT_SHORT_ID]} · proven", WAY_BACK)]
+            and stand.asked[before:] == [BACKUP_ASKED, [*RESTORE_TEST_ASKED, proved]]
             and stand.plan().action is reconcile.RealmAction.RUN,
-            f"the failed step shows {row}, asked hal {stand.asked[-2:]}",
+            f"the failed step shows {shown} of {failed}, asked hal {stand.asked[before:]}",
         )
 
     def make_console_objects(self) -> list[str]:

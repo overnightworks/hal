@@ -3674,7 +3674,7 @@ def test_a_failed_backup_ends_partial_exit_1_and_applies_nothing(switch, scripte
 
     assert exit_code == 1
     assert "backup broke · nothing applied" in out
-    assert "error: partial, keycloak realm failed" in err
+    assert err.splitlines() == ["error: partial, keycloak realm failed", "next: hal apply"]
     assert scripted.realm_applies == 0
 
 
