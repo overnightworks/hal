@@ -154,6 +154,7 @@ class FinalLine:
     says: str
     first_at_git: str = ""
     sync: str = ""
+    names_error: str = ""
     on: str = "\0"
     trouble: Callable[[], None] = interrupt
 
@@ -185,7 +186,11 @@ FINAL_LINES = {
         ExitCode.FAILURE, "at 'sync the dependencies'", sync="fail", on="partial"
     ),
     "output fails at the verdict": FinalLine(
-        ExitCode.FAILURE, "'write the closing verdict'", on=VERDICT, trouble=broken_pipe
+        ExitCode.FAILURE,
+        "'write the closing verdict'",
+        names_error="unexpected error (BrokenPipeError)",
+        on=VERDICT,
+        trouble=broken_pipe,
     ),
 }
 
@@ -206,6 +211,7 @@ def test_a_ctrl_c_makes_the_final_line_o6_only_when_recorded_before_it(world, mo
     shown = world.stdout()
     final, next_line = shown.splitlines()[-2:]
     assert case.says in final
+    assert case.names_error in shown
     assert next_line == "next: hal apply"
     assert shown.count("error:") == (case.code is not ExitCode.OK)
     assert (tip in final) == (case.code is not ExitCode.OK)
