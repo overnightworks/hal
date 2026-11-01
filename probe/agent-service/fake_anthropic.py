@@ -131,7 +131,9 @@ def handler(role: str, expect: dict) -> type[http.server.BaseHTTPRequestHandler]
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(reply)))
                 self.end_headers()
-                self.wfile.write(reply)
+                # The request's bytes no longer come back; what remains is the probe's own control
+                # file in JSON for LiteLLM, which HTML escaping would only corrupt.
+                self.wfile.write(reply)  # NOSONAR(S5131) JSON from the probe's control file
 
         def provider_answer(self, steering: dict, body: bytes) -> tuple[int, bytes]:
             """The status and body of the mode; status 0 means the connection was reset instead."""

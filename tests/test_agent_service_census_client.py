@@ -94,4 +94,4 @@ def test_a_module_of_the_probes_imports_as_the_first_one(module: str) -> None:
         [sys.executable, "-I", "-c", program], capture_output=True, text=True, check=False
     )
 
-    assert result.returncode == 0, result.stderr
+    assert not result.returncode, result.stderr
