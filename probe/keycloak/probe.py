@@ -6,8 +6,8 @@ directory, stands in for Cloudflare by sending `Host: auth.<domain>` and
 the stack down, volumes included. Its Traefik entrypoints listen on free loopback ports it picks
 and its keycloak network takes a free /24, so it runs beside the live edge, which stays up.
 
-    flock -o -w 1200 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 50 540 \
-        python3 probe/keycloak/probe.py --scratch DIR  # teardown measured 11 s (K 50 s, CAP 540 s)
+    flock -o -w 1200 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 50 720 \
+        python3 probe/keycloak/probe.py --scratch DIR  # teardown measured 11 s (K 50 s, CAP 720 s)
 
 `hold --scratch DIR` instead brings the same stack up without the proofs, prints one READY line
 and keeps it until SIGTERM, SIGINT or EOF on stdin (see probe/keycloak/README.md).
@@ -58,8 +58,16 @@ sys.path[:0] = [str(REPO / "src"), str(REPO / "probe/keycloak")]
 import backchannel_cell  # noqa: E402
 import device_grant_cell  # noqa: E402
 import logout_actions_cell  # noqa: E402
+import service_audience_cell  # noqa: E402
 import terms_cell  # noqa: E402
 from admin import AdminToken  # noqa: E402
+from service_audience_cell import (  # noqa: E402
+    AGENT_SERVICE,
+    SPEECH_SERVICE,
+    WORKLOAD_ROLES,
+    audience_of,
+    is_workload_identity_of,
+)
 from test_rp import token_claims as claims  # noqa: E402
 
 from hal.output import write_line  # noqa: E402
@@ -119,6 +127,7 @@ class AppClient:
     callbacks: tuple[str, ...]
     logout_redirect: str
     default_scopes: frozenset[str]  # exactly the client's default scopes in realm.yaml
+    optional_scopes: frozenset[str] = frozenset()  # and its optional ones
 
     @property
     def secret_file(self) -> str:
@@ -146,6 +155,7 @@ HOPIN = AppClient(
     (f"https://hopin.{DOMAIN}/auth/callback",),
     f"https://hopin.{DOMAIN}/login",
     default_scopes=HOPIN_CLIENT_SCOPES,
+    optional_scopes=frozenset({service_audience_cell.SPEECH_SCOPE}),
 )
 PRESENTATOR = AppClient(
     "presentator",
@@ -158,8 +168,7 @@ PRESENTATOR = AppClient(
     default_scopes=SONGMAKER_PRESENTATOR_CLIENT_SCOPES,
 )
 APP_CLIENTS = (SONGMAKER, HOPIN, PRESENTATOR)
-AGENT_SERVICE = "agent-service"
-AGENT_WORKLOAD_ROLE = "agent-workload"
+AGENT_WORKLOAD_ROLE = WORKLOAD_ROLES[AGENT_SERVICE]
 SECRET_FILES = (
     "db-password",
     "config-cli-secret",
@@ -224,6 +233,8 @@ RESIDUE_OF_THE_APPLY = [
     f"{ENABLED_SERVICE_ACCOUNT_CLIENT}/{AGENT_WORKLOAD_ROLE}",
     "hallucinai: addition service-account realm role service-account-"
     f"{ENABLED_SERVICE_ACCOUNT_CLIENT}/default-roles-hallucinai",
+    "hallucinai: addition service-account realm role service-account-"
+    f"{service_audience_cell.SPEECH_CALLER}/{WORKLOAD_ROLES[SPEECH_SERVICE]}",
     f"hallucinai: addition service-account user service-account-{ENABLED_SERVICE_ACCOUNT_CLIENT}",
     f"master: removal flow {CONSOLE_SUBFLOW}",
     f"master: removal flow step {FORMS_FLOW}/auth-otp-form#1",
@@ -231,11 +242,10 @@ RESIDUE_OF_THE_APPLY = [
 ]
 DROPPED_CLIENT = "hopin"
 DROPPED_GROUP = "services"
-DROPPED_ROLE = "agent-workload"  # created by an earlier apply, held by the listed service accounts
-DROPPED_ROLE_BLOCK = (
-    f"roles:\n  realm:\n    - name: {DROPPED_ROLE}\n      description: Service-account-only "
-    "marker of an app workload calling the agent service.\n"
-)
+ROLE_HOLDERS = {  # the realm roles earlier applies created, with the service accounts holding each
+    AGENT_WORKLOAD_ROLE: [f"service-account-{client.client_id}" for client in APP_CLIENTS],
+    WORKLOAD_ROLES[SPEECH_SERVICE]: [f"service-account-{service_audience_cell.SPEECH_CALLER}"],
+}
 CHANGED_CONFIG = "browser-mfa-without-passkey"
 # 6.5.1 reads the managed-role switch only when the file has a roles section, so an empty
 # list stays in it.
@@ -398,24 +408,6 @@ def stored_event_types(events: list[dict[str, Any]], request_address: str) -> li
             f"not the request's {request_address}",
         )
     return sorted(event["type"] for event in events)
-
-
-def audience_of(access: dict[str, Any]) -> list[str]:
-    audience = access.get("aud", [])
-    return [audience] if isinstance(audience, str) else audience
-
-
-def is_workload_identity_of(access: dict[str, Any], client_id: str) -> bool:
-    """The shape agent-service accepts: the workload role and audience, `client_id` and `azp`
-    both naming the app, and no group."""
-    roles = access.get("realm_access", {}).get("roles", [])
-    return (
-        AGENT_WORKLOAD_ROLE in roles
-        and AGENT_SERVICE in audience_of(access)
-        and access.get("client_id") == client_id
-        and access.get("azp") == client_id
-        and not access.get("groups")
-    )
 
 
 # --- The throwaway stack --------------------------------------------------------------------
@@ -1185,7 +1177,6 @@ class Probe:
         self.only_logins_and_failed_logins_are_stored(admin, rp_secret)
         for client in APP_CLIENTS:
             self.app_client(admin, client)
-        self.agent_service_stays_audience_only(admin)
         self.the_realm_step(stand)
         self.the_observer_door(admin)
         self.no_secret_leaked()
@@ -1286,7 +1277,7 @@ class Probe:
         roles = admin.get(f"/{REALM}/users/{account['id']}/role-mappings/realm")
         names, groups = [role["name"] for role in roles], admin.group_paths(account["id"])
         expect(
-            AGENT_WORKLOAD_ROLE in names and groups == [],
+            set(WORKLOAD_ROLES.values()) <= set(names) and groups == [],
             f"{ENABLED_SERVICE_ACCOUNT_CLIENT}'s service account has roles {names} and groups "
             f"{groups} after the apply",
         )
@@ -1913,8 +1904,9 @@ class Probe:
             f"realm.yaml no longer lists the client {DROPPED_CLIENT}",
         )
         text = text[:client_start] + text[client_end:]
-        expect(DROPPED_ROLE_BLOCK in text, f"realm.yaml no longer lists the role {DROPPED_ROLE}")
-        return text.replace(DROPPED_ROLE_BLOCK, EMPTY_REALM_ROLES)
+        roles_start, roles_end = text.find("\nroles:\n  realm:\n"), text.find("\ngroups:\n")
+        expect(0 <= roles_start < roles_end, "realm.yaml no longer lists the realm roles")
+        return text[: roles_start + 1] + EMPTY_REALM_ROLES + text[roles_end + 1 :]
 
     def changed_yaml_applies(self, admin: Admin, member_id: str) -> None:
         changed = self.stack.copy_config(self.stack.scratch / "config-changed")
@@ -1940,19 +1932,19 @@ class Probe:
             f"the client {DROPPED_CLIENT}, dropped from realm.yaml, did not survive the apply",
         )
         expect(admin.group_paths(member_id) == [MEMBER_GROUP], "the seeded membership changed")
-        role_holders = admin.get(f"/{REALM}/roles/{DROPPED_ROLE}/users")
-        expect(
-            sorted(holder["username"] for holder in role_holders)
-            == sorted(f"service-account-{client.client_id}" for client in APP_CLIENTS),
-            f"the role {DROPPED_ROLE}, dropped from realm.yaml, or its service accounts did not "
-            f"survive the apply: {role_holders}",
-        )
+        for role, holders in ROLE_HOLDERS.items():
+            found = sorted(user["username"] for user in admin.get(f"/{REALM}/roles/{role}/users"))
+            expect(
+                found == sorted(holders),
+                f"the role {role}, dropped from realm.yaml, or its service accounts did not "
+                f"survive the apply: {found}",
+            )
         self.held(
             "3d",
             f"a changed realm.yaml applies (access token {CHANGED_ACCESS_TOKEN_LIFESPAN} s, "
             f"group /{CHANGED_GROUP}) and deletes nothing it dropped: "
-            f"the group /{DROPPED_GROUP} tree and the client {DROPPED_CLIENT} and the role "
-            f"{DROPPED_ROLE} with its three service-account "
+            f"the group /{DROPPED_GROUP} tree and the client {DROPPED_CLIENT} and the roles "
+            f"{sorted(ROLE_HOLDERS)} with their service-account "
             f"holders, all dropped from realm.yaml, and the console-made {CONSOLE_SUBGROUP} stay; "
             f"probe-member is still in {MEMBER_GROUP}",
         )
@@ -2122,6 +2114,7 @@ class Probe:
         self.app_client_representation(admin, client)
         self.workload_token_carries_the_role(admin, client_secret, client)
         terms_cell.prove(self, expect, form_with, client)
+        service_audience_cell.prove(self, expect, client, tokens["access_token"])
         self.held(
             "10",
             f"a member of {client.group} signs in to {name} with PKCE and gets a code "
@@ -2159,13 +2152,17 @@ class Probe:
         username: str,
         password: str,
         client_secret: str,
+        scope: str = "openid",
     ) -> dict[str, Any]:
         """The authorization-code flow with S256 up to the ID token (cells T1, T2)."""
         name = client.client_id
         verifier = self.keep_secret(f"{name} PKCE verifier", secrets.token_urlsafe(48))
         challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest())
         query = self.app_client_authorization_query(
-            client, code_challenge=challenge.rstrip(b"=").decode(), code_challenge_method="S256"
+            client,
+            scope=scope,
+            code_challenge=challenge.rstrip(b"=").decode(),
+            code_challenge_method="S256",
         )
         login_page = self.through_tunnel("GET", f"{PUBLIC_AUTH_PATH}?{query}", opener=opener)
         expect(login_page.status == 200, f"{name}'s login page answered {login_page.status}")
@@ -2286,21 +2283,8 @@ class Probe:
             f"{realm_lifespan}s, 0 or 1 s more accepted, client override {override})",
         )
 
-    def agent_service_stays_audience_only(self, admin: Admin) -> None:
-        """Cell W4: agent-service has every flow off."""
-        found = admin.find(f"/{REALM}/clients", "clientId", AGENT_SERVICE)
-        flows = (
-            "standardFlowEnabled",
-            "implicitFlowEnabled",
-            "directAccessGrantsEnabled",
-            "serviceAccountsEnabled",
-        )
-        on = [flow for flow in flows if found.get(flow)]
-        expect(not on, f"{AGENT_SERVICE} has flows on: {on}")
-        self.held("10", f"{AGENT_SERVICE} still has every flow off (W4)")
-
     def app_client_refuses_offline_access(self, client: AppClient) -> None:
-        """Cell T13: no optional scope is attached, so no offline token can be asked for."""
+        """Cell T13: offline_access is no scope of the client, so no offline token is issued."""
         query = self.app_client_authorization_query(
             client, scope="openid offline_access", **device_grant_cell.PKCE
         )
@@ -2363,7 +2347,6 @@ class Probe:
                 "frontchannelLogout": False,
                 "baseUrl": f"{client.origin}/",
                 "alwaysDisplayInConsole": False,
-                "optionalClientScopes": [],
             }.items()
             if found.get(key) != value
         } | {
@@ -2371,6 +2354,7 @@ class Probe:
             for key, value in {
                 "redirectUris": set(client.callbacks),
                 "defaultClientScopes": client.default_scopes,
+                "optionalClientScopes": client.optional_scopes,
             }.items()
             if set(found.get(key) or ()) != value
         }

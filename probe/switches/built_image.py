@@ -20,7 +20,7 @@ It removes its containers, networks, volumes and tags. It never names the projec
 Measured teardown: 11 s (K 30 s, CAP 900 s).
 
 Needs an existing, empty --scratch directory, `uv` (it runs `uv sync` in the copy) and the local
-images busybox:1.36 and busybox:1.37.0.
+images busybox:1.36 and busybox:1.37.0. It leaves --scratch empty, passed or failed (`edge_copy`).
 """
 
 from __future__ import annotations

@@ -8,10 +8,10 @@ network takes a free /24 from 172.31.200.0 up. Both modes need an empty or new `
 directory and always tear the stack down. While a probe runs, `hal check exposure` reports its Keycloak as a
 routing name that is not valid, by design of the `edge.name: PROBE` label that keeps the live Traefik away.
 
-    flock -o -w 1200 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 50 540 \
+    flock -o -w 1200 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 50 720 \
         python3 probe/keycloak/probe.py [run|hold] --scratch DIR
 
-Measured teardown: 11 s (K 50 s, CAP 540 s).
+Measured teardown: 11 s (K 50 s, CAP 720 s).
 
 Before each `compose up` the probe writes appkit's tokens and fonts into this checkout, where the
 themes read them (`appkit-<version>/` beside each theme's `css/`), through
@@ -104,6 +104,12 @@ stack behind, ends with `PROBE FAILED` and exit 1.
   (TC2); Decline ends in `access_denied` with no session and no stored time (TC3); Accept stores the time as Unix seconds,
   which an admin reads and the account REST, both tokens and an admin PUT do not show or change (TC4); a later
   sign-in to hopin and presentator asks nothing (TC5); asked again, Decline removes the old time and Accept stores a new one (TC6).
+  Cells SP1 to SP6 and SP8 (#837) also run in proof 10: hopin's workload token carries the `speech-service` audience
+  only when it asks for `speech-service-audience`, and `speech-workload` either way, as its service account's role (SP1, SP2); a
+  member's person token carries the audience only when asked and `/services/speech-service` either way, as the default `groups`
+  scope gives it, and its ID token never the audience (SP3); a non-member's token without the scope carries no audience (SP4); songmaker and presentator are refused the scope and
+  never get the audience (SP5); `agent-service` and `speech-service` are bearer-only with every flow off (W4, SP6); the group has no subgroup (SP8).
+  Cells F0, U3, U4, RF0 to RF2 (#844) run last in hopin's branch of the same proof, on a target, a scope copied from `speech-service-audience`, a role and two clients the probe makes: the probe holds the setup and prints, as measured and not held, what a workload token's `aud` and roles are under Keycloak's defaults, without the default roles, with `fullScopeAllowed` off and with a role scope mapping (U3), and what refreshes and a new authorization request give sessions signed in before and after the scope turned optional (U4, RF1, RF2); `docs/keycloak.md` states the answers for the pinned Keycloak.
 - `hold` brings the same stack up, runs no proof and keeps it for another repository's proof.
   It seeds nothing beyond the realm's `songmaker`, `hopin` and `presentator` clients, which callers must not create
   themselves; they create their other clients and users through the admin API. A hallucinai user created there carries
@@ -116,7 +122,7 @@ argument (`--scratch` must be a new or empty directory). Under the `timeout` wra
 reaches the probe, so stop it with `kill -TERM` on the probe. A SIGTERM or Ctrl-C stop of `run`
 ends with exit 1 and a finished teardown.
 
-The lock is held for at most 590 seconds: at 540 `timeout` stops the probe, which still tears down
+The lock is held for at most 770 seconds: at 720 `timeout` stops the probe, which still tears down
 (exit 124), and 50 seconds later it kills the probe and its teardown (exit 137). After an exit 137
 or a `teardown: stack edge-kc-probe FAILED` line, remove the project under the lock, from a
 directory without a compose file, because Compose finds its containers, networks and volumes by the

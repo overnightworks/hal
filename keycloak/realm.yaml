@@ -37,6 +37,8 @@ roles:
   realm:
     - name: agent-workload
       description: Service-account-only marker of an app workload calling the agent service.
+    - name: speech-workload
+      description: Service-account-only marker of an app workload calling the speech service.
 groups:
   - name: apps
     subGroups:
@@ -58,6 +60,8 @@ groups:
           - name: subscription
           # The paid LiteLLM right; nothing reads it until the paid route exists.
           - name: api
+      # Exactly this path is the speech service's right; it has no subgroup.
+      - name: speech-service
 clientScopes:
   - name: groups
     description: The user's groups as full paths, for example /apps/songmaker
@@ -95,6 +99,23 @@ clientScopes:
           # Stated, because Keycloak would otherwise default it on create and the next apply flip it.
           userinfo.token.claim: "false"
           introspection.token.claim: "true"
+  - name: speech-service-audience
+    description: Adds speech-service to the access token audience
+    protocol: openid-connect
+    attributes:
+      include.in.token.scope: "false"
+      display.on.consent.screen: "false"
+    protocolMappers:
+      - name: speech-service-audience
+        protocol: openid-connect
+        protocolMapper: oidc-audience-mapper
+        consentRequired: false
+        config:
+          included.client.audience: speech-service
+          id.token.claim: "false"
+          access.token.claim: "true"
+          userinfo.token.claim: "false"
+          introspection.token.claim: "true"
 # Every new account is asked once to accept the terms of use (docs/keycloak.md, "Terms of use").
 # `priority` is stated because config-cli writes 0 for a missing one. Deleting this block does not
 # switch the action off (IMPORT_MANAGED_REQUIREDACTION is no-delete in compose.yaml): set `enabled: false`.
@@ -105,8 +126,8 @@ requiredActions:
     enabled: true
     defaultAction: true
     priority: 20
-# Only the service accounts of the clients that call the agent service (A1d, #183) are users here, and
-# only to hold agent-workload; no person is ever listed, and no group.
+# Only the service accounts of the clients that call the agent service (A1d, #183) or the speech service
+# are users here, and only to hold their workload roles; no person is ever listed, and no group.
 users:
   - username: service-account-songmaker
     enabled: true
@@ -123,10 +144,22 @@ users:
     serviceAccountClientId: hopin
     realmRoles:
       - agent-workload
+      - speech-workload
 clients:
   # Audience only: the agent service accepts tokens issued for it and never signs anyone in.
   - clientId: agent-service
     name: agent-service
+    enabled: true
+    bearerOnly: true
+    publicClient: false
+    standardFlowEnabled: false
+    implicitFlowEnabled: false
+    directAccessGrantsEnabled: false
+    serviceAccountsEnabled: false
+    frontchannelLogout: false
+  # Audience only, like agent-service: the speech service accepts tokens issued for it.
+  - clientId: speech-service
+    name: speech-service
     enabled: true
     bearerOnly: true
     publicClient: false
@@ -174,7 +207,8 @@ clients:
     optionalClientScopes: []
   # hopin signs people in the same way as songmaker and is logged out the same way (#254). It holds
   # a refresh token per session, named as on so a merge cannot keep an earlier off, and its service
-  # account is a workload of the agent service. It reads no email, web origin or acr, so it has
+  # account is a workload of the agent service and of the speech service, whose audience it asks for by
+  # the optional scope speech-service-audience. It reads no email, web origin or acr, so it has
   # none of those scopes.
   - clientId: hopin
     name: hopin
@@ -203,7 +237,8 @@ clients:
       - roles
       - service_account
       - agent-service-audience
-    optionalClientScopes: []
+    optionalClientScopes:
+      - speech-service-audience
   # One client for presentator's two hosts (agent-presentator#242). It is logged out like hopin, on
   # presentator's own port, over its own back-channel network.
   - clientId: presentator

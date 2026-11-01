@@ -14,6 +14,7 @@ from typing import Any
 
 from hal.stack import compose, core
 from hal.stack.compose import Compose, ComposeError, Runner
+from hal.stack.deploy_checkout import COMPOSE_FILE
 
 PROJECTS = ("edge", "hal")
 PROJECT_LABEL = "com.docker.compose.project"
@@ -98,7 +99,7 @@ def _down(source: str) -> list[str]:
     repository = compose.REPOSITORY
     return [
         "docker", "compose", "-p", source, "--project-directory", str(repository),
-        "--file", str(repository / "compose.yaml"), "--profile", "*", "down", "--remove-orphans",
+        "--file", str(repository / COMPOSE_FILE), "--profile", "*", "down", "--remove-orphans",
     ]  # fmt: skip
 
 

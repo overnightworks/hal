@@ -401,9 +401,10 @@ class Probe:
         """A copy of the file with the live gateway subnets replaced by the probe's: the live
         stack's networks own their /24s, and Docker refuses a second network on one."""
         text = source.read_text()
-        # The copy lies in the scratch directory that scratch_directory() resolved and required at
-        # the command line, and the text comes from the repository's own files; the route tried
-        # was resolving the path once at that boundary, which Sonar does not follow across calls.
+        # The copy lies in the scratch directory that scratch_directory() made absolute and
+        # required at the command line, and the text comes from the repository's own files; the
+        # route tried was checking the path once at that boundary, which Sonar does not follow
+        # across calls.
         moved = edge_copy.moved_to_probe_subnets(text, self.moved)
         copy.write_text(  # NOSONAR(S2083)
             edge_copy.namespaced_compose(moved, PROJECT) if source == COMPOSE_FILE else moved

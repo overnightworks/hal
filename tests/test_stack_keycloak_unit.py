@@ -343,12 +343,15 @@ def test_the_account_console_offers_no_groups_page():
 
 
 def test_hopin_has_a_workload_service_account_in_no_group_and_without_personal_scopes():
-    """#506: the account holds `agent-workload` only; no `email`, `web-origins` or `acr`."""
+    """#506: the account holds only declared workload roles; no `email`, `web-origins` or
+    `acr`."""
     realm = yaml.safe_load((REPOSITORY / "keycloak/realm.yaml").read_text())
     account = next(user for user in realm["users"] if user["username"] == "service-account-hopin")
 
     assert account["serviceAccountClientId"] == "hopin"
-    assert account["realmRoles"] == ["agent-workload"]
+    declared_roles = {role["name"] for role in realm["roles"]["realm"]}
+    assert set(account["realmRoles"]) == {"agent-workload", "speech-workload"}
+    assert set(account["realmRoles"]) <= declared_roles
     assert "groups" not in account
     assert realm_clients()["hopin"]["serviceAccountsEnabled"] is True
     assert not {"email", "web-origins", "acr"} & set(

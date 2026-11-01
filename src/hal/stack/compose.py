@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from hal.output import printable
+from hal.stack.deploy_checkout import COMPOSE_FILE
 
 REPOSITORY = Path(__file__).resolve().parents[3]
 READ_SECONDS = 60
@@ -246,7 +247,7 @@ class Compose:
     ) -> str:
         prefix = [
             "docker", "compose", "--project-directory", str(self.repository),
-            "--file", str(self.repository / "compose.yaml"),
+            "--file", str(self.repository / COMPOSE_FILE),
         ]  # fmt: skip
         command = [*prefix, "--profile", profile, verb, *arguments]
         result = self.run(command, timeout) if stdin is None else self.run(command, timeout, stdin)
