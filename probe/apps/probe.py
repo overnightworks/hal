@@ -300,7 +300,7 @@ class Probe:
     # --- the copy, its Traefik and hal -------------------------------------------------------
 
     def bring_up(self) -> None:
-        self.copy = edge_copy.repository_copy(REPO, self.home, self.scratch)
+        self.copy = edge_copy.repository_copy(REPO, self.home, self.scratch, CORE_PROJECT)
         (self.copy / "fleet.yaml").write_text(
             f"cloudflare:\n  zone: {DOMAIN}\ngithub:\n  org: {ORGANISATION}\n\nservices:\n"
             f"  {self.key}:\n    repo: {{default_branch: master}}\n    run: {{enabled: true}}\n"

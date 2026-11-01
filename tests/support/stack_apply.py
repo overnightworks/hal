@@ -436,6 +436,14 @@ OLD_IMAGE = str(PlanEvent.OLD_IMAGE)
 KEYCLOAK_ENABLED = "services:\n  keycloak:\n    run: {enabled: true, setup: keycloak/init}\n"
 
 
+def config_cli_entrypoint() -> str:
+    """Where compose.yaml mounts `keycloak/entrypoint.sh` into config-cli."""
+    mounts = yaml.safe_load((REPOSITORY / "compose.yaml").read_text())["services"][
+        "keycloak-config-cli"
+    ]["volumes"]
+    return next(mount.split(":")[1] for mount in mounts if "keycloak/entrypoint.sh" in mount)
+
+
 @pytest.fixture
 def realm_unit(repository, scripted) -> None:
     """Keycloak enabled, set up and running; its realm files, and config-cli as compose.yaml
@@ -446,6 +454,6 @@ def realm_unit(repository, scripted) -> None:
     (repository / "keycloak/entrypoint.sh").write_text("#!/bin/sh\n")
     scripted.config["services"]["keycloak-config-cli"] = {
         "profiles": ["apply"],
-        "volumes": [bind(repository / "keycloak/entrypoint.sh", "/opt/edge/entrypoint.sh")],
+        "volumes": [bind(repository / "keycloak/entrypoint.sh", config_cli_entrypoint())],
     }
     scripted.put_containers({"keycloak": "running"})

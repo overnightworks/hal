@@ -55,6 +55,13 @@ networks:
   backchannel-presentator:
     name: ${COMPOSE_PROJECT_NAME}_backchannel_presentator
 
+volumes:
+  # compose.yaml gives these two volumes fixed names; here they belong to the probe's project.
+  keycloak-db:
+    name: ${COMPOSE_PROJECT_NAME}_keycloak-db
+  step-ca:
+    name: ${COMPOSE_PROJECT_NAME}_step-ca
+
 secrets:
   keycloak_db_password:
     file: ${PROBE_SECRETS_DIR:?run through probe/keycloak/probe.py}/db-password

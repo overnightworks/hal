@@ -52,9 +52,8 @@ PROBE_IDENTITY = {"user.name": "edge probe", "user.email": "probe@edge.invalid"}
 # The fixed network names of compose.yaml (`name: hal_<suffix>`) that apps join as external
 # networks; they survive the project's rename, so a probe must never create or remove one.
 LIVE_NETWORK_PREFIX = "hal_"
-LIVE_NETWORK_NAME = re.compile(
-    rf"^(\s+name:\s+){re.escape(LIVE_NETWORK_PREFIX)}(\w+)\s*$", re.MULTILINE
-)
+FIXED_NAME_SECTIONS = ("networks", "volumes")
+NAME_LINE = re.compile(r"^(\s+name:\s+)(\S+)\s*$", re.MULTILINE)
 GUARDED_COMPOSE_VERBS = {"up", "run", "down"}  # what creates or removes networks
 # The networks of compose.yaml that pin a /24 so agent-egress has one address on each; a probe
 # moves each to a free /24 of its own, so it never collides with the live stack's.
@@ -77,14 +76,34 @@ def expect(condition: bool, message: str) -> None:
         raise ProbeFailed(message)
 
 
+def fixed_names(text: str) -> set[str]:
+    """The top-level `name:` of every network and volume of compose.yaml `text`."""
+    document = yaml.safe_load(text) or {}
+    return {
+        entry["name"]
+        for section in FIXED_NAME_SECTIONS
+        for entry in (document.get(section) or {}).values()
+        if entry and "name" in entry
+    }
+
+
 def namespaced_compose(text: str, project: str) -> str:
-    """`text` of compose.yaml with every fixed network name `hal_<suffix>` moved to
-    `<project>_<suffix>`, so a probe's stack shares no network with the live one. Refuses a text
-    with no such name, and one in which a `hal_` name remains."""
-    namespaced, renamed = LIVE_NETWORK_NAME.subn(rf"\g<1>{project}_\g<2>", text)
-    expect(renamed > 0, "compose.yaml names no fixed hal_ network to move")
-    remaining = re.findall(rf"name:\s+{LIVE_NETWORK_PREFIX}\S*", namespaced)
-    expect(not remaining, f"a hal_ network name remains after the rewrite: {remaining}")
+    """`text` of compose.yaml with every fixed network and volume name `<owner>_<suffix>` moved to
+    `<project>_<suffix>`, so a probe's stack shares none with the live one. Refuses a text with no
+    such name, and one in which a name outside the project remains."""
+    fixed = fixed_names(text)
+    expect(bool(fixed), "compose.yaml names no fixed network or volume name to move")
+    expect(all("_" in name for name in fixed), f"a fixed name has no <owner>_ prefix: {fixed}")
+    namespaced = NAME_LINE.sub(
+        lambda line: (
+            f"{line[1]}{project}_{line[2].partition('_')[2]}" if line[2] in fixed else line[0]
+        ),
+        text,
+    )
+    remaining = sorted(
+        name for name in fixed_names(namespaced) if not name.startswith(f"{project}_")
+    )
+    expect(not remaining, f"a fixed name remains after the rewrite: {remaining}")
     return namespaced
 
 
@@ -229,15 +248,17 @@ def _without_services(text: str, apps: set[str]) -> dict:
     return {**_document(text), "services": services}
 
 
-def expect_project_networks(resolved: dict, project: str) -> None:
-    """Raises `ProbeFailed` when a network of a resolved compose configuration (`config --format
-    json`) is not named `<project>_...`: a call that resolves one would touch a live network."""
-    foreign = {
-        key: network["name"]
-        for key, network in (resolved.get("networks") or {}).items()
-        if not network["name"].startswith(f"{project}_")
-    }
-    expect(not foreign, f"networks outside the project {project}: {foreign}")
+def expect_project_names(resolved: dict, project: str) -> None:
+    """Raises `ProbeFailed` when a network or volume of a resolved compose configuration (`config
+    --format json`) is not named `<project>_...`: a call that resolves one would touch a live
+    network or volume."""
+    for section in FIXED_NAME_SECTIONS:
+        foreign = {
+            key: entry["name"]
+            for key, entry in (resolved.get(section) or {}).items()
+            if not entry["name"].startswith(f"{project}_")
+        }
+        expect(not foreign, f"{section} outside the project {project}: {foreign}")
 
 
 def copy_compose_prefix(copy: Path) -> list[str]:
@@ -281,9 +302,9 @@ def free_subnet(candidates: Sequence[str], occupied: Sequence[str]) -> ipaddress
 
 class NetworkGuard:
     """Checks, before a compose call that starts or removes something, that what the call's files
-    and profiles resolve is the probe's project and names only networks of it (P26). `run` returns
-    the stdout of a command. A command is resolved once unless `once` is false, for a file that
-    changes between calls."""
+    and profiles resolve is the probe's project and names only networks and volumes of it (P26).
+    `run` returns the stdout of a command. A command is resolved once unless `once` is false, for a
+    file that changes between calls."""
 
     def __init__(self, project: str, run: Callable[[list[str]], str | bytes]) -> None:
         self.project, self.run = project, run
@@ -297,7 +318,7 @@ class NetworkGuard:
             name = resolved.get("name")
             expect(name is not None, f"the resolved configuration names no project: {prefix}")
             expect(name == self.project, f"the project is {name!r}, not {self.project}")
-            expect_project_networks(resolved, self.project)
+            expect_project_names(resolved, self.project)
             self.checked.add(key)
 
     def expect_call(self, command: list[str]) -> None:
@@ -350,9 +371,22 @@ class LiveProject:
         return f"{len(self.containers)} containers, {len(self.volumes)} volumes"
 
 
+def compose_project_name(text: str) -> str:
+    """The project the compose.yaml `text` names at its top level: the live one."""
+    return yaml.safe_load(text)["name"]
+
+
+def resolved_volumes(text: str, project: str) -> set[str]:
+    """Every volume name compose.yaml `text` resolves under `project`: the fixed `name:` of a
+    volume, else `<project>_<key>`."""
+    volumes = yaml.safe_load(text).get("volumes") or {}
+    return {(entry or {}).get("name", f"{project}_{key}") for key, entry in volumes.items()}
+
+
 def live_project(repository: Path) -> LiveProject:
     """The live project of `repository`'s compose.yaml (its top-level `name`) as the daemon has it
-    now; empty when the live stack is down."""
+    now; empty when the live stack is down. Its volumes are those labelled with the project and
+    every one compose.yaml resolves, whatever its label."""
 
     def docker(*arguments: str) -> list[str]:
         return subprocess.run(
@@ -360,7 +394,8 @@ def live_project(repository: Path) -> LiveProject:
             timeout=APPLY_SECONDS,
         ).stdout.splitlines()  # fmt: skip
 
-    name = yaml.safe_load((repository / deploy_checkout.COMPOSE_FILE).read_text())["name"]
+    text = (repository / deploy_checkout.COMPOSE_FILE).read_text()
+    name = compose_project_name(text)
     selector = f"label={PROJECT_LABEL}={name}"
     identifiers = docker("container", "ls", "--all", "--quiet", "--no-trunc", "--filter", selector)
     inspected = docker(
@@ -369,7 +404,8 @@ def live_project(repository: Path) -> LiveProject:
     return LiveProject(
         name,
         frozenset(tuple(line.split(" ", 2)) for line in inspected),
-        frozenset(docker("volume", "ls", "--quiet", "--filter", selector)),
+        frozenset(docker("volume", "ls", "--quiet", "--filter", selector))
+        | resolved_volumes(text, name).intersection(docker("volume", "ls", "--quiet")),
     )
 
 

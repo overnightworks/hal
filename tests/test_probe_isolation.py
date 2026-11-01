@@ -4,6 +4,7 @@ import json
 import sys
 from pathlib import Path
 from textwrap import dedent
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -21,42 +22,75 @@ from hal.stack import catalog  # noqa: E402
 PROJECT = "edge-some-probe"
 
 
-def fixed_networks(text: str) -> dict[str, str]:
-    networks = yaml.safe_load(text)["networks"]
-    return {key: network["name"] for key, network in networks.items() if "name" in network}
+def fixed_names(text: str, section: str = "networks") -> dict[str, str]:
+    entries = yaml.safe_load(text)[section]
+    return {key: entry["name"] for key, entry in entries.items() if entry and "name" in entry}
 
 
-def test_every_fixed_network_of_compose_moves_into_the_project():
+@pytest.mark.parametrize("section", ["networks", "volumes"])
+def test_every_fixed_name_of_compose_moves_into_the_project(section):
     compose = (ROOT / "compose.yaml").read_text()
 
-    moved = fixed_networks(edge_copy.namespaced_compose(compose, PROJECT))
+    moved = fixed_names(edge_copy.namespaced_compose(compose, PROJECT), section)
 
     assert moved
     assert all(name.startswith(f"{PROJECT}_") for name in moved.values())
-    assert moved.keys() == fixed_networks(compose).keys()
+    assert moved.keys() == fixed_names(compose, section).keys()
 
 
-def test_a_compose_text_with_no_fixed_network_is_refused():
-    with pytest.raises(edge_copy.ProbeFailed, match="no fixed hal_ network"):
+def test_a_compose_text_with_no_fixed_name_is_refused():
+    with pytest.raises(edge_copy.ProbeFailed, match="no fixed network or volume name"):
         edge_copy.namespaced_compose("networks:\n  mcp:\n    internal: true\n", PROJECT)
 
 
-def test_a_hal_network_name_the_rewrite_cannot_match_is_refused():
+def test_a_fixed_name_the_rewrite_cannot_match_is_refused():
     text = "networks:\n  a:\n    name: hal_a\n  b:\n    name: hal_b # live\n"
 
     with pytest.raises(edge_copy.ProbeFailed, match="remains after the rewrite"):
         edge_copy.namespaced_compose(text, PROJECT)
 
 
-def test_a_resolved_network_outside_the_project_fails_the_guard():
-    resolved = {"networks": {"a": {"name": f"{PROJECT}_a"}, "b": {"name": "hal_agent_songmaker"}}}
+@pytest.mark.parametrize(
+    ("section", "foreign"),
+    [("networks", "hal_agent_songmaker"), ("volumes", "edge_keycloak-db")],
+)
+def test_a_resolved_name_outside_the_project_fails_the_guard(section, foreign):
+    resolved = {section: {"a": {"name": f"{PROJECT}_a"}, "b": {"name": foreign}}}
 
-    with pytest.raises(edge_copy.ProbeFailed, match="hal_agent_songmaker"):
-        edge_copy.expect_project_networks(resolved, PROJECT)
+    with pytest.raises(edge_copy.ProbeFailed, match=foreign):
+        edge_copy.expect_project_names(resolved, PROJECT)
 
 
 def test_a_resolved_configuration_inside_the_project_passes_the_guard():
-    edge_copy.expect_project_networks({"networks": {"a": {"name": f"{PROJECT}_a"}}}, PROJECT)
+    resolved = {section: {"a": {"name": f"{PROJECT}_a"}} for section in ("networks", "volumes")}
+
+    edge_copy.expect_project_names(resolved, PROJECT)
+
+
+class FakeDocker:
+    """The daemon's volume listings: `existing` volumes, `labelled` the ones of the live project."""
+
+    def __init__(self, existing: list[str], labelled: list[str]) -> None:
+        self.existing, self.labelled = existing, labelled
+
+    def __call__(self, command, **_):
+        listing = (
+            self.labelled
+            if any(word.startswith("label=") for word in command)
+            else (self.existing if command[:3] == ["docker", "volume", "ls"] else [])
+        )
+        return SimpleNamespace(stdout="\n".join(listing))
+
+
+def test_the_live_snapshot_holds_every_volume_compose_resolves_whatever_its_label(monkeypatch):
+    kept = fixed_names((ROOT / "compose.yaml").read_text(), "volumes")["keycloak-db"]
+    monkeypatch.setattr(
+        edge_copy.subprocess, "run", FakeDocker(existing=[kept, "unrelated"], labelled=[])
+    )
+
+    snapshot = edge_copy.live_project(ROOT)
+
+    assert snapshot.volumes == {kept}
 
 
 def entrypoint_addresses(text: str) -> dict[str, str]:
@@ -408,7 +442,7 @@ def test_the_network_rewrite_applies_with_a_project_and_never_without(tmp_path, 
 
     text = (copy / "compose.yaml").read_text()
     if project:
-        assert fixed_networks(text) == {"mcp": f"{project}_mcp"}
+        assert fixed_names(text) == {"mcp": f"{project}_mcp"}
     else:
         assert text == (repository / "compose.yaml").read_text()
 
