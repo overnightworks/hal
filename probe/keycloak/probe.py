@@ -2392,7 +2392,7 @@ class Probe:
         expect(stand.hal("backup", "--init").returncode == 0, "hal backup --init failed")
 
         baseline = stand.apply()
-        expect(baseline.failure is None, f"the first realm step failed: {baseline.failure}")
+        expect(isinstance(baseline, reconcile.RealmApplied), f"the first realm step: {baseline}")
         snapshots = stand.hal("restore", "--list").stdout
         expect(
             [call[: len(BACKUP_ASKED)] for call in stand.asked]
@@ -2400,13 +2400,13 @@ class Probe:
             f"it asked {stand.asked}",
         )
         expect(
-            stand.asked[-1] == [*RESTORE_TEST_ASKED, baseline.applied.snapshot],
+            stand.asked[-1] == [*RESTORE_TEST_ASKED, baseline.snapshot],
             f"the restore test was asked {stand.asked[-1]}, not for the snapshot just made",
         )
         expect(stand.plan().settled, "the step is planned again right after it finished")
         expect(stand.plan().action is reconcile.RealmAction.NOTHING, "a settled realm plans work")
         asked = len(stand.asked)
-        expect(stand.apply() == reconcile.StepResult(), "a settled realm's step did something")
+        expect(stand.apply() is None, "a settled realm's step did something")
         expect(stand.asked == stand.asked[:asked], "a settled realm's step called hal")
         expect(stand.hal("restore", "--list").stdout == snapshots, "a quiet step made a snapshot")
         self.held(
@@ -2426,7 +2426,7 @@ class Probe:
         expect("keycloak/realm.yaml changed" in plan.why, f"the plan says {plan.why!r}")
         console_made = self.make_console_objects()
         applied = stand.apply()
-        expect(applied.failure is None, f"the changed realm step failed: {applied.failure}")
+        expect(isinstance(applied, reconcile.RealmApplied), f"the changed realm step: {applied}")
         (row,) = result_rows(applied)
         for line in (row.fact, *row.details):
             self.say(f"realm step: {line}")
@@ -2462,7 +2462,7 @@ class Probe:
         )
         plan = stand.plan()
         expect("import checksum is not the recorded one" in plan.why, f"the plan says {plan.why!r}")
-        expect(stand.apply().failure is None, "the step after a restored database failed")
+        expect(isinstance(stand.apply(), reconcile.RealmApplied), "the step after a restore failed")
         expect(stand.plan().settled, "the checksum was not recorded again")
         self.held(
             "12c",
@@ -2477,12 +2477,10 @@ class Probe:
         )
         stand.edit_realm((CHANGED_LIFESPAN_SETTING, LIFESPAN_SETTING))
         reset = stand.apply()
-        expect(
-            reset.failure is None, f"the step that resets a console change failed: {reset.failure}"
-        )
+        expect(isinstance(reset, reconcile.RealmApplied), f"the step that resets: {reset}")
         removal = (
             f"{REALM}: removal protocol mapper scope groups/{STEP_CONSOLE_MAPPER}: "
-            f"reset to the file, pre-apply snapshot {reset.applied.snapshot[:SNAPSHOT_SHORT_ID]}"
+            f"reset to the file, pre-apply snapshot {reset.snapshot[:SNAPSHOT_SHORT_ID]}"
         )
         expect(removal in result_rows(reset)[0].details, "the reset is not listed as such")
         self.held(
@@ -2492,28 +2490,15 @@ class Probe:
         )
 
         stand.edit_realm(append=UNDEFINED_VARIABLE_LINE)
-        asked = len(stand.asked)
-        failed = stand.apply()
-        named = re.search(r"pre-apply snapshot (\S+),", failed.failure or "")
-        expect(
-            named is not None and "Restore Keycloak" in failed.failure,
-            f"a failed config-cli ends as {failed.failure!r}",
-        )
-        expect(
-            stand.asked[asked:] == [BACKUP_ASKED, [*RESTORE_TEST_ASKED, named[1]]],
-            f"the failed step asked hal {stand.asked[asked:]}",
-        )
-        expect(
-            stand.plan().action is reconcile.RealmAction.RUN, "the failed step is not planned again"
-        )
+        self.failed_realm_step_shows_its_way_back(stand)
         self.held(
             "12e",
-            "a config-cli that fails (an undefined variable) ends the step partial, "
-            'names the snapshot and "Restore Keycloak", and the next plan repeats it (cell 11)',
+            "a config-cli that fails (an undefined variable) ends the step partial, shows the "
+            'proved snapshot and "Restore Keycloak" under its red row, and is planned again',
         )
 
         stand.edit_realm((UNDEFINED_VARIABLE_LINE, ""))
-        expect(stand.apply().failure is None, "the step after the repaired realm failed")
+        expect(isinstance(stand.apply(), reconcile.RealmApplied), "the repaired step failed")
         expect(stand.plan().settled, "the repaired realm is not recorded")
         entrypoint = stand.repository / "keycloak" / ENTRYPOINT_FILE
         original = entrypoint.read_text()
@@ -2526,6 +2511,21 @@ class Probe:
             "12f",
             "proves the entrypoint trigger: a changed entrypoint.sh that config-cli binds "
             "plans the step",
+        )
+
+    def failed_realm_step_shows_its_way_back(self, stand: RealmStepStand) -> None:
+        """Proof 12e: the red row of a config-cli that fails shows the snapshot it proved."""
+        failed = stand.apply()
+        (row,) = result_rows(failed)
+        self.say(" | ".join(("failed realm step:", row.fact, *row.details)))
+        proved = stand.asked[-1][-1]
+        expect(
+            isinstance(failed, reconcile.RealmFailed)
+            and row.details[0] == f"pre-apply snapshot {proved[:SNAPSHOT_SHORT_ID]} · proven"
+            and "Restore Keycloak" in row.details[1]
+            and stand.asked[-2:] == [BACKUP_ASKED, [*RESTORE_TEST_ASKED, proved]]
+            and stand.plan().action is reconcile.RealmAction.RUN,
+            f"the failed step shows {row}, asked hal {stand.asked[-2:]}",
         )
 
     def make_console_objects(self) -> list[str]:
@@ -2550,7 +2550,7 @@ class Probe:
         ]
 
     def step_lists_what_is_only_in_keycloak(
-        self, step: reconcile.StepResult, lines: tuple[str, ...], made: list[str]
+        self, step: reconcile.RealmApplied, lines: tuple[str, ...], made: list[str]
     ) -> None:
         """#248, cells 1 and 3: the console objects survive the step, are listed and have no
         removal line; the step carries the kinds that cannot be read."""
@@ -2569,7 +2569,7 @@ class Probe:
             ),
             "a console object did not survive the step",
         )
-        unread = step.applied.leftovers.unread
+        unread = step.leftovers.unread if isinstance(step.leftovers, reconcile.Leftovers) else ()
         expect(
             "defaultGroups" in unread and "workflows" in unread,
             f"the unread kinds are {unread}",

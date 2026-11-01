@@ -20,7 +20,7 @@ from support.stack_core import tracked
 from hal.stack import compose, core, switches
 from hal.stack import realm as realm_lines
 from hal.stack.realm import observe, reconcile
-from hal.stack.realm.reconcile import RealmAction, RealmPlan, RealmRestart
+from hal.stack.realm.reconcile import RealmAction, RealmPlan, RealmRestart, Stage
 
 REPOSITORY = Path(__file__).resolve().parents[1]
 SNAPSHOT = "ab12cd34"
@@ -29,8 +29,13 @@ GROUP = observe.GROUP.name
 
 
 def applied(result: reconcile.StepResult) -> reconcile.RealmApplied:
-    assert result.applied is not None
-    return result.applied
+    assert isinstance(result, reconcile.RealmApplied)
+    return result
+
+
+def failed(result: reconcile.StepResult) -> reconcile.RealmFailed:
+    assert isinstance(result, reconcile.RealmFailed)
+    return result
 
 
 def change_lines(result: reconcile.StepResult) -> list[str]:
@@ -39,7 +44,7 @@ def change_lines(result: reconcile.StepResult) -> list[str]:
 
 def leftovers(result: reconcile.StepResult) -> reconcile.Leftovers:
     found = applied(result).leftovers
-    assert found is not None
+    assert isinstance(found, reconcile.Leftovers)
     return found
 
 
@@ -192,7 +197,7 @@ def test_nothing_changed_since_the_last_apply_plans_no_step_and_no_line(
     world: World, tmp_path: Path, moved: bool, gate: core.Gate
 ) -> None:
     """Cells 1 and 4: a second apply does nothing, wherever it is checked out."""
-    assert world.applied_once().failure is None
+    assert isinstance(world.applied_once(), reconcile.RealmApplied)
     if moved:
         record, world = world.record, World(tmp_path / "moved")
         world.record = record
@@ -285,7 +290,7 @@ def test_a_keycloak_that_cannot_be_read_is_planned_as_a_skipped_step(world: Worl
 
     assert (plan.action, plan.settled) == (RealmAction.UNREADABLE, False)
     assert plan.error == "checksums broke"
-    assert (result.skipped, result.failure) == ("checksums broke", None)
+    assert result == reconcile.RealmSkipped("checksums broke")
     assert "backup" not in world.events
 
 
@@ -303,7 +308,6 @@ def test_the_step_backs_up_proves_observes_applies_observes_and_lists_the_change
     assert world.events == [
         "backup", "restore test", "observe", "config-cli", "observe", "checksums",
     ]  # fmt: skip
-    assert result.failure is None
     assert (applied(result).snapshot, applied(result).seconds) == (SNAPSHOT, 0.0)
     assert change_lines(result) == ["hallucinai: addition group operators (2 members)"]
 
@@ -318,7 +322,6 @@ def test_a_removal_is_printed_as_reset_to_the_file_with_the_snapshot(world: Worl
 
     result = world.step()
 
-    assert result.failure is None
     assert [(change.kind, change.identity) for change in applied(result).changes] == [
         (realm_lines.Kind.REMOVAL, "console-made")
     ]
@@ -331,7 +334,7 @@ def test_a_failed_backup_applies_nothing(world: World) -> None:
     result = world.step()
 
     assert world.events == ["backup"]
-    assert result.failure == "realm: backup broke; nothing applied"
+    assert failed(result) == reconcile.RealmFailed("backup broke", Stage.BEFORE, None, False)
 
 
 def test_a_failed_restore_test_applies_nothing_and_names_the_snapshot_as_unproven(
@@ -343,8 +346,8 @@ def test_a_failed_restore_test_applies_nothing_and_names_the_snapshot_as_unprove
     result = world.step()
 
     assert "config-cli" not in world.events
-    assert result.failure == (
-        f"realm: restore test broke; nothing applied; pre-apply snapshot {SNAPSHOT} is unproven"
+    assert failed(result) == reconcile.RealmFailed(
+        "restore test broke", Stage.BEFORE, SNAPSHOT, False
     )
 
 
@@ -355,9 +358,7 @@ def test_an_observer_that_fails_before_applies_nothing(world: World) -> None:
     result = world.step()
 
     assert "config-cli" not in world.events
-    assert result.failure == (
-        f"realm: observe broke; nothing applied; pre-apply snapshot {SNAPSHOT} is proven"
-    )
+    assert failed(result) == reconcile.RealmFailed("observe broke", Stage.BEFORE, SNAPSHOT, True)
 
 
 def test_a_failed_config_cli_is_partial_names_the_way_back_and_is_planned_again(
@@ -368,12 +369,9 @@ def test_a_failed_config_cli_is_partial_names_the_way_back_and_is_planned_again(
 
     result = world.step()
 
-    assert result.failure == (
-        "realm: config-cli broke; the realm may be partly applied; "
-        f'pre-apply snapshot {SNAPSHOT}, the way back is docs/backup.md "Restore Keycloak"; '
-        "the next run repeats the step"
+    assert failed(result) == reconcile.RealmFailed(
+        "config-cli broke", Stage.APPLYING, SNAPSHOT, True
     )
-    assert result.applied is None  # cell 5: a failed step lists nothing
     assert world.plan().action is RealmAction.RUN
 
 
@@ -385,8 +383,7 @@ def test_a_checksum_read_that_fails_after_config_cli_is_partial_and_not_recorded
 
     result = world.step()
 
-    assert "the realm was applied but not observed" in (result.failure or "")
-    assert SNAPSHOT in (result.failure or "")
+    assert failed(result) == reconcile.RealmFailed("checksums broke", Stage.APPLIED, SNAPSHOT, True)
     world.failing.clear()
     assert world.plan().action is RealmAction.RUN
 
@@ -399,9 +396,11 @@ def test_a_marker_set_since_the_plan_keeps_config_cli_from_running(world: World)
     result = world.run(plan, mark=None)
 
     assert "config-cli" not in world.events
-    assert result.failure == (
-        f"realm: {reconcile.REALM_UNIT} was switched off meanwhile; config-cli is not run; "
-        f"nothing applied; pre-apply snapshot {SNAPSHOT} is proven"
+    assert failed(result) == reconcile.RealmFailed(
+        f"{reconcile.REALM_UNIT} was switched off meanwhile; config-cli is not run",
+        Stage.BEFORE,
+        SNAPSHOT,
+        True,
     )
 
 
@@ -411,7 +410,7 @@ def test_an_interrupt_during_the_backup_applies_nothing(world: World) -> None:
 
     result = world.step()
 
-    assert result.failure == "realm: interrupted; nothing applied"
+    assert failed(result) == reconcile.RealmFailed("interrupted", Stage.BEFORE, None, False)
     assert "config-cli" not in world.events
 
 
@@ -423,8 +422,7 @@ def test_an_interrupt_during_config_cli_names_the_snapshot_and_the_realm_may_be_
 
     result = world.step()
 
-    assert "interrupted; the realm may be partly applied" in (result.failure or "")
-    assert SNAPSHOT in (result.failure or "")
+    assert failed(result) == reconcile.RealmFailed("interrupted", Stage.APPLYING, SNAPSHOT, True)
     assert world.plan().action is RealmAction.RUN
 
 
@@ -437,7 +435,7 @@ def test_a_config_cli_container_still_running_refuses_the_step_before_the_backup
     result = world.step()
 
     assert world.events == []
-    assert result.failure == "realm: a config-cli container is still running; nothing applied"
+    assert failed(result).cause == "a config-cli container is still running"
 
 
 def test_the_record_is_emptied_before_config_cli_and_filled_after_the_observe(
@@ -560,7 +558,7 @@ def test_a_backup_that_names_no_snapshot_is_a_failure() -> None:
 
 
 def test_the_installed_backup_is_the_checkouts_own_hal(tmp_path: Path) -> None:
-    backup = reconcile.Backup.installed(tmp_path, lambda _line: None)
+    backup = reconcile.Backup.installed(tmp_path, lambda _grace: None)
 
     assert backup.command == (str(tmp_path / ".venv" / "bin" / "hal"),)
 
@@ -570,13 +568,13 @@ def test_the_installed_backup_says_the_waiting_line_through_the_line_it_was_give
 ) -> None:
     """Cell 7: the waiting line leaves through the channel that carries the step's prefix."""
     monkeypatch.setattr(reconcile, "STOP_GRACE_SECONDS", 0.2)
-    said: list[str] = []
+    said: list[float] = []
     backup = reconcile.Backup.installed(tmp_path, said.append)
 
     with pytest.raises(compose.ComposeError, match="took longer than 1s"):
         backup.run(["sh", "-c", WAITS], 1)
 
-    assert said == ["realm: waiting up to 0.2s for hal to clean up"]
+    assert said == [0.2]
 
 
 def test_the_entry_of_a_finished_step_survives_a_json_round_trip(world: World) -> None:
@@ -606,13 +604,13 @@ def test_a_settled_plan_runs_nothing_and_keeps_the_record(world: World, old_hash
         world.record.write(name, old, {name})
         plan = world.plan()
         assert (plan.action, plan.why) == (RealmAction.RUN, "config-cli's definition changed")
-        assert world.run(plan).failure is None
+        assert isinstance(world.run(plan), reconcile.RealmApplied)
     recorded = world.record.path.read_bytes()
     plan = world.plan()
     world.events.clear()
     result = world.run(plan)
 
-    assert (plan.action, result, world.events) == (RealmAction.NOTHING, reconcile.StepResult(), [])
+    assert (plan.action, result, world.events) == (RealmAction.NOTHING, None, [])
     assert world.record.path.read_bytes() == recorded
 
 
@@ -629,7 +627,7 @@ def test_a_bind_resolution_that_fails_is_a_partial_line_not_a_traceback(
 
     result = world.run(plan)
 
-    assert result.failure == ("realm: cannot read keycloak (Permission denied); nothing applied")
+    assert failed(result).cause == "cannot read keycloak (Permission denied)"
     assert world.events == []
 
 
@@ -646,10 +644,8 @@ def test_a_record_that_cannot_be_written_keeps_the_changes_and_says_it_repeats(
     result = world.step()
 
     assert change_lines(result) == ["hallucinai: addition group operators (2 members)"]
-    assert applied(result).leftovers is None
-    assert result.failure == (
-        "realm: applied and observed, but the record could not be written "
-        "(cannot write applied.json (Permission denied)); the next run repeats the step"
+    assert applied(result).leftovers == reconcile.NotRecorded(
+        "cannot write applied.json (Permission denied)"
     )
 
 
@@ -676,7 +672,7 @@ def test_an_object_made_in_the_console_is_listed_and_has_no_removal_line(
 
     result = world.step()
 
-    assert result.failure is None
+    assert isinstance(result, reconcile.RealmApplied)
     assert sorted(listed(result)) == sorted([f"{kind} {identity}", f"{GROUP} console-made"])
     assert applied(result).changes == ()
 
@@ -760,7 +756,7 @@ def test_realm_files_that_cannot_be_read_leave_the_step_as_it_ended(
     world.write_file("realm.yaml", "realm: hallucinai\n")
     expected = world.step()
 
-    assert without_the_list.failure is None
+    assert isinstance(without_the_list, reconcile.RealmApplied)
     assert leftovers(without_the_list).files_read is False
     assert applied(without_the_list).changes == applied(expected).changes
 
@@ -770,7 +766,7 @@ def test_a_file_in_an_unreadable_encoding_leaves_the_step_as_it_ended(world: Wor
 
     result = world.step()
 
-    assert result.failure is None
+    assert isinstance(result, reconcile.RealmApplied)
     assert leftovers(result).files_read is False
 
 
@@ -781,7 +777,7 @@ def test_a_yaml_scalar_the_loader_cannot_build_still_records_and_says_unreadable
 
     result = world.step()
 
-    assert result.failure is None
+    assert isinstance(result, reconcile.RealmApplied)
     assert leftovers(result).files_read is False
     assert world.plan().settled
 
@@ -793,7 +789,7 @@ def test_a_key_left_empty_in_a_realm_file_still_records_and_lists(world: World) 
 
     result = world.step()
 
-    assert result.failure is None
+    assert isinstance(result, reconcile.RealmApplied)
     assert listed(result) == [f"{GROUP} /console"]
     assert world.plan().settled
 
@@ -805,7 +801,7 @@ def test_a_realm_the_files_name_that_was_not_observed_is_one_line_not_a_tracebac
 
     result = world.step()
 
-    assert result.failure is None
+    assert isinstance(result, reconcile.RealmApplied)
     assert leftovers(result).absent == ("elsewhere",)
 
 
@@ -816,8 +812,7 @@ def test_a_failed_step_lists_nothing_only_in_keycloak(world: World) -> None:
 
     result = world.step()
 
-    assert result.failure is not None
-    assert result.applied is None
+    assert isinstance(result, reconcile.RealmFailed)
 
 
 # --- hal backup is stopped, not killed --------------------------------------------------------
@@ -859,7 +854,7 @@ def interrupted(*_):
 signal.signal(signal.SIGINT, interrupted)
 from hal.stack.realm import observe, reconcile
 try:
-    reconcile.run_edge_backup(sys.argv[2:], 600, say=print)
+    reconcile.run_edge_backup(sys.argv[2:], 600, waiting=print)
 except KeyboardInterrupt:
     print("KeyboardInterrupt reached the step")
 """
@@ -876,7 +871,7 @@ def test_a_backup_that_runs_past_its_timeout_gets_sigterm_and_time_to_clean_up(
         reconcile.run_edge_backup(
             [sys.executable, "-c", CLEANS_UP_ON_SIGTERM, str(marker), str(release)],
             3,
-            say=lambda _line: None,
+            waiting=lambda _grace: None,
         )
 
     assert marker.read_text() == "cleaned\n"
@@ -889,7 +884,7 @@ def test_a_backup_that_ignores_sigterm_still_ends_in_the_timeout_failure(
 
     with pytest.raises(compose.ComposeError, match="took longer than 3s"):
         reconcile.run_edge_backup(
-            [sys.executable, "-c", IGNORES_SIGTERM], 3, say=lambda _line: None
+            [sys.executable, "-c", IGNORES_SIGTERM], 3, waiting=lambda _grace: None
         )
 
 
@@ -904,7 +899,9 @@ def test_a_grandchild_that_holds_the_output_open_cannot_hang_the_step(
     try:
         started = time.monotonic()
         with pytest.raises(compose.ComposeError, match="took longer than 1s"):
-            reconcile.run_edge_backup(["sh", "-c", leaves_a_grandchild], 1, say=lambda _line: None)
+            reconcile.run_edge_backup(
+                ["sh", "-c", leaves_a_grandchild], 1, waiting=lambda _grace: None
+            )
         assert time.monotonic() - started < 10
     finally:
         os.kill(int(escaped.read_text()), signal.SIGKILL)
@@ -971,7 +968,7 @@ def test_ctrl_c_during_the_grace_does_not_cut_the_clean_up_short(tmp_path: Path)
 
 def test_a_finished_backup_returns_its_exit_code_and_output() -> None:
     result = reconcile.run_edge_backup(
-        ["sh", "-c", "echo out; echo err >&2; exit 3"], 30, say=lambda _line: None
+        ["sh", "-c", "echo out; echo err >&2; exit 3"], 30, waiting=lambda _grace: None
     )
 
     assert (result.returncode, result.stdout, result.stderr) == (3, "out\n", "err\n")
