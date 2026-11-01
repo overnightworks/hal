@@ -3,6 +3,6 @@ agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
 role = "builder"
 base = "4d0ff90e7d7db481241949eadd210d9c08eb2472"
 branch = "claude/issue-842-a-probe-removes-its-repository-copy-venv"
-scope = ["probe/agent-service/egress.py", "probe/agent-service/image.py", "probe/edge_copy.py", "probe/switches/built_image.py", "probe/switches/probe.py", "tests/test_probe_run.py"]
+scope = ["probe/agent-service/egress.py", "probe/agent-service/image.py", "probe/edge_copy.py", "probe/switches/built_image.py", "probe/switches/probe.py", "tests/conftest.py", "tests/test_keycloak_probe.py", "tests/test_probe_run.py"]
 opened_commit = "b3bc1747da741eb40dbe827ce1f356d5d57e403c"
 whole_reason = "One loop changes; its two callers' docstrings state the change in the same commit, and the tests are its proof."
