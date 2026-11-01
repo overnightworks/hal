@@ -1,8 +1,0 @@
-claim_id = "d3a7c114ef234d20a446bd789a017788"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "4d0ff90e7d7db481241949eadd210d9c08eb2472"
-branch = "claude/issue-840-a-hidden-token-paste-with-a-line-break-i"
-scope = ["agent-service/setup", "docs/agent-service.md", "docs/design/hal-output.html", "docs/home.md", "scripts/system-proof/terminal.exp", "src/hal/output/__init__.py", "src/hal/output/hidden_paste.py", "src/hal/workstation/secrets_manifest.toml", "src/hal/workstation/secrets_setup.py", "tests/support/agent_service_setup.py", "tests/support/workstation_secrets_support.py", "tests/test_agent_service_setup.py", "tests/test_hal_output_hidden_paste.py", "tests/test_workstation_app_secrets.py", "tests/test_workstation_secrets_setup.py"]
-opened_commit = "f4d6763b2d928ef83cbd22830b89b9ad0c73f24d"
-whole_reason = "The owner lands with both callers: a caller left on getpass keeps writing cut tokens, and only its two callers prove the owner's API."
