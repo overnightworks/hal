@@ -739,7 +739,7 @@ Type <span class="w">yes</span> to set up 1 open row: yes
     [ ] Generate token, copy the value
     Enter opens the page in your browser:
 <span class="d">    opened github.com/settings/personal-access-tokens/new?…</span>
-    paste the token (hidden, empty skips):
+    paste the token, then an empty line (hidden, empty skips):
 <span class="g">  ✓</span> github/fleet-admin  verified   <span class="d">~/.secrets/github/fleet-admin (600)</span>
 <span class="g">  ✓</span> opentofu/passphrase  generated  <span class="d">~/.secrets/opentofu/passphrase (600) · never shown</span>
 <span class="g">  ✓</span> secrets         stored
@@ -749,9 +749,9 @@ Type <span class="w">yes</span> to set up 1 open row: yes
       </figure>
       <figure>
         <figcaption><span class="tag new">neu S2g</span> falsch eingefügt, dann leer gelassen</figcaption>
-<pre class="term">    paste the token (hidden, empty skips):
+<pre class="term">    paste the token, then an empty line (hidden, empty skips):
 <span class="r">  ✗</span> cloudflare/fleet-write  rejected  <span class="d">Cloudflare answers 403 · paste again or leave empty</span>
-    paste the token (hidden, empty skips):
+    paste the token, then an empty line (hidden, empty skips):
 <span class="d">  · cloudflare/fleet-write  skipped    nothing stored</span>
 <span class="y">  !</span> secrets         1 open         <span class="d">cloudflare/fleet-write</span>
 <span class="rw">error:</span> setup stopped at secrets · 1 secret still open
@@ -765,7 +765,7 @@ Type <span class="w">yes</span> to set up 1 open row: yes
     create: Calls › TURN keys › Create, copy the key id
     Enter opens the page in your browser:
 <span class="y">    no browser opened · open it yourself: https://dash.cloudflare.com/</span>
-    paste the token (hidden, empty skips):
+    paste the token, then an empty line (hidden, empty skips):
 <span class="g">  ✓</span> turn/key        stored         <span class="d">not verified · ~/.secrets/turn/key (644)</span></pre>
       </figure>
       <figure>
@@ -799,7 +799,7 @@ Type <span class="w">yes</span> to set up 1 open row: yes
       </figure>
       <figure>
         <figcaption><span class="tag fail">neu S2g, kaputt</span> Ctrl-C beim Einfügen</figcaption>
-<pre class="term">    paste the token (hidden, empty skips): ^C
+<pre class="term">    paste the token, then an empty line (hidden, empty skips): ^C
 <span class="rw">error:</span> interrupted at cloudflare/fleet-write · no file half written
 <span class="c">next:</span> hal setup</pre>
         <p class="was">heute: <code>abgebrochen; keine Datei halb geschrieben. Weiter mit: hal setup --apply</code></p>
@@ -1426,7 +1426,7 @@ Type <span class="w">yes</span> to reopen the tunnel: yes
     [ ] Continue to summary › Create Token, copy the value
     Enter opens the page in your browser:
 <span class="d">    opened dash.cloudflare.com/profile/api-tokens</span>
-    paste the token (hidden, empty skips):
+    paste the token, then an empty line (hidden, empty skips):
 <span class="g">  ✓</span> cloudflare/fleet-write  verified   <span class="d">~/.secrets/cloudflare/fleet-write (600)</span></pre>
       <p class="was">heute: <code>== cloudflare/fleet-write (Token, fehlt)</code> … <code>Token einfügen (unsichtbar; leer überspringt):</code></p>
     </figure>
