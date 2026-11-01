@@ -1,0 +1,8 @@
+claim_id = "81aa2291d24a4d3d8be8a028152d1d4d"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "35f2b52c910ed3cc62b8f23704cf928c45e5ece8"
+branch = "claude/issue-780-a5-2c-a-failed-realm-step"
+scope = ["docs/design/hal-output.html", "docs/keycloak.md", "probe/keycloak/probe.py", "quality/baseline.toml", "src/hal/stack/apply.py", "src/hal/stack/realm/reconcile.py", "src/hal/stack/result_rows.py", "tests/test_stack_apply.py", "tests/test_stack_realm_reconcile.py", "tests/test_stack_result_rows.py"]
+opened_commit = "223414bb815aaaf919c4b65faad88a60396d4a76"
+whole_reason = "The typed failure removes the text that apply.py, the probe's proof 12e, the tests and docs/keycloak.md read today, so the three production files, their tests, the probe and the doc and picture pins of that text land in one commit."
