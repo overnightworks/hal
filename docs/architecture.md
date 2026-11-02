@@ -277,7 +277,7 @@ plan prints one row per kind, without a heading, above `core`: `+ legal  2 new p
 `yes`, before any unit switches, it writes each changed page (a temporary file, mode 0644, renamed over the page)
 and prints `✓ legal  pages written` naming the pages whose bytes were written, `✓ legal  record written` for pages
 that gained only their record. Without an enabled `legal` unit there is no step and no line. A refusal comes before
-the question (exit 2) and changes nothing; a failed write is `✗ legal  not written` with the path and the reason, then
+the question (exit 3) and changes nothing; a failed write is `✗ legal  not written` with the path and the reason, then
 partial with no unit switched (exit 3). A page goes live only that way, and a
 wrong text is taken back by the next change of the text: there is no override.
 

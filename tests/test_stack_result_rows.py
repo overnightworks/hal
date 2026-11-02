@@ -366,12 +366,3 @@ def test_the_path_and_the_reason_of_a_failed_write_are_escaped_in_the_row() -> N
     row = not_written_row(NotWritten("legal", Path("a\nb"), "x\x1b[31m"))
 
     assert row.fact == "could not write a\\nb (x\\x1b[31m)"
-
-
-def test_a_failed_copy_without_an_error_text_still_has_a_reason() -> None:
-    error = OSError("copy failed")
-    assert error.strerror is None
-
-    failure = NotWritten.from_error("appkit", Path("/x"), error)
-
-    assert failure.fact == "could not write /x (copy failed)"

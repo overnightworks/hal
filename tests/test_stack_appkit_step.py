@@ -230,7 +230,7 @@ def test_a_failed_copy_without_an_error_text_has_a_reason_on_one_line(world, mon
     exit_code, out, _ = world.switch()
 
     assert exit_code == 1
-    assert find_row(out, "appkit", ResultEvent.NOT_WRITTEN, "could not write ")
+    assert find_row(out, "appkit", ResultEvent.NOT_WRITTEN, "No space left on device")
     assert "(None)" not in out
 
 

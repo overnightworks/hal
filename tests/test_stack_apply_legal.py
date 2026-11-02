@@ -478,6 +478,41 @@ def test_a_write_that_fails_is_partial_and_switches_no_unit(world):
     assert world.scripted.changing_verbs() == []
 
 
+@pytest.mark.parametrize("failing", ["copy", "removal"])
+def test_a_failed_appkit_write_stops_the_run_before_legal_writes_anything(world, failing):
+    served = appkit_step.served_directories(world.repository)[0]
+    if failing == "removal":
+        (served.parent / "appkit-0.0.1").mkdir()
+    else:
+        shutil.rmtree(served)
+    served.parent.chmod(0o500)
+    try:
+        exit_code, out, _ = world.switch()
+    finally:
+        served.parent.chmod(0o700)
+
+    assert exit_code == 1
+    assert find_row(out, "appkit", ResultEvent.NOT_WRITTEN, "could not write ")
+    assert not find_row(out, "legal", ResultEvent.PAGES_WRITTEN)
+    assert not re.search(r"[✓✗] legal", plain(out))
+    assert world.built_names() == [".gitkeep"]
+    assert world.scripted.changing_verbs() == []
+
+
+def test_a_failed_legal_write_keeps_the_appkit_row_that_was_written_before(world):
+    for target in appkit_step.served_directories(world.repository):
+        shutil.rmtree(target)
+    world.built.chmod(0o500)
+    try:
+        _, out, _ = world.switch()
+    finally:
+        world.built.chmod(0o700)
+
+    assert find_row(out, "appkit", ResultEvent.FILES_WRITTEN)
+    assert find_row(out, "legal", ResultEvent.NOT_WRITTEN)
+    assert not re.search(r"✓ legal", plain(out))
+
+
 def test_a_failed_record_write_names_the_record_and_the_next_apply_writes_it(world):
     record = world.state / RECORD_FILE
     record.mkdir(parents=True)
