@@ -1,8 +1,0 @@
-claim_id = "7f51d9cf05e44e36999cdf0681a38988"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "1e710eff3cd53f83260e919b6ff8260ecf2839e8"
-branch = "claude/issue-880-s7c-2b-typed-fields"
-scope = ["docs/backup.md", "docs/design/hal-output.html", "src/hal/backup/runner.py", "src/hal/output/__init__.py", "tests/test_hal_backup.py", "tests/test_hal_log_events.py"]
-opened_commit = "87227ad3395e92c9feedc0b849b2bedb9443b764"
-whole_reason = "One carrier with its one reader and its one producer: the two production files, their tests, the doc sentence and the picture lines move in one commit."
