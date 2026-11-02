@@ -2,7 +2,8 @@
 """agent-service/setup: the agent service's image, login folders, login token, keys and credential.
 
 Runs in the operator's terminal (`hal apply` asks first). Every step checks its own done-state
-first: a second run changes nothing. The token is read without echo and exists only in
+first: a second run changes nothing. The token is read without echo, its lines joined up to an
+empty line (hal.output.hidden_paste), and exists only in
 ~/.secrets/agent-service/claude/token; it is never printed and never on a command line.
 
     agent-service/setup           fix what is missing: build the image, make the folders (0700),
@@ -24,7 +25,7 @@ that LiteLLM's reader would refuse and leaves it as it is. It is never printed.
 
 The token rules equal the service's reader (agent_runtime/secret_file.py): a regular file of at
 most 16 KiB that group and others cannot touch, holding one printable line without whitespace
-that is neither JSON nor an API key. A pasted line is judged as
+that is neither JSON nor an API key. A paste is judged as
 the exact bytes to be written, with those rules, before anything is created; a refused paste
 leaves the old token as it was. Every write goes through a descriptor of ~/.secrets/agent-service/
 claude, reached without following a link, and holds a lock on it, so a link cannot send the paste
@@ -37,13 +38,11 @@ import argparse
 import contextlib
 import errno
 import fcntl
-import getpass
 import json
 import os
 import stat
 import subprocess
 import sys
-import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum, IntEnum
@@ -60,6 +59,16 @@ from secret_entry import (
 from signing_key import SIGNING_DIRECTORY, SigningKey, run_openssl
 
 REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO / "src"))  # the hidden paste has one owner: hal.output.hidden_paste
+
+from hal.output.hidden_paste import (  # noqa: E402
+    END_HINT,
+    PasteRefused,
+    TerminalCannotHide,
+    TerminalNotRestored,
+    read_hidden_paste,
+)
+
 SERVICE = "agent-service"
 SERVICE_UID = 1000  # compose.yaml runs the service as 1000:1000, so it must own the login files
 DIRECTORY_MODE = 0o700
@@ -115,20 +124,15 @@ def run_command(command: list[str], timeout: int) -> subprocess.CompletedProcess
 
 
 def read_pasted_line(prompt: str) -> str:
-    """One line from the terminal without echo; no way to hide it is a failure, never a fallback."""
-    with warnings.catch_warnings():
-        warnings.simplefilter("error", getpass.GetPassWarning)
-        try:
-            return getpass.getpass(prompt)
-        except getpass.GetPassWarning as error:
-            raise StepFailure("the terminal cannot hide the paste; nothing was read") from error
-        except EOFError as error:
-            raise StepFailure(
-                "no token was pasted (the input ended); nothing was written"
-            ) from error
-        except UnicodeDecodeError:
-            # `from None`: the error would carry the pasted bytes into any traceback chain
-            raise StepFailure("the pasted line is not UTF-8 text; nothing was written") from None
+    """The paste from the terminal without echo; no way to hide it fails, never a fallback."""
+    try:
+        return read_hidden_paste(prompt)
+    except TerminalCannotHide as error:
+        raise StepFailure("the terminal cannot hide the paste; nothing was read") from error
+    except EOFError as error:
+        raise StepFailure("no token was pasted (the input ended); nothing was written") from error
+    except (PasteRefused, TerminalNotRestored) as error:
+        raise StepFailure(f"{error}; nothing was written") from error
 
 
 @dataclass(frozen=True)
@@ -184,12 +188,9 @@ def refusal_of_token_bytes(contents: bytes) -> str | None:
 
 def file_contents_of_paste(pasted: str) -> bytes:
     """The exact bytes a paste would become, or a refusal: nothing is created for a refused one."""
-    try:
-        contents = f"{pasted}\n".encode()
-    except UnicodeEncodeError as error:
-        raise StepFailure("the pasted line is not UTF-8 text; nothing was written") from error
+    contents = f"{pasted}\n".encode()
     if refusal := refusal_of_token_bytes(contents):
-        raise StepFailure(f"the pasted line {refusal}; nothing was written")
+        raise StepFailure(f"the paste {refusal}; nothing was written")
     return contents
 
 
@@ -384,10 +385,10 @@ class AgentServiceSetup:
         if reason:
             self.tools.say(reason)
         self.tools.say(
-            "run `claude setup-token` in another terminal and paste its token here; "
-            "nothing is shown"
+            "run `claude setup-token` in another terminal and paste its whole token here, "
+            f"{END_HINT}; nothing is shown"
         )
-        payload = file_contents_of_paste(self.tools.read_secret("token: ").strip())
+        payload = file_contents_of_paste(self.tools.read_secret(f"token, {END_HINT}: ").strip())
         self.swap_in(payload)
         self.pasted = True
 

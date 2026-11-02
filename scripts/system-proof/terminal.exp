@@ -34,7 +34,7 @@ expect {
         send -- [expr {[dict exists $answers $answer] ? [dict get $answers $answer] : "$answer\r"}]
         exp_continue
     }
-    -re {Enter opens the page in your browser: ?|paste the token \(hidden, empty skips\): ?} {
+    -re {Enter opens the page in your browser: ?|paste the token, then an empty line \(hidden, empty skips\): ?} {
         send -- "\r"
         exp_continue
     }

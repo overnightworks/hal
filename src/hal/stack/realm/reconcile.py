@@ -61,11 +61,10 @@ DEFINITION_KEY = "definition"  # the entry's key for `definition_digest` of conf
 BACKUP_SECONDS = 1800
 STOP_GRACE_SECONDS = 120  # what hal backup gets to remove its staging and restore container
 COLLECT_SECONDS = 5  # what the output of a killed hal backup gets before its pipes are closed
-RESTORE_GUIDE = 'docs/backup.md "Restore Keycloak"'
 _ERROR_LINE = re.compile(r"^error: (.+)$", re.MULTILINE)
 
 type Checksums = dict[str, dict[str, str]]  # realm -> import-checksum attribute -> value
-type Say = Callable[[str], None]  # says one line of the step, with `hal apply`'s prefix
+type Waiting = Callable[[float], None]  # told the seconds a stopped hal is given to clean up
 
 
 class RealmError(Exception):
@@ -242,7 +241,7 @@ def _why(reading: core.Reading, inputs: Inputs, observed: Checksums | None) -> s
 
 
 def run_edge_backup(
-    command: list[str], timeout: int, stdin: str | None = None, *, say: Say
+    command: list[str], timeout: int, stdin: str | None = None, *, waiting: Waiting
 ) -> subprocess.CompletedProcess[str]:
     """Run hal backup or hal restore to its end, in a session of its own, so the terminal's Ctrl-C
     reaches only this step. On the timeout or the first Ctrl-C it is stopped as the `hal-backup`
@@ -261,22 +260,22 @@ def run_edge_backup(
             try:
                 stdout, stderr = process.communicate(stdin, timeout)
             except subprocess.TimeoutExpired as error:
-                _stop(process, say)
+                _stop(process, waiting)
                 raise compose.ComposeError(
                     f"`{' '.join(command[:3])}` took longer than {timeout}s"
                 ) from error
             except KeyboardInterrupt:
-                _stop(process, say)
+                _stop(process, waiting)
                 raise
     except OSError as error:
         raise compose.ComposeError(f"cannot run {command[0]}: {error.strerror}") from error
     return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
 
 
-def _stop(process: subprocess.Popen[str], say: Say) -> None:
+def _stop(process: subprocess.Popen[str], waiting: Waiting) -> None:
     """SIGTERM to the group and a grace that no further Ctrl-C shortens; then the group is killed
     and the output collected for a bounded time, so a grandchild holding a pipe cannot hang."""
-    say(f"realm: waiting up to {STOP_GRACE_SECONDS:g}s for hal to clean up")
+    waiting(STOP_GRACE_SECONDS)
     _signal_group(process, signal.SIGTERM)
     deadline = time.monotonic() + STOP_GRACE_SECONDS
     while (remaining := deadline - time.monotonic()) > 0:
@@ -305,11 +304,11 @@ class Backup:
     run: compose.Runner
 
     @classmethod
-    def installed(cls, repository: Path, say: Say) -> "Backup":
-        """`say` carries the step's lines while a stopped hal is waited for."""
+    def installed(cls, repository: Path, waiting: Waiting) -> "Backup":
+        """`waiting` is told when a stopped hal is waited for."""
         return cls(
             (str(repository / ".venv" / "bin" / PROGRAM),),
-            partial(run_edge_backup, say=say),
+            partial(run_edge_backup, waiting=waiting),
         )
 
     def pre_apply(self) -> str:
@@ -381,23 +380,41 @@ class Leftovers:
 
 
 @dataclass(frozen=True)
+class NotRecorded:
+    """The record of an applied and observed step could not be written, so nothing is listed."""
+
+    error: str
+
+
+@dataclass(frozen=True)
 class RealmApplied:
-    """A step that ran config-cli and observed the result. `leftovers` is None when the record
-    could not be written, so nothing is listed; `seconds` is the whole step."""
+    """A step that ran config-cli and observed the result; `seconds` is the whole step."""
 
     snapshot: str
     seconds: float
     changes: tuple[realm_lines.Change, ...]
-    leftovers: Leftovers | None
+    leftovers: Leftovers | NotRecorded
 
 
 @dataclass(frozen=True)
-class StepResult:
-    """What the step applied, and why it ended partial when it did."""
+class RealmFailed:
+    """A step that ended partial: how far it got, the pre-apply snapshot once there is one, and
+    whether its restore test passed."""
 
-    applied: RealmApplied | None = None
-    failure: str | None = None
-    skipped: str | None = None  # why Keycloak could not be read, so the step did not act
+    cause: str
+    stage: Stage
+    snapshot: str | None
+    proven: bool
+
+
+@dataclass(frozen=True)
+class RealmSkipped:
+    """Keycloak could not be read, so the step did not act."""
+
+    reason: str
+
+
+type StepResult = RealmApplied | RealmFailed | RealmSkipped | None  # None: a settled plan
 
 
 @dataclass(frozen=True)
@@ -417,18 +434,18 @@ class Realm:
     def run(self, plan: RealmPlan) -> StepResult:
         """Alone decides whether the step acts: a settled plan has no effect."""
         if plan.settled:
-            return StepResult()
+            return None
         if plan.action is RealmAction.UNREADABLE:
-            return StepResult(skipped=plan.error)
+            return RealmSkipped(plan.error)
         progress = _Progress()
         try:
             return self._apply(plan, progress)
         except (RealmError, compose.ComposeError, core.CoreError, switches.SwitchError) as error:
-            return StepResult(failure=_failure(progress, str(error)))
+            return _failed(progress, str(error))
         except KeyboardInterrupt:
-            return StepResult(failure=_failure(progress, "interrupted"))
+            return _failed(progress, "interrupted")
 
-    def _apply(self, plan: RealmPlan, progress: _Progress) -> StepResult:
+    def _apply(self, plan: RealmPlan, progress: _Progress) -> RealmApplied:
         started = self.clock()
         followed = core.followed_services(self.config, self.checkout)
         self._refuse_while_config_cli_runs()
@@ -443,14 +460,11 @@ class Realm:
         try:
             self.record.write(CONFIG_CLI, {**plan.entry, **_flat(checksums)}, followed)
         except core.CoreError as error:
-            applied = RealmApplied(progress.snapshot, self.clock() - started, changes, None)
-            return StepResult(
-                applied,
-                f"realm: applied and observed, but the record could not be written ({error}); "
-                "the next run repeats the step",
+            return RealmApplied(
+                progress.snapshot, self.clock() - started, changes, NotRecorded(str(error))
             )
         seconds = self.clock() - started
-        return StepResult(RealmApplied(progress.snapshot, seconds, changes, self.leftovers(after)))
+        return RealmApplied(progress.snapshot, seconds, changes, self.leftovers(after))
 
     def leftovers(self, after: Inventory) -> Leftovers:
         """What the step leaves alone, said only once the step has succeeded. A realm file that
@@ -484,21 +498,8 @@ class Realm:
         progress.stage = Stage.APPLIED
 
 
-def _failure(progress: _Progress, cause: str) -> str:
-    snapshot = progress.snapshot
-    if progress.stage is Stage.BEFORE:
-        proof = "proven" if progress.proven else "unproven"
-        kept = f"; pre-apply snapshot {snapshot} is {proof}" if snapshot else ""
-        return f"realm: {cause}; nothing applied{kept}"
-    done = (
-        "the realm may be partly applied"
-        if progress.stage is Stage.APPLYING
-        else "the realm was applied but not observed"
-    )
-    return (
-        f"realm: {cause}; {done}; pre-apply snapshot {snapshot}, the way back is {RESTORE_GUIDE}; "
-        "the next run repeats the step"
-    )
+def _failed(progress: _Progress, cause: str) -> RealmFailed:
+    return RealmFailed(cause, progress.stage, progress.snapshot, progress.proven)
 
 
 # --- What exists only in Keycloak ---------------------------------------------------------------

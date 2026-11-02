@@ -5,14 +5,4 @@ set -eu
 
 checkout=$(dirname "$(dirname "$(readlink -f "$0")")")
 
-# Another project's activated environment would otherwise make uv sync into, or warn about, it.
-unset VIRTUAL_ENV UV_PROJECT_ENVIRONMENT
-
-if ! uv sync --locked --inexact --no-dev --quiet --project "$checkout"; then
-    echo "error: cannot sync the live checkout's dependencies" >&2
-    echo "next: uv sync --locked --project $checkout" >&2
-    exit 3
-fi
-
-# exec, not a child: hal stays the shell's direct child, so Ctrl-C reaches it alone.
-exec "$checkout/.venv/bin/hal" "$@"
+exec "$checkout/bin/hal-sync" "$checkout" "$checkout/.venv/bin/hal" "$@"

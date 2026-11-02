@@ -17,7 +17,6 @@ cannot hide the input, with an invalid manifest or after an unexpected error at 
 from __future__ import annotations
 
 import contextlib
-import getpass
 import json
 import os
 import secrets
@@ -29,7 +28,6 @@ import sys
 import urllib.error
 import urllib.request
 import uuid
-import warnings
 import webbrowser
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
@@ -40,6 +38,7 @@ from urllib.parse import quote, urlencode, urlsplit
 
 from hal.output import DETAIL_INDENT, Glyph, Row, Tone, write_detail, write_error, write_row
 from hal.output.command import Verb, command
+from hal.output.hidden_paste import END_HINT, PasteRefused, TerminalCannotHide, TerminalNotRestored, is_visible_ascii, read_hidden_paste
 from hal.workstation import secrets_view
 from hal.workstation.secrets_create import CreateCommand
 from hal.workstation.secrets_view import (
@@ -62,7 +61,7 @@ from hal.workstation.secrets_view import (
 from hal.workstation.layout import Layout
 
 OPEN_PROMPT = f"{DETAIL_INDENT}Enter opens the page in your browser: "
-PASTE_PROMPT = f"{DETAIL_INDENT}paste the token (hidden, empty skips): "
+PASTE_PROMPT = f"{DETAIL_INDENT}paste the token, {END_HINT} (hidden, empty skips): "
 OPENED = "opened"
 NO_BROWSER = "no browser opened · open it yourself:"
 UNSENDABLE_PASTE = "a token is visible ASCII only, without spaces; nothing checked"
@@ -227,7 +226,7 @@ class Boundaries:
 
 
 TERMINAL_BOUNDARIES = Boundaries(
-    Terminal(_both_ends_are_a_terminal, input, getpass.getpass, webbrowser.open), verify_token, os.fsync, run_command
+    Terminal(_both_ends_are_a_terminal, input, read_hidden_paste, webbrowser.open), verify_token, os.fsync, run_command
 )
 
 
@@ -450,25 +449,17 @@ def _store(entry: SecretEntry, layout: Layout, boundaries: Boundaries, value: st
     write_row(stored_row(entry))
 
 
-def _paste_unseen(terminal: Terminal) -> str:
-    """getpass falls back to echoed input when it cannot hide it, and only warns; here that warning ends the walk unread."""
-    with warnings.catch_warnings():
-        warnings.simplefilter("error", getpass.GetPassWarning)
-        return terminal.ask_hidden(PASTE_PROMPT).strip()
-
-
-def _is_visible_ascii(value: str) -> bool:
-    """Every token the providers issue is visible ASCII; anything else is a slip of the paste and is never sent."""
-    return all("!" <= character <= "~" for character in value)
-
-
 def _visible_paste(entry: SecretEntry, terminal: Terminal) -> str:
-    """The first pasted value that is visible ASCII; empty when the operator leaves the prompt empty."""
-    while value := _paste_unseen(terminal):
-        if _is_visible_ascii(value):
+    """The first pasted value that is visible ASCII, the only kind a provider issues; empty when the operator leaves the prompt empty."""
+    while True:
+        try:
+            value = terminal.ask_hidden(PASTE_PROMPT).strip()
+        except PasteRefused as refusal:
+            _write_entry_row(Glyph.FAILED, entry.name, WizardEvent.REJECTED, f"{refusal} · {PASTE_AGAIN}")
+            continue
+        if not value or is_visible_ascii(value):
             return value
         _write_entry_row(Glyph.FAILED, entry.name, WizardEvent.REJECTED, f"{UNSENDABLE_PASTE} · {PASTE_AGAIN}")
-    return ""
 
 
 def _skipped(entry: SecretEntry) -> None:
@@ -627,6 +618,10 @@ class EntryRefused(Exception):
         self.refusal = refusal
 
 
+class EntryNotRestored(Exception):
+    """The terminal could not be set back at one entry; nothing was kept."""
+
+
 class EntryFailed(Exception):
     """An unexpected error while one entry was set up; only its type is kept, because its message may quote a value.
 
@@ -670,8 +665,10 @@ def _set_up_or_fail(entry: SecretEntry, layout: Layout, boundaries: Boundaries, 
         raise EntryInterrupted(entry.name, Interruption.CTRL_C) from None
     except EOFError:
         raise EntryInterrupted(entry.name, Interruption.INPUT_ENDED) from None
-    except getpass.GetPassWarning:
+    except TerminalCannotHide:
         raise
+    except TerminalNotRestored as error:
+        raise EntryNotRestored(f"{error} · nothing stored for {entry.name}") from None
     except StoreRefused as refusal:
         raise EntryRefused(entry.name, refusal) from None
     except Exception as error:
@@ -754,12 +751,12 @@ def run_setup(layout: Layout, boundaries: Boundaries, now: datetime) -> WalkEnd:
             fresh_line=True,
         )
         return WalkEnd.ABORTED
-    except getpass.GetPassWarning:
-        write_error(
-            "this terminal cannot hide what you type · nothing read",
-            f"{SETUP_NEXT_STEP} in another terminal window",
-        )
+    except TerminalCannotHide:
+        write_error("this terminal cannot hide what you type · nothing read", f"{SETUP_NEXT_STEP} in another terminal window")
         return WalkEnd.CANNOT_HIDE_INPUT
+    except EntryNotRestored as failed:
+        write_error(str(failed), f"stty sane, then {SETUP_NEXT_STEP}")
+        return WalkEnd.ENTRY_FAILED
     except EntryRefused as refused:
         _write_entry_row(Glyph.FAILED, refused.entry_name, WizardEvent.NOT_STORED, refused.refusal.reason)
         write_error(f"setup stopped at secrets · nothing stored for {refused.entry_name}", refused.refusal.fix or SETUP_NEXT_STEP)

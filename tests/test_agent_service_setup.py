@@ -6,11 +6,9 @@ refused cases below are the ones its docstring names.
 
 import errno
 import fcntl
-import getpass
 import os
 import stat
 import subprocess
-import warnings
 from collections.abc import Callable
 from pathlib import Path
 
@@ -29,6 +27,8 @@ from support.agent_service_setup import (
     token_path,
     write_token,
 )
+
+from hal.output import hidden_paste
 
 # The scripted Docker host, terminal, throwaway home and openssl are the support module's fixtures.
 setup_module, docker, terminal, home, make_setup, openssl = (
@@ -311,19 +311,61 @@ def test_a_refused_paste_writes_nothing(make_setup, home, terminal, pasted):
     assert not pasted.strip() or pasted.strip() not in terminal.said[-1]
 
 
-def test_a_paste_with_echo_unavailable_fails_closed(
-    setup_module, make_setup, home, terminal, monkeypatch
+@pytest.mark.parametrize(
+    ("failure", "line"),
+    [
+        pytest.param(
+            hidden_paste.TerminalCannotHide("no terminal"),
+            "the terminal cannot hide the paste; nothing was read",
+            id="cannot hide",
+        ),
+        pytest.param(
+            hidden_paste.TerminalNotRestored(),
+            f"{hidden_paste.TerminalNotRestored()}; nothing was written",
+            id="not restored",
+        ),
+        pytest.param(
+            EOFError(),
+            "no token was pasted (the input ended); nothing was written",
+            id="input ended",
+        ),
+        pytest.param(
+            hidden_paste.PasteRefused("the 2 pasted lines are not one token"),
+            "the 2 pasted lines are not one token; nothing was written",
+            id="refused",
+        ),
+    ],
+)
+def test_a_paste_the_reader_cannot_take_is_one_line_and_keeps_the_old_token(
+    setup_module, make_setup, home, terminal, monkeypatch, failure, line
 ):
-    def getpass_without_echo_control(prompt: str) -> str:
-        warnings.warn("Can not control echo on the terminal.", getpass.GetPassWarning, stacklevel=2)
-        return DUMMY_TOKEN
+    """A2: the reader's errors reach the operator through setup's own adapter as one line each."""
+    write_token(home, DUMMY_TOKEN + "\n")
 
-    monkeypatch.setattr(getpass, "getpass", getpass_without_echo_control)
-    make_login_directory(home)
+    def reader_fails(prompt: str) -> str:
+        raise failure
 
-    assert make_setup(read_secret=setup_module.read_pasted_line).run(renew=False) == 1
-    assert not token_path(home).exists()
-    assert "cannot hide the paste" in terminal.said[-1]
+    monkeypatch.setattr(setup_module, "read_hidden_paste", reader_fails)
+
+    assert make_setup(read_secret=setup_module.read_pasted_line).run(renew=True) == 1
+    assert terminal.said[-1] == f"agent-service/setup FAILED: {line}"
+    assert token_path(home).read_text() == DUMMY_TOKEN + "\n"
+    assert not (login_directory(home) / "token.new").exists()
+
+
+def test_the_script_imports_its_reader_under_the_system_interpreter(tmp_path):
+    """A3: the shebang picks the first `python3` on a bare PATH, as the operator's shell does."""
+    result = subprocess.run(
+        [str(setup_support.SETUP), "--help"],
+        env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), "PYTHONDONTWRITEBYTECODE": "1"},
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.startswith("usage: ")
 
 
 def test_renew_swaps_in_a_new_token_beside_the_old_one(make_setup, home, terminal):
@@ -437,21 +479,6 @@ def test_a_folder_swapped_for_a_link_after_the_check_still_receives_nothing(
     assert setup.run(renew=False) == 1
     assert "not a plain folder" in terminal.said[-1]
     assert list(outside.iterdir()) == []
-
-
-def test_the_end_of_the_input_at_the_paste_is_one_line_and_keeps_the_old_token(
-    setup_module, make_setup, home, terminal, monkeypatch
-):
-    write_token(home, DUMMY_TOKEN + "\n")
-
-    def input_ends(prompt: str) -> str:
-        raise EOFError
-
-    monkeypatch.setattr(getpass, "getpass", input_ends)
-
-    assert make_setup(read_secret=setup_module.read_pasted_line).run(renew=True) == 1
-    assert "nothing was written" in terminal.said[-1]
-    assert token_path(home).read_text() == DUMMY_TOKEN + "\n"
 
 
 def test_a_stale_pending_folder_is_one_line_and_keeps_the_old_token(make_setup, home, terminal):
@@ -598,23 +625,6 @@ def test_an_ancestor_swapped_for_a_link_after_the_check_is_never_narrowed_throug
     assert setup.run(renew=False) == 1
     assert "not a plain folder" in terminal.said[-1]
     assert mode_of(outside / "claude") == 0o755
-
-
-def test_a_pasted_line_that_is_not_utf8_is_one_line_and_chains_nothing(
-    setup_module, make_setup, home, terminal, monkeypatch
-):
-    write_token(home, DUMMY_TOKEN + "\n")
-
-    def not_utf8(prompt: str) -> str:
-        raise UnicodeDecodeError("utf-8", b"\xff-secret", 0, 1, "invalid start byte")
-
-    monkeypatch.setattr(getpass, "getpass", not_utf8)
-
-    assert make_setup(read_secret=setup_module.read_pasted_line).run(renew=True) == 1
-    assert terminal.said[-1] == (
-        "agent-service/setup FAILED: the pasted line is not UTF-8 text; nothing was written"
-    )
-    assert token_path(home).read_text() == DUMMY_TOKEN + "\n"
 
 
 def test_a_token_that_cannot_be_read_is_refused_and_replaced_by_the_paste(

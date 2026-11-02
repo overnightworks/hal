@@ -265,7 +265,7 @@ def test_external_apply_on_a_dirty_tree_prints_the_same_bytes_as_before(
     lines = capsys.readouterr().err.splitlines()
     assert [line.partition(": ")[2] for line in lines] == [
         "the live checkout has local changes, nothing changed; a change reaches it through a "
-        "pull request and `git pull --ff-only`:",
+        "pull request and `hal update`:",
         "  fleet.yaml",
         "  dynamic/x.yml",
     ]

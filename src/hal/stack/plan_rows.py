@@ -1,9 +1,12 @@
 """The planned run as rows: each part of a `Plan` is mapped from its typed fields to the rows
 `hal.output` prints, in the order hal works. Nothing here parses a string or prints."""
 
+from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from enum import StrEnum
 
 from hal.output import Glyph, Group, Noun, Row, TrailingNoun, counted
+from hal.output.command import Verb, command
 from hal.stack import checkout, core, environment, switches
 from hal.stack.appkit_step import APPKIT_UNIT, TARGETS, AppkitPlan
 from hal.stack.apps import AppKind, AppPlan, AppsPlan, OffPlan, SkippedNote, StaysStoppedNote
@@ -72,20 +75,89 @@ class PlanGroup(StrEnum):
 
 
 def checkout_row(origin: checkout.Origin) -> Row:
-    """The live checkout against origin's `main`: current, or behind with the way to bring the
-    waiting commits in by hand."""
+    """The live checkout against origin's `main`: current, or behind by the commits waiting on
+    origin."""
     if origin.standing is checkout.Standing.BEHIND:
         return Row(
             Glyph.NEEDS_YOU,
             CHECKOUT,
             CheckoutEvent.BEHIND,
-            f"plan applies {origin.head} without them",
+            f"origin/{checkout.MAIN} {origin.short}",
             count=origin.behind,
-            details=(f"git -C {checkout.LIVE_CHECKOUT} merge --ff-only {origin.sha}",),
         )
     return Row(
         Glyph.DONE, CHECKOUT, CheckoutEvent.CURRENT, f"{origin.short} · origin/{checkout.MAIN}"
     )
+
+
+class CommitNoun(Noun):
+    COMMIT = "commit"
+
+
+def waiting_text(count: int) -> str:
+    """`3 commits wait on origin`: the commits origin's `main` has that this checkout lacks."""
+    return f"{counted(count, CommitNoun.COMMIT)} {'waits' if count == 1 else 'wait'} on origin"
+
+
+class Effect(StrEnum):
+    """What a file that waits on origin changes, by where it is read; the value is the row's
+    subject."""
+
+    CODE = "hal code"
+    DIRECTORY_BIND = "directory bind"
+    PLANNED = "planned"
+    OTHER = "other"
+
+
+_EFFECT_FACTS = {
+    Effect.CODE: "hal's code and dependencies: the next hal command runs them",
+    Effect.DIRECTORY_BIND: (
+        "under a directory bind: the merge changes them in place, a container that mounts the "
+        "directory sees them at once, and whether its service uses them before its next restart "
+        "depends on the service"
+    ),
+    Effect.PLANNED: (
+        f"the next `{command(Verb.APPLY)}` plans them; a container that binds such a file alone "
+        "keeps the old one until it is recreated"
+    ),
+    Effect.OTHER: "",
+}
+
+
+class UpdateEvent(StrEnum):
+    NOT_CLASSIFIED = "not classified"
+
+
+def update_rows(
+    origin: checkout.Origin,
+    commits: Sequence[checkout.Commit],
+    by_effect: Mapping[Effect, Sequence[str]] | None,
+    reason: str = "",
+) -> list[Row]:
+    """What `hal update` shows before it asks: the behind row with every waiting commit under it,
+    then the changed files by effect; `by_effect` None is one row saying why they are not
+    classified. Each line is conditional on the checkout's configuration, never on a container."""
+    behind = replace(
+        checkout_row(origin),
+        details=tuple(f"{commit.short} {commit.subject}" for commit in commits),
+    )
+    if by_effect is None:
+        return [behind, Row(Glyph.NEEDS_YOU, "files", UpdateEvent.NOT_CLASSIFIED, reason)]
+    return [
+        behind,
+        *(
+            Row(
+                Glyph.CHANGE,
+                effect.value,
+                FileNoun.FILE,
+                _EFFECT_FACTS[effect],
+                count=len(by_effect[effect]),
+                details=tuple(by_effect[effect]),
+            )
+            for effect in Effect
+            if by_effect.get(effect)
+        ),
+    ]
 
 
 def local_changes_row(paths: tuple[str, ...]) -> Row:

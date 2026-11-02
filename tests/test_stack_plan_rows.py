@@ -40,9 +40,11 @@ from hal.stack.core import (
 from hal.stack.plan_rows import (
     CHECKOUT,
     CheckoutEvent,
+    Effect,
     PlanEvent,
     PlanGroup,
     checkout_row,
+    update_rows,
 )
 from hal.stack.realm.reconcile import REALM_UNIT, RealmAction, RealmPlan, RealmRestart
 from hal.stack.unit_plans import Action, ImageReference, KeptImage, Recreate
@@ -527,7 +529,7 @@ def test_the_core_group_holds_core_plans_then_followers_and_stands_before_units_
 
 
 def origin_main(behind: int, ahead: int = 0) -> checkout.Origin:
-    return checkout.Origin("f" * 40, "ffffff0", "c280a80", ahead, behind)
+    return checkout.Origin("f" * 40, "ffffff0", "c280a80", "c" * 40, ahead, behind)
 
 
 def test_a_current_checkout_is_one_done_row_naming_the_pinned_main() -> None:
@@ -537,19 +539,55 @@ def test_a_current_checkout_is_one_done_row_naming_the_pinned_main() -> None:
 
 
 @pytest.mark.parametrize("behind", [1, 3])
-def test_a_checkout_behind_is_one_needs_you_row_with_the_merge_command_under_it(
-    behind: int,
-) -> None:
+def test_a_checkout_behind_is_one_needs_you_row_with_no_manual_command(behind: int) -> None:
+    """#783 decision 10: the row counts the waiting commits and names origin's short sha."""
     assert checkout_row(origin_main(behind)) == Row(
         Glyph.NEEDS_YOU,
         CHECKOUT,
         CheckoutEvent.BEHIND,
-        "plan applies c280a80 without them",
+        "origin/main ffffff0",
         count=behind,
-        details=(f"git -C {checkout.LIVE_CHECKOUT} merge --ff-only {'f' * 40}",),
     )
 
 
 def test_a_diverged_checkout_is_not_a_behind_row() -> None:
     """Behind is `Origin.standing`'s answer, not the behind count alone."""
     assert checkout_row(origin_main(behind=2, ahead=1)).event != CheckoutEvent.BEHIND
+
+
+def update_row_texts(by_effect: dict[Effect, list[str]] | None, reason: str = "") -> list[str]:
+    commits = [checkout.Commit("aaaaaaa", "first"), checkout.Commit("bbbbbbb", "second")]
+    return [
+        f"{row.subject}|{row.fact}|{row.count}|{'/'.join(row.details)}"
+        for row in update_rows(origin_main(2), commits, by_effect, reason)
+    ]
+
+
+def test_the_update_lists_every_commit_under_the_behind_row() -> None:
+    """A2: one detail line per waiting commit, none cut."""
+    behind, *_ = update_rows(origin_main(500), [checkout.Commit("abcdef0", "x")] * 500, {})
+
+    assert behind.event == CheckoutEvent.BEHIND
+    assert len(behind.details) == 500
+    assert behind.details[0] == "abcdef0 x"
+
+
+def test_files_are_one_row_per_effect_group_and_an_empty_group_has_none() -> None:
+    """A3: four groups at most; the lines promise no more than the configuration says."""
+    rows = update_row_texts(
+        {Effect.CODE: ["src/a.py"], Effect.DIRECTORY_BIND: ["legal/nginx/default.conf"]}
+    )
+
+    assert [row.partition("|")[0] for row in rows[1:]] == [Effect.CODE, Effect.DIRECTORY_BIND]
+    assert rows[2].endswith("|1|legal/nginx/default.conf")
+    for row in rows[1:]:
+        assert not {"live", "active", "running", "applied"} & set(
+            row.lower().replace(".", " ").split()
+        )
+
+
+def test_files_that_cannot_be_classified_are_one_row_with_the_reason() -> None:
+    """A3: compose unreadable."""
+    rows = update_row_texts(None, "cannot read compose.yaml")
+
+    assert rows[1] == "files|cannot read compose.yaml|None|"

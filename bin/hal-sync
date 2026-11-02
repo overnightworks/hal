@@ -1,0 +1,26 @@
+#!/bin/sh
+# Brings a checkout's locked dependencies to their state: hal-sync <checkout> [<program> [<argument>...]].
+# With a program it then replaces itself with it, in the environment it just cleaned, and reports a
+# failed sync as hal's error form with exit 3; without one it exits 1 and leaves the report to the
+# caller. The argument shape is the one name that crosses revisions: docs/stack.md.
+set -eu
+
+checkout=$1
+shift
+
+# Another project's activated environment would otherwise make uv sync into, or warn about, it.
+unset VIRTUAL_ENV UV_PROJECT_ENVIRONMENT
+
+if ! uv sync --locked --inexact --no-dev --quiet --project "$checkout"; then
+    if [ "$#" -gt 0 ]; then
+        echo "error: cannot sync the live checkout's dependencies" >&2
+        echo "next: uv sync --locked --project $checkout" >&2
+        exit 3
+    fi
+    exit 1
+fi
+
+if [ "$#" -gt 0 ]; then
+    # exec, not a child: the program stays the shell's direct child, so Ctrl-C reaches it alone.
+    exec "$@"
+fi

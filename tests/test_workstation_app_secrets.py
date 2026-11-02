@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import getpass
 import re
 import stat
 from collections.abc import Callable, Iterator
@@ -16,6 +15,7 @@ from support.workstation_secrets_report import findings_of, report_of
 
 from support.terminal_support import put_stdout_on_a_terminal
 from hal.grammar import ExitCode
+from hal.output.hidden_paste import TerminalCannotHide
 from hal.workstation import ports as home_ports
 from hal.workstation import secrets_view
 from hal.workstation.secrets_setup import OPEN_PROMPT, PASTE_PROMPT, UNSENDABLE_PASTE, UNVERIFIED_FACT, Boundaries, Verdict
@@ -562,11 +562,15 @@ def fail_to_verify(_source: TokenSource, _value: str) -> None:
     raise RuntimeError("the value stays out of the line")
 
 
+def cannot_hide(_prompt: str) -> str:
+    raise TerminalCannotHide("no terminal")
+
+
 @pytest.mark.parametrize(
     ("boundaries", "expected_error"),
     [
         pytest.param(
-            guided_boundaries(getpass.fallback_getpass, fail_to_verify),
+            guided_boundaries(cannot_hide, fail_to_verify),
             [
                 "error: this terminal cannot hide what you type · nothing read",
                 "next: hal setup in another terminal window",

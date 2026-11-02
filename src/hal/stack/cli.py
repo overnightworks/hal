@@ -8,7 +8,7 @@ from pathlib import Path
 
 from hal.output import Stream, write_line
 from hal.output.command import Verb, command
-from hal.stack import apply, emergency, switches, tunnel
+from hal.stack import apply, emergency, switches, tunnel, update
 from hal.stack.external import cli as external_cli
 
 COMMAND = command(Verb.APPLY)
@@ -63,6 +63,10 @@ class _Run:
 
     publish_started: bool = False
     publish_exit: int | None = None
+
+
+def update_checkout() -> update.UpdateEnd:
+    return update.update_checkout(switches.default_state_directory())
 
 
 def apply_units(local: bool) -> int:

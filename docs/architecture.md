@@ -501,7 +501,7 @@ Every finding names the subject and a page to fix it, never a value.
 
 ### What stays applied by the operator
 
-- **edge itself** (L2): `hal apply` after his merge. It fast-forwards edge's live checkout, shows the plan and asks `yes`. Changing the gatekeeper, Keycloak or the backup is never automatic.
+- **edge itself** (L2): `hal update` after his merge fast-forwards edge's live checkout after one `yes` and syncs its dependencies; then `hal apply` shows the plan and asks its own `yes`. Changing the gatekeeper, Keycloak or the backup is never automatic.
 - **External** (L3): the publish phase of `hal apply`. Only the operator holds the write tokens (E3 rule 3).
 - **Why not automatic.** Agents run as his user today, so any token on a timer would be an admin credential in an agent's reach. Automatic apply becomes possible only after D14.
 
@@ -675,7 +675,7 @@ Every other section points here ("guards: section 8 state table") and restates n
 | **D · global stop + switched off** | both | stopped | present | paused | as in B |
 | **E · disabled in the catalog** | the applied catalog says `enabled: false`; a marker may remain from B or D | as the PC: running, or stopped under the global stop | absent, or S's barrier while its marker remains: either way every host S declares or routes answers 404 | none: not installed | removed; volumes kept (R1, section 3 "Off") |
 
-**E takes precedence over A–D.** "Applied" means the live edge checkout, which only `hal apply` fast-forwards: a merged `enabled: false` changes nothing until `hal apply` runs, and from then on S is in E whatever its marker says. A marker that remains keeps a re-enabled S closed; see "How the states are held". The global stop still governs cloudflared for the PC; E does not touch it.
+**E takes precedence over A–D.** "Applied" means the live edge checkout, which only `hal update` fast-forwards: a merged `enabled: false` changes nothing until `hal apply` runs, and from then on S is in E whatever its marker says. A marker that remains keeps a re-enabled S closed; see "How the states are held". The global stop still governs cloudflared for the PC; E does not touch it.
 
 **A command on the whole PC** (`hal offline`, `hal online`, boot) applies to each service the cell of that service's own column. On a PC with X in C and Y in D, one `hal online` moves X to A and Y to B.
 

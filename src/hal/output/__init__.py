@@ -1,7 +1,8 @@
 """The one owner of how this repository's tools print to a terminal: text from outside made safe
 to show, and the form of a row, a verdict, an error, the indented detail lines under a row, an
 aligned table and the `yes` that confirms an action, and whether the run is `-v`.
-`hal.output.command` owns the program name. It imports nothing else of this repository."""
+`hal.output.command` owns the program name, `hal.output.hidden_paste` a secret pasted unseen.
+It imports nothing else of this repository."""
 
 # ruff: noqa: T201 - this is the one output owner of the hal program
 

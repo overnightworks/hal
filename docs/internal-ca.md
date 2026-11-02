@@ -14,7 +14,7 @@ that the agent service calls over https only. It listens on `step-ca:9000` on th
 TLS-ALPN-01, and issues 24-hour certificates. `step-ca/ca.json` is its one configuration. `traefik-mcp`
 fetches its certificates from it.
 
-**Go live, once,** as the operator (uid 1000): pull `~/srv/hal` and run `hal apply`
+**Go live, once,** as the operator (uid 1000): run `hal update`, then `hal apply`
 (`services.step-ca.run.enabled: true` in `fleet.yaml`). `apply` makes no key material itself: while
 `step-ca/init --check` fails it asks separately and, on `yes`, runs `step-ca/init` in your terminal,
 re-checks, and shows a fresh plan.
@@ -27,7 +27,7 @@ puts the intermediate and a copy of the root certificate into the `step-ca` volu
 interruption it completes what is missing and never overwrites a key. Back up `~/.secrets/step-ca/` and
 the `step-ca` volume. The root certificate is what other services trust.
 
-**Switching off.** `enabled: false` through a pull request, the pull, then `hal apply`; the CA and the
+**Switching off.** `enabled: false` through a pull request, `hal update`, then `hal apply`; the CA and the
 gateway go together, the volumes `step-ca` and `traefik-mcp-acme` stay, and switching on again serves the
 same intermediate. `step-ca`, `traefik-mcp` and its helper `traefik-mcp-acme-owner` sit behind the
 compose profile `step-ca`, so a plain `docker compose up -d` starts none of them. Removing the volumes or

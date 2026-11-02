@@ -17,7 +17,7 @@
 "tests/test_stack_cloudflare_read.py" = 906
 "tests/test_stack_external.py" = 2242
 "tests/test_stack_host_check.py" = 817
-"tests/test_stack_realm_reconcile.py" = 977
+"tests/test_stack_realm_reconcile.py" = 974
 "tests/test_workstation_secrets_view.py" = 919
 
 [function_lines."probe/keycloak/probe.py"]
@@ -25,7 +25,7 @@
 "Probe.go_live_creates_the_admin" = 104
 "Probe.only_logins_and_failed_logins_are_stored" = 65
 "Probe.public_issuer_and_paths" = 86
-"Probe.the_realm_step" = 142
+"Probe.the_realm_step" = 127
 
 [function_lines."src/hal/stack/external/cli.py"]
 "apply_command" = 70
