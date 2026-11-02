@@ -600,8 +600,8 @@ def test_a_core_recreate_that_proved_every_active_barrier_says_so(
 
 @pytest.mark.parametrize(
     ("unproven", "keys"),
-    [({"probe"}, ["probe"]), ({"probe", "echo"}, ["probe", "echo"])],
-    ids=["one beside a proven one", "every one"],
+    [({"probe"}, ["probe"]), ({"echo"}, ["echo"]), ({"probe", "echo"}, ["probe", "echo"])],
+    ids=["one before a proven one", "one after a proven one", "every one"],
 )
 def test_a_core_recreate_with_an_unproven_barrier_prints_one_red_row_after_trying_every_barrier(
     unproven,
