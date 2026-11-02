@@ -119,14 +119,14 @@ def read_events(returncode: int, event_lines: Sequence[str]) -> PlaybookRun:
     for line in event_lines:
         try:
             event = json.loads(line.removeprefix(EVENT_MARK))
-            match EventKind(event["event"]):
-                case EventKind.CHANGED:
-                    tasks.append(str(event["task"]))
-                case EventKind.RESULT:
-                    TaskStatus(event["status"])
-                    message = str(event["msg"])
-                case EventKind.COUNTS:
-                    counts.append((_count(event, "changed"), _count(event, "failed"), _count(event, "unreachable")))
+            kind = EventKind(event["event"])
+            if kind is EventKind.CHANGED:
+                tasks.append(str(event["task"]))
+            elif kind is EventKind.RESULT:
+                TaskStatus(event["status"])
+                message = str(event["msg"])
+            else:
+                counts.append((_count(event, "changed"), _count(event, "failed"), _count(event, "unreachable")))
         except (ValueError, KeyError, TypeError):
             return PlaybookUnfinished()
     if len(counts) != 1:

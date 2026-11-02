@@ -113,7 +113,7 @@ def test_an_unreachable_host_is_an_unfinished_run_with_the_connection_message(tm
 def test_without_v_none_of_ansibles_text_shows(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]) -> None:
     run_scratch_play(tmp_path, monkeypatch, FAILING_ASSERT)
 
-    assert capfd.readouterr().out == ""
+    assert not capfd.readouterr().out
 
 
 def test_with_v_ansibles_text_shows_indented_and_no_event_line_does(
