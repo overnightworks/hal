@@ -33,7 +33,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-from hal.output import printable
+from hal.output import LOG_FORMAT_VARIABLE, LogFormat, printable
 from hal.output.command import PROGRAM, Verb, command
 from hal.stack import compose, core, switches
 from hal.stack import realm as realm_lines
@@ -255,6 +255,7 @@ def run_edge_backup(
             stderr=subprocess.PIPE,
             text=True,
             cwd=compose.REPOSITORY,
+            env={**os.environ, LOG_FORMAT_VARIABLE: LogFormat.TEXT},  # `_cause` reads text
             start_new_session=True,
         ) as process:
             try:
