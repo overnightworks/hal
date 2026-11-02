@@ -3,6 +3,6 @@ agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
 role = "builder"
 base = "4dfcbb05f37849458d9e8165a534783bbf15c8a8"
 branch = "claude/issue-929-product-quality-rules"
-scope = ["agent-service/api_credential.py", "agent-service/live_signer.py", "agent-service/live_smoke.py", "agent-service/retention_census.py", "src/hal/rename_commands.py", "src/hal/stack/apply.py", "src/hal/stack/checkout.py", "src/hal/workstation/layout.py", "tests/test_agent_egress.py", "tests/test_agent_service_live_signer.py", "tests/test_agent_service_retention_census.py", "tests/test_workstation_user_units.py"]
+scope = ["agent-service/api_credential.py", "agent-service/live_signer.py", "agent-service/live_smoke.py", "agent-service/retention_census.py", "src/hal/rename_commands.py", "src/hal/stack/apply.py", "src/hal/stack/checkout.py", "src/hal/workstation/layout.py", "tests/test_agent_egress.py", "tests/test_agent_service_live_signer.py", "tests/test_agent_service_live_smoke.py", "tests/test_agent_service_retention_census.py", "tests/test_workstation_user_units.py"]
 opened_commit = "ab2758ea00ab5f75fb353c753d80ae5279dbd58d"
 whole_reason = "One finding class across the product files, each a single marker or a routed print; splitting it further only multiplies reviews of the same judgement."
