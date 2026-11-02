@@ -1,7 +1,0 @@
-claim_id = "762240845fe04c17a9500cc133126eb2"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "4caedc8b293abcc1ce33cc8a74e59e18e7fab584"
-branch = "claude/issue-828-s3-privacy-text-api-route"
-scope = ["docs/agent-service.md", "legal/sections/agent-service/datenschutz.html", "legal/sections/allgemein/datenschutz.html"]
-opened_commit = "9e86f4ee34a2aeedb44a264f62755d54113904fc"
