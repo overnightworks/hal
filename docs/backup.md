@@ -114,10 +114,12 @@ waits up to 10 minutes, then fails. One host lock (`~/.local/state/edge/backup.l
 `hal restore` or any other verb waits silently until that run ends.
 
 To run now, start the same units the timers take (`systemctl --user start hal-backup.service` and
-`hal-backup-restore-test.service`); the last journal line of the unit is the verdict.
+`hal-backup-restore-test.service`); the last `hal` event of the unit is the verdict.
 `hal restore --list` lists the snapshots of host `hal` only. Both `forget` runs leave other hosts' snapshots alone.
 
-With `LOG_FORMAT=json` every row, verdict and error of `hal backup` and `hal restore --test` is one
+Both units set `LOG_FORMAT=json`, the fleet's one log format. Read a run with
+`journalctl --user -u hal-backup -p err` (`-o cat` prints the bare events); by hand the variable is unset
+and `hal` prints rows. With `LOG_FORMAT=json` every row, verdict and error of `hal backup` and `hal restore --test` is one
 flushed line: a journal priority (`<3>` error, `<4>` warning, `<6>` info) and a JSON object with
 `timestamp`, `level`, `logger`, `service` and `event`. journald removes the priority; by hand, cut it
 (`LOG_FORMAT=json hal backup | cut -c4- | jq`). Any other value than `json` or `text` stops every verb

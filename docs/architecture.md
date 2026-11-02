@@ -897,7 +897,7 @@ The rules are labelled "§10 rule n", because [edge#50](https://github.com/overn
 - Identity: OIDC code flow with PKCE and static endpoints (webauth#49 ruled out discovery at login), W5/W9 logout, and W10 bearer or device login for CLIs.
 - Data and runtime: SQL over a DSN, the Redis protocol, the S3 API once files leave a host, OCI images with compose.
 - Operations: OpenMetrics `/metrics` where an app exposes metrics, X.509/ACME, secrets as files.
-- LLM vendors only behind agent-service.
+- LLM vendors only behind agent-service or LiteLLM; an app holds only its LiteLLM key.
 
 **§10 rule 6: logs go to stdout and stderr.** No app writes a log file to a volume or a host path.
 
