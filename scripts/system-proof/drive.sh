@@ -180,10 +180,11 @@ install_home() {  # the wheel, and the user manager `hal setup`'s user-units ste
 # mail cells would fail its unit and change what `hal check` finds. A hal that exits 0 lets every such unit end clean,
 # where the real one would write the remembered set and could mail the sink.
 plant_stub_hal() {
-    install -d -o tester -g tester /home/tester/srv/hal/.venv /home/tester/srv/hal/.venv/bin
-    printf '#!/bin/sh\nexit 0\n' >/home/tester/srv/hal/.venv/bin/hal
-    chown tester:tester /home/tester/srv/hal/.venv/bin/hal
-    chmod 755 /home/tester/srv/hal/.venv/bin/hal
+    local bin=/home/tester/srv/hal/.venv/bin
+    install -d -o tester -g tester "$bin/.." "$bin"
+    printf '#!/bin/sh\nexit 0\n' >"$bin/hal"
+    chown tester:tester "$bin/hal"
+    chmod 755 "$bin/hal"
     return
 }
 
