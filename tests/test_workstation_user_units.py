@@ -189,6 +189,7 @@ Documentation=file://%h/{live}/docs/backup.md
 
 [Service]
 Type=oneshot
+Environment=LOG_FORMAT=json
 ExecStart=%h/{live}/.venv/bin/hal backup
 TimeoutStartSec=6h
 """,
@@ -249,6 +250,7 @@ Documentation=file://%h/{live}/docs/backup.md
 
 [Service]
 Type=oneshot
+Environment=LOG_FORMAT=json
 ExecStart=%h/{live}/.venv/bin/hal restore --test
 TimeoutStartSec=6h
 """,
@@ -363,6 +365,28 @@ def test_a_stale_marker_file_is_rewritten_and_systemd_reloaded(machine: Machine)
     )
     assert machine.systemctl.changes == [["daemon-reload"]]
     machine.assert_complete()
+
+
+def test_an_older_backup_unit_without_the_log_format_is_rewritten_with_it_and_stays_enabled(
+    sandboxed_machine: Machine, sandbox: Sandbox, capsys: pytest.CaptureFixture[str]
+) -> None:
+    sandboxed_machine.arrange_complete_state()
+    older = sandboxed_machine.user_units / "hal-backup.service"
+    older.write_text(
+        "".join(
+            line
+            for line in older.read_text().splitlines(keepends=True)
+            if not line.startswith("Environment=")
+        )
+    )
+
+    _, planned, _ = setup_lines(sandboxed_machine, sandbox, capsys, "--dry-run")
+    setup_lines(sandboxed_machine, sandbox, capsys)
+
+    assert any(line.startswith("  ~ timers          will change") for line in planned)
+    assert "Environment=LOG_FORMAT=json" in older.read_text().splitlines()
+    assert "UnitFileState=enabled" in sandboxed_machine.systemctl.show(TIMER_NAMES[0])
+    sandboxed_machine.assert_complete()
 
 
 def test_a_drop_in_directory_is_never_touched(machine: Machine) -> None:

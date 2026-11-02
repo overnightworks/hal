@@ -18,6 +18,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from hal.output import LOG_FORMAT_VARIABLE
 from hal.output.command import Verb, command
 from hal.workstation.jobs import TimerJob
 from hal.workstation.layout import CommandRunner, Layout
@@ -312,6 +313,10 @@ def service_text(job: TimerJob, checkout_below_home: str) -> str:
         "",
         "[Service]",
         "Type=oneshot",
+    ]
+    if job.log_format:
+        lines.append(f"Environment={LOG_FORMAT_VARIABLE}={job.log_format}")
+    lines += [
         f"ExecStart={checkout_below_home}/.venv/bin/{command(job.verb, *job.arguments)}",
     ]
     if job.timeout_start:

@@ -259,19 +259,40 @@ APP_EXITED = STEP_CA_ON | {"traefik-mcp": "exited"}
 
 
 @pytest.fixture
-def agent_service_unit(repository, scripted) -> set[str]:
-    """The repository's `agent-service` unit and compose.yaml, the other units off; its services."""
+def agent_service_unit(repository, scripted, tmp_path) -> set[str]:
+    """The repository's `agent-service` unit and compose.yaml, the other units off; its services,
+    their secrets resolved as `docker compose config` spells them, each file written."""
     real = yaml.safe_load((REPOSITORY / "fleet.yaml").read_text())["services"]["agent-service"]
     fleet = {"cloudflare": {"zone": ZONE}, "services": {"agent-service": real}}
     write_fleet(repository, yaml.safe_dump(fleet))
     shutil.copytree(REPOSITORY / "agent-service" / "image", repository / "agent-service" / "image")
-    services = yaml.safe_load((REPOSITORY / "compose.yaml").read_text())["services"]
-    profile = {n: d for n, d in services.items() if "agent-service" in d.get("profiles", ())}
+    compose_file = yaml.safe_load((REPOSITORY / "compose.yaml").read_text())
+    profile = {
+        n: d
+        for n, d in compose_file["services"].items()
+        if "agent-service" in d.get("profiles", ())
+    }
     for name, definition in profile.items():
         scripted.config["services"][name] = definition | {
-            "volumes": [_resolved_mount(mount) for mount in definition.get("volumes", [])]
+            "volumes": [_resolved_mount(mount) for mount in definition.get("volumes", [])],
+            "secrets": [
+                {"source": secret, "target": secret} for secret in definition.get("secrets", [])
+            ],
         }
+    named = {secret for definition in profile.values() for secret in definition.get("secrets", [])}
+    scripted.config["secrets"] = {
+        secret: _written_secret(secret, compose_file["secrets"][secret]["file"], tmp_path)
+        for secret in sorted(named)
+    }
     return set(profile)
+
+
+def _written_secret(name: str, file: str, tmp_path: Path) -> dict:
+    """A top-level secret as `docker compose config` spells it, its file under the test's HOME."""
+    path = tmp_path / "compose-home" / file.removeprefix("${HOME}/")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("x\n")
+    return {"name": name, "file": str(path)}
 
 
 def _resolved_mount(mount: str | dict) -> dict:
