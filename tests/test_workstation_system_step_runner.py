@@ -194,8 +194,11 @@ def test_a_second_ctrl_c_while_the_play_stops_is_still_the_interrupted_step_carr
 
         def __exit__(self, exception_type: Any, *exit_arguments: Any) -> None:
             super().__exit__(exception_type, *exit_arguments)
-            if self.is_the_play and exception_type is KeyboardInterrupt:
-                raise KeyboardInterrupt
+            if self.is_the_play:
+                self.kill()
+                self.wait()
+                if exception_type is KeyboardInterrupt:
+                    raise KeyboardInterrupt
 
     monkeypatch.setattr(subprocess, "Popen", PlayPopenInterruptedOnExit)
     stub = StubSudo(tmp_path, monkeypatch, forgetting_exit_code=1)
