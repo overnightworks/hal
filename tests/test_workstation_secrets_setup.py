@@ -677,6 +677,45 @@ def test_a_service_password_is_generated_fresh_for_each_home(
     assert all(os.path.getsize(tmp_path / name / PASSPHRASE_FILE) >= 64 for name in ("first", "second"))
 
 
+APP_KEYS = tuple(f"litellm/apps/{app}" for app in ("songmaker", "hopin", "presentator"))
+
+
+def _use_packaged_entries(use_manifest, names: tuple[str, ...]) -> None:
+    blocks = PACKAGED_MANIFEST.read_text().split("[[secret]]")[1:]
+    use_manifest("".join(f"[[secret]]{block}" for block in blocks if any(f'name = "{name}"' in block for name in names)))
+
+
+def test_setup_creates_each_apps_litellm_key_prefixed_and_keeps_existing_files(
+    home: Path, use_manifest, boundaries: Boundaries, capsys, caplog
+) -> None:
+    """#915 K1 and K2: all three files exist with `sk-`, readable by the app's container user, no value is shown, and a second run keeps their bytes."""
+    _use_packaged_entries(use_manifest, APP_KEYS)
+    caplog.set_level(logging.DEBUG)
+    paths = [home / ".secrets" / name for name in APP_KEYS]
+
+    assert run_wizard(home, boundaries) is WalkEnd.DONE
+
+    values = [path.read_text() for path in paths]
+    shown = capsys.readouterr()
+    assert all(value.startswith("sk-") and len(value) > 64 for value in values)
+    assert len(set(values)) == 3
+    assert {stat.S_IMODE(path.stat().st_mode) for path in paths} == {0o644}
+    assert stat.S_IMODE((home / ".secrets/litellm/apps").stat().st_mode) == 0o700
+    assert all(value not in shown.out + shown.err + caplog.text for value in values)
+
+    assert run_wizard(home, boundaries) is WalkEnd.DONE
+    assert [path.read_text() for path in paths] == values
+
+
+def test_the_master_key_keeps_its_unprefixed_value_form(home: Path, use_manifest, boundaries: Boundaries) -> None:
+    """#915 K5: only entries that declare a value_prefix get one."""
+    _use_packaged_entries(use_manifest, ("litellm/master-key",))
+
+    run_wizard(home, boundaries)
+
+    assert not (home / ".secrets/litellm/master-key").read_text().startswith("sk-")
+
+
 def test_the_real_terminal_fact_is_false_while_stdio_is_captured(capsys: pytest.CaptureFixture[str]) -> None:
     """A terminal needs both ends: under captured stdio the process the agents run is no terminal, which is what refuses the yes."""
     assert secrets_setup.TERMINAL_BOUNDARIES.terminal.is_interactive() is False

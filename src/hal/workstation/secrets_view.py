@@ -151,6 +151,7 @@ class SecretEntry:
     loosest_mode: int = LOOSEST_FILE_MODE
     loosest_mode_reason: str = ""
     create: CreateCommand | None = None
+    value_prefix: str = ""
 
     @property
     def retired(self) -> bool:
@@ -189,7 +190,7 @@ REQUIRED_KEYS = frozenset({"name", "kind", "paths", "read_by"})
 SOURCE_KEYS = frozenset({"provider", "resource", "scope", "expires_in_days"})
 RETIREMENT_KEYS = frozenset({"retired_on", "revoke_url", "revocation_confirmed"})
 MODE_KEYS = frozenset({"loosest_mode", "loosest_mode_reason"})
-OPTIONAL_KEYS = frozenset({"recreate", "create", "verify", "mirror_of", "purpose", "optional", "elsewhere", "page"}) | RETIREMENT_KEYS | SOURCE_KEYS | MODE_KEYS
+OPTIONAL_KEYS = frozenset({"recreate", "create", "verify", "mirror_of", "purpose", "optional", "elsewhere", "page", "value_prefix"}) | RETIREMENT_KEYS | SOURCE_KEYS | MODE_KEYS
 GITHUB_ACCESS_LEVELS = frozenset({"read", "write", "admin"})
 LONGEST_EXPIRY_DAYS = 366  # GitHub's ceiling for a fine-grained token's expires_in
 
@@ -303,6 +304,8 @@ def _entry(path: Path, index: int, raw: object) -> SecretEntry:
     kind = _enum_value(path, where, raw, "kind", SecretKind)
     require_key_of_kind(path, where, raw, "mirror_of", kind, SecretKind.DERIVED_MIRROR)
     require_key_of_kind(path, where, raw, "page", kind, SecretKind.UNVERIFIED_TOKEN)
+    if "value_prefix" in raw and kind is not SecretKind.SERVICE_PASSWORD:
+        raise fail(path, where, "value_prefix belongs to a service-password entry only")
     retirement = _retirement(path, where, raw)
     source = _token_source(path, where, raw, kind)
     loosest_mode, loosest_mode_reason = _declared_mode(path, where, raw)
@@ -327,6 +330,7 @@ def _entry(path: Path, index: int, raw: object) -> SecretEntry:
         loosest_mode=loosest_mode,
         loosest_mode_reason=loosest_mode_reason,
         create=create,
+        value_prefix=string(path, where, raw, "value_prefix") if "value_prefix" in raw else "",
     )
     if entry.written_by_setup and (len(patterns) != 1 or _has_wildcard(patterns[0].name)):
         raise fail(path, where, "paths of an entry the wizard writes must be exactly one place without a wildcard")

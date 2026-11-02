@@ -688,7 +688,7 @@ def _set_up(entry: SecretEntry, layout: Layout, boundaries: Boundaries, now: dat
     elif entry.kind is SecretKind.UNVERIFIED_TOKEN:
         stored = _set_up_unverified_token(entry, layout, boundaries)
     else:
-        _store(entry, layout, boundaries, secrets.token_urlsafe(PASSPHRASE_BYTES))
+        _store(entry, layout, boundaries, entry.value_prefix + secrets.token_urlsafe(PASSPHRASE_BYTES))
         stored = True
     return Step.STORED if stored else Step.STILL_MISSING
 

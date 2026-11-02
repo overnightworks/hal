@@ -605,6 +605,25 @@ def test_every_file_the_packaged_manifest_plants_is_known(tmp_path: Path, probe:
     assert findings_of(report_of(home), "unknown-file") == {}
 
 
+def test_each_apps_litellm_key_is_listed_with_its_readers_and_mode_0644_is_no_finding(tmp_path: Path, probe: FakeProbe, capsys) -> None:
+    """#915 K4: the three app key files are declared secrets, readable by their container user."""
+    home = tmp_path / "home"
+    plant_secrets(home)
+    apps = ("songmaker", "hopin", "presentator")
+    for app in apps:
+        (home / ".secrets/litellm/apps" / app).chmod(0o644)
+
+    code = run_hal_secrets(home, probe, now=NOW)
+    report = report_of(home)
+    capsys.readouterr()
+    by_service = run_hal_secrets(home, probe, "--by-service", now=NOW)
+    listing = capsys.readouterr().out
+
+    assert (code, by_service) == (0, 0)
+    assert findings_of(report, "loose-mode") == {}
+    assert all(f"| {app} | " in listing and "litellm" in listing.split(f"| {app} |")[1].splitlines()[0] for app in apps)
+
+
 def never_asked(*_: object) -> object:
     raise AssertionError("--setup asked the operator although nothing is set up by it")
 
@@ -704,6 +723,8 @@ SOURCE = 'provider = "github"\nresource = "o"\nscope = ["metadata:read"]\nexpire
         (ENTRY + 'loosest_mode = 0\nloosest_mode_reason = "r"\n', "loosest_mode"),
         (ENTRY + "loosest_mode = 0o644\n", "belong together"),
         (ENTRY + 'loosest_mode_reason = "r"\n', "belong together"),
+        (ENTRY + 'value_prefix = "sk-"\n', "value_prefix"),
+        (ENTRY.replace('"token"', '"service-password"') + 'value_prefix = ""\n', "value_prefix"),
         (ENTRY + ENTRY, "e"),
         (ENTRY.replace('"token"', '"derived-mirror"') + 'mirror_of = "gone"\n', "gone"),
         # #36 rule 1 / rule 2.2: a token the wizard guides names its provider, resource, rights and expiry, and one place.
