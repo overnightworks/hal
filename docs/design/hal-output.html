@@ -465,6 +465,7 @@ hal setup: Schritt „System“ ist fehlgeschlagen; die späteren Schritte sind 
     <li><b>Scheitert der Play selbst,</b> ist sein Grund der Fakt der roten Zeile. Die <code>fail_msg</code> im Playbook werden dafür kurz, ohne <code>; nothing was written</code>: was geschrieben wurde, sagt die <code>error:</code>-Zeile.</li>
     <li><b>Fünf Zeilen statt acht Schritten:</b> quality, Engines, Hook-Dateien und Aktivierung sind für dich ein Ding, der Commit-Hook; der Link <code>~/.local/bin/hal</code> ist <code>path</code>; Ansible gehört zu system. Scheitert einer, nennt die rote Zeile ihn.</li>
     <li><b>Falsches Passwort:</b> sudo sagt es selbst, in seinen Worten. Gibt es auf, folgt <code>✗ system  failed  sudo refused</code> und <code>error:</code> mit <code>/etc may be partial</code>.</li>
+    <li><b>Ctrl-C im Play:</b> auf einer frischen Zeile folgt <code>✗ system  interrupted</code>, die späteren Zeilen als <code>not run</code>, <code>error: setup stopped at system · /etc may be partial</code> und <code>next: hal setup</code>; Exit 130. Scheitert danach <code>sudo -k</code>, steht der Satz über das Ticket als Fakt der Zeile.</li>
   </ul>
 </section>
 <section aria-labelledby="s-yes">

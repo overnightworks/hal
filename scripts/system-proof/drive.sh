@@ -1841,8 +1841,8 @@ cell_p_interrupted() {  # cell_p_interrupted <cell> <log> <ticket>: Ctrl-C at th
     local cell=$1 log=$2 ticket=$3 code
     PROOF_INTERRUPT='TASK \[' at_sudo_terminal "$log" "$ticket" "$APPLY_ARGUMENTS"
     code=$?
-    verdict "$cell" "Ctrl-C mid-play stops the step with 130 and the ticket is gone" \
-        "[ \$code -eq 130 ] && active_sudo_is \"\$sudo_alternative\" && ticket_is_gone $log"
+    verdict "$cell" "Ctrl-C mid-play prints the system row on its own line and the pair, stops with 130 and the ticket is gone" \
+        "[ \$code -eq 130 ] && active_sudo_is \"\$sudo_alternative\" && row_in_log $log system interrupted && in_log $log 'error: setup stopped at system · /etc may be partial' && in_log $log 'next: hal setup' && ticket_is_gone $log"
     return
 }
 

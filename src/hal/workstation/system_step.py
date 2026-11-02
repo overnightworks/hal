@@ -58,6 +58,10 @@ class StepFailed(Exception):
     """A step that did not finish; its message says why."""
 
 
+class SystemStepInterrupted(StepFailed):
+    """The person pressed Ctrl-C during the play; the message is the ticket sentence when `sudo -k` failed after it, else empty."""
+
+
 class EventKind(Enum):
     RESULT = "result"
     COUNTS = "counts"
@@ -118,11 +122,12 @@ def read_events(returncode: int, event_lines: Sequence[str]) -> PlaybookRun:
     return PlaybookFinished(changed) if returncode == 0 else PlaybookUnfinished()
 
 
-def _forget_the_sudo_ticket() -> None:
+def _forget_the_sudo_ticket(interrupted: bool) -> None:
     try:
         subprocess.run(["sudo", "-k"], check=True)  # noqa: S607 - sudo is found on PATH by design
     except subprocess.CalledProcessError as failure:
-        raise StepFailed(f"sudo could not forget its ticket (exit {failure.returncode}) · it may still be valid") from failure
+        sentence = f"sudo could not forget its ticket (exit {failure.returncode}) · it may still be valid"
+        raise (SystemStepInterrupted if interrupted else StepFailed)(sentence) from failure
 
 
 def run_playbook_as_root(argv: Sequence[str]) -> PlaybookRun:
@@ -131,12 +136,14 @@ def run_playbook_as_root(argv: Sequence[str]) -> PlaybookRun:
     The system asks for the password at the terminal, which stays stdin and stderr's; Ansible's stderr joins its stdout inside
     sudo, which is shown line by line, and the lines the callback marks are read as events and not shown.
     No `ANSIBLE_*` variable reaches the play, so the packaged `ansible.cfg` there decides. `sudo -k` follows whatever
-    the play did, and a failing `sudo -k` fails the step; it never follows a sudo that did not start.
+    the play did, and a failing `sudo -k` fails the step;
+    a Ctrl-C in the play is a `SystemStepInterrupted`, which a failing `sudo -k` keeps; it never follows a sudo that did not start.
     Root's Python writes no bytecode, which would leave root-owned files in the operator's tool environment.
     No timeout: a person types the password; the run asks its yes at a terminal first and `--dry-run` reaches here only when `needs_first` finds one.
     """
     environment = {name: value for name, value in os.environ.items() if not name.startswith("ANSIBLE_")}
     event_lines: list[str] = []
+    interrupted = False
     with subprocess.Popen(["sudo", "env", "PYTHONDONTWRITEBYTECODE=1", "sh", "-c", 'exec "$@" 2>&1', "sh", *argv], stdout=subprocess.PIPE, text=True, cwd=PLAYBOOK.parent, env=environment) as playbook:  # noqa: S603, S607 - argv is the packaged playbook and sudo is found on PATH by design
         try:
             for line in playbook.stdout:
@@ -144,8 +151,11 @@ def run_playbook_as_root(argv: Sequence[str]) -> PlaybookRun:
                     event_lines.append(line)
                 else:
                     write_line(line, end="", flush=True)
+        except KeyboardInterrupt as ctrl_c:
+            interrupted = True
+            raise SystemStepInterrupted from ctrl_c
         finally:
-            _forget_the_sudo_ticket()
+            _forget_the_sudo_ticket(interrupted)
     return read_events(playbook.returncode, event_lines)
 
 

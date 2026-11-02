@@ -8,9 +8,10 @@ from pathlib import Path
 
 import pytest
 
+from hal.grammar import ExitCode
 from hal.workstation import system_step
 from hal.workstation.system_step import PlaybookFinished, PlaybookRun, PlaybookUnfinished
-from support.workstation_support import StubSudo
+from support.workstation_support import Sandbox, StubSudo, run_hal_setup
 
 COUNTS = system_step.EVENT_MARK + json.dumps({"event": "counts", "changed": 3, "failed": 0, "unreachable": 0})
 FAILED_COUNTS = system_step.EVENT_MARK + json.dumps({"event": "counts", "changed": 1, "failed": 1, "unreachable": 0})
@@ -153,13 +154,94 @@ def test_a_failing_sudo_k_fails_the_step_after_a_successful_play(tmp_path: Path,
     assert isinstance(failure.value.__cause__, subprocess.CalledProcessError)
 
 
-def test_sudo_forgets_the_ticket_after_a_ctrl_c(tmp_path: Path, stub_sudo: StubSudo) -> None:
+TICKET_SENTENCE = "sudo could not forget its ticket (exit 1) · it may still be valid"
+
+
+def test_a_ctrl_c_in_the_play_is_an_interrupted_step_without_a_fact(tmp_path: Path, stub_sudo: StubSudo) -> None:
     playbook = fake_ansible(tmp_path, "kill -INT $PPID")
 
-    with pytest.raises(KeyboardInterrupt):
+    with pytest.raises(system_step.SystemStepInterrupted) as interrupted:
         system_step.run_playbook_as_root([str(playbook)])
 
+    assert str(interrupted.value) == ""
     assert stub_sudo.calls()[-1][0] == "-k"
+
+
+def test_a_failing_sudo_k_after_a_ctrl_c_is_the_same_interrupted_step_carrying_the_ticket_sentence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ruled E1: the ticket that may still be valid is said, and the person still pressed Ctrl-C."""
+    stub = StubSudo(tmp_path, monkeypatch, forgetting_exit_code=1)
+    playbook = fake_ansible(tmp_path, "kill -INT $PPID")
+
+    with pytest.raises(system_step.SystemStepInterrupted) as interrupted:
+        system_step.run_playbook_as_root([str(playbook)])
+
+    assert str(interrupted.value) == TICKET_SENTENCE
+    assert stub.calls()[-1][0] == "-k"
+
+
+def a_play_under_stub_sudo(
+    sandbox: Sandbox, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, script: str, forgetting_exit_code: int = 0
+) -> StubSudo:
+    """`hal setup` whose system step runs the real runner over a fake `ansible-playbook` and a stub `sudo`."""
+    stub = StubSudo(tmp_path, monkeypatch, forgetting_exit_code)
+    playbook = fake_ansible(tmp_path, script)
+    sandbox.layout.ansible_playbook_executable.parent.mkdir(parents=True, exist_ok=True)
+    sandbox.layout.ansible_playbook_executable.write_text("")
+    monkeypatch.setattr(
+        system_step,
+        "TERMINAL_BOUNDARIES",
+        system_step.Boundaries(lambda: True, lambda _argv: system_step.run_playbook_as_root([str(playbook)]), lambda: "operator"),
+    )
+    return stub
+
+
+@pytest.mark.parametrize(
+    ("forgetting_exit_code", "fact"), [(0, ""), (1, f"    {TICKET_SENTENCE}")], ids=["ticket forgotten", "ticket kept"]
+)
+def test_a_ctrl_c_in_the_play_of_hal_setup_prints_the_system_row_and_the_pair_and_exits_130(
+    sandbox: Sandbox,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    forgetting_exit_code: int,
+    fact: str,
+) -> None:
+    stub = a_play_under_stub_sudo(sandbox, tmp_path, monkeypatch, "kill -INT $PPID", forgetting_exit_code)
+
+    code = run_hal_setup(home=sandbox.home, secrets_setup_boundaries=sandbox.secrets_boundaries)
+
+    captured = capsys.readouterr()
+    assert code == ExitCode.INTERRUPTED
+    assert captured.out.splitlines()[-3:] == ["", f"  ✗ system          interrupted{fact}".rstrip(), "  · secrets         not run"]
+    assert captured.err == "error: setup stopped at system · /etc may be partial\nnext: hal setup\n"
+    assert stub.calls()[-1][0] == "-k"
+
+
+def test_a_ctrl_c_in_the_check_of_a_dry_run_says_etc_is_unchanged(
+    sandbox: Sandbox, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    a_play_under_stub_sudo(sandbox, tmp_path, monkeypatch, "kill -INT $PPID")
+
+    code = run_hal_setup("--dry-run", home=sandbox.home, secrets_setup_boundaries=sandbox.secrets_boundaries)
+
+    captured = capsys.readouterr()
+    assert code == ExitCode.INTERRUPTED
+    assert "  ✗ system          interrupted" in captured.out.splitlines()
+    assert captured.err == "error: setup stopped at system · /etc unchanged\nnext: hal setup\n"
+
+
+def test_a_failing_sudo_k_after_a_finished_play_still_fails_the_system_row_with_exit_3(
+    sandbox: Sandbox, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    a_play_under_stub_sudo(sandbox, tmp_path, monkeypatch, "true", forgetting_exit_code=1)
+
+    code = run_hal_setup(home=sandbox.home, secrets_setup_boundaries=sandbox.secrets_boundaries)
+
+    captured = capsys.readouterr()
+    assert code == ExitCode.FAILURE
+    assert f"  ✗ system          failed         {TICKET_SENTENCE}" in captured.out.splitlines()
 
 
 def test_a_missing_sudo_fails_alone_without_a_ticket_to_forget(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
