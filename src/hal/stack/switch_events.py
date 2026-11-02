@@ -78,13 +78,13 @@ class Closing:
     stop_failure: str | None = None
     interruption: Interruption | None = None
 
-    def with_barrier(self, part: BarrierPart, failure: str | None = None) -> "Closing":
+    def with_barrier(self, part: BarrierPart, failure: str | None = None) -> Closing:
         return replace(self, barrier=part, barrier_failure=failure)
 
-    def with_stop(self, part: StopPart, failure: str | None = None) -> "Closing":
+    def with_stop(self, part: StopPart, failure: str | None = None) -> Closing:
         return replace(self, stop=part, stop_failure=failure)
 
-    def interrupted(self, step: Interruption) -> "Closing":
+    def interrupted(self, step: Interruption) -> Closing:
         return replace(self, interruption=step)
 
     @property

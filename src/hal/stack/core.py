@@ -150,7 +150,7 @@ class Checkout:
     kinds: Mapping[str, EntryKind]
 
     @classmethod
-    def read(cls, config: Mapping[str, Any], git: Git) -> "Checkout":
+    def read(cls, config: Mapping[str, Any], git: Git) -> Checkout:
         """The kinds of every bind source of every service of `config` that lies in the tree; a
         source that is neither a file nor a directory at HEAD is an error before any plan."""
         sources = {

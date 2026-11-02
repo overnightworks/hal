@@ -118,7 +118,7 @@ class Machine:
     """What `docker volume ls` answers for a compose volume name, whatever the project."""
     unreadable_directories: set[str] = field(default_factory=set)
     """Directories of a kept volume the operator cannot traverse: a count entering one exits 1."""
-    clock: "Clock" = field(default_factory=lambda: Clock())
+    clock: Clock = field(default_factory=lambda: Clock())
     absent_polls: int = 0
     """How many `docker ps` polls find no database container before it appears."""
     source_bytes: int = 4_404_019

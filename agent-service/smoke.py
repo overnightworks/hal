@@ -139,7 +139,7 @@ def refusal_line(response: http.client.HTTPResponse) -> str:
     try:
         document = json.loads(body)
         return f"refused with {response.status} {document['code']}: {document['message']}"
-    except (ValueError, KeyError, TypeError):
+    except ValueError, KeyError, TypeError:
         return f"refused with {response.status}"
 
 

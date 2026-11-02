@@ -283,7 +283,7 @@ class FakeCloudflare:
     def __init__(self, outcome) -> None:
         self.outcome = outcome
 
-    def __call__(self, _token: str) -> "FakeCloudflare":
+    def __call__(self, _token: str) -> FakeCloudflare:
         return self
 
     def read(self, _zone: str):
@@ -299,7 +299,7 @@ class AnsweringProber:
     def __init__(self, answer=None) -> None:
         self.answer = answer or host_probe.Answer(200, None, True, False)
 
-    def __call__(self) -> "AnsweringProber":
+    def __call__(self) -> AnsweringProber:
         return self
 
     def ask(self, _name: str, _path: str = "/"):

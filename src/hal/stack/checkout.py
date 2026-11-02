@@ -459,7 +459,7 @@ class Refusal:
     cannot_tell: bool = False
 
     @classmethod
-    def cannot_read(cls, error: GitError) -> "Refusal":
+    def cannot_read(cls, error: GitError) -> Refusal:
         return cls(f"cannot read the live checkout, {error}", cannot_tell=True)
 
 

@@ -51,7 +51,7 @@ def main(arguments: list[str]) -> int:
                 sys.stdout.write(f"{check(Path(database), table)}\n")
             case _:
                 return 2
-    except (sqlite3.Error, OSError):
+    except sqlite3.Error, OSError:
         return VERDICT_EXIT
     return 0
 

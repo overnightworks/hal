@@ -45,7 +45,7 @@ def tracked_files() -> list[str]:
 def read_text(name: str) -> str | None:
     try:
         return (REPOSITORY_ROOT / name).read_text(encoding="utf-8")
-    except (UnicodeDecodeError, FileNotFoundError, IsADirectoryError):
+    except UnicodeDecodeError, FileNotFoundError, IsADirectoryError:
         return None
 
 

@@ -78,7 +78,7 @@ def shared_key_of(document_bytes: bytes) -> str | None:
     """The `shared_key` of a credential document agent-runtime's reader would accept, else None."""
     try:
         document = json.loads(document_bytes.decode("utf-8"), object_pairs_hook=_unique_fields)
-    except (ValueError, RecursionError):
+    except ValueError, RecursionError:
         return None
     if not isinstance(document, dict) or document.keys() - CREDENTIAL_FIELDS:
         return None
@@ -111,6 +111,6 @@ def _bearer_matches(authorization: str | None, shared_key: str) -> bool:
 def _body_keys(body: bytes) -> frozenset[str] | None:
     try:
         document = json.loads(body.decode("utf-8"))
-    except (ValueError, RecursionError):
+    except ValueError, RecursionError:
         return None
     return frozenset(document) if isinstance(document, dict) else None

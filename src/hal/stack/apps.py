@@ -86,7 +86,7 @@ class DeploymentRecord:
             fields = json.loads(raw)
             deployment = Deployment(fields["tag"], fields["sha"], fields["time"])
             valid = releases.parse(deployment.tag) and _is_sha(deployment.sha)
-        except (ValueError, KeyError, TypeError):
+        except ValueError, KeyError, TypeError:
             valid = False
         if not valid:
             raise AppError(f"services.{key}: {path} is not a record of a deployment")
@@ -115,7 +115,7 @@ class AppRuntime:
     now: Callable[[], datetime] = _now
 
     @classmethod
-    def of(cls, home: Path, state_directory: Path) -> "AppRuntime":
+    def of(cls, home: Path, state_directory: Path) -> AppRuntime:
         return cls(home / "srv", DeploymentRecord(state_directory / "deployed"))
 
 

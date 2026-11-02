@@ -55,7 +55,7 @@ class AppCompose:
         output = self._call("ps", ["--all", "--format", "json"], compose.READ_SECONDS)
         try:
             return [_container(entry) for entry in compose.ps_entries(output)]
-        except (KeyError, TypeError):
+        except KeyError, TypeError:
             raise compose.ComposeError(
                 f"`docker compose ps` of {self.key} answered no list of containers"
             ) from None
@@ -124,7 +124,7 @@ class AppCompose:
                 name: str(one.get("image") or f"{self.key}-{name}")
                 for name, one in services.items()
             }
-        except (ValueError, KeyError, TypeError, AttributeError):
+        except ValueError, KeyError, TypeError, AttributeError:
             raise compose.ComposeError(
                 f"`docker compose config` of {self.key} at {tag} answered no image per service"
             ) from None

@@ -24,7 +24,6 @@ module-name = "hal"
 
 [tool.ruff]
 line-length = 100
-target-version = "py312"
 extend-include = ["keycloak/go-live", "step-ca/init", "agent-service/setup"]
 
 [tool.ruff.format]

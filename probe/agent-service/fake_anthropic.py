@@ -96,7 +96,7 @@ def provider_record(expect: dict, request: http.server.BaseHTTPRequestHandler, b
     raw = str(request.headers).encode() + body
     try:
         model = json.loads(body)["model"]
-    except (ValueError, KeyError, TypeError):
+    except ValueError, KeyError, TypeError:
         model = None
     return {
         "path": request.path,
