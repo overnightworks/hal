@@ -1,0 +1,8 @@
+claim_id = "72e3d917e5e140db947a5bd278f53737"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "d7b850999820612a040643ba26926faabbc14bf1"
+branch = "claude/issue-919-backup-units-json-log"
+scope = ["docs/backup.md", "src/hal/workstation/jobs.py", "src/hal/workstation/user_units.py", "tests/test_hal_log_events.py", "tests/test_workstation_user_units.py"]
+opened_commit = "855460bf1d9b0900e399df58a7b0bd26858d8da7"
+whole_reason = "One field, its one rendering, the golden unit texts, the proof through the real door and the document that tells how to read the result."
