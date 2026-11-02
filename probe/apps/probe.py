@@ -46,8 +46,6 @@ import sys
 import time
 from pathlib import Path
 
-import yaml
-
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "probe"))  # the helper of the probes, importable by path too
 sys.path.insert(0, str(REPO / "src"))  # edge's own facts; its modules need only the stdlib
@@ -59,7 +57,7 @@ from emergency_switch import EmergencySwitch  # noqa: E402
 from switched_off import SwitchedOff  # noqa: E402
 
 from hal.output import write_line  # noqa: E402
-from hal.stack import checkout, deploy_checkout  # noqa: E402
+from hal.stack import barrier, checkout, deploy_checkout  # noqa: E402
 
 CORE_PROJECT = "edge-apps-probe"
 DOMAIN = "probe.invalid"
@@ -314,9 +312,6 @@ class Probe:
         )
         beside = edge_copy.beside_the_live_edge(traefik, self.key)
         private = beside.replace("edge.name", self.label).replace("edge.alias", self.alias_label)
-        self.edge_port = int(
-            yaml.safe_load(private)["entryPoints"]["edge"]["address"].rpartition(":")[2]
-        )
         (self.copy / "traefik.yml").write_text(private)
         edge_copy.publish(self.copy, "probe: a Traefik of its own")
         self.start_origin()
@@ -359,8 +354,9 @@ class Probe:
         self, path: str, host: str | None = None
     ) -> tuple[int, str, http.client.HTTPMessage] | None:
         """(status, body, headers) of the probe's Traefik's answer; None when it gives none."""
+        address_host, _, address_port = barrier.edge_address(self.copy).rpartition(":")
         connection = http.client.HTTPConnection(
-            edge_copy.PROBE_HOST, self.edge_port, timeout=REQUEST_SECONDS
+            address_host, int(address_port), timeout=REQUEST_SECONDS
         )
         try:
             connection.request("GET", path, headers={"Host": host or f"{self.key}.{DOMAIN}"})
