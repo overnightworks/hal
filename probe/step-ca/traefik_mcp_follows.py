@@ -5,6 +5,7 @@ container helpers, and drives `hal apply --local` on the copy of the repository 
 from __future__ import annotations
 
 import json
+import re
 import time
 from pathlib import Path
 
@@ -76,7 +77,7 @@ class TraefikMcpFollows:
         self.edit_follower_file(copy)
         out = self.hal(copy, "apply", "--local", terminal=True)
         expect("traefik-mcp recreate traefik-mcp.yml changed" in out, f"P13b: {out[-240:]}")
-        expect("traefik-mcp is recreated and runs the checked-out traefik-mcp.yml" in out, out)
+        expect(re.search(r"traefik-mcp +recreated\b", out) is not None, out)
         expect(self.container_id(FOLLOWER) != follower, "P13b: traefik-mcp kept its container")
         expect(self.container_id("step-ca") == step_ca, "P13b: step-ca was recreated")
         self.wait_until_answering()

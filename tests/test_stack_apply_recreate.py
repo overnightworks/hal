@@ -39,6 +39,7 @@ from support.stack_apply_fakes import (
 from support.stack_plan_rows import find_row, plain
 
 from hal.stack.plan_rows import PlanEvent
+from hal.stack.result_rows import ResultEvent
 
 RECREATE_STEP_CA = [*RECREATE_TRAEFIK[:-1], "step-ca"]
 RECREATE_KEYCLOAK_DB = [*RECREATE_TRAEFIK[:-1], "keycloak-db"]
@@ -109,6 +110,8 @@ def test_a_changed_definition_recreates_a_running_unit_service_alone_then_nothin
     assert bool(find_row(out, "step-ca", PlanEvent.RECREATE, "definition changed")) == (
         "step-ca" in drifted
     )
+    for service in ("step-ca", "traefik-mcp"):
+        assert bool(find_row(out, service, ResultEvent.RECREATED, "5s")) == (service in drifted)
     assert up_calls(scripted) == recreated
     assert {service for service in ids if scripted.container_ids[service] != ids[service]} == set(
         drifted
@@ -118,6 +121,46 @@ def test_a_changed_definition_recreates_a_running_unit_service_alone_then_nothin
     assert exit_code == 0
     assert "nothing to change" in out
     assert scripted.changing_verbs() == []
+
+
+def test_each_recreated_service_row_shows_its_own_wait(
+    two_units_applied,
+    switch,  # noqa: F811
+    scripted,  # noqa: F811
+    ingress,  # noqa: F811
+):
+    """Two services in one path: the clock runs between the two `up`s, so each row shows the wait
+    of its own recreate, not a fixed or a shared one."""
+    for service in ("step-ca", "keycloak-db"):
+        scripted.change_definition(service)
+    waits = iter([20, 40])
+    scripted.after_up = lambda: setattr(ingress, "now", ingress.now + next(waits))
+
+    exit_code, out, _ = switch()
+
+    assert exit_code == 0
+    assert find_row(out, "step-ca", ResultEvent.RECREATED, "25s")
+    assert find_row(out, "keycloak-db", ResultEvent.RECREATED, "45s")
+
+
+def test_a_follower_whose_record_cannot_be_written_is_partial_and_has_no_recreated_row(
+    step_ca_applied,  # noqa: F811
+    switch,  # noqa: F811
+    scripted,  # noqa: F811
+    state,  # noqa: F811
+):
+    """The recreated row follows the write of the follower's entry: a failed write says
+    partial and tells no recreate."""
+    scripted.change_definition("traefik-mcp")
+    scripted.after_up = lambda: state.chmod(0o500)
+    try:
+        exit_code, out, err = switch()
+    finally:
+        state.chmod(0o700)
+
+    assert exit_code == 1
+    assert "could not record traefik-mcp" in err
+    assert not find_row(out, "traefik-mcp", ResultEvent.RECREATED)
 
 
 def test_a_declined_yes_recreates_nothing(
@@ -245,9 +288,10 @@ def test_a_marker_that_appears_after_the_yes_wins_and_the_run_is_partial(
     ids = dict(scripted.container_ids)
     scripted.change_definition("step-ca")
 
-    exit_code, _, err = switch(while_prompt_waits=lambda: switch_off(state))
+    exit_code, out, err = switch(while_prompt_waits=lambda: switch_off(state))
 
     assert exit_code == 1
+    assert not find_row(out, "step-ca", ResultEvent.RECREATED)
     assert "partial, step-ca was switched off meanwhile" in err
     assert "step-ca is not recreated" in err
     assert scripted.container_ids == ids

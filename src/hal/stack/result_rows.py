@@ -28,6 +28,7 @@ from hal.stack.realm.reconcile import (
     Stage,
     StepResult,
 )
+from hal.stack.service_recreate import Recreated
 
 # restic's short ID, which `hal restore --snapshot` takes as a prefix (`hal.backup.runner`'s
 # MIN_SNAPSHOT_PREFIX); `hal.stack` may not import `hal.backup`, so the length is repeated.
@@ -53,6 +54,7 @@ class ResultEvent(StrEnum):
     APP_SWITCHED_OFF = "switched off"
     APP_SWITCH_OFF_FAILED = "switch off failed"
     APP_HELD_OFF = "switched off meanwhile"
+    RECREATED = "recreated"
 
 
 _APP_ON_EVENT = {
@@ -135,6 +137,13 @@ def _failed_event(subject: AppPlan | OffPlan) -> ResultEvent:
     if isinstance(subject, OffPlan):
         return ResultEvent.APP_SWITCH_OFF_FAILED
     return ResultEvent.APP_FAILED
+
+
+def recreated_row(recreated: Recreated) -> Row:
+    """A follower or unit service recreated and observed running, with the time it took."""
+    return Row(
+        Glyph.DONE, recreated.service, ResultEvent.RECREATED, format_duration(recreated.seconds)
+    )
 
 
 def waiting_row(grace_seconds: float) -> Row:
