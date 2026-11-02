@@ -714,7 +714,6 @@ class Probe(McpNetworks, TraefikMcpFollows):
         expect(not self.containers_of_unit(running_only=False), "off left containers")
         expect(marker.read_text() == written, "apply to E cleared the marker")
         self.volume_names_exist()
-
         out = self.hal(copy, "stop", "step-ca", terminal=False)  # 6. E x stop
         expect("nothing of it runs" in out, f"stop in E said: {out[-120:]}")
         expect(marker.read_text() == written, "stop in E touched the marker")
@@ -765,7 +764,6 @@ class Probe(McpNetworks, TraefikMcpFollows):
 
     def proof_12_apply_runs_the_setup(self) -> None:
         copy = self.start_without_keys()
-
         out = self.hal(copy, "apply", "--local", terminal=True, fails=True, typed=b"no\n")
         expect("aborted, nothing changed" in out, f"a no said: {out[-160:]}")  # (i)
         expect(not self.secrets_dir.exists(), "keys exist after a no")
