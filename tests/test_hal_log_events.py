@@ -512,7 +512,7 @@ def text_reason_of(output: str, event: str) -> str:
 def test_a_failed_app_carries_its_reason_and_the_skipped_prune_carries_its_own(
     edge_backup, machine, monkeypatch
 ):
-    machine.other_db_containers["edge"] = []
+    machine.lose_keycloak_database()
     monkeypatch.setenv("LOG_FORMAT", "text")
     in_text = edge_backup(*declare_shipped_apps(), "backup")
     monkeypatch.setenv("LOG_FORMAT", "json")
@@ -566,7 +566,7 @@ def test_a_restore_that_proves_nothing_and_a_failing_check_each_carry_a_reason(
         ),
         (((Field.BYTES, 0), (Field.SECONDS, 0)), 0, 0, "0 B · <1s\n"),
     ],
-    ids=["K6", "K7"],
+    ids=["size and span", "zero"],
 )
 def test_a_size_and_a_span_stay_raw_in_json_and_read_as_units_in_text_even_at_zero(
     capsys, monkeypatch, fields, raw_bytes, raw_seconds, text_ending
