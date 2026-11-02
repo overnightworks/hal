@@ -3,6 +3,6 @@ agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
 role = "builder"
 base = "9fef3432b7f6b9826f521a0fc771dbce783ff516"
 branch = "claude/issue-864-a5-3a-recreate-rows"
-scope = ["docs/design/hal-output.html", "probe/step-ca/traefik_mcp_follows.py", "src/hal/stack/core.py", "src/hal/stack/core_phase.py", "src/hal/stack/result_rows.py", "src/hal/stack/service_recreate.py", "tests/test_stack_apply.py", "tests/test_stack_apply_built_image.py", "tests/test_stack_apply_recreate.py", "tests/test_stack_result_rows.py"]
+scope = ["docs/design/hal-output.html", "probe/step-ca/traefik_mcp_follows.py", "src/hal/stack/apply.py", "src/hal/stack/core.py", "src/hal/stack/core_phase.py", "src/hal/stack/result_rows.py", "src/hal/stack/service_recreate.py", "tests/test_stack_apply.py", "tests/test_stack_apply_built_image.py", "tests/test_stack_apply_recreate.py", "tests/test_stack_result_rows.py"]
 opened_commit = "6bc1669799768ba43fe77f5202b5b4a0cfba1cf4"
 whole_reason = "One typed record and its row replace the sentence the two recreate paths print, so the callback, its two producers, the renderer and the pins of that sentence land in one commit; the fourth production file only removes the method left dead."
