@@ -3,6 +3,9 @@ HOME and copy of the repository, and a unit `built-probe` with `run.build` whose
 `pull_policy: never`. Its tags are made with `docker tag` from busybox images that are already
 local; nothing is built or pulled, and the core is never started.
 
+D2: the service names a file secret whose file is missing: one apply refuses before its yes
+with the error pair and exit 4, and no container exists; with the file written the unit starts.
+
 D1a: a bumped tag is recreated under one yes, with a new id and the new image; a second apply
 changes nothing. D1b: a container that restarts on the old tag is recreated onto the new tag by
 one apply, which leaves it running. D1c: the unchanged tag is removed with `docker rmi -f`; the
@@ -40,6 +43,7 @@ sys.path.insert(0, str(REPO / "src"))  # edge's own facts; its modules need only
 import edge_copy  # noqa: E402
 from edge_copy import ProbeFailed, expect  # noqa: E402
 
+from hal.grammar import ExitCode  # noqa: E402
 from hal.output import write_line  # noqa: E402
 from hal.stack import compose  # noqa: E402
 from hal.stack.built_image import ENDS_RUNS  # noqa: E402
@@ -67,6 +71,8 @@ SERVICE_TEXT = """\
 
 """
 COMPOSE_FILE = "compose.yaml"
+SECRET = "built_probe_key"
+SECRET_FILE = ".secrets/built-probe/key"
 NOTHING_TO_CHANGE = "nothing to change"
 COMPOSE_SECONDS = 300
 STOP_THE_LANE = "stop the lane (body, Acceptance): ps Image is neither the reference nor the id"
@@ -281,6 +287,38 @@ class Drive:
         expect(after["image_id"] == self.image_id_of(moved), "D1d the container is not on the tag")
         write_line("D1d held: one yes recreated onto the moved tag's new id")
 
+    def d2_a_missing_secret_file(self) -> None:
+        """The unit has no container and names a secret whose file is not there."""
+        path = self.home / SECRET_FILE
+        text = (self.copy / COMPOSE_FILE).read_text()
+        text = text.replace(f"  {UNIT}:\n", f"  {UNIT}:\n    secrets: [{SECRET}]\n", 1)
+        text = text.replace(
+            "\nsecrets:\n", f"\nsecrets:\n  {SECRET}:\n    file: ${{HOME}}/{SECRET_FILE}\n", 1
+        )
+        (self.copy / COMPOSE_FILE).write_text(text)
+        edge_copy.publish(self.copy, f"probe: {UNIT} names the secret {SECRET}")
+        assert self.guard  # noqa: S101 - narrows the type of the guard that the setup sets
+        self.guard.expect(edge_copy.copy_compose_command(self.copy), once=False)
+        self.compose("rm", "--stop", "--force", UNIT)
+        resolved = json.loads(self.compose("config", "--format", "json"))
+        expect(
+            resolved["secrets"][SECRET]["file"] == str(path),
+            f"D2 Compose resolves the secret to {resolved['secrets'][SECRET]}, not {path}",
+        )
+        out = self.hal(exit_code=ExitCode.REFUSED)
+        line = f"error: {UNIT} needs {path}; nothing switched next: hal setup"
+        expect(line in out, f"D2 the refusal lacks {line!r}: {out[-300:]}")
+        expect("Type yes to apply" not in out, f"D2 asked for a yes: {out[-300:]}")
+        listed = self.compose("ps", "--all", "--format", "json", UNIT).strip()
+        expect(not listed, f"D2 a container exists after the refusal: {listed[:200]}")
+        write_line(f"D2 refusal: {line!r}; no container")
+        path.parent.mkdir(parents=True)
+        path.write_text("probe\n")
+        out = self.hal()
+        expect(f"{UNIT} is on" in out, f"D2 with the file the apply said: {out[-300:]}")
+        expect(self.container()["state"] == "running", "D2 the unit is not running")
+        write_line("D2 held: the missing file refuses before the yes; written, the unit starts")
+
     def teardown(self) -> None:
         if self.guard is not None:
             self.compose("down", "--volumes", "--remove-orphans")
@@ -297,6 +335,7 @@ def prove(drive: Drive) -> int:
         drive.d1b_a_restarting_container()
         drive.d1c_a_removed_tag()
         drive.d1d_a_moved_tag()
+        drive.d2_a_missing_secret_file()
     except (ProbeFailed, subprocess.TimeoutExpired, KeyboardInterrupt) as failure:
         write_line(f"PROBE FAILED: {failure!r}")
         return 1
@@ -305,7 +344,7 @@ def prove(drive: Drive) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     return edge_copy.run_main(
-        __doc__.splitlines()[0], argv, Drive, prove, "PROBE PASSED: #482 D1a-D1d hold"
+        __doc__.splitlines()[0], argv, Drive, prove, "PROBE PASSED: #482 D1a-D1d and #893 D2 hold"
     )
 
 

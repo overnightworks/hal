@@ -29,6 +29,28 @@ class Plan:
     legal: LegalPlan
 
     @property
+    def created_services(self) -> tuple[str, ...]:
+        """Every service this run creates a container for or names to start (a running one is left
+        alone by `--no-recreate`), once each."""
+        services = (
+            *(
+                service
+                for plan in self.plans
+                if plan.action is Action.ON
+                for service in plan.services
+            ),
+            *(plan.service for plan in self.core if plan.action is core.CoreAction.RECREATE),
+            *(
+                plan.service
+                for plan in self.followers
+                if plan.action is core.FollowerAction.RECREATE
+            ),
+            *(built.service for built in self.built),
+            *(recreate.service for recreate in self.recreates),
+        )
+        return tuple(dict.fromkeys(services))
+
+    @property
     def changes_nothing(self) -> bool:
         return (
             self.realm.action is not reconcile.RealmAction.RUN
