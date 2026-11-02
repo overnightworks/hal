@@ -3,6 +3,6 @@ agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
 role = "builder"
 base = "8d02d769729eb72e3964ca56852fb0b367a63386"
 branch = "claude/issue-853-step-ca-probe-run-probe"
-scope = ["probe/edge_copy.py", "probe/step-ca/probe.py", "quality/baseline.toml", "tests/test_step_ca_init.py"]
+scope = ["probe/edge_copy.py", "probe/step-ca/probe.py", "probe/switches/built_image.py", "probe/switches/probe.py", "quality/baseline.toml", "tests/test_probe_run.py", "tests/test_step_ca_init.py"]
 opened_commit = "05d1e069c1a0720b57007737c3daa525d33b9f05"
 whole_reason = "One loop gains a verdict callable and its second caller folds in; the test drive and the baseline entry follow the same change."
