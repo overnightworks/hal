@@ -319,10 +319,10 @@ wheels = [
 
 [[package]]
 name = "overnightworks-appkit"
-version = "0.11.0"
-source = { url = "https://github.com/overnightworks/appkit/releases/download/v0.11.0/overnightworks_appkit-0.11.0-py3-none-any.whl" }
+version = "0.12.0"
+source = { url = "https://github.com/overnightworks/appkit/releases/download/v0.12.0/overnightworks_appkit-0.12.0-py3-none-any.whl" }
 wheels = [
-    { url = "https://github.com/overnightworks/appkit/releases/download/v0.11.0/overnightworks_appkit-0.11.0-py3-none-any.whl", hash = "sha256:0278c2b9feeb438ee1fcf79a7a6d9dce98a5a5e7ee43b928b82386dda39fe007" },
+    { url = "https://github.com/overnightworks/appkit/releases/download/v0.12.0/overnightworks_appkit-0.12.0-py3-none-any.whl", hash = "sha256:e0d53c0fd192292865ca0f098ed4525fd5f33a55448bdf03bfbbb4660fbf17e5" },
 ]
 
 [[package]]
@@ -344,7 +344,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "overnightworks-appkit", url = "https://github.com/overnightworks/appkit/releases/download/v0.11.0/overnightworks_appkit-0.11.0-py3-none-any.whl" },
+    { name = "overnightworks-appkit", url = "https://github.com/overnightworks/appkit/releases/download/v0.12.0/overnightworks_appkit-0.12.0-py3-none-any.whl" },
     { name = "pyyaml", specifier = ">=6" },
 ]
 
