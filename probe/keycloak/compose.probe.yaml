@@ -24,7 +24,7 @@ services:
       - ${PROBE_CONFIG_DIR:?run through probe/keycloak/probe.py}:/config:ro
 
   probe-rp:
-    image: python:3.13.17-alpine@sha256:fa0bb0d0cd7c7d6cef30a69094d32ac2b71c7304c87c6107fec100e1ee4eda02
+    image: python:3.14.8-alpine@sha256:f6a589d43c42b9e7f7dc67a12d37132491f362859a5d750607710cc56da3bc72
     user: "65534:65534"
     read_only: true
     cap_drop: [ALL]
@@ -36,7 +36,7 @@ services:
 
   # A stand-in for songmaker's web service: a container on the back-channel network only.
   probe-backchannel-client:
-    image: python:3.13.17-alpine@sha256:fa0bb0d0cd7c7d6cef30a69094d32ac2b71c7304c87c6107fec100e1ee4eda02
+    image: python:3.14.8-alpine@sha256:f6a589d43c42b9e7f7dc67a12d37132491f362859a5d750607710cc56da3bc72
     user: "65534:65534"
     read_only: true
     cap_drop: [ALL]
