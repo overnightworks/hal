@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from hal.output import LogFormat
 from hal.output.command import Verb, command
 
 ALARM_JOB_NAME = "hal-alarm"
@@ -30,6 +31,8 @@ class TimerJob:
     """A calendar event; a job has this or `interval_minutes`."""
     interval_minutes: int | None = None
     """Minutes after boot and after each run, for a job whose repetition comes from the settings file."""
+    log_format: LogFormat | None = None
+    """The format the unit sets for the run's log; none leaves the variable unset."""
 
 
 def alarm_job(interval: int) -> TimerJob:
@@ -57,6 +60,7 @@ TIMER_JOBS: tuple[TimerJob, ...] = (
         on_calendar="Sun *-*-* 03:00:00",
         timeout_start="6h",
         documentation="docs/backup.md",
+        log_format=LogFormat.JSON,
     ),
     TimerJob(
         name="hal-backup-restore-test",
@@ -68,6 +72,7 @@ TIMER_JOBS: tuple[TimerJob, ...] = (
         on_calendar="Sun *-*-01..07 05:00:00",
         timeout_start="6h",
         documentation="docs/backup.md",
+        log_format=LogFormat.JSON,
     ),
     TimerJob(
         name="hal-check",

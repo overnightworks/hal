@@ -26,7 +26,9 @@ the operator's terminal (key material is made there, never here) and `--check` m
 before a fresh plan is shown. A unit with an emergency switch (`hal stop`) or a barrier a stop
 left is never started and its switch is never cleared here: only `hal start` ends it. If it is
 enabled in the catalog, declares a setup, and its containers still run while it is not set up,
-the run is refused: nothing is asked or published.
+the run is refused: nothing is asked or published. After the setups, and before the plan is
+shown, a service this run creates that names a secret file which does not exist refuses the run
+with that path and `next: hal setup`, where Compose would refuse it at `up`.
 An app (an entry with `repo`) is planned last, in the same plan and under the same `yes`: its
 newest release tag is checked out, built, started and recorded once its containers are settled
 (`apps.py`).
@@ -418,8 +420,9 @@ def _missing_setups(planned: Plan, repository: Path, check: setup.SetupCheck) ->
 
 
 def _refusal(missing: Sequence[MissingSetup], planned: Plan, setups_ran: bool) -> int | None:
-    """GUARD_REFUSED when a unit or app a stop keeps off still runs, or, after the setups ran, a
-    unit is still not set up: none is started."""
+    """GUARD_REFUSED when a unit or app a stop keeps off still runs, when, after the setups ran, a
+    unit is still not set up, or when a service this run creates lacks its secret file: none is
+    started."""
     still_running = [
         *(still_runs_row(item.unit.key, item.check_line) for item in missing if item.kept_stopped),
         *(still_runs_row(key, "") for key in planned.app_plans.switched_off_still_running),
@@ -442,7 +445,20 @@ def _refusal(missing: Sequence[MissingSetup], planned: Plan, setups_ran: bool) -
             command(Verb.APPLY),
         )
         return ApplyExit.GUARD_REFUSED
-    return None
+    return None if missing else _refused_for_absent_secrets(planned)
+
+
+def _refused_for_absent_secrets(planned: Plan) -> int | None:
+    """GUARD_REFUSED when a service this run creates names a secret file that does not exist:
+    Compose would refuse it at `up`, after the services before it ran."""
+    absent = setup.absent_secret_files(planned.fleet.config, planned.created_services)
+    if not absent:
+        return None
+    write_error(
+        "; ".join(f"{item.service} needs {item.file}" for item in absent) + "; nothing switched",
+        command(Verb.SETUP),
+    )
+    return ApplyExit.GUARD_REFUSED
 
 
 def _ask_and_run_setups(
