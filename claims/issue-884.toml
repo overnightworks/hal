@@ -1,8 +1,0 @@
-claim_id = "d560ebbf8e8c40b6833b3297194b1ed3"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "6c17d580b36def4e3c680f9c09fb75d4eafcf958"
-branch = "claude/issue-884-a5-3d-unproven-barrier-row"
-scope = ["docs/design/hal-output.html", "probe/switches/probe.py", "probe/switches/unproven_barrier.py", "quality/baseline.toml", "src/hal/stack/apply.py", "src/hal/stack/barrier.py", "src/hal/stack/core_phase.py", "src/hal/stack/result_rows.py", "tests/support/stack_apply.py", "tests/test_stack_apply.py", "tests/test_stack_apply_recreate.py", "tests/test_stack_result_rows.py"]
-opened_commit = "cffce097cace6b6577607b290fdeadc6066ba01d"
-whole_reason = "One typed failure from the proof to its one row and pair: the type, the walk, the row, its reader, their pins, the real-stack cell and the picture move in one commit."
