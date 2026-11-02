@@ -1,0 +1,8 @@
+claim_id = "23549eed6f3841d8aa17feb0c3e8fa44"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "6c17d580b36def4e3c680f9c09fb75d4eafcf958"
+branch = "claude/issue-883-a5-3f-appkit-legal-rows"
+scope = ["docs/architecture.md", "docs/design/hal-output.html", "src/hal/stack/appkit_step.py", "src/hal/stack/apply.py", "src/hal/stack/legal_step.py", "src/hal/stack/plan_rows.py", "src/hal/stack/result_rows.py", "src/hal/stack/unit_plans.py", "tests/test_stack_appkit_step.py", "tests/test_stack_apply_legal.py", "tests/test_stack_result_rows.py"]
+opened_commit = "0dd0652ec8fb596aaae6f1f9f42d12c74c9e1b2a"
+whole_reason = "One ruled sentence over two write steps: the shared failure, both writes, the row owner, the chain that stops the run, their pins and the docs move in one commit."
