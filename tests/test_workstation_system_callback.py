@@ -147,4 +147,5 @@ def test_the_live_line_shows_each_task_start_in_run_order_and_a_looped_task_once
 
     shown = [re.search(r"system +(.*) \xb7 \S+$", re.sub(r"\x1b\[[0-9;]*[mK]", "", frame)) for frame in err.getvalue().split("\r")]
     names = [match.group(1) for match in shown if match]
-    assert ["changed task", "skipped task", "handler", "looped task", "unchanged task"] == [name for name in names if name != "ansible.builtin.meta"]
+    started = [name for name in names if name != "ansible.builtin.meta"]
+    assert started == ["changed task", "skipped task", "handler", "looped task", "unchanged task"]
