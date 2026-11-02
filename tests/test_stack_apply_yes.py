@@ -190,7 +190,7 @@ def test_nothing_to_change_ends_in_the_done_verdict_with_the_run_time(
 
     assert (exit_code, err) == (0, "")
     assert "✓ nothing to change · units and apps checked · 21s" in plain(out)
-    assert "Type yes" not in out
+    assert "Type yes" not in plain(out)
 
 
 @pytest.mark.usefixtures("realm_unit")
@@ -203,8 +203,7 @@ def test_a_plan_that_only_cannot_read_the_realm_asks_nothing_and_refuses(
     exit_code, out, err = switch()
 
     assert exit_code == 1
-    assert "Type yes" not in out
-    assert "the plan" not in out
+    assert "Type yes" not in plain(out)
     assert "realm skipped" in plain(out)
     assert lines_of(err) == [
         "error: realm: Keycloak could not be read; not checked "

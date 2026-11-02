@@ -12,6 +12,17 @@ from hal.stack.unit_plans import Progress, Recreate, since_of
 
 
 @dataclass(frozen=True)
+class Recreated:
+    """A service recreated and observed running, after `seconds` of the recreate and the watch
+    (for a core service also the proof and the record); `barriers_proven` says a core recreate
+    proved at least one barrier and none failed."""
+
+    service: str
+    seconds: float
+    barriers_proven: bool = False
+
+
+@dataclass(frozen=True)
 class ServiceRecreator:
     """One apply run's means to recreate a service alone: `--no-deps`, so the unit's other
     services are never touched (C6), under the switch lock, so a marker that appeared since the
@@ -23,7 +34,7 @@ class ServiceRecreator:
     config: Mapping[str, Any]
     watch: compose.Watch
     progress: Progress
-    tell: Callable[[str], None]
+    tell: Callable[[Recreated], None]
 
     def followers(
         self,
@@ -40,6 +51,7 @@ class ServiceRecreator:
             followed_services = followed()
             for plan in recreates:
                 self.progress.unit = plan.service
+                started = self.watch.clock()
                 if failure := self.alone(
                     plan.unit,
                     plan.service,
@@ -48,7 +60,7 @@ class ServiceRecreator:
                     return failure
                 self.progress.step = f"record {plan.service} in {core.APPLIED_FILE}"
                 record.write(plan.service, plan.digests, followed_services)
-                self.tell(plan.recreated())
+                self.tell(Recreated(plan.service, self.watch.clock() - started))
         except (compose.ComposeError, core.CoreError, switches.SwitchError) as error:
             return f"could not {self.progress.step}, {error}"
         return None
@@ -68,9 +80,10 @@ class ServiceRecreator:
         try:
             for plan in recreates:
                 self.progress.unit = plan.service
+                started = self.watch.clock()
                 if failure := self.alone(plan.unit, plan.service):
                     return failure
-                self.tell(f"{plan.service} is recreated")
+                self.tell(Recreated(plan.service, self.watch.clock() - started))
         except (compose.ComposeError, switches.SwitchError) as error:
             return f"could not {self.progress.step}, {error}"
         return None
