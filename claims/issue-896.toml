@@ -1,7 +1,0 @@
-claim_id = "a1b44ead1bfd4ebd94b2c60414eb1f61"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "c11c8ac5203a5ef1a11d6c0b18465f393c6a1b9d"
-branch = "claude/issue-896-fake-sync-mask"
-scope = ["tests/support/stack_update.py"]
-opened_commit = "9af7a6d2c9f1cd0a7940fab80e8fc3c222f9dfef"
