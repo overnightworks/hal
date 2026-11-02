@@ -349,7 +349,8 @@ class _LiveLine:
     def on_ctrl_c(self, _signal_number: int, _frame: FrameType | None) -> None:
         """Runs in place of the `KeyboardInterrupt`, wherever the Ctrl-C lands, also at the end of
         the block where no `except` would see it: the line ends first, then `stop` raises it. A
-        Ctrl-C while `stop` runs leaves the line, unless the thread already erased it, and waits."""
+        Ctrl-C while `stop` runs leaves the line, unless the thread wrote the erase or a stopped
+        terminal still holds it, and waits."""
         self._erase = False
         self._ctrl_c_held = True
         self.stop(erase=False)
@@ -401,8 +402,9 @@ def live_line(subject: str) -> Iterator[Callable[[str], None]]:
     `show(text)` names the task now running, and its time restarts. Only for a person at a
     terminal outside `-v` and `LOG_FORMAT=json`; elsewhere `show` does nothing. A normal end
     erases the line; a Ctrl-C leaves it, so the next row can end it with `fresh_line`, and no byte
-    of the line follows the `KeyboardInterrupt`. Only the main thread may call it: it takes SIGINT
-    for the length of the block, unless the caller put its own handler there, which then stays."""
+    of the line follows the `KeyboardInterrupt`, apart from a write a terminal stopped with Ctrl-S
+    still holds. Only the main thread may call it: it takes SIGINT for the length of the block,
+    unless the caller put its own handler there, which then stays."""
     if is_verbose() or _json_on() or not _colour_on(sys.stderr):
         yield lambda _text: None
         return
