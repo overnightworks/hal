@@ -14,7 +14,7 @@ services:
   capture-egress: &capture
     profiles: [agent-probe]
     # The realm observer's pin (compose.yaml); tests/test_agent_egress.py holds the two equal.
-    image: python:3.14.8-alpine@sha256:f6a589d43c42b9e7f7dc67a12d37132491f362859a5d750607710cc56da3bc72
+    image: python:3.14.10-alpine@sha256:eb2c62658b8d51bff0acc408504b76521d02030de56a8a3c1e830083e89b89d2
     # Root in the container, but NET_RAW alone: it opens a packet socket and writes nothing.
     user: "0:0"
     read_only: true
