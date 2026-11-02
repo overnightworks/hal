@@ -45,6 +45,11 @@ TOO_MANY = 429
 REQUEST_SECONDS = 60
 HOLDER_SECONDS = 120
 UPSTREAM_FAILURE = 529
+ADMITTED_BODY = {
+    "model": "anthropic/opus",
+    "messages": [{"role": "user", "content": "probe"}],
+    "tools": [],
+}
 CLIENT_PROGRAM = """\
 import json, socket, sys, time
 bearer, body = sys.argv[1:3]
@@ -89,7 +94,7 @@ class AdmissionProbe(LitellmProbe):
             "docker", "run", "--rm", "-i", "--name", name, "--label", LABEL,
             f"--network={PROJECT}_litellm-api", "--read-only", "--user", "65534:65534",
             "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", self.image,
-            "python", "-I", "-", self.credential, json.dumps(self.good_body()), ROUTE,
+            "python", "-I", "-", self.credential, json.dumps(ADMITTED_BODY), ROUTE,
         ]  # fmt: skip
 
     def start_client(self) -> subprocess.Popen:
@@ -115,8 +120,14 @@ class AdmissionProbe(LitellmProbe):
     def wait_for_requests(self, cell: str, count: int) -> None:
         deadline = time.monotonic() + REQUEST_SECONDS
         while len(self.provider_requests()) < count:
-            expect(time.monotonic() < deadline, f"{cell}: the fake never logged {count} requests")
+            expect(time.monotonic() < deadline, f"{cell}: the fake logged {self.seen(count)}")
             time.sleep(1)
+
+    def seen(self, count: int) -> str:
+        """Why `count` requests did not arrive: what reached the fake and what the clients got."""
+        ended = [p.communicate() for p in self.holders if p.poll() is not None]
+        reached = len(self.provider_requests()) - self.base
+        return f"{reached} of {count} requests; {len(ended)} clients ended: {ended[:2]}"
 
     def released(self) -> list[str]:
         return [line for line in self.log_of(FAKE_PROVIDER).splitlines() if line.startswith("held")]
