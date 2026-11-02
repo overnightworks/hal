@@ -32,6 +32,7 @@ from hal.workstation.system_step import (
     CheckState,
     StepFailed,
     SystemStep,
+    SystemStepInterrupted,
     UnresolvableRunningUser,
 )
 from hal.workstation.layout import CommandRunner, Layout
@@ -88,6 +89,7 @@ class SetupEvent(StrEnum):
     STORED = "stored"
     COMPLETE = "complete"
     FAILED = "failed"
+    INTERRUPTED = "interrupted"
     NOT_RUN = "not run"
     NEEDS_SUDO = "needs sudo"
     OPEN = "open"
@@ -113,6 +115,7 @@ class EventLook:
 
 EVENT_LOOK: dict[SetupEvent, EventLook] = {
     SetupEvent.FAILED: EventLook(Glyph.FAILED, 5, None),
+    SetupEvent.INTERRUPTED: EventLook(Glyph.FAILED, 5, None),
     SetupEvent.NOT_CHECKED: EventLook(Glyph.NEEDS_YOU, 4, Tally.OPEN),
     SetupEvent.MISSING: EventLook(Glyph.NEEDS_YOU, 4, Tally.OPEN),
     SetupEvent.OPEN: EventLook(Glyph.NEEDS_YOU, 4, Tally.OPEN),
@@ -643,18 +646,24 @@ def _stop_after_failure(rows: list[SetupRow], position: int, stopped: _RowStoppe
         case SecretsStillOpen(names=names):
             outcome = Outcome(SetupEvent.OPEN, ", ".join(names), count=len(names))
             detail = f" · {counted(len(names), StillOpenSecret.SECRET)}"
+        case SystemStepInterrupted() as error:
+            outcome = Outcome(SetupEvent.INTERRUPTED, str(error))
+            detail = _failure_detail(rows[position], error, step, mode)
         case error:
             outcome = Outcome(SetupEvent.FAILED, _failure_sentence(step, error))
             detail = _failure_detail(rows[position], error, step, mode)
-    write_row(outcome.row(rows[position]))
+    write_row(outcome.row(rows[position]), fresh_line=outcome.event is SetupEvent.INTERRUPTED)
     for later in rows[position + 1 :]:
         write_row(Outcome(SetupEvent.NOT_RUN).row(later))
     _stopped(rows[position], step, detail)
+    if outcome.event is SetupEvent.INTERRUPTED:
+        raise KeyboardInterrupt from stopped
 
 
 def _go_through(steps: tuple[Step, ...], role: ExecutionRole, mode: Pass) -> list[Outcome] | None:
     """Every row in order, printed as it ends; stops at the first failed step, so a missing scanner never gets a hook
-    activated, and the later rows say `not run`. `None` says a step failed and its error pair is written."""
+    activated, and the later rows say `not run`. `None` says a step failed and its error pair is written;
+    a Ctrl-C in the system step prints the same and then raises `KeyboardInterrupt`."""
     outcomes: list[Outcome] = []
     rows = list(SetupRow)
     for position, row in enumerate(rows):

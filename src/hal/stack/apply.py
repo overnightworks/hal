@@ -90,10 +90,21 @@ from hal.stack.plan_rows import (
     waiting_text,
 )
 from hal.stack.realm import reconcile
-from hal.stack.result_rows import app_partial, app_row, partial_error, result_rows, waiting_row
+from hal.stack.result_rows import (
+    app_partial,
+    app_row,
+    appkit_rows,
+    legal_rows,
+    not_written_partial,
+    not_written_row,
+    partial_error,
+    result_rows,
+    waiting_row,
+)
 from hal.stack.terminal import NEEDS_TERMINAL, at_terminal
 from hal.stack.unit_plans import (
     Action,
+    NotWritten,
     Progress,
     UnitPlan,
     plan_switches,
@@ -571,6 +582,29 @@ def _write_plan(planned: Plan) -> None:
     write_groups(plan_groups(planned))
 
 
+def _write_files(planned: Plan, progress: Progress) -> NotWritten | None:
+    """Appkit, then legal; a step's rows are said once its write returned, the first failure
+    stops the rest."""
+    if failure := planned.appkit.write(progress):
+        return failure
+    for row in appkit_rows(planned.appkit):
+        write_row(row)
+    if failure := planned.legal.write(progress):
+        return failure
+    for row in legal_rows(planned.legal):
+        write_row(row)
+    return None
+
+
+def _say_stopped(failure: NotWritten | str) -> None:
+    """The red row of a file step that could not write, when it was one, then the pair."""
+    if isinstance(failure, NotWritten):
+        write_row(not_written_row(failure))
+        write_error(*not_written_partial(failure))
+    else:
+        write_error(f"partial, {failure}; no unit switched", command(Verb.APPLY))
+
+
 def _confirm_and_switch(
     engine: compose.Compose,
     planned: Plan,
@@ -587,12 +621,10 @@ def _confirm_and_switch(
     progress = Progress()
     withheld: dict[str, str] = {}
     try:
-        if failure := (
-            planned.appkit.write(progress)
-            or planned.legal.write(progress)
-            or core_phase.run(engine, planned, marks, progress)
+        if failure := _write_files(planned, progress) or core_phase.run(
+            engine, planned, marks, progress
         ):
-            write_error(f"partial, {failure}; no unit switched", command(Verb.APPLY))
+            _say_stopped(failure)
             return ApplyExit.REFUSED
         for plan in changes:
             if since := switch(engine, plan, progress, marks, planned.read):
