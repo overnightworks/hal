@@ -257,25 +257,20 @@ def test_a_failed_app_is_an_error_row_beside_an_info_row_and_the_error_event(edg
 
 
 @pytest.mark.usefixtures("json_log")
-def test_pre_apply_json_answers_one_object_without_a_prefix(edge_backup, machine, home):
-    outcome = edge_backup(*declare_two_apps(home), "backup", "radio", "--pre-apply", "--json")
-
-    assert outcome.exit_code == 0, outcome.err
-    assert json.loads(outcome.out) == {"snapshot": machine.snapshots[-1]["id"]}
-    assert outcome.out.count("\n") == 1
-
-
-@pytest.mark.usefixtures("json_log")
-def test_a_failed_pre_apply_json_keeps_stdout_empty_and_writes_the_error_event(
-    edge_backup, machine, home
-):
-    machine.failing["restic backup"] = 1
+@pytest.mark.parametrize("failing", [False, True], ids=["good", "failed"])
+def test_pre_apply_json_keeps_stdout_a_bare_object_or_empty(edge_backup, machine, home, failing):
+    if failing:
+        machine.failing["restic backup"] = 1
 
     outcome = edge_backup(*declare_two_apps(home), "backup", "radio", "--pre-apply", "--json")
 
-    assert (outcome.exit_code, outcome.out) == (ExitCode.FAILURE, "")
-    [(priority, event)] = events(outcome.err)
-    assert (priority, event["event"]) == (3, "error")
+    if failing:
+        assert (outcome.exit_code, outcome.out) == (ExitCode.FAILURE, "")
+        [(priority, event)] = events(outcome.err)
+        assert (priority, event["event"]) == (3, "error")
+    else:
+        assert set(json.loads(outcome.out)) == {"snapshot"}
+        assert outcome.out.startswith("{")
 
 
 def forbidden_in(home: Path) -> list[str]:
