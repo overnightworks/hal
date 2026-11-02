@@ -119,6 +119,8 @@ class ApplyExit(IntEnum):
     APPLIED_OR_NOTHING = 0
     REFUSED = 1
     CANNOT_PLAN = 2
+    DECLINED = 3
+    GUARD_REFUSED = 4
 
 
 CANNOT_PLAN_ERRORS = (
@@ -218,10 +220,10 @@ def apply_local(
     started = verifier.clock()
     if not at_terminal():
         write_error(NEEDS_TERMINAL)
-        return ApplyExit.REFUSED
+        return ApplyExit.GUARD_REFUSED
     if refusal := checkout.not_live_checkout_line(repository, home or Path.home()):
         write_error(refusal)
-        return ApplyExit.CANNOT_PLAN
+        return ApplyExit.GUARD_REFUSED
     try:
         lock = take_apply_lock(state_directory)
     except OSError as error:
@@ -229,11 +231,11 @@ def apply_local(
         return ApplyExit.CANNOT_PLAN
     if lock is None:
         write_error(APPLY_RUNNING)
-        return ApplyExit.REFUSED
+        return ApplyExit.GUARD_REFUSED
     try:
         live = checkout.Git(repository, git)
         if not on_clean_main(live):
-            return ApplyExit.CANNOT_PLAN
+            return ApplyExit.GUARD_REFUSED
         if (origin := fetched(live, write_error)) is None or _waits_on_origin(origin):
             return ApplyExit.CANNOT_PLAN
         if not _environment_ready(repository, ensure_environment):
@@ -415,7 +417,7 @@ def _refusal(missing: Sequence[MissingSetup], planned: Plan, setups_ran: bool) -
             "switched off but still running, nothing switched",
             command(Verb.STOP, still_running[0].subject),
         )
-        return ApplyExit.REFUSED
+        return ApplyExit.GUARD_REFUSED
     if setups_ran and missing:
         write_error(
             "; ".join(
@@ -425,7 +427,7 @@ def _refusal(missing: Sequence[MissingSetup], planned: Plan, setups_ran: bool) -
             ),
             command(Verb.APPLY),
         )
-        return ApplyExit.REFUSED
+        return ApplyExit.GUARD_REFUSED
     return None
 
 
@@ -440,7 +442,7 @@ def _ask_and_run_setups(
         print(f"{item.unit.key} is not set up: {item.check_line}")
         if not confirmed(f"run `{item.unit.setup}` now"):
             write_error(f"aborted, nothing changed; run `{item.unit.setup}` yourself or answer yes")
-            return ApplyExit.REFUSED
+            return ApplyExit.DECLINED
     for item in missing:
         if (exit_code := _run_one_setup(item, repository, check, run_setup)) is not None:
             return exit_code
@@ -475,7 +477,7 @@ def _run_one_setup(
         return ApplyExit.REFUSED
     if line := setup.not_set_up_line(item.unit, repository, check):
         write_error(f"`{setup_command}` ran, still not set up: {line}")
-        return ApplyExit.REFUSED
+        return ApplyExit.GUARD_REFUSED
     return None
 
 
@@ -582,7 +584,7 @@ def _confirm_and_switch(
     _write_plan(planned)
     if not confirmed(f"apply {counted(changes_in(planned), ChangeNoun.CHANGE)}"):
         _say_aborted(completed_setups)
-        return ApplyExit.REFUSED
+        return ApplyExit.DECLINED
     changes = [plan for plan in planned.plans if plan.action is not Action.STAYS_STOPPED]
     progress = Progress()
     withheld: dict[str, str] = {}

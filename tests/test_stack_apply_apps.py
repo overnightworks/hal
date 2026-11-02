@@ -149,7 +149,7 @@ def test_declining_the_plan_leaves_the_checkout_the_containers_and_the_record_al
 
     exit_code, _, err = app_world.apply("no")
 
-    assert exit_code == 1
+    assert exit_code == emergency.ApplyExit.DECLINED
     assert "aborted, nothing changed" in err
     assert set(app_world.docker.verbs) == {"ps"}
     assert not (app_world.state / "deployed").exists()
@@ -560,7 +560,7 @@ def test_an_app_kept_off_whose_containers_still_run_refuses_the_whole_apply(app_
 
     exit_code, _, err = app_world.apply()
 
-    assert exit_code == 1
+    assert exit_code == emergency.ApplyExit.GUARD_REFUSED
     assert err.splitlines() == STILL_RUNNING
     assert app_world.docker.verbs == ["ps"]
     assert app_world.scripted.changing_verbs() == changes_before
@@ -583,7 +583,7 @@ def test_a_unit_and_an_app_kept_off_that_still_run_are_one_row_each_then_one_err
 
     exit_code, out, err = app_world.apply()
 
-    assert exit_code == 1
+    assert exit_code == emergency.ApplyExit.GUARD_REFUSED
     rows = [line for line in plain(out).splitlines() if "still runs" in line]
     assert [row.split()[:2] for row in rows] == [["✗", "step-ca"], ["✗", KEY]]
     assert missing_setup.line in rows[0]
@@ -610,7 +610,7 @@ def test_an_app_switched_off_while_a_setup_runs_and_still_running_refuses_the_re
 
     exit_code, out, err = app_world.apply("yes\nyes")
 
-    assert exit_code == 1
+    assert exit_code == emergency.ApplyExit.GUARD_REFUSED
     assert len(setup_run.commands) == 1
     assert err.splitlines() == STILL_RUNNING
     assert "nothing to change" not in out

@@ -46,8 +46,10 @@ in `src/hal/grammar.py`, the fleet rules for command lines are overnightworks/qu
 ([docs/architecture.md](docs/architecture.md), section 9). `hal rename OLD NEW [--dry-run]` moves a
 renamed repository's clones on this PC, asks one `yes` before it moves, and ends 0, 1 (declined or
 findings), 3 or 4 ([docs/naming.md](docs/naming.md), P1).
-Of the six stack commands, `hal update` keeps the grammar; the other five and `hal setup` deviate
-from it (Exception E in [docs/stack.md](docs/stack.md)); `hal setup` prints five rows, a verdict
+`hal apply` ends 0, 1 (declined), 4 (a guard said no) or 3 (cannot plan, a failed step, a partial run;
+the printed line says which). Of the six stack commands, `hal update` and `hal apply` keep the
+grammar's codes; `stop`, `start`, `offline`, `online` and `hal setup` deviate from it (Exception E
+in [docs/stack.md](docs/stack.md)); `hal setup` prints five rows, a verdict
 and, when it stops, an `error:`/`next:` pair, asks one `yes` before it acts (`--dry-run` only shows), and ends 0, 1 (declined), 3 or 4 (no terminal).
 
 ## Adding a tool: the label rule

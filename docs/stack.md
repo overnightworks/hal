@@ -82,17 +82,17 @@ Keycloak user, credential and session and survives the rollback. Never run `down
 socket directory volume is tmpfs and holds nothing; remove its definition alone with
 `docker volume rm edge_socket-proxy-run`. Then revert the commit.
 
-## Exception E: where five of the six stack commands and `hal setup` deviate
+## Exception E: where the stack commands and `hal setup` deviate
 
-`hal`'s exit codes are in `src/hal/grammar.py`, its error form in `src/hal/output/__init__.py`, and `hal --help` shows both. `hal apply`, `stop`, `start`,
-`offline` and `online` end with 0, 2 for a usage error, or with 3 for every outcome of the stack that
-is not "applied or nothing to do"; an uncaught Ctrl-C ends with 130. They deviate in exactly three
-ways (`hal update`, the sixth, keeps the grammar: its section below):
+`hal`'s exit codes are in `src/hal/grammar.py`, its error form in `src/hal/output/__init__.py`, and `hal --help` shows both. `hal apply` ends with 0 (applied or nothing to do), 1 when
+the person declined the `yes`, 4 when a guard said no (no terminal, the apply lock is held, the
+checkout is not the live one or not a clean `main`, a unit is disabled or not set up), 2 for a usage
+error, and 3 for a cannot-plan end, a failed step and a partial run; the printed line names which
+(`partial, …` after a step ran and a later one failed). `stop`, `start`, `offline` and `online` end with 0, 2 for a usage error, or with 3 for every outcome of the stack that is not "applied or nothing to
+do"; an uncaught Ctrl-C ends with 130. They deviate in exactly two ways (`hal update`, the sixth,
+keeps the grammar: its section below):
 
-- **E1:** (until overnightworks/edge#50 classifies the stack's outcomes) a guard refusal decided by the stack ends with 3, not 4: no terminal, the apply lock is held,
-  `yes` declined, the unit is disabled or not set up, a barrier is unproven, or the checkout is not the
-  live one or not a clean `main`.
-- **E2:** (until #50 classifies the stack's outcomes) a Ctrl-C that the stack catches ends by what the stack then observes, not with 130. `apply`,
+- **E2:** a Ctrl-C that the stack catches ends by what the stack then observes, not with 130. `apply`,
   `stop` and `start` print their `interrupted …` line and end with 3. `offline` drops the interrupt and
   reports the tunnel as observed: 3 with its `partial …` line while the tunnel still runs, 0 when it did
   stop, the marker is recorded and the boot drop-in is present. A Ctrl-C the stack does not catch ends
