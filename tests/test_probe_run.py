@@ -19,6 +19,12 @@ import edge_copy  # noqa: E402
 from support.git_support import committed_main  # noqa: E402
 
 PASSED = "PROBE PASSED"
+
+
+def passes(_probe: object) -> int:
+    return edge_copy.passed_line(PASSED)
+
+
 SENTINEL = "sentinel"
 
 
@@ -73,7 +79,7 @@ class Scenario:
         return self.prove_action()
 
     def run(self) -> int:
-        return edge_copy.run_probe(self.scratch, self.create, self.prove, PASSED)
+        return edge_copy.run_probe(self.scratch, self.create, self.prove, passes)
 
 
 def listing(directory: Path) -> list[str]:
@@ -383,7 +389,7 @@ def test_a_symlinked_scratch_is_refused_before_anything_is_created(tmp_path, cap
     link.symlink_to(target, target_is_directory=True)
     run = Scenario(link)
 
-    exit_code = edge_copy.run_main("probe", ["--scratch", str(link)], run.create, run.prove, PASSED)
+    exit_code = edge_copy.run_main("probe", ["--scratch", str(link)], run.create, run.prove, passes)
 
     assert exit_code == edge_copy.NOT_RUNNABLE
     assert run.events == []
@@ -411,7 +417,7 @@ def test_the_real_copy_venv_remote_and_work_clone_are_removed(tmp_path, scratch)
         assert (directory / edge_copy.WORK_CLONE).is_dir()
         return FakeProbe([], scratch=directory)
 
-    assert edge_copy.run_probe(scratch, create, lambda _probe: 0, PASSED) == 0
+    assert edge_copy.run_probe(scratch, create, lambda _probe: 0, passes) == 0
 
     assert listing(scratch) == []
     assert sorted(str(path.relative_to(repository)) for path in repository.rglob("*")) == before

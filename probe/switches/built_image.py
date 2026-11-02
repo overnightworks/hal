@@ -344,7 +344,11 @@ def prove(drive: Drive) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     return edge_copy.run_main(
-        __doc__.splitlines()[0], argv, Drive, prove, "PROBE PASSED: #482 D1a-D1d and #893 D2 hold"
+        __doc__.splitlines()[0],
+        argv,
+        Drive,
+        prove,
+        lambda _drive: edge_copy.passed_line("PROBE PASSED: #482 D1a-D1d and #893 D2 hold"),
     )
 
 
