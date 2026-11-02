@@ -589,6 +589,7 @@ def test_teardown_finishes_when_a_stop_signal_arrives_during_cleanup(
         number: signal.getsignal(number) for number in (signal.SIGTERM, signal.SIGINT)
     }
 
+    (tmp_path / "scratch").mkdir()
     try:
         exit_code = probe.main(["--scratch", str(tmp_path / "scratch")])
     finally:
@@ -598,6 +599,7 @@ def test_teardown_finishes_when_a_stop_signal_arrives_during_cleanup(
     assert down_finished.exists()
     assert f"teardown: project {probe.PROJECT} removed" in capsys.readouterr().out
     assert exit_code == 1
+    assert not any((tmp_path / "scratch").iterdir())
 
 
 @pytest.mark.parametrize("stop_signal", [signal.SIGTERM, signal.SIGINT])
@@ -629,6 +631,7 @@ def test_teardown_commands_survive_a_stop_signal_to_the_probe_process_group(
     )
     docker.chmod(0o755)
 
+    (tmp_path / "scratch").mkdir()
     probe_run = subprocess.run(
         [sys.executable, str(PROBE), "--scratch", str(tmp_path / "scratch")],
         env={**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"},
@@ -641,6 +644,7 @@ def test_teardown_commands_survive_a_stop_signal_to_the_probe_process_group(
 
     assert down_finished.exists()
     assert "teardown: project edge-stepca-probe removed" in probe_run.stdout
+    assert not any((tmp_path / "scratch").iterdir())
 
 
 def fake_uv_on_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, uv_script: str) -> None:

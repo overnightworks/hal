@@ -25,18 +25,15 @@ there is published (committed and pushed) before the apply that follows it (#95 
 
 from __future__ import annotations
 
-import argparse
 import json
 import os
 import re
 import shutil
-import signal
 import stat
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from collections.abc import Callable
 from datetime import UTC, datetime
 from functools import cached_property
 from pathlib import Path
@@ -807,46 +804,10 @@ class Probe(McpNetworks, TraefikMcpFollows):
         write_line(f"teardown: project {PROJECT} removed; the hal_ networks are unchanged (P26)")
 
 
-@contextmanager
-def stop_signals_ignored() -> Iterator[None]:
-    """Teardown is what removes the containers and the volume, so a late SIGTERM or Ctrl-C must
-    not cut it short."""
-    stop_signals = (signal.SIGTERM, signal.SIGINT)
-    previous = {number: signal.signal(number, signal.SIG_IGN) for number in stop_signals}
-    try:
-        yield
-    finally:
-        for number, handler in previous.items():
-            signal.signal(number, handler)
-
-
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--scratch", type=Path, required=True)
-    arguments = parser.parse_args(argv)
-    if arguments.scratch.exists() and any(arguments.scratch.iterdir()):
-        write_line("PROBE FAILED: --scratch is not empty")
-        return 3
-    arguments.scratch.mkdir(parents=True, exist_ok=True)
-    probe = Probe(arguments.scratch)
-    signal.signal(signal.SIGTERM, raise_interrupt)  # `timeout` ends the probe with SIGTERM
-    exit_code = 1
-    try:
-        exit_code = prove(probe)
-    finally:
-        with stop_signals_ignored():
-            try:
-                probe.teardown()
-            except ProbeFailed as failure:
-                write_line(f"PROBE FAILED: {failure}")
-                exit_code = 1
-    if exit_code == 0:
-        exit_code = print_verdict(probe.not_driven)
-    return exit_code
-
-
-def raise_interrupt(_signal: int, _frame: object) -> None:
-    raise KeyboardInterrupt
+    return edge_copy.run_main(
+        __doc__.splitlines()[0], argv, Probe, prove, lambda probe: print_verdict(probe.not_driven)
+    )
 
 
 def prove(probe: Probe) -> int:
