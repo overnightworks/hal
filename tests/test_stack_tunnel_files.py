@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 
 import pytest
+import yaml
 
 from hal.stack import switches, tunnel
 from hal.workstation.layout import Layout
@@ -19,6 +20,8 @@ BOOT_DROP_IN = DROP_INS / tunnel.BOOT_DROP_IN
 HAL_DROP_IN = DROP_INS / "30-hal-global-stop.conf"
 POLKIT_RULES = tuple(sorted((TUNNEL_FILES / "polkit").glob("*.rules")))
 ALL_FILES = tuple(sorted(path for path in TUNNEL_FILES.rglob("*") if path.is_file()))
+
+PLAYBOOK = Path(__file__).resolve().parents[1] / "src/hal/workstation/system/playbook.yml"
 
 PLACEHOLDER = re.compile(r"@[A-Z_]+@")
 
@@ -34,10 +37,19 @@ def key_value_lines(text: str) -> list[str]:
     return [line for line in text.splitlines() if "=" in line and not line.startswith("#")]
 
 
+def test_every_shipped_tunnel_file_is_installed_and_every_installed_file_is_shipped():
+    """The directory against the playbook's `system_files`, both read: a file nobody installs and an
+    entry without a file are both red."""
+    installed = {
+        entry["src"] for entry in yaml.safe_load(PLAYBOOK.read_text())[0]["vars"]["system_files"]
+    }
+    shipped = {path.relative_to(TUNNEL_FILES).as_posix() for path in ALL_FILES}
+    assert shipped == installed
+
+
 def test_the_boot_drop_in_carries_the_name_edge_checks_for():
     """#76 rule 3, cell 1."""
-    names = sorted(path.name for path in DROP_INS.iterdir())
-    assert names == sorted([NONROOT_DROP_IN.name, tunnel.BOOT_DROP_IN, HAL_DROP_IN.name])
+    assert BOOT_DROP_IN.is_file()
 
 
 def test_the_boot_drop_in_skips_the_tunnel_while_the_global_stop_exists(tmp_path, monkeypatch):
@@ -63,10 +75,15 @@ def test_the_hal_drop_in_names_the_marker_below_hal_state_dir(tmp_path):
     assert "[Unit]" in rendered.splitlines()
 
 
+def test_the_polkit_rules_exist():
+    assert POLKIT_RULES
+
+
 @pytest.mark.parametrize("path", POLKIT_RULES, ids=lambda path: path.name)
 def test_the_polkit_rule_grants_only_the_operators_stop_of_the_tunnel(path):
     """#76 rule 1, rule 3, cell 3."""
     rule = path.read_text()
+    assert "||" not in rule
     for condition in (
         f'action.id == "{tunnel.MANAGE_UNITS_ACTION}"',
         f'action.lookup("unit") == "{tunnel.CLOUDFLARED_UNIT}"',

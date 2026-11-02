@@ -729,17 +729,25 @@ cell_7() {
     return
 }
 
-cell_7o() {  # only the old marker exists: the old path alone keeps the tunnel down, for code that still writes it
+cell_7o() {  # only the old marker exists (marker_off ran before): the old path alone keeps the tunnel down, for code that still writes it
     local started_at
-    rm -f "$MARKER"
-    as_tester mkdir -p "$(dirname "$OLD_MARKER")" && as_tester touch "$OLD_MARKER"
+    if [ -e "$MARKER" ] || ! as_tester mkdir -p "$(dirname "$OLD_MARKER")" || ! as_tester touch "$OLD_MARKER" || [ ! -e "$OLD_MARKER" ]; then
+        echo "cell 7o: FAILED: the preparation failed, the hal marker is not absent or the old marker is not present"
+        rm -f "$OLD_MARKER"
+        return 0
+    fi
     started_at=$(date '+%F %T')
     systemctl start cloudflared >"$EVIDENCE/cell7o.txt" 2>&1
+    echo "start exit code: $?" >>"$EVIDENCE/cell7o.txt"
+    journalctl --sync
     journalctl --unit cloudflared --since "$started_at" --no-pager >>"$EVIDENCE/cell7o.txt" 2>&1
     systemctl show cloudflared -p ActiveState >>"$EVIDENCE/cell7o.txt"
-    rm -f "$OLD_MARKER"
+    if ! rm -f "$OLD_MARKER" || [ -e "$OLD_MARKER" ]; then
+        echo "cell 7o: FAILED: the old marker could not be removed"
+        return 0
+    fi
     verdict 7o "with only the old marker a start is condition-skipped" \
-        'grep -qx ActiveState=inactive "$EVIDENCE/cell7o.txt" && grep -q "skipped, unmet condition check ConditionPathExists=!" "$EVIDENCE/cell7o.txt"'
+        'grep -qx ActiveState=inactive "$EVIDENCE/cell7o.txt" && grep -qF "ConditionPathExists=!$OLD_MARKER" "$EVIDENCE/cell7o.txt"'
     return
 }
 
@@ -1895,7 +1903,7 @@ cells_sudo() {  # cells_sudo <suffix> <alternative>: P1-P10 under one variant of
 case "${1:?stage}" in
     install) install_home ;;
     fresh) cell_dk1; plant_rsyslog_files; record_rsyslog_before; cell_11; cell_12; cell_13; cell_10; cell_r0; cell_dk3_before_the_first_apply; cell_1; cells_rsyslog_purged; cell_a1_1; cell_9; cell_a1_2; cell_r4; cell_s1; cells_yes; cells_mail; cells_agent; cells_docker; cells_retention; cells_polkit; marker_on ;;
-    after-marker-reboot) cell_7; cell_a1_9; cell_r2_after_boot; cell_7o; marker_off ;;
+    after-marker-reboot) cell_7; cell_a1_9; cell_r2_after_boot; marker_off; cell_7o ;;
     after-unmarked-reboot) cell_8; cell_r5 ;;
     prepared) wait_for_engine; prepare_today; cell_2 ;;
     sudo-classic) cells_sudo c "$SUDO_CLASSIC" ;;

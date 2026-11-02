@@ -1,4 +1,4 @@
-# The system step of `hal setup`: edge's cloudflared unit, its two drop-ins and the stop-only polkit
+# The system step of `hal setup`: edge's cloudflared unit, its three drop-ins and the stop-only polkit
 # rule, and the daily timer that deletes journal entries before they are 30 days old.
 #
 # hal.workstation.system_step runs it as root under one `sudo`, which asks once, and passes `home`,
