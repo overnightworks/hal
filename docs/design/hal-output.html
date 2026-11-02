@@ -382,7 +382,7 @@
     </div>
     <div class="reader">
       <div class="who"><b>Timer, Journal</b><span><code>LOG_FORMAT=json</code> in der Unit: Flotten-Format aus #4</span></div>
-<pre class="term"><span class="d">Nov 01 03:03:15 pc hal[4711]:</span> {"timestamp":"2026-11-01T02:03:15Z","level":"info","logger":"hal.backup","service":"hal","event":"backed up","subject":"songmaker","snapshot":"4f2a91c0","bytes":2254857830,"seconds":192}</pre>
+<pre class="term"><span class="d">Nov 01 03:03:15 pc hal[4711]:</span> {"timestamp":"2026-11-01T02:03:15.000Z","level":"info","logger":"hal.backup","service":"hal","event":"backed up","subject":"songmaker","snapshot":"4f2a91c0","bytes":2254857830,"seconds":192.4}</pre>
     </div>
     <div class="reader">
       <div class="who"><b>Später lesen</b><span><code>hal logs</code></span></div>
@@ -1499,10 +1499,10 @@ Type <span class="w">yes</span> to apply 7 changes: yes
       <figcaption><span class="tag new">neu</span> roh im Journal; die Zeilen von systemd kommen von systemd</figcaption>
 <pre class="term"><span class="p">$</span> <span class="u">journalctl --user -u hal-backup -S today</span>
 <span class="d">Nov 01 03:00:01 pc systemd[2087]:</span> Starting hal-backup.service - hal backup: encrypted restic backup of the declared apps...
-<span class="d">Nov 01 03:10:04 pc hal[4711]:</span> <span class="r">{"timestamp":"2026-11-01T02:10:04Z","level":"error","logger":"hal.backup","service":"hal","event":"not backed up","subject":"songmaker","reason":"database not ready after 10 min"}</span>
-<span class="d">Nov 01 03:10:26 pc hal[4711]:</span> {"timestamp":"2026-11-01T02:10:26Z","level":"info","logger":"hal.backup","service":"hal","event":"backed up","subject":"keycloak","snapshot":"9b07e1d2","bytes":4404019,"seconds":21}
-<span class="d">Nov 01 03:10:26 pc hal[4711]:</span> {"timestamp":"2026-11-01T02:10:26Z","level":"info","logger":"hal.backup","service":"hal","event":"not pruned","subject":"repository","reason":"a backup failed"}
-<span class="d">Nov 01 03:10:26 pc hal[4711]:</span> <span class="r">{"timestamp":"2026-11-01T02:10:26Z","level":"error","logger":"hal.backup","service":"hal","event":"error","message":"1 of 2 apps not backed up · songmaker has no good backup recorded","next":"hal backup songmaker"}</span>
+<span class="d">Nov 01 03:10:04 pc hal[4711]:</span> <span class="r">{"timestamp":"2026-11-01T02:10:04.000Z","level":"error","logger":"hal.backup","service":"hal","event":"not backed up","subject":"songmaker","reason":"database not ready after 10 min"}</span>
+<span class="d">Nov 01 03:10:26 pc hal[4711]:</span> {"timestamp":"2026-11-01T02:10:26.000Z","level":"info","logger":"hal.backup","service":"hal","event":"backed up","subject":"keycloak","snapshot":"9b07e1d2","bytes":4404019,"seconds":21.3}
+<span class="d">Nov 01 03:10:26 pc hal[4711]:</span> {"timestamp":"2026-11-01T02:10:26.000Z","level":"info","logger":"hal.backup","service":"hal","event":"not pruned","subject":"repository","reason":"a backup failed"}
+<span class="d">Nov 01 03:10:26 pc hal[4711]:</span> <span class="r">{"timestamp":"2026-11-01T02:10:26.000Z","level":"error","logger":"hal.backup","service":"hal","event":"error","message":"1 of 2 apps not backed up · songmaker has no good backup recorded","next":"hal backup songmaker"}</span>
 <span class="d">Nov 01 03:10:26 pc systemd[2087]:</span> hal-backup.service: Main process exited, code=exited, status=3/NOTIMPLEMENTED
 <span class="d">Nov 01 03:10:26 pc systemd[2087]:</span> hal-backup.service: Failed with result 'exit-code'.</pre>
     </figure>
