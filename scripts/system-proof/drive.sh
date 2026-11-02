@@ -731,7 +731,7 @@ cell_7() {
 
 cell_7o() {  # only the old marker exists (marker_off ran before): the old path alone keeps the tunnel down, for code that still writes it
     local started_at
-    if [ -e "$MARKER" ] || ! as_tester mkdir -p "$(dirname "$OLD_MARKER")" || ! as_tester touch "$OLD_MARKER" || [ ! -e "$OLD_MARKER" ]; then
+    if [[ -e "$MARKER" ]] || ! as_tester mkdir -p "$(dirname "$OLD_MARKER")" || ! as_tester touch "$OLD_MARKER" || [[ ! -e "$OLD_MARKER" ]]; then
         echo "cell 7o: FAILED: the preparation failed, the hal marker is not absent or the old marker is not present"
         rm -f "$OLD_MARKER"
         return 0
@@ -742,7 +742,7 @@ cell_7o() {  # only the old marker exists (marker_off ran before): the old path 
     journalctl --sync
     journalctl --unit cloudflared --since "$started_at" --no-pager >>"$EVIDENCE/cell7o.txt" 2>&1
     systemctl show cloudflared -p ActiveState >>"$EVIDENCE/cell7o.txt"
-    if ! rm -f "$OLD_MARKER" || [ -e "$OLD_MARKER" ]; then
+    if ! rm -f "$OLD_MARKER" || [[ -e "$OLD_MARKER" ]]; then
         echo "cell 7o: FAILED: the old marker could not be removed"
         return 0
     fi

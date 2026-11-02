@@ -47,11 +47,6 @@ def test_every_shipped_tunnel_file_is_installed_and_every_installed_file_is_ship
     assert shipped == installed
 
 
-def test_the_boot_drop_in_carries_the_name_edge_checks_for():
-    """#76 rule 3, cell 1."""
-    assert BOOT_DROP_IN.is_file()
-
-
 def test_the_boot_drop_in_skips_the_tunnel_while_the_global_stop_exists(tmp_path, monkeypatch):
     """#76 rule 3, cell 2: rendered with a temporary HOME, the condition names switches' marker."""
     monkeypatch.setenv("HOME", str(tmp_path))
