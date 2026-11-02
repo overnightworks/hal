@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import json
 import secrets
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -136,8 +135,8 @@ class Person:
 
 
 def header_of(jwt: str) -> dict[str, Any]:
-    segment = jwt.split(".")[0]
-    return json.loads(base64.urlsafe_b64decode(segment + "=" * (-len(segment) % 4)))
+    """The header is encoded like the payload, which `token_claims` reads as the second segment."""
+    return token_claims(f"x.{jwt.split('.')[0]}")
 
 
 def settings(value: Any) -> Any:
@@ -504,7 +503,7 @@ class AgentsClientCell:
             callback._replace(netloc=f"localhost:{callback.port + 1}").geturl(),
             callback._replace(path="/other").geturl(),
             callback._replace(netloc=f"127.0.0.1:{callback.port}").geturl(),
-            "http://example.invalid:28471/callback",
+            callback._replace(netloc=f"example.invalid:{callback.port}").geturl(),
         ):
             answer, _ = self.start(self.probe.browser("agents A6"), "openid", redirect_uri=redirect)
             self.expect(
