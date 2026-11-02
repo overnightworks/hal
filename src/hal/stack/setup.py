@@ -5,10 +5,11 @@ The one owner of that question for `hal apply --local`, `hal start` and any late
 
 import signal
 import subprocess
-from collections.abc import Callable
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
 from enum import IntEnum
 from pathlib import Path
+from typing import Any
 
 from hal.stack import catalog, compose
 
@@ -56,6 +57,29 @@ def refusal(unit: catalog.Unit, repository: Path, check: SetupCheck, again: str)
     if line is None:
         return None
     return f"{unit.key} is not set up: run `{unit.setup}`, then `{again}` again; {line}"
+
+
+@dataclass(frozen=True)
+class AbsentSecretFile:
+    service: str
+    file: Path
+
+
+def absent_secret_files(
+    config: Mapping[str, Any], services: Collection[str]
+) -> list[AbsentSecretFile]:
+    """Each file of a resolved top-level `secrets` entry that one of the services names and that
+    does not exist, in order, once each; a secret without a `file` is not looked at."""
+    files = {
+        name: entry["file"] for name, entry in config.get("secrets", {}).items() if "file" in entry
+    }
+    absent: dict[Path, AbsentSecretFile] = {}
+    for service in services:
+        for named in config["services"][service].get("secrets", ()):
+            file = Path(files[named["source"]]) if named["source"] in files else None
+            if file and not file.exists():
+                absent.setdefault(file, AbsentSecretFile(service, file))
+    return list(absent.values())
 
 
 @dataclass(frozen=True)

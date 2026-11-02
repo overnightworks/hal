@@ -650,9 +650,10 @@ def _tear_down_and_empty(
 
 def _run_and_clean_up(
     scratch: Path, descriptor: int, create: Callable[[Path], Any], prove: Callable[[Any], int]
-) -> int:
+) -> tuple[int, Any]:
     """Create and prove the probe, then tear it down and empty the scratch on every way out. The
-    first of an escaped exception, a stop and an unforeseen teardown exception propagates."""
+    first of an escaped exception, a stop and an unforeseen teardown exception propagates. Returns
+    the exit code and the probe."""
     stops = _Stops()
     signal.signal(signal.SIGTERM, stops)
     signal.signal(signal.SIGINT, stops)
@@ -668,19 +669,27 @@ def _run_and_clean_up(
     escaped = stops.kept or unforeseen
     if escaped is not None:
         raise escaped
-    return exit_code
+    return exit_code, probe
+
+
+def passed_line(line: str) -> int:
+    """What the verdict of a probe that only passes calls: print its line, exit code 0."""
+    print(line)
+    return 0
 
 
 def run_probe(
     scratch: Path,
     create: Callable[[Path], Any],
     prove: Callable[[Any], int],
-    passed: str,
+    verdict: Callable[[Any], int],
 ) -> int:
     """A probe's run in `scratch`: refuse a scratch that is a symlink or not empty, create the
     probe, prove it, tear it down even when `timeout` ends the proof with SIGTERM or anything
     escapes, and then empty the scratch. The exit code is the proof's, or 1 when the teardown or
-    the emptying fails; `passed` is printed on success."""
+    the emptying fails. On success `verdict` ends the run: it is called with
+    the probe and its result is the exit code (a probe that only passes has its verdict call
+    `passed_line`)."""
     try:
         # The operator chooses --scratch (made absolute at the argparse boundary) and any directory
         # they name is valid, so there is nothing to sanitise; O_NOFOLLOW refuses a symlink.
@@ -696,14 +705,12 @@ def run_probe(
             if any(True for _ in entries):
                 print("PROBE FAILED: --scratch is not empty")
                 return NOT_RUNNABLE
-        exit_code = _run_and_clean_up(scratch, descriptor, create, prove)
+        exit_code, probe = _run_and_clean_up(scratch, descriptor, create, prove)
     finally:
         for number, handler in handlers.items():
             signal.signal(number, handler)
         os.close(descriptor)
-    if exit_code == 0:
-        print(passed)
-    return exit_code
+    return verdict(probe) if exit_code == 0 else exit_code
 
 
 def run_main(
@@ -711,9 +718,9 @@ def run_main(
     argv: Sequence[str] | None,
     create: Callable[[Path], Any],
     prove: Callable[[Any], int],
-    passed: str,
+    verdict: Callable[[Any], int],
 ) -> int:
-    """A probe's command line, `--scratch DIR`, and its `run_probe`."""
+    """A probe's command line, `--scratch DIR`, and its `run_probe` with the same `verdict`."""
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument("--scratch", type=scratch_directory, required=True)
-    return run_probe(parser.parse_args(argv).scratch, create, prove, passed)
+    return run_probe(parser.parse_args(argv).scratch, create, prove, verdict)

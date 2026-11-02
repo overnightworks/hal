@@ -246,6 +246,27 @@ messages must be served before the action is on, or the page shows Keycloak's pl
 Switch it off with `enabled: false` and `defaultAction: false` in the block, never by deleting the block:
 the apply deletes nothing, so a removed block leaves the action on.
 
+### The agents client
+
+`agents` is the one public client for a person's own AI agents. It signs in with the authorization code and PKCE
+(S256) at the single loopback address `http://localhost:28471/callback`, has no secret and no refresh token, and
+asks for consent at the first sign-in. Its default scopes are `basic` and `groups`; `mcp-songmaker`,
+`mcp-presentator`, `mcp-hopin` and `offline_access` are optional. Each `mcp-<app>` scope puts exactly one
+audience, `https://<app>.hallucinai.de/mcp`, into the access token and names the app on the consent page. The
+token has the type header `at+jwt`, `azp` `agents`, the person's group paths and no role claim, and lives the
+realm's 300 seconds (the operator's ruling of 01.11.2026): an agent signs in again when it expires.
+
+The realm grants no right with it: any account can get such a token, and an app admits it only for a member of
+its group `/apps/<app>/mcp`, which webauth checks. The three groups are empty; who joins one is decided in the
+console, after the app's privacy notice names the agent.
+
+The Keycloak probe (cells A1 to E1) measured on the pinned version:
+
+- The consent page lists `offline_access` beside the app, and the scope of another app meets it again.
+- Discovery through the edge answers only in the appended form
+  `/realms/hallucinai/.well-known/openid-configuration`; the two inserted forms are 404.
+- Client registration is refused for anonymous callers.
+
 ## Secrets
 
 No secret is in any file of this repository or in any container's `Config.Env`. Compose mounts

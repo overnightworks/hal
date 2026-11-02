@@ -624,3 +624,34 @@ def test_the_apps_teardown_of_a_copy_cut_before_its_compose_file_calls_no_compos
     probe.teardown()
 
     assert docker.compose_calls() == []
+
+
+@pytest.mark.parametrize(
+    ("flags", "line"),
+    [
+        ((), "PROBE PASSED: #255 A1-A4"),
+        (("--switch-only",), "PROBE PASSED: #255 A1, D1, D2, D4, D7 hold"),
+    ],
+    ids=["full", "switch-only"],
+)
+def test_an_apps_run_that_passed_prints_its_line_last_and_leaves_scratch_empty(
+    apps_probe, tmp_path, monkeypatch, capsys, flags, line
+):
+    monkeypatch.setattr(apps_probe.grp, "getgrnam", lambda _: SimpleNamespace(gr_gid=0))
+    monkeypatch.setattr(apps_probe.Probe, "teardown", lambda _probe: None)
+    switch_only_seen = []
+
+    def prove(_probe, *, switch_only):
+        switch_only_seen.append(switch_only)
+        return 0
+
+    monkeypatch.setattr(apps_probe, "prove", prove)
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+
+    exit_code = apps_probe.main(["--scratch", str(scratch), *flags])
+
+    assert exit_code == 0
+    assert switch_only_seen == [bool(flags)]
+    assert capsys.readouterr().out.splitlines()[-1].startswith(line)
+    assert not any(scratch.iterdir())

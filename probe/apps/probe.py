@@ -12,11 +12,12 @@ HEAD, C5 off with a leftover container. D and R: `emergency_switch.py`, `alias_r
 exits: 0 or 3.
 
 It never touches the live stack. It runs its own Traefik and socket proxy of a copy of the
-repository under the compose project `edge-apps-probe`, on two free loopback ports instead of 8081
-and 8090, constrained to a label key of its own (`probe-<random>.name`) instead of `edge.name`, so
-the live Traefik's constraint never matches the probe's app and the probe's Traefik never matches a
-live container; it sends no request to the live stack. The app, its checkout (`~/srv/<key>` under a
-throwaway HOME) and its origin (a bare repository reached through `url.<file>.insteadOf`) are the
+repository under the compose project `edge-apps-probe`, on the probe loopback address
+`edge_copy.PROBE_HOST` with the live entrypoint ports, constrained to a label key of its own
+(`probe-<random>.name`) instead of `edge.name`, so the live Traefik's constraint never matches the
+probe's app and the probe's Traefik never matches a live container; it sends no request to the
+live stack. The app, its checkout (`~/srv/<key>` under a throwaway HOME) and its origin (a bare
+repository reached through `url.<file>.insteadOf`) are the
 probe's own. The probe never runs `hal online`, `hal offline` or `--all`, so no tunnel is named. It
 always removes its containers, volumes, networks and images, found by their compose project.
 
@@ -25,8 +26,9 @@ always removes its containers, volumes, networks and images, found by their comp
 
 Measured teardown: 2 s (K 50 s, CAP 1780 s).
 
-Needs an empty or new --scratch directory, `uv` (it runs `uv sync` in the copy) and a Docker that
-may pull busybox and Traefik.
+Needs an existing, empty --scratch directory and leaves it empty, passed, failed, stopped or
+crashed (`edge_copy.run_probe`); also `uv` (it runs `uv sync` in the copy) and a Docker that may
+pull busybox and Traefik.
 """
 
 from __future__ import annotations
@@ -39,8 +41,6 @@ import os
 import re
 import secrets
 import shlex
-import signal
-import socket
 import subprocess
 import sys
 import time
@@ -57,7 +57,7 @@ from emergency_switch import EmergencySwitch  # noqa: E402
 from switched_off import SwitchedOff  # noqa: E402
 
 from hal.output import write_line  # noqa: E402
-from hal.stack import checkout, deploy_checkout  # noqa: E402
+from hal.stack import barrier, checkout, deploy_checkout  # noqa: E402
 
 CORE_PROJECT = "edge-apps-probe"
 DOMAIN = "probe.invalid"
@@ -70,7 +70,6 @@ COMPOSE_SECONDS = 300
 READY_SECONDS = 90
 REQUEST_SECONDS = 3
 POLL_SECONDS = 0.5
-NOT_RUNNABLE = 3
 TAGS = {  # by cell, in the order they are cut: each is newer than the one before
     "a1": "v2026.10.22.1",
     "a3": "v2026.10.22.2",
@@ -110,19 +109,12 @@ GHOST = f"services:\n  ghost:\n    image: {BUSYBOX}\n    command: [sleep, '3600'
 FORBIDDEN_VERBS = ("online", "offline", "--all")
 
 
-def free_port() -> int:
-    with socket.socket() as taken:
-        taken.bind(("127.0.0.1", 0))
-        return taken.getsockname()[1]
-
-
 class Probe:
     def __init__(self, scratch: Path) -> None:
         self.scratch = scratch
         suffix = secrets.token_hex(3)
         self.key = f"apps-probe-{suffix}"
         self.label, self.alias_label = (f"probe-{suffix}.{field}" for field in ("name", "alias"))
-        self.edge_port, self.admin_port = free_port(), free_port()
         self.home = scratch / "home"
         self.home.mkdir(parents=True)
         self.environment = {
@@ -314,17 +306,11 @@ class Probe:
         )
         traefik = (self.copy / "traefik.yml").read_text()
         expect(
-            traefik.count("edge.name") == 2
-            and traefik.count("edge.alias") == 1
-            and "127.0.0.1:8081" in traefik,
+            traefik.count("edge.name") == 2 and traefik.count("edge.alias") == 1,
             "traefik.yml changed shape",
         )
-        private = (
-            traefik.replace("edge.name", self.label)
-            .replace("edge.alias", self.alias_label)
-            .replace("127.0.0.1:8081", f"127.0.0.1:{self.edge_port}")
-            .replace("127.0.0.1:8090", f"127.0.0.1:{self.admin_port}")
-        )
+        beside = edge_copy.beside_the_live_edge(traefik, self.key)
+        private = beside.replace("edge.name", self.label).replace("edge.alias", self.alias_label)
         (self.copy / "traefik.yml").write_text(private)
         edge_copy.publish(self.copy, "probe: a Traefik of its own")
         self.start_origin()
@@ -367,8 +353,9 @@ class Probe:
         self, path: str, host: str | None = None
     ) -> tuple[int, str, http.client.HTTPMessage] | None:
         """(status, body, headers) of the probe's Traefik's answer; None when it gives none."""
+        address_host, _, address_port = barrier.edge_address(self.copy).rpartition(":")
         connection = http.client.HTTPConnection(
-            "127.0.0.1", self.edge_port, timeout=REQUEST_SECONDS
+            address_host, int(address_port), timeout=REQUEST_SECONDS
         )
         try:
             connection.request("GET", path, headers={"Host": host or f"{self.key}.{DOMAIN}"})
@@ -683,41 +670,27 @@ def prove(probe: Probe, *, switch_only: bool) -> int:
     return 0
 
 
-def raise_interrupt(_signal: int, _frame: object) -> None:
-    raise KeyboardInterrupt
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--scratch", type=Path, required=True)
+    parser.add_argument("--scratch", type=edge_copy.scratch_directory, required=True)
     parser.add_argument(
         "--switch-only", action="store_true", help="only A1 and the emergency-switch cells D1-D7"
     )
     arguments = parser.parse_args(argv)
-    if arguments.scratch.exists() and any(arguments.scratch.iterdir()):
-        write_line("PROBE FAILED: --scratch is not empty")
-        return NOT_RUNNABLE
-    arguments.scratch.mkdir(parents=True, exist_ok=True)
-    probe = Probe(arguments.scratch)
-    signal.signal(signal.SIGTERM, raise_interrupt)  # `timeout` ends the probe with SIGTERM
-    try:
-        exit_code = prove(probe, switch_only=arguments.switch_only)
-    except BaseException:
-        probe.teardown()  # a failure the probe did not foresee must not leave its containers
-        raise
-    signal.signal(signal.SIGTERM, signal.SIG_IGN)
-    try:
-        probe.teardown()
-    except (ProbeFailed, subprocess.TimeoutExpired) as failure:
-        write_line(f"PROBE FAILED: teardown, {failure}")
-        exit_code = 1
-    if exit_code == 0 and arguments.switch_only:
-        write_line("PROBE PASSED: #255 A1, D1, D2, D4, D7 hold")
-    elif exit_code == 0:
-        write_line(
+
+    def passed(_probe: Probe) -> int:
+        if arguments.switch_only:
+            return edge_copy.passed_line("PROBE PASSED: #255 A1, D1, D2, D4, D7 hold")
+        return edge_copy.passed_line(
             "PROBE PASSED: #255 A1-A4, A7-A9, A12, A18, A23, B5, B8, C1-C5, D1, D2, D4, D7 hold"
         )
-    return exit_code
+
+    return edge_copy.run_probe(
+        arguments.scratch,
+        Probe,
+        lambda probe: prove(probe, switch_only=arguments.switch_only),
+        passed,
+    )
 
 
 if __name__ == "__main__":
