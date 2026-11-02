@@ -1,0 +1,8 @@
+claim_id = "127b2f91585b44b59348d7bd6f4a7ad1"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "0297a873db3cd2d53a0934d5e7197ac53903064b"
+branch = "claude/issue-938-quality-v092-pin"
+scope = [".github/workflows/ci.yml", "AGENTS.md", "agent-service/live_canary.py", "agent-service/live_signer.py", "agent-service/live_smoke.py", "quality/config.toml"]
+opened_commit = "74f2854596b3a1c2d26891c9ae1372525618b404"
+whole_reason = "One pin in its two places and the declarations it needs in one commit, because an older gate refuses the new tables and a newer gate refuses their absence."
