@@ -776,8 +776,10 @@ def main(argv: list[str] | None = None) -> int:
         argv,
         Probe,
         prove,
-        "PROBE PASSED: #61 proofs 1-7, #70 proof 8, #85 P1-P7, #87 Q1-Q6, #91 Z1-Z3, "
-        "#95 P1-P2, #592 V1, V4, V6-V8, #783 P1-P4 hold",
+        lambda _probe: edge_copy.passed_line(
+            "PROBE PASSED: #61 proofs 1-7, #70 proof 8, #85 P1-P7, #87 Q1-Q6, #91 Z1-Z3, "
+            "#95 P1-P2, #592 V1, V4, V6-V8, #783 P1-P4 hold"
+        ),
     )
 
 

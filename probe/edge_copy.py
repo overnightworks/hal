@@ -672,17 +672,23 @@ def _run_and_clean_up(
     return exit_code, probe
 
 
+def passed_line(line: str) -> int:
+    """The verdict of a probe that only passes: print its line, exit code 0."""
+    print(line)
+    return 0
+
+
 def run_probe(
     scratch: Path,
     create: Callable[[Path], Any],
     prove: Callable[[Any], int],
-    passed: str | Callable[[Any], int],
+    verdict: Callable[[Any], int],
 ) -> int:
     """A probe's run in `scratch`: refuse a scratch that is a symlink or not empty, create the
     probe, prove it, tear it down even when `timeout` ends the proof with SIGTERM or anything
     escapes, and then empty the scratch. The exit code is the proof's, or 1 when the teardown or
-    the emptying fails. On success `passed` ends the run: a line it prints, or a verdict called with
-    the probe whose result is the exit code."""
+    the emptying fails. On success `verdict` ends the run: it is called with
+    the probe and its result is the exit code (`passed_line` for a probe that only passes)."""
     try:
         # The operator chooses --scratch (made absolute at the argparse boundary) and any directory
         # they name is valid, so there is nothing to sanitise; O_NOFOLLOW refuses a symlink.
@@ -703,11 +709,7 @@ def run_probe(
         for number, handler in handlers.items():
             signal.signal(number, handler)
         os.close(descriptor)
-    if exit_code == 0:
-        if callable(passed):
-            return passed(probe)
-        print(passed)
-    return exit_code
+    return verdict(probe) if exit_code == 0 else exit_code
 
 
 def run_main(
@@ -715,9 +717,9 @@ def run_main(
     argv: Sequence[str] | None,
     create: Callable[[Path], Any],
     prove: Callable[[Any], int],
-    passed: str | Callable[[Any], int],
+    verdict: Callable[[Any], int],
 ) -> int:
-    """A probe's command line, `--scratch DIR`, and its `run_probe`."""
+    """A probe's command line, `--scratch DIR`, and its `run_probe` with the same `verdict`."""
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument("--scratch", type=scratch_directory, required=True)
-    return run_probe(parser.parse_args(argv).scratch, create, prove, passed)
+    return run_probe(parser.parse_args(argv).scratch, create, prove, verdict)
