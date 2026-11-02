@@ -7,6 +7,8 @@ It imports nothing else of this repository."""
 
 # ruff: noqa: T201 - this is the one output owner of the hal program
 
+from __future__ import annotations
+
 import json
 import os
 import sys
