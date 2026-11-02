@@ -189,7 +189,7 @@ def test_an_app_without_a_release_is_cannot_plan_and_nothing_is_asked(app_world)
 
     assert exit_code == 2
     assert "cannot plan, services.hopin: no vYYYY.MM.DD.N release on origin master" in err
-    assert "the plan" not in out
+    assert "Type yes" not in out
     assert app_world.docker.verbs == []
 
 

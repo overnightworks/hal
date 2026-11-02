@@ -89,6 +89,7 @@ from hal.stack import (
 )
 from hal.stack.plan_rows import PlanEvent
 from hal.stack.realm import reconcile
+from hal.stack.result_rows import ResultEvent
 from hal.stack.unit_plans import ImageReference, KeptImage, plan_kept_images
 
 (
@@ -516,7 +517,7 @@ def test_a_missing_setup_is_asked_separately_before_the_plan(
     assert exit_code == 0
     assert f"step-ca is not set up: {NOT_SET_UP_LINE}" in out
     shown = plain(out)
-    assert shown.index(QUESTION) < shown.index("the plan") < shown.index("Type yes to apply")
+    assert shown.index(QUESTION) < shown.index("Type yes to apply")
     assert setup_run.commands == [(repository / "step-ca/init", repository)]
     assert missing_setup.commands[-1][-1] == "--check"
     assert scripted.containers["step-ca"] == "running"
@@ -3072,8 +3073,7 @@ def test_a_traefik_stopped_before_its_own_recreate_keeps_an_emptied_entry_for_th
 
 
 # --- #89: traefik-mcp follows traefik-mcp.yml and its definition while step-ca is on ----------
-
-FOLLOWER_RECREATED = f"traefik-mcp is recreated and runs the checked-out {FOLLOWER_FILE}"
+FOLLOWER_RECREATED = ("traefik-mcp", ResultEvent.RECREATED, "5s")  # after the fake clock's watch
 HELD_OFF = "traefik-mcp.yml changed · step-ca is off"
 HELD_SWITCHED_OFF = "traefik-mcp.yml changed · step-ca is switched off"
 
@@ -3106,7 +3106,7 @@ def test_a_changed_traefik_mcp_yml_recreates_exactly_traefik_mcp_and_records_the
     assert scripted.container_ids["traefik-mcp"] != ids["traefik-mcp"]
     assert scripted.container_ids["step-ca"] == ids["step-ca"]
     assert follower_entry(state) == planned
-    assert FOLLOWER_RECREATED in out
+    assert find_row(out, *FOLLOWER_RECREATED)
 
 
 def test_a_follower_without_an_entry_is_recreated_once_and_a_second_run_changes_nothing(
@@ -3210,7 +3210,7 @@ def test_a_failed_follower_recreate_empties_its_entry_and_the_next_runs_recreate
     assert exit_code == 1
     assert "partial, could not recreate traefik-mcp, `docker compose up` exited 1" in err
     assert follower_entry(state) == {}
-    assert FOLLOWER_RECREATED not in out
+    assert not find_row(out, *FOLLOWER_RECREATED)
     scripted.failing_verb = None
     (repository / FOLLOWER_FILE).write_text(recorded)
     exit_code, out, _ = switch()
@@ -3231,7 +3231,7 @@ def test_a_traefik_mcp_that_crash_loops_after_its_recreate_is_partial_with_its_e
     assert exit_code == 1
     assert "partial, traefik-mcp is not running after the traefik-mcp recreate" in err
     assert follower_entry(state) == {}
-    assert FOLLOWER_RECREATED not in out
+    assert not find_row(out, *FOLLOWER_RECREATED)
 
 
 def test_l5_a_traefik_mcp_stopped_while_the_prompt_waits_is_still_recreated(
@@ -3249,7 +3249,7 @@ def test_l5_a_traefik_mcp_stopped_while_the_prompt_waits_is_still_recreated(
     assert exit_code == 0
     assert up_calls(scripted) == [RECREATE_FOLLOWER]
     assert scripted.containers["traefik-mcp"] == "running"
-    assert FOLLOWER_RECREATED in out
+    assert find_row(out, *FOLLOWER_RECREATED)
     assert follower_entry(state) == follower_digest(repository)
 
 
@@ -3266,7 +3266,7 @@ def test_a_fixed_file_reaches_traefik_mcp_before_a_crashed_step_ca_is_started(
     assert find_row(out, "step-ca", PlanEvent.SWITCH_ON)
     starting_step_ca = unit_calls(scripted)[0]
     assert scripted.calls.index(RECREATE_FOLLOWER) < scripted.calls.index(starting_step_ca)
-    assert out.index(FOLLOWER_RECREATED) < out.index("step-ca is on")
+    assert find_row(out, *FOLLOWER_RECREATED).start() < plain(out).index("step-ca is on")
     assert follower_entry(state) == follower_digest(repository)
 
 
@@ -3340,10 +3340,10 @@ def test_a_core_change_a_follower_change_and_a_unit_switch_share_one_yes_in_orde
     assert plain(out).count("Type yes to apply") == 1
     assert up_calls(scripted)[:3] == [RECREATE_SOCKET_PROXY, RECREATE_TRAEFIK, RECREATE_FOLLOWER]
     assert unit_calls(scripted, "echo") == [up_calls(scripted)[3]]
-    proven = "the barrier of probe is proven"
-    assert out.count(proven) == 2
-    assert out.rindex(proven) < out.index(CORE_CURRENT) < out.index(FOLLOWER_RECREATED)
-    assert out.index(FOLLOWER_RECREATED) < out.index("echo is on")
+    proven, shown = "the barrier of probe is proven", plain(out)
+    assert shown.count(proven) == 2
+    at = find_row(out, *FOLLOWER_RECREATED).start()
+    assert shown.rindex(proven) < shown.index(CORE_CURRENT) < at < shown.index("echo is on")
 
 
 def test_a_follower_of_a_unit_the_catalog_does_not_name_is_never_planned(

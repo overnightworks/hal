@@ -204,7 +204,6 @@ def test_a_plan_that_only_cannot_read_the_realm_asks_nothing_and_refuses(
 
     assert exit_code == 1
     assert "Type yes" not in out
-    assert "the plan" not in out
     assert "realm skipped" in plain(out)
     assert lines_of(err) == [
         "error: realm: Keycloak could not be read; not checked "

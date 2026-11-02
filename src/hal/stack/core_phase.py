@@ -7,11 +7,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from hal.output import write_row
 from hal.output.command import Verb, command
 from hal.stack import barrier, compose, core, switches
 from hal.stack.plan import Plan
-from hal.stack.service_recreate import ServiceRecreator
+from hal.stack.result_rows import recreated_row
+from hal.stack.service_recreate import Recreated, ServiceRecreator
 from hal.stack.unit_plans import Progress, UnitPlan
+
+
+def _say_recreated(recreated: Recreated) -> None:
+    write_row(recreated_row(recreated))
 
 
 @dataclass(frozen=True)
@@ -47,7 +53,7 @@ class CorePhase:
     ) -> str | None:
         config = planned.fleet.config
         recreator = ServiceRecreator(
-            engine, marks, planned.read, config, self.watch, progress, print
+            engine, marks, planned.read, config, self.watch, progress, _say_recreated
         )
         followers = [
             plan for plan in planned.followers if plan.action is core.FollowerAction.RECREATE

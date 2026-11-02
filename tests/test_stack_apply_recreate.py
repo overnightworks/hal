@@ -39,6 +39,7 @@ from support.stack_apply_fakes import (
 from support.stack_plan_rows import find_row, plain
 
 from hal.stack.plan_rows import PlanEvent
+from hal.stack.result_rows import ResultEvent
 
 RECREATE_STEP_CA = [*RECREATE_TRAEFIK[:-1], "step-ca"]
 RECREATE_KEYCLOAK_DB = [*RECREATE_TRAEFIK[:-1], "keycloak-db"]
@@ -109,6 +110,8 @@ def test_a_changed_definition_recreates_a_running_unit_service_alone_then_nothin
     assert bool(find_row(out, "step-ca", PlanEvent.RECREATE, "definition changed")) == (
         "step-ca" in drifted
     )
+    for service in ("step-ca", "traefik-mcp"):
+        assert bool(find_row(out, service, ResultEvent.RECREATED, "5s")) == (service in drifted)
     assert up_calls(scripted) == recreated
     assert {service for service in ids if scripted.container_ids[service] != ids[service]} == set(
         drifted
@@ -245,9 +248,10 @@ def test_a_marker_that_appears_after_the_yes_wins_and_the_run_is_partial(
     ids = dict(scripted.container_ids)
     scripted.change_definition("step-ca")
 
-    exit_code, _, err = switch(while_prompt_waits=lambda: switch_off(state))
+    exit_code, out, err = switch(while_prompt_waits=lambda: switch_off(state))
 
     assert exit_code == 1
+    assert not find_row(out, "step-ca", ResultEvent.RECREATED)
     assert "partial, step-ca was switched off meanwhile" in err
     assert "step-ca is not recreated" in err
     assert scripted.container_ids == ids

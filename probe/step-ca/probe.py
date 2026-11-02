@@ -773,8 +773,8 @@ class Probe(McpNetworks, TraefikMcpFollows):
         expect(not self.containers_of_unit(running_only=False), "a container exists after a no")
 
         out = self.hal(copy, "apply", "--local", terminal=True, typed=b"yes\nyes\n")  # (ii)
-        expect("is not set up" in out and "the plan" in out, f"yes, yes said: {out[-200:]}")
-        expect(out.index("is not set up") < out.index("the plan"), "the plan came first")
+        expect("is not set up" in out and "Type yes" in out, f"yes, yes said: {out[-200:]}")
+        expect(out.index("is not set up") < out.index("Type yes"), "the plan came first")
         expect((self.secrets_dir / "root_ca_key").is_file(), "the setup made no root key")
         self.run([str(REPO / "step-ca" / "init"), "--check"])
         self.wait_until_answering()

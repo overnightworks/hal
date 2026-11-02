@@ -27,6 +27,7 @@ from support.stack_plan_rows import find_row, plain
 
 from hal.stack import switches
 from hal.stack.plan_rows import PlanEvent
+from hal.stack.result_rows import ResultEvent
 
 BUMPED_TAG = "edge-agent-service:9.9.9-2.1.302"
 REBUILT_ID = f"sha256:{'e' * 64}"
@@ -126,6 +127,7 @@ def test_a_reference_bump_recreates_agent_service_once_under_the_one_yes(running
 
     assert exit_code == 0
     assert recreate_row(out, bump_fact(old))
+    assert find_row(out, "agent-service", ResultEvent.RECREATED, "5s")
     assert plain(out).count("Type yes to apply") == 1
     assert up_calls(scripted) == [RECREATE_AGENT_SERVICE]
     assert scripted.container_ids["agent-service"] != ids["agent-service"]
