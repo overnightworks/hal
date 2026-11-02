@@ -18,7 +18,6 @@ from hal.stack.apps import (
     OffPlan,
 )
 from hal.stack.barrier import BarriersUnproven
-from hal.stack.plan_rows import ChangeNoun, PlanEvent
 from hal.stack.legal_step import LEGAL_UNIT, LegalPlan, PageChange
 from hal.stack.plan_rows import ChangeNoun, PlanEvent, appkit_row
 from hal.stack.realm import Kind

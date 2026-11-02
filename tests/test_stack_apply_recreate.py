@@ -61,7 +61,6 @@ STOPPED_BY_BARRIERS = [
     "error: partial, barriers not proven · no unit switched",
     "next: hal offline",
 ]
-SECOND_FOLLOWER_FILE = "traefik-mcp-second.yml"
 LOCAL_TAG = "edge-local:1"
 REBUILT_IMAGE_ID = f"sha256:{'f' * 64}"
 KEYCLOAK_DB_IMAGE = f"postgres:18@sha256:{'5' * 64}"
@@ -515,12 +514,12 @@ def test_each_of_two_followers_shows_its_own_wait(
 ):
     """Each follower's clock starts at its own recreate, not at the first one's."""
     services = scripted.config["services"]
-    second_file = repository / SECOND_FOLLOWER_FILE
+    second_file = repository / "traefik-mcp-second.yml"
     second_file.write_text("entryPoints: {}\n")
     services["traefik-mcp-second"] = copy.deepcopy(services["traefik-mcp"])
     services["traefik-mcp-second"]["volumes"][-2] = bind(second_file, "/etc/traefik/traefik.yml")
     scripted.put_containers({"traefik-mcp-second": "running"})
-    second = {"traefik-mcp-second": {SECOND_FOLLOWER_FILE: sha256(second_file)}}
+    second = {"traefik-mcp-second": {second_file.name: sha256(second_file)}}
     (state / "applied.json").write_text(json.dumps(applied(state) | second))
     scripted.change_definition("traefik-mcp")
     scripted.change_definition("traefik-mcp-second")
