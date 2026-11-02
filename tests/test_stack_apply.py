@@ -3662,7 +3662,7 @@ def test_the_waiting_line_of_a_stopped_hal_is_told_as_the_step_runs(
     exit_code, out, _ = switch(installed_backup=True)
 
     assert exit_code == 1
-    assert "realm: waiting up to 0.2s for hal to clean up" in out
+    assert out.index("up to <1s for hal to clean up") < out.index("realm failed")
 
 
 @pytest.mark.usefixtures("realm_unit")
@@ -3670,10 +3670,11 @@ def test_a_failed_backup_ends_partial_exit_1_and_applies_nothing(switch, scripte
     """Cell 8."""
     realm_backup.failing = "backup"
 
-    exit_code, _, err = switch()
+    exit_code, out, err = switch()
 
     assert exit_code == 1
-    assert "error: partial, realm: backup broke; nothing applied" in err
+    assert "backup broke · nothing applied" in out
+    assert err.splitlines() == ["error: partial, keycloak realm failed", "next: hal apply"]
     assert scripted.realm_applies == 0
 
 
@@ -3684,13 +3685,13 @@ def test_a_config_cli_that_fails_ends_partial_names_the_snapshot_and_is_planned_
     """Cell 11."""
     scripted.config_cli_fails = True
 
-    exit_code, _, err = switch()
+    exit_code, out, err = switch()
 
     assert exit_code == 1
     assert realm_backup.asked == ["backup", "restore test"]
-    assert "partial, realm:" in err
-    assert "the realm may be partly applied; pre-apply snapshot ab12cd34" in err
-    assert 'docs/backup.md "Restore Keycloak"' in err
+    assert "pre-apply snapshot ab12cd34 · proven" in out
+    assert 'way back: docs/backup.md "Restore Keycloak" · the next apply repeats the step' in out
+    assert "error: partial, keycloak realm failed" in err
 
     scripted.config_cli_fails = False
     _, out, _ = switch("no")
@@ -3709,11 +3710,10 @@ def test_a_core_error_inside_the_realm_hook_ends_partial_not_in_a_traceback(
 
     monkeypatch.setattr(core, "followed_services", refuse)
 
-    exit_code, _, err = switch()
+    exit_code, out, _ = switch()
 
-    assert exit_code == 1
-    assert "partial, realm: cannot read keycloak (Permission denied); nothing applied" in err
-    assert scripted.realm_applies == 0
+    assert (exit_code, scripted.realm_applies) == (1, 0)
+    assert "cannot read keycloak (Permission denied) · nothing applied" in out
 
 
 @pytest.mark.usefixtures("realm_unit")

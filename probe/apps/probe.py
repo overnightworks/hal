@@ -419,7 +419,10 @@ class Probe:
             re.search(rf"{self.key}\s+switch on\s+{tag} · into ~/srv/{self.key}", out),
             f"the plan said: {out[-300:]}",
         )
-        expect(f"{self.key} is on at {tag}" in out, f"the run said: {out[-300:]}")
+        expect(
+            re.search(rf"{self.key}\s+switched on\s+{tag} · running", out),
+            f"the run said: {out[-300:]}",
+        )
         expect(self.head() == sha, "HEAD is not the tag's commit")
         expect(checkout.Git(self.srv).branch() is None, "HEAD is not detached")
         expect(self.deployed()["sha"] == sha, "the record names another sha")
@@ -493,7 +496,7 @@ class Probe:
         tag = TAGS["a8"]
         self.release(tag, healthy=False)
         out = self.apply(exit_code=HAL_FAILURE)
-        expect(f"is not healthy at {tag} after {HEALTH_WAIT_SECONDS}s" in out, out[-300:])
+        expect(f"not healthy at {tag} after {HEALTH_WAIT_SECONDS}s" in out, out[-300:])
         expect(self.deployed()["tag"] == TAGS["a3"], "the record moved")
         expect(self.ask("/version")[0] == 404, "Traefik still routes an unhealthy container")
         again = self.apply(typed=b"no\n", exit_code=HAL_FAILURE)

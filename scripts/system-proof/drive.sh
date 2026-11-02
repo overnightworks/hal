@@ -174,7 +174,20 @@ install_home() {  # the wheel, and the user manager `hal setup`'s user-units ste
     loginctl enable-linger tester
     timeout 60 bash -c 'until systemctl is-active --quiet "user@$(id -u tester).service"; do sleep 1; done'
     su - tester -c "uv tool install /proof/*.whl" >"$EVIDENCE/install.log" 2>&1
+    plant_stub_hal
     plant_fake_secrets >>"$EVIDENCE/install.log" 2>&1
+    return
+}
+
+# The units' ExecStart is ~/srv/hal/.venv/bin/hal, which the proof's home has no venv for: a timer that fires inside the
+# mail cells would fail its unit and change what `hal check` finds. A hal that exits 0 lets every such unit end clean,
+# where the real one would write the remembered set and could mail the sink.
+plant_stub_hal() {
+    local bin=/home/tester/srv/hal/.venv/bin
+    install -d -o tester -g tester "$bin/.." "$bin"
+    printf '#!/bin/sh\nexit 0\n' >"$bin/hal"
+    chown tester:tester "$bin/hal"
+    chmod 755 "$bin/hal"
     return
 }
 
