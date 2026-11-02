@@ -364,8 +364,7 @@ def test_setup_never_writes_the_passwords_step_ca_init_and_keycloak_go_live_gene
 ) -> None:
     """#195: those units own their four generated passwords; the packaged entries are optional, so `--setup` leaves them as they are."""
     generated = ("step-ca/password", "keycloak/db-password", "keycloak/config-cli-secret", "keycloak/bootstrap-admin-password")
-    blocks = PACKAGED_MANIFEST.read_text().split("[[secret]]")[1:]
-    use_manifest("".join(f"[[secret]]{block}" for block in blocks if any(f'name = "{name}"' in block for name in generated)))
+    _use_packaged_entries(use_manifest, generated)
     for name in generated if present else ():
         file = private_directory(home, f".secrets/{Path(name).parent}") / Path(name).name
         file.write_text("FAKE-OLD-VALUE")
@@ -680,7 +679,8 @@ def test_a_service_password_is_generated_fresh_for_each_home(
     assert all(os.path.getsize(tmp_path / name / PASSPHRASE_FILE) >= 64 for name in ("first", "second"))
 
 
-APP_KEYS = tuple(f"litellm/apps/{app}" for app in ("songmaker", "hopin", "presentator"))
+APPS = ("songmaker", "hopin", "presentator")
+APP_KEYS = tuple(f"litellm/apps/{app}" for app in APPS)
 
 
 def _use_packaged_entries(use_manifest, names: tuple[str, ...]) -> None:
@@ -691,7 +691,7 @@ def _use_packaged_entries(use_manifest, names: tuple[str, ...]) -> None:
 def test_setup_creates_each_apps_litellm_key_prefixed_and_keeps_existing_files(
     home: Path, use_manifest, boundaries: Boundaries, capsys, caplog
 ) -> None:
-    """#915 K1 and K2: all three files exist with `sk-`, readable by the app's container user, no value is shown, and a second run keeps their bytes."""
+    """K1 and K2: all three files exist with `sk-`, readable by the app's container user, no value is shown, and a second run keeps their bytes."""
     _use_packaged_entries(use_manifest, APP_KEYS)
     caplog.set_level(logging.DEBUG)
     paths = [home / ".secrets" / name for name in APP_KEYS]
@@ -711,7 +711,7 @@ def test_setup_creates_each_apps_litellm_key_prefixed_and_keeps_existing_files(
 
 
 def test_a_value_prefix_on_another_kind_is_refused_at_load_naming_the_entry(tmp_path: Path) -> None:
-    """#915 K3: a prefix belongs to a service-password entry only."""
+    """K3: a prefix belongs to a service-password entry only."""
     manifest = tmp_path / "manifest.toml"
     manifest.write_text(
         '[[secret]]\nname = "gitlab"\nkind = "token"\npaths = ["~/.secrets/gitlab"]\nread_by = []\nrecreate = "r"\nvalue_prefix = "sk-"\n'
@@ -722,7 +722,7 @@ def test_a_value_prefix_on_another_kind_is_refused_at_load_naming_the_entry(tmp_
 
 
 def test_the_master_key_keeps_its_unprefixed_value_form(home: Path, use_manifest, boundaries: Boundaries) -> None:
-    """#915 K5: only entries that declare a value_prefix get one."""
+    """K5: only entries that declare a value_prefix get one."""
     _use_packaged_entries(use_manifest, ("litellm/master-key",))
 
     run_wizard(home, boundaries)
@@ -731,11 +731,10 @@ def test_the_master_key_keeps_its_unprefixed_value_form(home: Path, use_manifest
 
 
 def test_each_apps_litellm_key_is_listed_with_its_readers_and_mode_0644_is_no_finding(tmp_path: Path, probe: FakeProbe, capsys) -> None:
-    """#915 K4: the three app key files are declared secrets, readable by their container user."""
+    """K4: the three app key files are declared secrets, readable by their container user."""
     home = tmp_path / "home"
     plant_secrets(home)
-    apps = ("songmaker", "hopin", "presentator")
-    for app in apps:
+    for app in APPS:
         (home / ".secrets/litellm/apps" / app).chmod(0o644)
 
     code = run_hal_secrets(home, probe, now=WIZARD_NOW)
@@ -746,7 +745,9 @@ def test_each_apps_litellm_key_is_listed_with_its_readers_and_mode_0644_is_no_fi
 
     assert (code, by_service) == (0, 0)
     assert findings_of(report, "loose-mode") == {}
-    assert all(f"| {app} | " in listing and "litellm" in listing.split(f"| {app} |")[1].splitlines()[0] for app in apps)
+    assert all(f"| {app} | " in listing and "litellm" in listing.split(f"| {app} |")[1].splitlines()[0] for app in APPS)
+    litellm_rows = [line for line in listing.splitlines() if line.startswith("| litellm | ")]
+    assert len(litellm_rows) == 1 and all(key in litellm_rows[0] for key in APP_KEYS)
 
 
 def test_the_real_terminal_fact_is_false_while_stdio_is_captured(capsys: pytest.CaptureFixture[str]) -> None:

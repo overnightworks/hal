@@ -280,8 +280,7 @@ host process can reach it, because the network has no host address and publishes
 
 An app that calls LiteLLM directly holds only its own key, the file `~/.secrets/litellm/apps/<app>` (`songmaker`,
 `hopin`, `presentator`). `hal setup` creates a missing one with the prefix `sk-` that LiteLLM requires of a custom
-key, mode 0644 in a 0700 folder so the app's container reads it as its own user; the app mounts it as a secret. The
-address the app calls follows with the route's switch-on.
+key, mode 0644 in a 0700 folder so the app's container reads it as its own user; no service reads the file today.
 
 ## The API route
 
