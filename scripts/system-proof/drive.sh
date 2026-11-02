@@ -89,7 +89,8 @@ row_in_log() {  # row_in_log <log> <row> <event regex>: a row of hal setup's run
 }
 
 system_row_details() {  # system_row_details <log>: the detail lines under the system row, without their indent
-    awk '/^  [^ ]+ system +/ { under = 1; next } under && /^    [^ ]/ { sub(/\r$/, ""); sub(/^    /, ""); print; next } { under = 0 }' "$EVIDENCE/$1.log"
+    local log=$1
+    awk '/^  [^ ]+ system +/ { under = 1; next } under && /^    [^ ]/ { sub(/\r$/, ""); sub(/^    /, ""); print; next } { under = 0 }' "$EVIDENCE/$log.log"
     return
 }
 
