@@ -25,6 +25,7 @@ from support.backup_support import (
 from hal import cli
 from hal.grammar import ExitCode
 from hal.output import (
+    Field,
     Glyph,
     Noun,
     Row,
@@ -211,6 +212,7 @@ def test_every_event_is_flushed_before_the_process_ends_abruptly():
 def test_unset_and_text_print_the_same_bytes_without_json(monkeypatch, capsys):
     def printed() -> tuple[str, str]:
         write_row(row(fact="4.2 MiB", details=("first",)))
+        write_row(row(fact="checked", fields=((Field.BYTES, 4_404_019), (Field.SECONDS, 60))))
         write_verdict(Verdict(Glyph.DONE, "backup done", ((1, AppCount.APP),)))
         write_error("it broke", "hal backup")
         captured = capsys.readouterr()
@@ -454,3 +456,148 @@ def test_a_realm_step_asks_the_backup_child_for_text_under_an_exported_json(monk
         backup.restore_test("ab12cd34")
 
     assert str(raised.value) == "the restore test failed (the dump does not restore)"
+
+
+def the_event(outcome_out: str, name: str, subject: str | None = None) -> tuple[int, dict]:
+    [found] = [
+        (priority, event)
+        for priority, event in events(outcome_out)
+        if event["event"] == name and subject in (None, event["subject"])
+    ]
+    return found
+
+
+@pytest.mark.usefixtures("json_log")
+def test_a_backed_up_event_carries_the_snapshot_the_bytes_and_the_seconds_as_raw_values(
+    edge_backup, machine
+):
+    machine.source_bytes = 2_254_857_830
+    machine.backup_seconds = 100
+
+    outcome = edge_backup("backup")
+
+    _, event = the_event(outcome.out, "backed up")
+    assert list(event) == [*COMMON_FIELDS, "subject", "snapshot", "bytes", "seconds"]
+    assert (event["snapshot"], event["bytes"], event["seconds"]) == (
+        machine.snapshots[-1]["id"][:8],
+        2_254_857_830,
+        100.0,
+    )
+
+
+@pytest.mark.usefixtures("json_log")
+def test_the_pruned_event_keeps_its_word_and_carries_the_seconds(edge_backup, machine, home):
+    machine.maintenance_seconds = 20
+
+    outcome = edge_backup(*declare_two_apps(home), "backup")
+
+    _, event = the_event(outcome.out, "pruned")
+    assert (event["fact"], event["seconds"]) == ("checked", 60.0)
+    assert list(event)[-2:] == ["fact", "seconds"]
+
+
+def text_reason_of(output: str, event: str) -> str:
+    [line] = [line for line in output.splitlines() if f" {event} " in line]
+    return line.split(f"{event} ", 1)[1].strip()
+
+
+def test_a_failed_app_carries_its_reason_and_the_skipped_prune_carries_its_own(
+    edge_backup, machine, monkeypatch
+):
+    machine.other_db_containers["edge"] = []
+    monkeypatch.setenv("LOG_FORMAT", "text")
+    in_text = edge_backup(*declare_shipped_apps(), "backup")
+    monkeypatch.setenv("LOG_FORMAT", "json")
+
+    in_json = edge_backup(*declare_shipped_apps(), "backup")
+
+    priority, failed = the_event(in_json.out, "not backed up")
+    assert priority == 3
+    assert failed["reason"] == text_reason_of(in_text.out, "not backed up")
+    assert "fact" not in failed
+    priority, skipped = the_event(in_json.out, "not pruned")
+    assert (priority, skipped["reason"]) == (6, "a backup failed")
+    assert "fact" not in skipped
+
+
+@pytest.mark.usefixtures("json_log")
+def test_a_proven_restore_carries_the_snapshot_and_the_checked_row_carries_no_field(edge_backup):
+    edge_backup("backup")
+
+    outcome = edge_backup("restore", "--test")
+
+    _, proven = the_event(outcome.out, "restore proven")
+    assert len(proven["snapshot"]) == 8
+    assert "fact" not in proven
+    _, checked = the_event(outcome.out, "checked")
+    assert not {"fact", "snapshot", "reason"} & set(checked)
+
+
+@pytest.mark.usefixtures("json_log")
+def test_a_restore_that_proves_nothing_and_a_failing_check_each_carry_a_reason(
+    edge_backup, machine
+):
+    machine.failing["restic check"] = 1
+
+    outcome = edge_backup(*declare_shipped_apps(), "restore", "--test")
+
+    for name in ("not proven", "not checked"):
+        priority, event = the_event(outcome.out, name, "keycloak" if name == "not proven" else None)
+        assert (priority, bool(event["reason"]), "fact" in event) == (3, True, False), name
+
+
+@pytest.mark.usefixtures("json_log")
+def test_a_size_and_a_span_stay_raw_in_json_and_read_as_units_in_text(capsys, monkeypatch):
+    fields = ((Field.BYTES, 2_254_857_830), (Field.SECONDS, 192.44))
+    write_row(row(fields=fields))
+    in_json = capsys.readouterr().out
+    monkeypatch.setenv("LOG_FORMAT", "text")
+    write_row(row(fields=fields))
+    in_text = capsys.readouterr().out
+
+    _, event = the_one_event(in_json)
+    assert (event["bytes"], event["seconds"]) == (2_254_857_830, 192.4)
+    assert in_text.endswith("2.1 GiB · 3m12s\n")
+
+
+@pytest.mark.usefixtures("json_log")
+def test_a_zero_size_and_a_zero_span_still_stand_in_both_formats(capsys, monkeypatch):
+    fields = ((Field.BYTES, 0), (Field.SECONDS, 0))
+    write_row(row(fields=fields))
+    in_json = capsys.readouterr().out
+    monkeypatch.setenv("LOG_FORMAT", "text")
+    write_row(row(fields=fields))
+    in_text = capsys.readouterr().out
+
+    _, event = the_one_event(in_json)
+    assert (event["bytes"], event["seconds"]) == (0, 0)
+    assert in_text.endswith("0 B · <1s\n")
+
+
+@pytest.mark.usefixtures("json_log")
+def test_a_fact_and_a_field_stand_together_fact_first(capsys, monkeypatch):
+    write_row(row(fact="checked", fields=((Field.SECONDS, 60),)))
+    in_json = capsys.readouterr().out
+    monkeypatch.setenv("LOG_FORMAT", "text")
+    write_row(row(fact="checked", fields=((Field.SECONDS, 60),)))
+    in_text = capsys.readouterr().out
+
+    _, event = the_one_event(in_json)
+    assert list(event)[-2:] == ["fact", "seconds"]
+    assert in_text.endswith("checked · 1m00s\n")
+
+
+@pytest.mark.parametrize("field", [Field.REASON, Field.SNAPSHOT])
+@pytest.mark.parametrize("log_format", ["json", "text"])
+def test_hostile_text_in_a_field_stays_one_escaped_line(capsys, monkeypatch, field, log_format):
+    monkeypatch.setenv("LOG_FORMAT", log_format)
+
+    write_row(row(fields=((field, f"{HOSTILE} "),)))
+
+    shown = capsys.readouterr().out
+    expected = printable(f"{HOSTILE} ").rstrip()
+    if log_format == "json":
+        assert the_one_event(shown)[1][field.value] == expected
+    else:
+        assert shown.count("\n") == 1
+        assert shown.rstrip("\n").endswith(expected)

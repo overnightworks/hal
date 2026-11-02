@@ -283,8 +283,12 @@ def _fail_keycloak_after_a_good_run(edge_backup, machine, *arguments):
             ("keycloak",),
             "error: keycloak not backed up · last good backup 18.10. 05:00",
         ),
+        (
+            ("keycloak", "--pre-apply"),
+            "error: keycloak not backed up · last good backup 18.10. 05:00",
+        ),
     ],
-    ids=["several apps", "one app"],
+    ids=["several apps", "one app", "one app before apply"],
 )
 def test_the_error_line_names_the_failed_apps_last_good_backup_in_local_time(
     edge_backup, machine, berlin_time, arguments, error_line
