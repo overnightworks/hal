@@ -471,6 +471,16 @@ def test_a_census_that_fails_leaves_the_container_unexamined(retention, answers)
     assert sweep.problems == ("service: the census could not search the mounts",)
 
 
+@pytest.mark.parametrize("answer", [(1, b""), (0, b"[]"), (0, b"not json"), (0, b"[1]")])
+def test_a_container_that_cannot_be_inspected_is_an_unexamined_sink_and_no_crash(
+    retention, answer
+) -> None:
+    sweep, docker = sweep_of(retention, front_answers(**{"docker inspect front": answer}))
+
+    assert sweep.problems == ("front: the container could not be inspected",)
+    assert [call for call, _ in docker.calls if call[1] == "logs"] == []
+
+
 def test_the_writable_destinations_of_an_inspection_are_its_rw_mounts_and_tmpfs(retention) -> None:
     document = json.loads(inspect_answer([("/a", True), ("/b", False)], {"/t": "size=1m"}))[0]
 

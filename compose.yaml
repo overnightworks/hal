@@ -524,6 +524,29 @@ services:
     volumes:
       - ./agent-service/smoke.py:/opt/smoke/smoke.py:ro
 
+  # The canary of the API route (agent-service/api_canary.py, run by live_canary.py; docs/
+  # agent-service.md, "Proofs"): one run of a person on the API route, only verdict lines out. Run
+  # as `compose run -T --rm agent-canary --marker TEXT` with the tokens on stdin, one per line.
+  # Declared like agent-smoke, whose smoke.py it imports; -B and not -I because it imports the
+  # script beside it.
+  agent-canary:
+    image: *agent-service-image
+    pull_policy: never
+    profiles: [apply]
+    logging: *one-off-logging
+    user: "65534:65534"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    networks: [agent-songmaker]
+    entrypoint:
+      - python
+      - -B
+      - /opt/canary/api_canary.py
+    volumes:
+      - ./agent-service/smoke.py:/opt/canary/smoke.py:ro
+      - ./agent-service/api_canary.py:/opt/canary/api_canary.py:ro
+
   # The probe's stand-in for the agent service (probe/agent-service/egress.py): the same
   # attachments, hardened like the service, listening on nothing.
   agent-probe:

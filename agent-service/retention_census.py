@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import io
 import json
+import subprocess
 import tarfile
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -36,6 +37,10 @@ DOCKER_OWN = frozenset({
 HANDED_OVER = frozenset({Skip.NESTED_MOUNT.value, Skip.FILE_MOUNT.value})
 COMMAND_NOT_FOUND = frozenset({126, 127})
 MOUNT_TABLE = "/proc/1/mountinfo"
+DOCKER_SECONDS = 300
+FRONT, GATEWAY, LITELLM, AGENT_SERVICE = "litellm-front", "agent-egress", "litellm", "agent-service"
+# The compose services of the API route, each with whether its container holds Python.
+ROUTE_SERVICES = {FRONT: False, GATEWAY: False, LITELLM: True, AGENT_SERVICE: True}
 
 Entry = tuple[str, str, bool]  # mount point, filesystem type, writable
 
@@ -47,6 +52,13 @@ class Completed(NamedTuple):
 
 
 Run = Callable[[Sequence[str], bytes | None], Completed]
+
+
+def run_docker(command: Sequence[str], stdin: bytes | None = None) -> Completed:
+    result = subprocess.run(  # noqa: S603 - argv is built by the program itself and no shell runs
+        list(command), input=stdin, capture_output=True, timeout=DOCKER_SECONDS, check=False
+    )
+    return Completed(result.returncode, result.stdout, result.stderr)
 
 
 @dataclass(frozen=True)
@@ -146,7 +158,10 @@ class Census:
 
     def _container(self, target: Target, tokens: Mapping[str, str], sweep: Sweep) -> None:
         name = target.name
-        document = json.loads(self.run(["docker", "inspect", name], None).stdout)[0]
+        document = self._inspection(name)
+        if document is None:
+            sweep.problem(name, "the container could not be inspected")
+            return
         declared = writable_destinations(document)
         masked = frozenset(document["HostConfig"].get("MaskedPaths") or ())
         known = declared | DOCKER_OWN | masked
@@ -164,6 +179,14 @@ class Census:
                 elif point not in inside[1]:
                     sweep.problem(f"{name} {point}", "the census did not walk the mount")
         self._log(name, tokens, sweep)
+
+    def _inspection(self, name: str) -> dict | None:
+        result = self.run(["docker", "inspect", name], None)
+        try:
+            document = json.loads(result.stdout)[0] if result.returncode == 0 else None
+        except (ValueError, IndexError):
+            return None
+        return document if isinstance(document, dict) else None
 
     def _table_of(self, name: str, sweep: Sweep) -> list[Entry] | None:
         result = self.run(["docker", "exec", name, "cat", MOUNT_TABLE], None)
