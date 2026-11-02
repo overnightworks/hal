@@ -354,7 +354,7 @@ def test_sigterm_in_pg_dump_is_the_error_event_with_exit_130(edge_backup, machin
     assert outcome.exit_code == ExitCode.INTERRUPTED
     [(priority, event)] = events(outcome.err)
     assert (priority, event["event"]) == (3, "error")
-    assert list((home / ".cache/edge-backup").iterdir()) == []
+    assert list((home / ".cache").glob("*/*")) == []
 
 
 @pytest.mark.usefixtures("json_log")
