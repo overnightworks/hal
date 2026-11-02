@@ -76,23 +76,32 @@ def recheck_cannot_tell(world: World) -> None:
 
 
 @pytest.mark.parametrize(
-    ("arrange", "answers"),
+    ("arrange", "answers", "expected_exit"),
     [
-        pytest.param(lock_held, [], id="C1 refused: another apply runs"),
-        pytest.param(World.make_setup_missing, ["no"], id="C3 the setup is declined"),
-        pytest.param(setup_fails, ["yes"], id="C4 the setup fails"),
-        pytest.param(setup_is_interrupted, ["yes"], id="C4 the setup is interrupted"),
-        pytest.param(nothing, ["no"], id="C5 the plan is declined"),
-        pytest.param(recheck_cannot_tell, ["yes", "yes"], id="C7 a setup ran, then no plan"),
+        pytest.param(lock_held, [], ExitCode.REFUSED, id="C1 refused: another apply runs"),
+        pytest.param(
+            World.make_setup_missing, ["no"], ExitCode.FINDINGS, id="C3 the setup is declined"
+        ),
+        pytest.param(setup_fails, ["yes"], ExitCode.FAILURE, id="C4 the setup fails"),
+        pytest.param(
+            setup_is_interrupted, ["yes"], ExitCode.FAILURE, id="C4 the setup is interrupted"
+        ),
+        pytest.param(nothing, ["no"], ExitCode.FINDINGS, id="C5 the plan is declined"),
+        pytest.param(
+            recheck_cannot_tell, ["yes", "yes"], ExitCode.FAILURE, id="C7 a setup ran, then no plan"
+        ),
     ],
 )
-def test_a_local_part_that_does_not_end_clean_publishes_nothing(world, arrange, answers):
-    """C1, C3-C5, C7 (D2, D3): the stack's failure is hal's 3, the publish is never entered."""
+def test_a_local_part_that_does_not_end_clean_publishes_nothing(
+    world, arrange, answers, expected_exit
+):
+    """C1, C3-C5, C7 (D2, D3, #784): the local end keeps its own exit, the publish is never
+    entered."""
     arrange(world)
 
     result = world.run(*answers)
 
-    assert result.exit_code == ExitCode.FAILURE
+    assert result.exit_code == expected_exit
     assert NOTHING_PUBLISHED in result.err
     assert world.publish_never_began()
 
@@ -168,7 +177,7 @@ def test_an_interrupted_setup_whose_containers_run_is_asked_again_and_publishes_
 
     declined = world.run("no")
 
-    assert declined.exit_code == ExitCode.FAILURE
+    assert declined.exit_code == ExitCode.FINDINGS
     assert SETUP_QUESTION in declined.out
     assert world.publish_never_began()
 
@@ -189,7 +198,7 @@ def test_an_interrupted_stop_after_an_interrupted_setup_is_refused_and_publishes
 
     result = world.run()
 
-    assert result.exit_code == ExitCode.FAILURE
+    assert result.exit_code == ExitCode.REFUSED
     assert result.err.splitlines()[:2] == [
         "error: switched off but still running, nothing switched",
         "next: hal stop step-ca",

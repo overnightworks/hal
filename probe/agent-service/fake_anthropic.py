@@ -15,8 +15,9 @@ The `provider` role re-reads `/fake/control.json` on every request, so one conta
 cell of the failure probe (probe/agent-service/litellm_failures.py). The file holds `mode`:
 `answer` (the default), `status` (with `status`: 500 or 529), `billing`, `low_credit`, `broken` (a
 200 whose body is no JSON), `reset` (the connection is reset), `hold` (the request is held until
-the client disconnects or `hold_seconds` (at most 120, the default) have passed, and the log gets
-`held disconnected` or `held timed out` afterwards; the held request is then answered) or `echo`
+the client disconnects, the control file no longer says `hold`, or `hold_seconds` (at most 120, the
+default) have passed, and the log gets `held disconnected`, `held released` or `held timed out`
+afterwards; the held request is then answered) or `echo`
 (an error of `status` whose message is `request_canary` when the request holds it, as an upstream
 that quotes its input); and optionally `provider_key`, `credential` and `marker`, which stand in
 for the values of `expect.json`, and `request_canary`, whose occurrences in a request the log line
@@ -75,9 +76,12 @@ def quoted(steering: dict, body: bytes) -> str:
 
 
 def wait_for_disconnect(connection: socket.socket, seconds: float) -> str:
-    """Holds until the client closes its side, and says so; gives up after `seconds`."""
+    """Holds until the client closes its side or the control file stops saying `hold`, and says
+    so; gives up after `seconds`."""
     deadline = time.monotonic() + min(seconds, HOLD_SECONDS)
     while time.monotonic() < deadline:
+        if control().get("mode") != "hold":
+            return "released"
         readable, _, _ = select.select([connection], [], [], HOLD_POLL_SECONDS)
         if readable:
             try:

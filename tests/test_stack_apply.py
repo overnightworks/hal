@@ -527,7 +527,7 @@ def test_one_yes_does_not_cover_both_the_setup_and_the_plan(switch, scripted, mi
     """#69 rule 1: the plan has its own question; a declined plan names the completed setup."""
     exit_code, _, err = switch("yes\nno")
 
-    assert exit_code == 1
+    assert exit_code == apply.ApplyExit.DECLINED
     assert "setup of step-ca completed; nothing switched" in err
     assert "nothing changed" not in err
     assert scripted.changing_verbs() == []
@@ -539,7 +539,7 @@ def test_declining_the_setup_aborts_everything_and_runs_nothing(
     """#69 rule 3: `no` aborts: nothing runs, nothing is switched."""
     exit_code, _, err = switch("no")
 
-    assert exit_code == 1
+    assert exit_code == apply.ApplyExit.DECLINED
     assert "aborted, nothing changed; run `step-ca/init` yourself or answer yes" in err
     assert setup_run.commands == []
     assert scripted.changing_verbs() == []
@@ -549,7 +549,7 @@ def test_a_closed_stdin_counts_as_no_to_the_setup(switch, missing_setup, setup_r
     """#69 rule 8: EOF is a no."""
     exit_code, _, _ = switch("")
 
-    assert exit_code == 1
+    assert exit_code == apply.ApplyExit.DECLINED
     assert setup_run.commands == []
 
 
@@ -570,7 +570,7 @@ def test_a_running_unit_that_is_not_set_up_is_asked_like_one_switched_on(
 
     exit_code, out, err = switch("no")
 
-    assert exit_code == 1
+    assert exit_code == apply.ApplyExit.DECLINED
     assert QUESTION in plain(out)
     assert "aborted, nothing changed" in err
     assert setup_run.commands == []
@@ -633,7 +633,7 @@ def test_an_interrupted_setup_says_that_keys_may_exist_and_how_to_go_on(
     assert err.splitlines()[-1] == "next: hal apply"
 
 
-def test_a_setup_that_leaves_the_check_failing_is_exit_1(
+def test_a_setup_that_leaves_the_check_failing_is_a_guard_refusal(
     switch, scripted, missing_setup, setup_run
 ):
     """#69 rule 5: --check still 1 after the setup."""
@@ -641,7 +641,7 @@ def test_a_setup_that_leaves_the_check_failing_is_exit_1(
 
     exit_code, _, err = switch("yes\nyes")
 
-    assert exit_code == 1
+    assert exit_code == apply.ApplyExit.GUARD_REFUSED
     assert "`step-ca/init` ran, still not set up: still no keys" in err
     assert scripted.changing_verbs() == []
 
@@ -667,7 +667,7 @@ def test_several_missing_setups_are_all_asked_first_and_a_no_stops_the_rest(
 
     exit_code, out, _ = switch("yes\nno")
 
-    assert exit_code == 1
+    assert exit_code == apply.ApplyExit.DECLINED
     assert out.count("is not set up") == 2
     assert out.index("step-ca is not set up") < out.index("keycloak is not set up")
     assert setup_run.commands == []
@@ -710,7 +710,7 @@ def test_every_run_asks_again_until_the_check_says_set_up(
 ):
     """#69 rule 9: nothing is remembered; a `no` is asked again, a passing check is not."""
     exit_code, first, _ = switch("no")
-    assert exit_code == 1
+    assert exit_code == apply.ApplyExit.DECLINED
     assert "step-ca is not set up" in first
 
     _, second, _ = switch("no")
@@ -749,7 +749,7 @@ def test_a_unit_that_became_on_during_the_setup_is_refused_without_a_question_an
 
     exit_code, _, err = switch("yes")
 
-    assert exit_code == 1
+    assert exit_code == apply.ApplyExit.GUARD_REFUSED
     assert "keycloak is not set up" in err
     assert scripted.changing_verbs() == []
 
@@ -802,7 +802,7 @@ def test_without_a_terminal_it_refuses_before_anything_else(
         git=scripted_git,
     )  # fmt: skip
 
-    assert exit_code == 1
+    assert exit_code == apply.ApplyExit.GUARD_REFUSED
     assert "refused, stdin and stdout must be a terminal" in capsys.readouterr().err
     assert scripted.calls == []
     assert missing_setup.commands == []
@@ -821,7 +821,7 @@ def test_from_another_copy_it_refuses_naming_the_tree_and_runs_nothing(
 
     exit_code, _, err = switch(tree=copy)
 
-    assert exit_code == 2
+    assert exit_code == apply.ApplyExit.GUARD_REFUSED
     assert err.splitlines() == [
         f"error: runs only from the live checkout {checkout.LIVE_CHECKOUT} (this is {copy})"
     ]
@@ -942,7 +942,7 @@ def test_while_another_apply_runs_it_never_writes_an_environment_file(switch, re
     with apply_lock_held(state):
         exit_code, _, _ = switch(ensure_environment=writing_environment())
 
-    assert exit_code == 1
+    assert exit_code == apply.ApplyExit.GUARD_REFUSED
     assert not (repository / ".env").exists()
 
 
@@ -954,7 +954,7 @@ def test_while_another_apply_runs_it_refuses_and_touches_nothing(
     with apply_lock_held(state):
         exit_code, _, err = switch()
 
-    assert exit_code == 1
+    assert exit_code == apply.ApplyExit.GUARD_REFUSED
     assert err == "error: another `hal apply` or `hal update` is running; nothing changed\n"
     assert scripted.calls == []
     assert scripted_git.calls == []
@@ -982,15 +982,15 @@ def git_that_breaks(_tree, _arguments, _profile):
     ("arrange", "outcome"),
     [
         pytest.param({}, 0, id="exit 0"),
-        pytest.param({"answer": "no"}, 1, id="exit 1"),
-        pytest.param({"git": git_that_is_missing}, 2, id="exit 2, git missing (G25)"),
+        pytest.param({"answer": "no"}, apply.ApplyExit.DECLINED, id="declined"),
+        pytest.param({"git": git_that_is_missing}, apply.ApplyExit.CANNOT_PLAN, id="G25"),
         pytest.param({"git": git_that_breaks}, RuntimeError, id="an exception"),
         pytest.param({"while_prompt_waits": interrupted_at_the_prompt}, KeyboardInterrupt,
                      id="Ctrl-C"),
     ],
 )  # fmt: skip
 def test_the_lock_is_free_again_however_the_apply_ends(switch, state, arrange, outcome):
-    """#95 rule 4, G9 and G25: after exit 0, 1, 2, an exception or Ctrl-C the lock is free."""
+    """#95 rule 4, G9 and G25: after an end of any exit, an exception or Ctrl-C the lock is free."""
     if isinstance(outcome, int):
         exit_code, _, _ = switch(**arrange)
         assert exit_code == outcome
@@ -1002,10 +1002,10 @@ def test_the_lock_is_free_again_however_the_apply_ends(switch, state, arrange, o
 
 
 def test_a_missing_git_is_one_line(switch):
-    """#95 G25: git missing is exit 2 with one line."""
+    """#95 G25: git missing is a cannot-plan end with one line."""
     exit_code, _, err = switch(git=git_that_is_missing)
 
-    assert exit_code == 2
+    assert exit_code == apply.ApplyExit.CANNOT_PLAN
     assert err.splitlines() == [
         "error: cannot read the live checkout, cannot run git (No such file or directory)"
     ]
@@ -1014,8 +1014,7 @@ def test_a_missing_git_is_one_line(switch):
 def test_a_lock_that_flock_refuses_is_exit_2_and_leaves_no_descriptor_open(
     switch, state, scripted_git, monkeypatch
 ):
-    """#95 rule 4: a flock error other than contention (ENOLCK) is exit 2 with one line, and the
-    descriptor opened for `apply.lock` is closed again."""
+    """#95 rule 4: a flock error other than contention (ENOLCK) is one line and closes the fd."""
     refused = refuse_flock(monkeypatch, OSError(errno.ENOLCK, os.strerror(errno.ENOLCK)))
 
     exit_code, _, err = switch()
@@ -1099,7 +1098,7 @@ def test_off_main_or_with_changes_it_refuses_naming_why(
 
     exit_code, _, err = switch()
 
-    assert exit_code == 2
+    assert exit_code == apply.ApplyExit.GUARD_REFUSED
     assert err.splitlines() == lines
     assert scripted.calls == []
 
@@ -1193,7 +1192,7 @@ def test_traefik_yml_replaced_by_a_directory_refuses_before_compose(switch, scri
 
     exit_code, out, _ = switch(git=checkout.run_git)
 
-    assert exit_code == 2
+    assert exit_code == apply.ApplyExit.GUARD_REFUSED
     assert "traefik.yml" in detail_lines(out)
     assert scripted.calls == []
 
@@ -1250,7 +1249,8 @@ def test_only_the_first_failing_guard_speaks(
         )
 
     assert [line for line in GUARD_LINES if line in err] == [GUARD_LINES[first]]
-    assert exit_code == (1 if first in (0, 2) else 2)
+    ends = apply.ApplyExit
+    assert exit_code == (ends.CANNOT_PLAN if first == 5 else ends.GUARD_REFUSED)
     assert scripted.calls == []
 
 
@@ -1259,7 +1259,7 @@ def test_only_the_exact_yes_applies(switch, scripted, answer):
     """#52 rule 4: any answer but the exact `yes` aborts with nothing changed."""
     exit_code, _, err = switch(answer)
 
-    assert exit_code == 1
+    assert exit_code == apply.ApplyExit.DECLINED
     assert "aborted, nothing changed" in err
     assert scripted.changing_verbs() == []
 
@@ -3621,7 +3621,7 @@ def test_a_realm_not_applied_before_is_planned_and_a_no_backs_up_and_applies_not
     """Cell 2."""
     exit_code, out, err = switch("no")
 
-    assert exit_code == 1
+    assert exit_code == apply.ApplyExit.DECLINED
     assert PlanEvent.REALM_APPLY in out
     assert "aborted, nothing changed" in err
     assert (realm_backup.asked, scripted.realm_applies) == ([], 0)
