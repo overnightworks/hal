@@ -5,7 +5,7 @@ from support.stack_plan_rows import APP, NEW, app_plan
 
 from hal.output import Glyph
 from hal.stack import realm as realm_lines
-from hal.stack.apps import AppFailed, AppHeldOff, AppKind, AppOn, OffPlan
+from hal.stack.apps import AppFailed, AppHeldOff, AppKind, AppOn, AppSwitchedOff, OffPlan
 from hal.stack.realm.reconcile import (
     Leftovers,
     NotRecorded,
@@ -229,6 +229,13 @@ def test_an_app_that_is_on_is_a_done_row_with_its_tag_the_state_and_the_time(
 
     assert (row.glyph, row.subject, str(row.event)) == (Glyph.DONE, "hopin", event)
     assert row.fact == f"{NEW} · running · 1m42s"
+
+
+def test_an_app_switched_off_is_a_done_row_that_restates_what_the_off_never_touches() -> None:
+    row = app_row(AppSwitchedOff(OffPlan(APP)))
+
+    assert (row.glyph, row.subject, str(row.event)) == (Glyph.DONE, "hopin", "switched off")
+    assert row.fact == "volumes and ~/srv/hopin kept"
 
 
 @pytest.mark.parametrize(

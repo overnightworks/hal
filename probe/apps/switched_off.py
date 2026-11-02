@@ -59,7 +59,14 @@ class SwitchedOff:
     def cell_c1_c2_off_and_on_again(self) -> None:
         tag, before = self.probe.deployed()["tag"], self.probe.starts()
         out = self.switch_off("C1")
-        expect("partial" not in out, f"C1: {out[-300:]}")
+        expect(
+            re.search(
+                rf"✓ {self.probe.key}\s+switched off\s+volumes and ~/srv/{self.probe.key} kept", out
+            )
+            is not None
+            and "partial" not in out,
+            f"C1: {out[-300:]}",
+        )
         again = self.probe.apply(typed=b"no\n")
         expect("nothing to change" in again, f"C1: a second apply said: {again[-200:]}")
         write_line(

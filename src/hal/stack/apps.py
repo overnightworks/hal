@@ -179,7 +179,14 @@ class AppHeldOff:
     cause: str
 
 
-type AppResult = AppOn | AppFailed | AppHeldOff
+@dataclass(frozen=True)
+class AppSwitchedOff:
+    """The off removed every container of the app."""
+
+    off: OffPlan
+
+
+type AppResult = AppOn | AppSwitchedOff | AppFailed | AppHeldOff
 
 
 @dataclass(frozen=True)
@@ -196,11 +203,12 @@ class AppsPlan:
         return not self.plans and not self.offs
 
     def run(self, marks: switches.Switches, progress: Progress) -> Iterator[AppResult]:
-        """Each app in turn, the ones switched off first, with the result of its run. An app
-        switched off yields only a failure."""
+        """Each app in turn, the ones switched off first, with the result of its run."""
         for off in self.offs:
             if failure := _switch_off(off.app.key, self.runtime, progress):
                 yield AppFailed(off, failure)
+            else:
+                yield AppSwitchedOff(off)
         for plan in self.plans:
             yield _run(plan, self.runtime, marks, progress)
 
