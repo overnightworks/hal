@@ -15,7 +15,9 @@ and the fake issuer (alias auth.hallucinai.de) hold certificates of the scratch 
 LiteLLM's SSL_CERT_FILE trusts. The scratch HOME also holds LiteLLM's master key file.
 
 Evidence: F is the fake provider's request log, R the canary's verdict lines, I `docker inspect`,
-LA LiteLLM's access log. Exit 0: every cell held.
+LA LiteLLM's access log. The probe differs from production in LiteLLM's log level: compose.yaml sets
+`CRITICAL`, which prints no access line, so this probe sets `INFO` for LA (LITELLM_LOG_LEVEL;
+litellm_retention.py leaves the shipped level). Exit 0: every cell held.
 """
 
 from __future__ import annotations
@@ -107,6 +109,8 @@ def bound_names(declared: str) -> list[list[str]]:
 
 class LitellmProbe(IssuerProbe):
     """The service with an API-only person, the front, LiteLLM and a fake Anthropic."""
+
+    LITELLM_LOG_LEVEL: str | None = "INFO"  # None keeps the level compose.yaml ships
 
     def __init__(self, scratch: Path) -> None:
         super().__init__(scratch)
@@ -210,13 +214,18 @@ class LitellmProbe(IssuerProbe):
             }  # fmt: skip
 
         agent_directory = REPO / "agent-service"
+        level = self.LITELLM_LOG_LEVEL
+        log_level = {"LITELLM_LOG": level} if level else {}
         overlay = scratch / "compose.litellm.yaml"
         overlay.write_text(
             json.dumps({
                 "services": {
                     SERVICE: {"secrets": ["agent_service_api_credential"]},
                     LITELLM: {
-                        "environment": {"SSL_CERT_FILE": "/probe/ca.crt"},
+                        "environment": {
+                            "SSL_CERT_FILE": "/probe/ca.crt",
+                            **log_level,
+                        },
                         "volumes": [
                             {"type": "bind", "source": str(self.litellm_config),
                              "target": "/etc/litellm/config.yaml", "read_only": True},
