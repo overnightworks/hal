@@ -7,8 +7,6 @@ It imports nothing else of this repository."""
 
 # ruff: noqa: T201 - this is the one output owner of the hal program
 
-from __future__ import annotations
-
 import json
 import os
 import sys
@@ -128,9 +126,8 @@ def _colour_on(stream: TextIO) -> bool:
     terminal is not `dumb`."""
     try:
         is_terminal = stream.isatty()
-    # No stdout when daemonised, or a closed stream; the system python of agent-service/setup
-    # imports this and predates PEP 758's bare except list.
-    except (AttributeError, ValueError):  # fmt: skip
+    # No stdout when daemonised, or a closed stream.
+    except AttributeError, ValueError:
         return False
     return is_terminal and not os.environ.get("NO_COLOR") and os.environ.get("TERM") != "dumb"
 

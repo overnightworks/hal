@@ -164,7 +164,7 @@ class Status:
         return replace(self, apps={**self.apps, app: history})
 
 
-def first_attempt(started: datetime) -> Self:
+def first_attempt(started: datetime) -> Status:
     return Status(state=State.RUNNING, phase=Phase.PREPARE, last_attempt=started)
 
 
@@ -198,7 +198,7 @@ def write_status(path: Path, status: Status) -> None:
         raise
 
 
-def _parse(document: dict) -> Self:
+def _parse(document: dict) -> Status:
     schema = document["schema"]
     if schema == SCHEMA:
         apps = {name: AppHistory.from_json(record) for name, record in document["apps"].items()}
@@ -222,7 +222,7 @@ def _parse_verdict(
     apps: dict[str, AppHistory],
     unattributed: AppHistory | None,
     failing_app: str | None,
-) -> Self:
+) -> Status:
     return Status(
         state=State(document["state"]),
         phase=Phase(document["phase"]),

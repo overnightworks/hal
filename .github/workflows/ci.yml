@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     env:
       # Placeholder the compose file interpolates; the real one lives in the uncommitted .env.
       DOCKER_GID: "127"
@@ -419,7 +419,7 @@ jobs:
   # The pinned front of LiteLLM as shipped, against a stand-in backend: the table of
   # tests/test_litellm_front.py (about 50 MB of images). It re-runs on every Traefik bump.
   front:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     env:
       DOCKER_GID: "127"
       EDGE_FRONT_CASES: "1"
