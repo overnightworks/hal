@@ -564,7 +564,7 @@ def _say_stopped(failure: CoreFailure) -> None:
     proven are the one failure whose way on is `hal offline`."""
     if isinstance(failure, barrier.BarriersUnproven):
         write_row(unproven_row(failure))
-        write_error(*unproven_partial(failure))
+        write_error(*unproven_partial())
     else:
         write_error(f"partial, {failure}; no unit switched", command(Verb.APPLY))
 

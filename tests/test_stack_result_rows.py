@@ -306,7 +306,7 @@ def test_each_unproven_barrier_has_one_detail_and_the_way_on_comes_last() -> Non
 
 
 def test_unproven_barriers_end_partial_with_hal_offline_as_the_next_step() -> None:
-    assert unproven_partial(TWO_UNPROVEN) == (
+    assert unproven_partial() == (
         "partial, barriers not proven · no unit switched",
         "hal offline",
     )

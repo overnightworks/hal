@@ -169,7 +169,7 @@ def unproven_row(failure: BarriersUnproven) -> Row:
     )
 
 
-def unproven_partial(failure: BarriersUnproven) -> tuple[str, str]:
+def unproven_partial() -> tuple[str, str]:
     """The run's `partial, ...` text for unproven barriers and the command that closes the
     tunnel."""
     return f"partial, barriers {ResultEvent.NOT_PROVEN}{_SEPARATOR}no unit switched", command(
