@@ -281,6 +281,10 @@ and calls `http://agent-service:8080` (the service's own default port; the smoke
 use it). No CA mount is needed: the service is plain http on an isolated internal network, and no
 host process can reach it, because the network has no host address and publishes no port.
 
+An app that calls LiteLLM directly holds only its own key, the file `~/.secrets/litellm/apps/<app>` (`songmaker`,
+`hopin`, `presentator`). `hal setup` creates a missing one with the prefix `sk-` that LiteLLM requires of a custom
+key, mode 0644 in a 0700 folder so the app's container reads it as its own user; no service reads the file today.
+
 ## The API route
 
 A person who is in an API group but not in a subscription group reaches the provider through

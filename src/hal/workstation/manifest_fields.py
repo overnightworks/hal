@@ -40,3 +40,19 @@ def require_key_of_kind(path: Path, where: str, raw: Mapping[str, object], key: 
     """A key that belongs to every entry of one kind and to no other."""
     if (entry_kind is owner_kind) != (key in raw):
         raise fail(path, where, f"{key} belongs to every {owner_kind.value} entry and to no other kind")
+
+
+def flag(path: Path, where: str, raw: Mapping[str, object], key: str) -> bool:
+    value = raw.get(key, False)
+    if not isinstance(value, bool):
+        raise fail(path, where, f"{key} must be true or false")
+    return value
+
+
+def value_prefix(path: Path, where: str, raw: Mapping[str, object], entry_kind: Enum, owner_kind: Enum) -> str:
+    """The text `hal setup` puts before a value it generates; empty when absent, refused on any kind but the owner's."""
+    if "value_prefix" not in raw:
+        return ""
+    if entry_kind is not owner_kind:
+        raise fail(path, where, f"value_prefix belongs to a {owner_kind.value} entry only")
+    return string(path, where, raw, "value_prefix")
