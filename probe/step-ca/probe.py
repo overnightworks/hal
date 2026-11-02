@@ -397,7 +397,7 @@ class Probe(McpNetworks, TraefikMcpFollows):
         result = self.run(EXPOSURE_CHECK, check=False)
         try:
             findings = json.loads(result.stdout)["exposure"]
-        except (ValueError, KeyError, TypeError):
+        except ValueError, KeyError, TypeError:
             findings = None
         stderr_tail = result.stderr.decode(errors="replace").strip().splitlines()[-1:]
         expect(

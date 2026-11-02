@@ -27,9 +27,7 @@ from smoke import Tokens  # noqa: E402
 class FakeKeycloak:
     """Answers each request in turn (an HTTPError is a 400 refusal) and keeps what was asked."""
 
-    def __init__(
-        self, *answers: dict, clock: "FakeClock | None" = None, latency: float = 0
-    ) -> None:
+    def __init__(self, *answers: dict, clock: FakeClock | None = None, latency: float = 0) -> None:
         self.answers = list(answers)
         self.requests: list[tuple[str, dict[str, str]]] = []
         self.timeouts: list[float] = []

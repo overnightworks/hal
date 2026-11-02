@@ -114,7 +114,7 @@ class ImageReference:
     digest: str | None
 
     @classmethod
-    def parse(cls, reference: str) -> "ImageReference":
+    def parse(cls, reference: str) -> ImageReference:
         name, separator, digest = reference.partition(DIGEST_SEPARATOR)
         return cls(name, cls.digest_hex(digest) if separator else None)
 
@@ -336,7 +336,7 @@ class NotWritten:
     reason: str
 
     @classmethod
-    def from_error(cls, subject: str, path: Path, error: OSError) -> "NotWritten":
+    def from_error(cls, subject: str, path: Path, error: OSError) -> NotWritten:
         """A `shutil.Error` has no `strerror`; its text is the reason then."""
         return cls(subject, path, error.strerror or str(error))
 

@@ -271,7 +271,7 @@ def read_recorded_page(record: Path, built_text: bytes, page: str) -> PageFinger
                 for block in entry["blocks"]
             ),
         )
-    except (OSError, ValueError, KeyError, TypeError):
+    except OSError, ValueError, KeyError, TypeError:
         return None
     return fingerprint if fingerprint.page_sha256 == sha256(built_text).hexdigest() else None
 

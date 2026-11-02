@@ -125,7 +125,7 @@ def service_container(stack: Stack) -> dict:
     answer = stack.run(["docker", "inspect", identifiers[0]])
     try:
         return json.loads(answer.stdout)[0]
-    except (ValueError, IndexError):
+    except ValueError, IndexError:
         raise LiveSmokeFailed(f"docker inspect {SERVICE} gave no container") from None
 
 

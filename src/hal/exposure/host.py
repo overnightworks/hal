@@ -16,7 +16,7 @@ class HostCommand:
     name: str
     argv: tuple[str, ...]
 
-    def with_arguments(self, *arguments: str) -> "HostCommand":
+    def with_arguments(self, *arguments: str) -> HostCommand:
         return HostCommand(self.name, (*self.argv, *arguments))
 
 

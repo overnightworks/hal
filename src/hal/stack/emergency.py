@@ -191,7 +191,7 @@ def _is_enabled_app(key: str, repository: Path) -> bool:
     the stop (`compose config` and `ps` take seconds)."""
     try:
         return catalog.is_enabled_app(catalog.read(repository / catalog.FLEET_FILE), key)
-    except (catalog.CatalogError, OSError):
+    except catalog.CatalogError, OSError:
         return False
 
 
@@ -200,7 +200,7 @@ def _recorded_first(marks: switches.Switches, key: str, now: datetime) -> bool:
     reports a record that failed."""
     try:
         marks.record(key, now)
-    except (OSError, switches.SwitchError):
+    except OSError, switches.SwitchError:
         return False
     return True
 
@@ -252,7 +252,7 @@ def _confirmed_off(
             repaired = target.ingress.close()
             since = marks.since(key)
             return (since, repaired) if since else None
-    except (compose.ComposeError, switches.SwitchError, barrier.BarrierError):
+    except compose.ComposeError, switches.SwitchError, barrier.BarrierError:
         return None
 
 
@@ -674,7 +674,7 @@ def _tunnel_closed_clause(door: tunnel.Tunnel) -> str:
             door.stop(may_ask_password=terminal.at_terminal())
         if door.is_inactive():
             return "the tunnel is closed"
-    except (tunnel.TunnelError, KeyboardInterrupt):
+    except tunnel.TunnelError, KeyboardInterrupt:
         pass  # the reply below says it was not observed
     return f"the tunnel is not confirmed closed; check `systemctl is-active {door.unit}`"
 

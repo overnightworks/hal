@@ -247,7 +247,7 @@ def apply_plan(
                 session, plan_file, token_values, progress, hosts, prober_for, catalog_bytes
             )
             progress.step = Step.CLEANUP
-    except (tofu.Interrupted, KeyboardInterrupt):
+    except tofu.Interrupted, KeyboardInterrupt:
         return _interrupted(progress)
     except OSError as error:
         if progress.step is Step.PLAN:
