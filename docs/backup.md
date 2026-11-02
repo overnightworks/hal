@@ -121,9 +121,9 @@ With `LOG_FORMAT=json` every row, verdict and error of `hal backup` and `hal res
 flushed line: a journal priority (`<3>` error, `<4>` warning, `<6>` info) and a JSON object with
 `timestamp`, `level`, `logger`, `service` and `event`. journald removes the priority; by hand, cut it
 (`LOG_FORMAT=json hal backup | cut -c4- | jq`). Any other value than `json` or `text` stops every verb
-with exit 2. The events carry no host path, container id, argument or database row, and the password
-is never read into one; restic's and Docker's own stderr stays raw in the journal. `--json` stays the
-separate result for programs.
+with exit 2. On the timer path, whose arguments are fixed, the events carry no host path, container
+id, argument or database row, and the password is never read into one; restic's and Docker's own
+stderr stays raw in the journal. `--json` stays the separate result for programs.
 
 ### One app, and the pre-apply snapshot
 

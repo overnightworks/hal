@@ -36,6 +36,7 @@ from hal.output import (
 )
 from hal.stack.realm import reconcile
 
+SOURCE = Path(__file__).resolve().parents[1] / "src"
 HOSTILE = f'ESC \x1b[31m, newline \n, quote ", prefix <3>, separator {chr(0x2028)} end'
 COMMON_FIELDS = ["timestamp", "level", "logger", "service", "event"]
 
@@ -58,7 +59,8 @@ def events(text: str) -> list[tuple[int, dict]]:
     """Each line as its journal priority and its object; a line without both fails the test."""
     parsed = []
     for line in text.splitlines():
-        assert line.startswith("<") and line[2] == ">", line
+        assert line.startswith("<"), line
+        assert line[2] == ">", line
         parsed.append((int(line[1]), json.loads(line[3:])))
     return parsed
 
@@ -77,7 +79,9 @@ def row(glyph: Glyph = Glyph.DONE, **fields: object) -> Row:
 def test_a_row_is_one_info_line_with_the_common_fields_first(capsys):
     write_row(row(fact="4.2 MiB"))
 
-    priority, event = the_one_event(capsys.readouterr().out)
+    shown = capsys.readouterr().out
+    priority, event = the_one_event(shown)
+    assert '"subject":"songmaker","fact":"4.2 MiB"' in shown
     assert priority == 6
     assert list(event) == [*COMMON_FIELDS, "subject", "fact"]
     assert (event["level"], event["logger"], event["service"]) == ("info", "hal", "hal")
@@ -87,7 +91,8 @@ def test_a_row_is_one_info_line_with_the_common_fields_first(capsys):
         "4.2 MiB",
     )
     moment = datetime.fromisoformat(event["timestamp"])
-    assert event["timestamp"].endswith("Z") and moment.utcoffset() == UTC.utcoffset(None)
+    assert event["timestamp"].endswith("Z")
+    assert moment.utcoffset() == UTC.utcoffset(None)
 
 
 @pytest.mark.usefixtures("json_log")
@@ -109,22 +114,37 @@ def test_a_rows_count_and_details_are_in_the_object_and_print_no_detail_line(cap
 
 
 @pytest.mark.usefixtures("json_log")
-def test_a_verdict_names_its_counts_by_plural_label_and_leaves_out_zeros(capsys):
+@pytest.mark.parametrize(
+    ("glyph", "priority"), [(Glyph.DONE, 6), (Glyph.FAILED, 3)], ids=["done", "failed"]
+)
+def test_a_verdict_names_its_counts_by_plural_label_and_leaves_out_zeros(capsys, glyph, priority):
     verdict = Verdict(
-        Glyph.DONE,
+        glyph,
         "backup done",
         ((1, AppCount.APP), (0, AppCount.OTHER)),
+        hint="hal status",
         elapsed_seconds=3.0,
+        details=("checked",),
         next_step="hal restore --test",
     )
 
     write_verdict(verdict)
 
-    priority, event = the_one_event(capsys.readouterr().out)
-    assert priority == 6
-    assert list(event) == [*COMMON_FIELDS, "apps", "seconds", "next"]
+    shown_priority, event = the_one_event(capsys.readouterr().out)
+    assert shown_priority == priority
+    assert list(event) == [*COMMON_FIELDS, "apps", "seconds", "details", "hint", "next"]
     assert (event["event"], event["apps"], event["seconds"]) == ("backup done", 1, 3.0)
+    assert (event["details"], event["hint"]) == (["checked"], "hal status")
     assert event["next"] == "hal restore --test"
+
+
+@pytest.mark.usefixtures("json_log")
+def test_a_verdicts_hostile_text_is_escaped_in_every_field(capsys):
+    write_verdict(Verdict(Glyph.DONE, "done", (), HOSTILE, details=(HOSTILE,), next_step=HOSTILE))
+
+    _, event = the_one_event(capsys.readouterr().out)
+    expected = printable(HOSTILE)
+    assert (event["details"], event["hint"], event["next"]) == ([expected], expected, expected)
 
 
 @pytest.mark.usefixtures("json_log")
@@ -150,17 +170,18 @@ def test_an_error_prints_no_empty_line_for_a_fresh_line(capsys):
 
 
 @pytest.mark.usefixtures("json_log")
-@pytest.mark.parametrize("field", ["subject", "fact", "message"])
+@pytest.mark.parametrize("field", ["subject", "fact", "details", "message", "next"])
 def test_hostile_text_stays_one_parsing_line_of_escaped_text(capsys, field):
-    if field == "message":
-        write_error(HOSTILE)
+    if field in ("message", "next"):
+        write_error(HOSTILE, HOSTILE)
         text = capsys.readouterr().err
     else:
-        write_row(row(**{field: HOSTILE}))
+        write_row(row(**{field: (HOSTILE,) if field == "details" else HOSTILE}))
         text = capsys.readouterr().out
 
     _, event = the_one_event(text)
-    assert event[field] == printable(HOSTILE).rstrip()
+    expected = printable(HOSTILE).rstrip()
+    assert event[field] == ([expected] if field == "details" else expected)
 
 
 def test_every_event_is_flushed_before_the_process_ends_abruptly():
@@ -177,7 +198,7 @@ def test_every_event_is_flushed_before_the_process_ends_abruptly():
 
     ended = subprocess.run(  # noqa: S603 - the interpreter of this test run and a fixed script
         [sys.executable, "-c", script],
-        env={**os.environ, "LOG_FORMAT": "json"},
+        env={**os.environ, "LOG_FORMAT": "json", "PYTHONPATH": str(SOURCE)},
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -284,18 +305,16 @@ def forbidden_in(home: Path) -> list[str]:
     ]
 
 
-def run_every_failing_label(edge_backup, machine):
-    """Runs a backup and a restore test, then each again with one of its labels failing; yields
-    what each printed."""
+def labels_of_a_good_backup_and_restore_test(edge_backup, machine):
     edge_backup("backup")
     edge_backup("restore", "--test")
-    labels = sorted(set(machine.labels()))
-    for label in labels:
-        machine.failing[label] = 1
-        for command in (("backup",), ("restore", "--test")):
-            outcome = edge_backup(*command)
-            yield label, outcome
-        del machine.failing[label]
+    return sorted(set(machine.labels()))
+
+
+def assert_nothing_forbidden_is_shown(outcome, home, label):
+    shown = outcome.out + outcome.err
+    for marker in [*forbidden_in(home), "ROW-MARKER-4711"]:
+        assert marker not in shown, (label, marker)
 
 
 @pytest.mark.parametrize("log_format", ["text", "json"])
@@ -303,12 +322,28 @@ def test_no_failing_step_prints_the_password_a_host_path_or_an_argv_marker(
     edge_backup, machine, home, monkeypatch, log_format
 ):
     monkeypatch.setenv("LOG_FORMAT", log_format)
+    labels = labels_of_a_good_backup_and_restore_test(edge_backup, machine)
+    assert {"pg_restore", "psql"} <= set(labels)
+
+    for label in labels:
+        machine.failing[label] = 1
+        for command in (("backup",), ("restore", "--test")):
+            assert_nothing_forbidden_is_shown(edge_backup(*command), home, label)
+        del machine.failing[label]
+
+
+@pytest.mark.parametrize("log_format", ["text", "json"])
+def test_a_restore_diagnostic_naming_a_row_is_not_printed(
+    edge_backup, machine, home, monkeypatch, log_format
+):
+    monkeypatch.setenv("LOG_FORMAT", log_format)
+    edge_backup("backup")
     machine.restore_diagnostic = 'COPY credential, line 1: "ROW-MARKER-4711"'
 
-    for label, outcome in run_every_failing_label(edge_backup, machine):
-        shown = outcome.out + outcome.err
-        for marker in [*forbidden_in(home), "ROW-MARKER-4711"]:
-            assert marker not in shown, (label, marker)
+    outcome = edge_backup("restore", "--test")
+
+    assert outcome.exit_code == ExitCode.FAILURE
+    assert_nothing_forbidden_is_shown(outcome, home, "pg_restore")
 
 
 HOST_PATH_MARKER = "/run/secrets/HOSTPATH-MARKER"
@@ -322,7 +357,7 @@ REFUSED_APPS = {
     ),
     "an unknown top-level key": f'"{HOST_PATH_MARKER}" = 1\n{SONGMAKER_TOML}',
     "an app name": SONGMAKER_TOML.replace("[app.songmaker]", f'[app."{HOST_PATH_MARKER}"]', 1),
-    "a syntax error": f'{SONGMAKER_TOML}\n"{HOST_PATH_MARKER}" = = 1\n',
+    "a duplicate table": SONGMAKER_TOML + 2 * f'\n[app."{HOST_PATH_MARKER}"]\n',
 }
 
 
@@ -398,7 +433,8 @@ def test_the_logger_is_hal_again_after_a_run(edge_backup, machine, capsys, endin
 
 
 @pytest.mark.usefixtures("json_log")
-def test_a_realm_step_asks_the_backup_child_for_text_under_an_exported_json():
+def test_a_realm_step_asks_the_backup_child_for_text_under_an_exported_json(monkeypatch):
+    monkeypatch.setenv("PYTHONPATH", str(SOURCE))
     child = (
         "from enum import StrEnum\n"
         "from hal.output import Glyph, Row, write_error, write_row\n"
