@@ -353,6 +353,8 @@ def put_probe_in_b(scripted, state, ingress) -> None:
 
 
 RECREATE_TRAEFIK = ["--profile", "*", "up", "-d", "--no-deps", "--force-recreate", "traefik"]
+RECREATE_SOCKET_PROXY = [*RECREATE_TRAEFIK[:-1], "socket-proxy"]
+UNFINISHED = {"traefik": {}}
 
 
 @pytest.fixture
