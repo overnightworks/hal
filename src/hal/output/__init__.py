@@ -318,7 +318,7 @@ def _fit_frame(lead: str, name: str, trail: str, width: int) -> str:
 
 class _LiveLine:
     """One transient line on stderr: the task running now and its own time. One thread redraws it
-    and, as its last act, erases it, so a terminal stopped with Ctrl-S can hold only that thread.
+    and, as its last act, erases it, so a terminal stopped with Ctrl-S cannot hold `stop`.
 
     The barrier is `_stop_decided`, a plain flag so that a signal can read it at any instruction:
     from the moment it is set no frame starts, whether or not the thread could be joined."""
@@ -356,8 +356,8 @@ class _LiveLine:
 
     def stop(self, *, erase: bool) -> None:
         """Ends the thread, then gives Ctrl-C back and raises one that came meanwhile. Only the
-        first call acts. The wait ends at `LIVE_STOP_SECONDS`: a write the terminal holds then
-        keeps its daemon thread, which costs only the line, as no erase follows that write."""
+        first call acts. The wait ends at `LIVE_STOP_SECONDS`: a write the terminal holds, a frame
+        or the erase, keeps its daemon thread and lands at Ctrl-Q: that costs just the line."""
         if self._stop_decided:
             return
         self._erase = erase
@@ -402,12 +402,13 @@ def live_line(subject: str) -> Iterator[Callable[[str], None]]:
     terminal outside `-v` and `LOG_FORMAT=json`; elsewhere `show` does nothing. A normal end
     erases the line; a Ctrl-C leaves it, so the next row can end it with `fresh_line`, and no byte
     of the line follows the `KeyboardInterrupt`. Only the main thread may call it: it takes SIGINT
-    for the length of the block."""
+    for the length of the block, unless the caller put its own handler there, which then stays."""
     if is_verbose() or _json_on() or not _colour_on(sys.stderr):
         yield lambda _text: None
         return
     line = _LiveLine(subject)
-    signal.signal(signal.SIGINT, line.on_ctrl_c)
+    if signal.getsignal(signal.SIGINT) is signal.default_int_handler:
+        signal.signal(signal.SIGINT, line.on_ctrl_c)
     interrupted = False
     try:
         yield line.show

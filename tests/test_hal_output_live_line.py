@@ -457,27 +457,51 @@ def test_a_ctrl_c_inside_a_normal_stop_leaves_the_line_for_the_row_below_it(
     assert err.getvalue().count(ERASE) == 1
 
 
+def returns_at_a_ctrl_c(_signal_number: int, _frame: object) -> None:
+    """A caller's handler that lets the play go on."""
+
+
 @pytest.mark.usefixtures("stills")
-def test_a_ctrl_c_reaches_the_handler_before_the_block_once_with_the_thread_already_ended(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize(
+    "callers_handler", [signal.SIG_IGN, returns_at_a_ctrl_c], ids=["ignored", "returning"]
+)
+def test_a_callers_handler_stays_so_a_ctrl_c_keeps_the_play_and_the_line_and_the_end_erases(
+    monkeypatch: pytest.MonkeyPatch, callers_handler: object
 ) -> None:
-    stderr_terminal(monkeypatch)
-    threads_before = threading.active_count()
-    threads_at_each_ctrl_c: list[int] = []
-
-    def caller_handler(_signal_number: int, _frame: object) -> None:
-        threads_at_each_ctrl_c.append(threading.active_count())
-        raise KeyboardInterrupt
-
-    outer_handler = signal.signal(signal.SIGINT, caller_handler)
+    _, err = stderr_terminal(monkeypatch)
+    ctrl_c_before = signal.signal(signal.SIGINT, callers_handler)
     try:
-        with pytest.raises(KeyboardInterrupt), live_line(SUBJECT) as show:
-            show("Restart Docker")
+        with live_line(SUBJECT) as show:
+            show("first task")
+            handler_in_the_block = signal.getsignal(signal.SIGINT)
             press_ctrl_c()
+            show("second task")
+            frames_drawn = frames_of(err)
+        handler_after = signal.getsignal(signal.SIGINT)
     finally:
-        signal.signal(signal.SIGINT, outer_handler)
+        signal.signal(signal.SIGINT, ctrl_c_before)
 
-    assert threads_at_each_ctrl_c == [threads_before]
+    assert handler_in_the_block is callers_handler
+    assert len(frames_drawn) == 2
+    assert "second task" in frames_drawn[-1]
+    assert err.getvalue().endswith(ERASE)
+    assert handler_after is callers_handler
+
+
+@pytest.mark.usefixtures("stills")
+def test_the_default_action_handler_stays_too(monkeypatch: pytest.MonkeyPatch) -> None:
+    stderr_terminal(monkeypatch)
+    ctrl_c_before = signal.signal(signal.SIGINT, signal.SIG_DFL)
+    try:
+        with live_line(SUBJECT) as show:
+            show("first task")
+            handler_in_the_block = signal.getsignal(signal.SIGINT)
+        handler_after = signal.getsignal(signal.SIGINT)
+    finally:
+        signal.signal(signal.SIGINT, ctrl_c_before)
+
+    assert handler_in_the_block == signal.SIG_DFL
+    assert handler_after == signal.SIG_DFL
 
 
 class CtrlCInTheSecondFrame(FrameStream):
@@ -526,7 +550,7 @@ class StoppedTerminal(FrameStream):
 
 
 @pytest.mark.parametrize("ctrl_c", [False, True], ids=["normal end", "Ctrl-C"])
-def test_a_stopped_terminal_holds_only_the_thread_and_the_block_ends_within_the_bound(
+def test_a_stopped_terminal_holds_the_thread_and_the_block_ends_within_the_bound(
     monkeypatch: pytest.MonkeyPatch, ctrl_c: bool
 ) -> None:
     put_on_terminals(monkeypatch)
