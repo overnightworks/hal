@@ -423,11 +423,15 @@ def test_a_ctrl_c_inside_the_stop_waits_for_the_stop_and_nothing_draws_after_it(
     held = redraw_held_at_the_lock(monkeypatch, CtrlCsInTheJoin)
     ctrl_c_before = signal.getsignal(signal.SIGINT)
 
-    with pytest.raises(KeyboardInterrupt), live_line(SUBJECT) as show:
-        show("Restart Docker")
-        assert held.reached.wait(timeout=10)
-        if ctrl_c_in_the_block:
-            raise KeyboardInterrupt
+    def block() -> None:
+        with live_line(SUBJECT) as show:
+            show("Restart Docker")
+            assert held.reached.wait(timeout=10)
+            if ctrl_c_in_the_block:
+                raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        block()
     left = err.getvalue()
     held.let_the_redrawer_end()
 
@@ -450,9 +454,13 @@ def test_a_ctrl_c_inside_a_normal_stop_leaves_the_line_for_the_row_below_it(
     held = redraw_held_at_the_lock(monkeypatch, CtrlCThenTheRedrawEnds)
     monkeypatch.setattr(hal.output, "LIVE_STOP_SECONDS", 10)
 
-    with pytest.raises(KeyboardInterrupt), live_line(SUBJECT) as show:
-        show("Restart Docker")
-        assert held.reached.wait(timeout=10)
+    def block() -> None:
+        with live_line(SUBJECT) as show:
+            show("Restart Docker")
+            assert held.reached.wait(timeout=10)
+
+    with pytest.raises(KeyboardInterrupt):
+        block()
 
     assert err.getvalue().count(ERASE) == 1
 
@@ -521,9 +529,13 @@ def test_a_ctrl_c_in_the_middle_of_a_frame_leaves_that_frame_and_ends_the_thread
     monkeypatch.setattr(sys, "stderr", err)
     threads_before = threading.active_count()
 
-    with pytest.raises(KeyboardInterrupt), live_line(SUBJECT) as show:
-        show("first task")
-        show("second task")
+    def block() -> None:
+        with live_line(SUBJECT) as show:
+            show("first task")
+            show("second task")
+
+    with pytest.raises(KeyboardInterrupt):
+        block()
 
     assert threading.active_count() == threads_before
     assert frames_of(err)[-1].split()[-3:] == ["task", "·", "<1s"]
