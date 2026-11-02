@@ -245,12 +245,7 @@ def backup(
                 first_readiness if index == 0 else _Deadline.start(),
                 pre_apply=pre_apply,
             )
-            fields = (
-                (Field.SNAPSHOT, summary.snapshot_id[:8]),
-                (Field.BYTES, summary.source_bytes),
-                (Field.SECONDS, host.monotonic() - started),
-            )
-            report(Row(Glyph.DONE, app.name, BackupEvent.BACKED_UP, fields=fields))
+            report(_backed_up_row(app, summary, started))
     if run.failed_apps:
         report(
             Row(
@@ -277,6 +272,15 @@ def backup(
             fields=((Field.SECONDS, maintenance),),
         )
     )
+
+
+def _backed_up_row(app: App, summary: restic.BackupSummary, started: float) -> Row:
+    fields = (
+        (Field.SNAPSHOT, summary.snapshot_id[:8]),
+        (Field.BYTES, summary.source_bytes),
+        (Field.SECONDS, host.monotonic() - started),
+    )
+    return Row(Glyph.DONE, app.name, BackupEvent.BACKED_UP, fields=fields)
 
 
 def _report_not_backed_up(report: Callable[[Row], None], app: App, failure: StepFailed) -> None:
