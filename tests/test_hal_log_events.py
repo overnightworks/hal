@@ -306,8 +306,9 @@ def forbidden_in(home: Path) -> list[str]:
 
 
 def labels_of_a_good_backup_and_restore_test(edge_backup, machine):
-    edge_backup("backup")
-    edge_backup("restore", "--test")
+    for command in (("backup",), ("restore", "--test")):
+        outcome = edge_backup(*command)
+        assert outcome.exit_code == 0, (command, outcome.err)
     return sorted(set(machine.labels()))
 
 
