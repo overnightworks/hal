@@ -131,7 +131,7 @@ def test_with_v_ansibles_text_shows_indented_and_no_event_line_does(
 
 
 def test_the_ansible_core_in_the_dev_group_is_the_one_hal_installs() -> None:
-    assert ANSIBLE_SOURCE == f"ansible-core=={version('ansible-core')}"
+    assert f"ansible-core=={version('ansible-core')}" == ANSIBLE_SOURCE
 
 
 def test_the_live_line_shows_each_task_start_in_run_order_and_a_looped_task_once(
@@ -147,4 +147,4 @@ def test_the_live_line_shows_each_task_start_in_run_order_and_a_looped_task_once
 
     shown = [re.search(r"system +(.*) \xb7 \S+$", re.sub(r"\x1b\[[0-9;]*[mK]", "", frame)) for frame in err.getvalue().split("\r")]
     names = [match.group(1) for match in shown if match]
-    assert [name for name in names if name != "ansible.builtin.meta"] == ["changed task", "skipped task", "handler", "looped task", "unchanged task"]
+    assert ["changed task", "skipped task", "handler", "looped task", "unchanged task"] == [name for name in names if name != "ansible.builtin.meta"]
