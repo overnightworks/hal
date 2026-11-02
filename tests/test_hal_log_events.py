@@ -140,6 +140,14 @@ def test_a_verdict_names_its_counts_by_plural_label_and_leaves_out_zeros(capsys,
 
 
 @pytest.mark.usefixtures("json_log")
+def test_a_verdicts_span_is_a_tenth_of_a_second_in_json(capsys):
+    write_verdict(Verdict(Glyph.DONE, "done", (), elapsed_seconds=192.44))
+
+    _, event = the_one_event(capsys.readouterr().out)
+    assert event["seconds"] == 192.4
+
+
+@pytest.mark.usefixtures("json_log")
 def test_a_verdicts_hostile_text_is_escaped_in_every_field(capsys):
     write_verdict(Verdict(Glyph.DONE, "done", (), HOSTILE, details=(HOSTILE,), next_step=HOSTILE))
 
@@ -547,8 +555,21 @@ def test_a_restore_that_proves_nothing_and_a_failing_check_each_carry_a_reason(
 
 
 @pytest.mark.usefixtures("json_log")
-def test_a_size_and_a_span_stay_raw_in_json_and_read_as_units_in_text(capsys, monkeypatch):
-    fields = ((Field.BYTES, 2_254_857_830), (Field.SECONDS, 192.44))
+@pytest.mark.parametrize(
+    ("fields", "raw_in_json", "text_ending"),
+    [
+        (
+            ((Field.BYTES, 2_254_857_830), (Field.SECONDS, 192.44)),
+            (2_254_857_830, 192.4),
+            "2.1 GiB · 3m12s\n",
+        ),
+        (((Field.BYTES, 0), (Field.SECONDS, 0)), (0, 0), "0 B · <1s\n"),
+    ],
+    ids=["K6", "K7"],
+)
+def test_a_size_and_a_span_stay_raw_in_json_and_read_as_units_in_text_even_at_zero(
+    capsys, monkeypatch, fields, raw_in_json, text_ending
+):
     write_row(row(fields=fields))
     in_json = capsys.readouterr().out
     monkeypatch.setenv("LOG_FORMAT", "text")
@@ -556,22 +577,8 @@ def test_a_size_and_a_span_stay_raw_in_json_and_read_as_units_in_text(capsys, mo
     in_text = capsys.readouterr().out
 
     _, event = the_one_event(in_json)
-    assert (event["bytes"], event["seconds"]) == (2_254_857_830, 192.4)
-    assert in_text.endswith("2.1 GiB · 3m12s\n")
-
-
-@pytest.mark.usefixtures("json_log")
-def test_a_zero_size_and_a_zero_span_still_stand_in_both_formats(capsys, monkeypatch):
-    fields = ((Field.BYTES, 0), (Field.SECONDS, 0))
-    write_row(row(fields=fields))
-    in_json = capsys.readouterr().out
-    monkeypatch.setenv("LOG_FORMAT", "text")
-    write_row(row(fields=fields))
-    in_text = capsys.readouterr().out
-
-    _, event = the_one_event(in_json)
-    assert (event["bytes"], event["seconds"]) == (0, 0)
-    assert in_text.endswith("0 B · <1s\n")
+    assert (event["bytes"], event["seconds"]) == raw_in_json
+    assert in_text.endswith(text_ending)
 
 
 @pytest.mark.usefixtures("json_log")
