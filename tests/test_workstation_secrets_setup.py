@@ -747,7 +747,8 @@ def test_each_apps_litellm_key_is_listed_with_its_readers_and_mode_0644_is_no_fi
     assert findings_of(report, "loose-mode") == {}
     assert all(f"| {app} | " in listing and "litellm" in listing.split(f"| {app} |")[1].splitlines()[0] for app in APPS)
     litellm_rows = [line for line in listing.splitlines() if line.startswith("| litellm | ")]
-    assert len(litellm_rows) == 1 and all(key in litellm_rows[0] for key in APP_KEYS)
+    assert len(litellm_rows) == 1
+    assert all(key in litellm_rows[0] for key in APP_KEYS)
 
 
 def test_the_real_terminal_fact_is_false_while_stdio_is_captured(capsys: pytest.CaptureFixture[str]) -> None:
