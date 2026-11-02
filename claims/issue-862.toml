@@ -1,0 +1,8 @@
+claim_id = "dc351e5cc6824b9ca4b8f8bd2a0b6b6d"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "23a230ea4de507b7f07fe0b831826466b1ab5657"
+branch = "claude/issue-862-a5-2e-off-row"
+scope = ["docs/design/hal-output.html", "probe/apps/switched_off.py", "src/hal/stack/apply.py", "src/hal/stack/apps.py", "src/hal/stack/result_rows.py", "tests/test_stack_apply_apps.py", "tests/test_stack_apps.py", "tests/test_stack_result_rows.py"]
+opened_commit = "5fb9795e0b9bb18d88bc9d3192916c3e65f4efbe"
+whole_reason = "One typed variant and its printed row: the three production files, their pins and the picture move in one commit."
