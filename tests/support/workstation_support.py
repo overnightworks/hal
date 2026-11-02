@@ -9,6 +9,7 @@ import json
 import os
 import re
 import stat
+import subprocess
 import time
 import urllib.request
 from collections.abc import Sequence
@@ -610,3 +611,44 @@ def no_container_restarts(runner) -> None:
 
 def message_of(sent: SentMail) -> email.message.EmailMessage:
     return email.message_from_string(sent.stdin, policy=email.policy.default)  # type: ignore[return-value]
+
+
+COMMIT_HOOK, PATH, TIMERS, SYSTEM, SECRETS = "commit hook", "path", "timers", "system", "secrets"
+
+
+# The sandbox declares no timer job: the timers have nothing to change, and no secret is open.
+SUDO_ANNOUNCEMENT = "  › system          needs sudo     tunnel, polkit, journal, mail, agent account"
+FRESH_APPLY = [
+    "  ✓ commit hook     changed",
+    "  · path            unchanged",
+    "  · timers          unchanged",
+    SUDO_ANNOUNCEMENT,
+    "  ✓ system          changed",
+    "  · secrets         complete",
+    "✓ setup done · 2 changed, 3 unchanged · 47s",
+]
+REPEATED_APPLY = [
+    "  · commit hook     unchanged",
+    "  · path            unchanged",
+    "  · timers          unchanged",
+    SUDO_ANNOUNCEMENT,
+    "  · system          unchanged",
+    "  · secrets         complete",
+    "✓ setup done · 5 unchanged · 47s",
+]
+
+NOT_RUN = {
+    PATH: "  · path            not run",
+    TIMERS: "  · timers          not run",
+    SYSTEM: "  · system          not run",
+    SECRETS: "  · secrets         not run",
+}
+
+
+def run_setup(sandbox: Sandbox, capsys: pytest.CaptureFixture[str], *flags: str) -> tuple[int, list[str], str]:
+    return run_captured_hal_setup(capsys, *flags, home=sandbox.home, secrets_setup_boundaries=sandbox.secrets_boundaries)
+
+
+def global_hooks_path(sandbox: Sandbox) -> str:
+    completed = subprocess.run(["git", "config", "--global", "--get", "core.hooksPath"], capture_output=True, text=True, check=False)
+    return completed.stdout.strip()
