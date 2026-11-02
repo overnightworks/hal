@@ -286,18 +286,22 @@ for the next realm change.
 
 The plan names the step in one line. After your yes it takes a Keycloak-only backup tagged
 `pre-apply` (the last ten are kept) and restore-tests that snapshot, observes both realms, runs
-config-cli, observes again and prints one line per change, with the seconds the backup and the
-restore test took. A failed backup or restore test applies nothing and ends the run partial with
-exit 1. A Keycloak that should run and cannot be read is skipped: the step prints a `!` row,
+config-cli, observes again and prints one line per change. A Keycloak that should run and cannot be read is skipped: the step prints a `!` row,
 `keycloak  realm skipped` with the reason, and the run ends partial (`error: partial, keycloak realm
-skipped`, `next: hal apply`) with exit 1; when that is the only change, hal asks no yes and ends
-`error: realm: Keycloak could not be read; not checked (…)`, `next: hal apply`, exit 1.
+skipped`, `next: hal apply`) and hal exits 3; when that is the only change, hal asks no yes and ends
+`error: realm: Keycloak could not be read; not checked (…)`, `next: hal apply`, exit 3.
 `hal backup` runs in a process group of its own, so Ctrl-C does not reach it. A step
 that outlives its time or is interrupted sends it SIGTERM, as a systemd stop does, and waits two
-minutes for its cleanup, which a further Ctrl-C does not shorten; only then it kills the group. A
-failure after config-cli started ends the run with exit 1 and names the snapshot; the way back is
-[Restore Keycloak](backup.md#restore-keycloak), and the next `hal apply` repeats the step. A console
-change to a declared object that the apply resets is printed as "reset to the file" with the
+minutes for its cleanup, which a further Ctrl-C does not shorten, and a `› keycloak  waiting  up to
+2m00s for hal to clean up` row says so; only after that wait it kills the group.
+
+A step that fails ends the run partial, hal exits 3, and it prints one red row, `✗ keycloak  realm failed
+<cause> · <nothing applied | may be partly applied | applied, not observed>`. Under it, dim, stands
+`pre-apply snapshot 37c2a560 · proven` (or `unproven`, when its restore test did not pass) once a
+snapshot exists, and from the start of config-cli on `way back: docs/backup.md "Restore Keycloak" ·
+the next apply repeats the step`; the way back is [Restore Keycloak](backup.md#restore-keycloak).
+A failure before any snapshot prints the row alone. Then come `error: partial, keycloak realm
+failed` and `next: hal apply`. A console change to a declared object that the apply resets is printed as "reset to the file" with the
 snapshot ID, exit 0. Keycloak that is switched off or disabled is never started by the step: the
 plan says its realm files wait. Keycloak that starts in the same run is checked by the next `hal
 apply`.
@@ -309,7 +313,8 @@ your yes, after a backup. After the yes the step prints one row, `✓ keycloak  
 proven · 11s` (the first eight characters of the pre-apply snapshot, which `hal restore --snapshot`
 takes), and under it one dim line per change, then one per group, client, client scope, realm role,
 top-level flow and identity provider that the files do not declare (`only in Keycloak: hallucinai
-group /console-made`), and last `only in Keycloak: nothing · 12 kinds not read` (or the count found). The kinds it cannot
+group /console-made`), and last `only in Keycloak: nothing · 12 kinds not read` (or the count found, and
+`1 realm not observed` between the two when a declared realm could not be observed). The kinds it cannot
 read are `organizations`, `workflows`, `subComponents`, `scopeMappings`, `clientScopeMappings`,
 `defaultGroups`, `clientPolicies`, `clientProfiles`, `authorizationSettings`,
 `userFederationProviders`, `messageBundles` and `userProfile`; they are not listed, so the list
