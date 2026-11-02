@@ -530,3 +530,13 @@ def test_a_play_that_fills_the_pipe_finishes_with_the_live_line_on(tmp_path: Pat
     playbook = fake_ansible(tmp_path, play_starting(tmp_path, READ_LOG_DRIVER, after=fills_the_pipe))
 
     assert system_step.run_playbook_as_root([str(playbook)]) == PlaybookFinished(3)
+
+
+def test_a_marked_line_that_cannot_be_read_shows_nothing_and_leaves_the_run_unfinished(
+    tmp_path: Path, stub_sudo: StubSudo, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    terminal = stderr_on_a_terminal(monkeypatch)
+    playbook = fake_ansible(tmp_path, f"echo '{system_step.EVENT_MARK}not json'")
+
+    assert system_step.run_playbook_as_root([str(playbook)]) == PlaybookUnfinished()
+    assert terminal.getvalue() == ""
