@@ -29,7 +29,7 @@ from hal.stack.legal_pages import (
     frame_template_path,
 )
 from hal.stack.legal_section import PAGES, LegalError, parse_fragment, parse_general
-from hal.stack.unit_plans import Fleet, Progress
+from hal.stack.unit_plans import Fleet, NotWritten, Progress
 
 LEGAL_UNIT = "legal"
 GENERAL_UNIT = "allgemein"
@@ -77,21 +77,21 @@ class LegalPlan:
     def changes_nothing(self) -> bool:
         return not self.changed
 
-    def write(self, progress: Progress) -> str | None:
-        """Write the changed pages; the failure line, or None. The progress names this step only
+    def write(self, progress: Progress) -> NotWritten | None:
+        """Write the changed pages; the failure, or None. The progress names this step only
         while it runs."""
         progress.unit, progress.step = LEGAL_UNIT, "write the legal pages"
-        failed = ""
+        failed = self.repository
         try:
             for page, change in self.changed.items():
                 if change is not PageChange.UNRECORDED:
-                    failed = f"{BUILT_DIRECTORY}/{page}.html"
+                    failed = Path(BUILT_DIRECTORY, f"{page}.html")
                     _replace(self.repository / BUILT_DIRECTORY, page, self.pages[page])
             if self.changed:
-                failed = str(self.record)
+                failed = self.record
                 write_record(self.record, self.fingerprints)
         except OSError as error:
-            return f"legal: could not write {failed} ({error.strerror})"
+            return NotWritten.from_error(LEGAL_UNIT, failed, error)
         finally:
             progress.unit = progress.step = ""
         return None

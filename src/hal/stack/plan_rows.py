@@ -11,7 +11,7 @@ from hal.stack import checkout, core, environment, switches
 from hal.stack.appkit_step import APPKIT_UNIT, TARGETS, AppkitPlan
 from hal.stack.apps import AppKind, AppPlan, AppsPlan, OffPlan, SkippedNote, StaysStoppedNote
 from hal.stack.built_image import ENDS_RUNS, BuiltRecreate
-from hal.stack.legal_step import BlockChange, LegalPlan, PageChange
+from hal.stack.legal_step import LEGAL_UNIT, BlockChange, LegalPlan, PageChange
 from hal.stack.plan import Plan
 from hal.stack.realm.reconcile import REALM_UNIT, RealmAction, RealmPlan
 from hal.stack.unit_plans import Action, ImageReference, KeptImage, Recreate, UnitPlan
@@ -196,20 +196,33 @@ def plan_groups(plan: Plan) -> tuple[Group, ...]:
     )
 
 
-def _appkit_rows(plan: AppkitPlan) -> tuple[Row, ...]:
-    old_names = ", ".join(sorted({path.name for path in plan.stale}))
-    rows = []
+def appkit_row(
+    plan: AppkitPlan,
+    written: tuple[Glyph, StrEnum],
+    removed: tuple[Glyph, StrEnum],
+    removal: str,
+) -> tuple[Row, ...]:
+    """The one row of the appkit step, which the plan and the finished write each say in their own
+    glyphs, events and verb `removal`: the version, the targets when not all changed and the stale
+    names; the names alone when only stale directories go."""
+    names = ", ".join(plan.stale_names)
     if plan.changed:
         facts = [plan.version]
         labels = plan.changed_labels
         if len(labels) < len(TARGETS):
             facts.append(f"only {', '.join(labels)}")
-        if old_names:
-            facts.append(f"removes {old_names}")
-        rows.append(Row(Glyph.ADD, APPKIT_UNIT, PlanEvent.NEW_FILES, _SEPARATOR.join(facts)))
-    elif old_names:
-        rows.append(Row(Glyph.REMOVE, APPKIT_UNIT, PlanEvent.OLD_FILES, old_names))
-    return tuple(rows)
+        if names:
+            facts.append(f"{removal} {names}")
+        return (Row(written[0], APPKIT_UNIT, written[1], _SEPARATOR.join(facts)),)
+    if names:
+        return (Row(removed[0], APPKIT_UNIT, removed[1], names),)
+    return ()
+
+
+def _appkit_rows(plan: AppkitPlan) -> tuple[Row, ...]:
+    return appkit_row(
+        plan, (Glyph.ADD, PlanEvent.NEW_FILES), (Glyph.REMOVE, PlanEvent.OLD_FILES), "removes"
+    )
 
 
 _PAGE_ROWS = (
@@ -233,7 +246,7 @@ def _legal_rows(plan: LegalPlan) -> tuple[Row, ...]:
                 if kind is PageChange.CHANGED
                 else ()
             )
-            rows.append(Row(glyph, "legal", event, ", ".join(pages), len(pages), details))
+            rows.append(Row(glyph, LEGAL_UNIT, event, ", ".join(pages), len(pages), details))
     return tuple(rows)
 
 
