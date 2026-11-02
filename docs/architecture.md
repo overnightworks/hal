@@ -274,9 +274,11 @@ the catalog, enabled or not. Apps' own texts are not read yet (edge#110).
 
 What `hal apply` does: it validates every section, builds the pages and compares them with `legal/built/`. The
 plan prints one row per kind, without a heading, above `core`: `+ legal  2 new pages`, `~ legal  1 edited page` and `~ legal  3 new records` (a page that matches while its record is missing, unreadable or stale), each with the page names. Under an edited page, from a record of what the last write was made of, each block stands as a dim line, new, changed or left (`legal/sections/songmaker/datenschutz.html#songmaker changed`), and a changed page frame (its skeleton or a table-of-contents template) as its own line; a missing or stale record makes every block new. It prints no legal row when nothing changes. The record is `legal-built.json` in the apply state beside `applied.json` (not beside `legal/built/`, which nginx serves), written after the pages; a page whose bytes already match is still planned (and the record written) while its entry is missing, unreadable or stale. After
-`yes`, before any unit switches, it writes each changed page (a temporary file, mode 0644, renamed over the page).
-Without an enabled `legal` unit there is no step and no line. A refusal comes before the question (exit 2) and
-changes nothing; a failed write is partial with no unit switched (exit 1). A page goes live only that way, and a
+`yes`, before any unit switches, it writes each changed page (a temporary file, mode 0644, renamed over the page)
+and prints `✓ legal  pages written` naming the pages whose bytes were written, `✓ legal  record written` for pages
+that gained only their record. Without an enabled `legal` unit there is no step and no line. A refusal comes before
+the question (exit 3) and changes nothing; a failed write is `✗ legal  not written` with the path and the reason, then
+partial with no unit switched (exit 3). A page goes live only that way, and a
 wrong text is taken back by the next change of the text: there is no override.
 
 **Format.** German, UTF-8 without a byte order mark, at most 65,536 bytes, LF line ends, no control character
@@ -862,7 +864,7 @@ The rules are labelled "§10 rule n", because [edge#50](https://github.com/overn
 - "Never an IP" is about reaching a peer. A trust list such as webauth's `trusted_proxies` names a network that the compose file owns. Hopin pins `172.31.255.0/24` in its own `compose.yaml` (hopin#175), which owns that allocation.
 
 **§10 rule 3: each app owns its stores.**
-- No volume, database or Redis is shared across compose projects. The edge networks are the exception.
+- No volume, database or Redis is shared across compose projects. The stack's named networks are the exception.
 - Integration goes through the owning app's API.
 - A call between apps carries a signed, short-lived token whose audience is the callee: an issuer token, or the agent-service capability (agent-runtime decision record 0001). Never a static secret shared between apps.
 

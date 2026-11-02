@@ -45,7 +45,7 @@ from hal.backup.verify import (
     check_row_count,
     check_rows,
 )
-from hal.output import Glyph, Row, format_bytes, format_duration
+from hal.output import Field, Glyph, Row
 from hal.output.command import Verb, command
 
 # A run stages in `staging-<random>` and first creates `staging-<random>.run` beside it: that
@@ -245,11 +245,16 @@ def backup(
                 first_readiness if index == 0 else _Deadline.start(),
                 pre_apply=pre_apply,
             )
-            report(
-                Row(Glyph.DONE, app.name, BackupEvent.BACKED_UP, _backed_up_facts(summary, started))
-            )
+            report(_backed_up_row(app, summary, started))
     if run.failed_apps:
-        report(Row(Glyph.UNCHANGED, REPOSITORY, BackupEvent.NOT_PRUNED, "a backup failed"))
+        report(
+            Row(
+                Glyph.UNCHANGED,
+                REPOSITORY,
+                BackupEvent.NOT_PRUNED,
+                fields=((Field.REASON, "a backup failed"),),
+            )
+        )
     run.raise_first_app_failure()
     maintenance_started = host.monotonic()
     for app in targets:
@@ -257,25 +262,42 @@ def backup(
             restic.forget(settings, app.name, pre_apply=pre_apply)
     with run.phase(Phase.CHECK):
         restic.check(settings, read_data=False)
-    maintenance = format_duration(host.monotonic() - maintenance_started)
-    report(Row(Glyph.DONE, REPOSITORY, BackupEvent.PRUNED, f"checked · {maintenance}"))
-
-
-def _backed_up_facts(summary: restic.BackupSummary, started: float) -> str:
-    facts = (
-        summary.snapshot_id[:8],
-        format_bytes(summary.source_bytes),
-        format_duration(host.monotonic() - started),
+    maintenance = host.monotonic() - maintenance_started
+    report(
+        Row(
+            Glyph.DONE,
+            REPOSITORY,
+            BackupEvent.PRUNED,
+            "checked",
+            fields=((Field.SECONDS, maintenance),),
+        )
     )
-    return " · ".join(facts)
+
+
+def _backed_up_row(app: App, summary: restic.BackupSummary, started: float) -> Row:
+    fields = (
+        (Field.SNAPSHOT, summary.snapshot_id[:8]),
+        (Field.BYTES, summary.source_bytes),
+        (Field.SECONDS, host.monotonic() - started),
+    )
+    return Row(Glyph.DONE, app.name, BackupEvent.BACKED_UP, fields=fields)
 
 
 def _report_not_backed_up(report: Callable[[Row], None], app: App, failure: StepFailed) -> None:
-    report(Row(Glyph.FAILED, app.name, BackupEvent.NOT_BACKED_UP, str(failure)))
+    report(
+        Row(
+            Glyph.FAILED,
+            app.name,
+            BackupEvent.NOT_BACKED_UP,
+            fields=((Field.REASON, str(failure)),),
+        )
+    )
 
 
 def _report_not_proven(report: Callable[[Row], None], app: App, failure: StepFailed) -> None:
-    report(Row(Glyph.FAILED, app.name, RestoreEvent.NOT_PROVEN, str(failure)))
+    report(
+        Row(Glyph.FAILED, app.name, RestoreEvent.NOT_PROVEN, fields=((Field.REASON, str(failure)),))
+    )
 
 
 def restore_test(
@@ -302,12 +324,26 @@ def restore_test(
             snapshot_id = _restore_test(settings, app, run, snapshot_prefix)
             verified.append(app.name)
             run.proven_apps += 1
-            report(Row(Glyph.DONE, app.name, RestoreEvent.PROVEN, snapshot_id[:8]))
+            report(
+                Row(
+                    Glyph.DONE,
+                    app.name,
+                    RestoreEvent.PROVEN,
+                    fields=((Field.SNAPSHOT, snapshot_id[:8]),),
+                )
+            )
     try:
         with run.phase(Phase.CHECK):
             restic.check(settings, read_data=only is None)
     except StepFailed as failure:
-        report(Row(Glyph.FAILED, REPOSITORY, RestoreEvent.NOT_CHECKED, str(failure)))
+        report(
+            Row(
+                Glyph.FAILED,
+                REPOSITORY,
+                RestoreEvent.NOT_CHECKED,
+                fields=((Field.REASON, str(failure)),),
+            )
+        )
         raise
     report(Row(Glyph.DONE, REPOSITORY, RestoreEvent.CHECKED))
     run.restore_tested(verified)

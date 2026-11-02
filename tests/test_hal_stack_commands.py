@@ -160,11 +160,31 @@ def test_a_wrong_command_line_is_a_usage_error_and_no_stack_code_runs(
     ],
     ids=lambda value: value.name,
 )
-def test_every_outcome_of_the_stack_has_one_exit_of_hal(monkeypatch, stack_exit, hal_exit):
-    """D3: the door prints what the table says for each member of `ApplyExit`."""
+def test_the_emergency_verbs_end_every_outcome_with_the_exit_they_always_had(
+    monkeypatch, stack_exit, hal_exit
+):
+    """D3, #784 D3: `offline` keeps its mapping, whatever `apply` splits."""
     monkeypatch.setattr(stack, "stop_all", lambda: stack_exit)
 
     assert cli.main(["offline"]) == hal_exit
+
+
+@pytest.mark.parametrize(
+    ("stack_exit", "hal_exit"),
+    [
+        (apply.ApplyExit.APPLIED_OR_NOTHING, ExitCode.OK),
+        (apply.ApplyExit.DECLINED, ExitCode.FINDINGS),
+        (apply.ApplyExit.GUARD_REFUSED, ExitCode.REFUSED),
+        (apply.ApplyExit.CANNOT_PLAN, ExitCode.FAILURE),
+        (apply.ApplyExit.REFUSED, ExitCode.FAILURE),
+    ],
+    ids=lambda value: value.name,
+)
+def test_every_outcome_of_apply_has_one_exit_of_hal(monkeypatch, stack_exit, hal_exit):
+    """#784 D1, D2: declined 1, a guard 4, cannot plan, failed and partial 3."""
+    monkeypatch.setattr(stack, "apply_units", lambda _local: stack_exit)
+
+    assert cli.main(["apply"]) == hal_exit
 
 
 @pytest.mark.parametrize(
@@ -237,7 +257,7 @@ def test_apply_while_another_apply_runs_changes_nothing(hal, applying):
 
     result = hal("apply", answers=("yes",))
 
-    assert result.exit_code == ExitCode.FAILURE
+    assert result.exit_code == ExitCode.REFUSED
     assert "another `hal apply` or `hal update` is running; nothing changed" in result.err
     assert "hal apply: nothing published" in result.err
     assert applying.scripted.changing_verbs() == []
@@ -280,13 +300,13 @@ def test_apply_whose_compose_up_fails_is_partial_and_publishes_nothing(hal, appl
     assert applying.publish_never_began()
 
 
-def test_apply_without_a_terminal_is_refused_with_3_and_touches_nothing(
+def test_apply_without_a_terminal_is_refused_with_4_and_touches_nothing(
     tmp_path, system_commands, empty_home
 ):
-    """A5 (E1)"""
+    """A5"""
     result = run_door(tmp_path, system_commands, "apply")
 
-    assert result.returncode == ExitCode.FAILURE
+    assert result.returncode == ExitCode.REFUSED
     assert "refused, stdin and stdout must be a terminal" in result.stderr
     assert "nothing published" in result.stderr
 
@@ -300,13 +320,13 @@ def test_apply_local_applies_the_local_part_alone(hal, applying):
     assert applying.publish_never_began()
 
 
-def test_apply_with_the_plan_declined_changes_nothing(hal, applying):
-    """A7 (E1)"""
+def test_apply_with_the_plan_declined_ends_with_1_and_changes_nothing(hal, applying):
+    """A7"""
     nothing(applying)
 
     result = hal("apply", answers=("no",))
 
-    assert result.exit_code == ExitCode.FAILURE
+    assert result.exit_code == ExitCode.FINDINGS
     assert "aborted, nothing changed" in result.err
     assert "nothing published" in result.err
     assert applying.scripted.changing_verbs() == []
@@ -314,12 +334,12 @@ def test_apply_with_the_plan_declined_changes_nothing(hal, applying):
 
 
 def test_apply_from_a_checkout_that_is_not_a_clean_main_is_refused(hal, applying):
-    """A8 (E1)"""
+    """A8"""
     not_on_main(applying)
 
     result = hal("apply", answers=("yes",))
 
-    assert result.exit_code == ExitCode.FAILURE
+    assert result.exit_code == ExitCode.REFUSED
     assert "runs only on main" in result.err
     assert "nothing published" in result.err
     assert applying.scripted.changing_verbs() == []
@@ -341,7 +361,7 @@ def test_start_of_a_switched_off_unit_after_yes_clears_the_marker(hal, fakes):
 
 
 def test_start_with_any_answer_but_yes_aborts_and_keeps_the_marker(hal, fakes):
-    """T2 (E1)"""
+    """T2"""
     fakes.unit_in("B")
 
     result = hal("start", UNIT, answers=("no",))
@@ -379,7 +399,7 @@ def test_start_whose_compose_up_fails_is_partial_and_keeps_the_switch(hal, fakes
 def test_start_without_a_terminal_is_refused_with_3_and_touches_nothing(
     tmp_path, system_commands, empty_home
 ):
-    """T5 (E1)"""
+    """T5"""
     result = run_door(tmp_path, system_commands, "start", UNIT)
 
     assert result.returncode == ExitCode.FAILURE
@@ -534,7 +554,7 @@ def test_online_with_the_barriers_proven_reopens_the_tunnel(
 def test_online_with_an_unproven_barrier_keeps_the_tunnel_closed(
     hal, fakes, stopped_tunnel, systemd, marks
 ):
-    """N2 (E1)"""
+    """N2"""
     fakes.probe_switched_off_behind_a_barrier()
     fakes.ingress.rejecting = True
 
@@ -576,7 +596,7 @@ def test_online_whose_tunnel_does_not_start_records_the_switch_again(
 def test_online_without_a_terminal_is_refused_with_3_and_touches_nothing(
     tmp_path, system_commands, empty_home
 ):
-    """N5 (E1)"""
+    """N5"""
     result = run_door(tmp_path, system_commands, "online")
 
     assert result.returncode == ExitCode.FAILURE
@@ -586,7 +606,7 @@ def test_online_without_a_terminal_is_refused_with_3_and_touches_nothing(
 def test_online_with_yes_declined_keeps_the_global_switch(
     hal, fakes, stopped_tunnel, systemd, marks
 ):
-    """N6 (E1)"""
+    """N6"""
     result = hal("online", answers=("no",))
 
     assert result.exit_code == ExitCode.FAILURE

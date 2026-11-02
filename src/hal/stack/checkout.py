@@ -1,6 +1,6 @@
 """The live checkout: `~/srv/hal` on `main` is the tree the live stack runs from (P6).
 
-`hal apply` binds the compose project `edge` to the tree its code runs from, so it runs only
+`hal apply` binds the compose project `hal` to the tree its code runs from, so it runs only
 from the live checkout (#79 rule 1). Whether a tree is that checkout is read from paths alone,
 without git: it is `$HOME/srv/hal` once both are resolved, and it is a main worktree, whose `.git`
 is a directory where a linked worktree has a `.git` file.
@@ -451,10 +451,12 @@ def not_on_main(git: Git) -> str | None:
 @dataclass(frozen=True)
 class Refusal:
     """Why a checkout is not a born `main` with nothing changed; `paths` are the changed paths of
-    a dirty tree, in git's order."""
+    a dirty tree, in git's order; `cannot_tell` is a git that could not be asked, which is no
+    verdict on the checkout."""
 
     message: str
     paths: tuple[str, ...] = ()
+    cannot_tell: bool = False
 
 
 def not_clean_main(git: Git) -> Refusal | None:
@@ -465,7 +467,7 @@ def not_clean_main(git: Git) -> Refusal | None:
             return Refusal(f"runs only on {MAIN} ({reason})")
         changed = git.changed_paths()
     except GitError as error:
-        return Refusal(f"cannot read the live checkout, {error}")
+        return Refusal(f"cannot read the live checkout, {error}", cannot_tell=True)
     if not changed:
         return None
     return Refusal(DIRTY_TREE, tuple(changed))

@@ -10,12 +10,16 @@ from hal.stack import apply
 from hal.stack import cli as stack
 from hal.stack.update import UpdateEnd
 
-# Every outcome of the stack means "the command could not do its job"; the finer split waits until
-# the owners classify their own outcomes. Naming every member keeps a new one from passing as 0.
+# `hal apply` ends a declined yes with FINDINGS and a guard that says no with REFUSED; a cannot-plan
+# end, a failed step and a partial run are FAILURE, and the printed line names which. The emergency
+# verbs only return the members they always did. Naming every member keeps a new one from passing
+# as 0.
 EXIT_OF_STACK: dict[apply.ApplyExit, ExitCode] = {
     apply.ApplyExit.APPLIED_OR_NOTHING: ExitCode.OK,
     apply.ApplyExit.CANNOT_PLAN: ExitCode.FAILURE,
     apply.ApplyExit.REFUSED: ExitCode.FAILURE,
+    apply.ApplyExit.DECLINED: ExitCode.FINDINGS,
+    apply.ApplyExit.GUARD_REFUSED: ExitCode.REFUSED,
 }
 
 

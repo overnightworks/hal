@@ -1,12 +1,16 @@
 """The rows of a finished step: what a typed result prints as, with no step run."""
 
+from pathlib import Path
+
 import pytest
+from support.stack_plan_legal_rows import ALL_LABELS, appkit_plan, legal_plan
 from support.stack_plan_rows import APP, NEW, app_plan
 
 from hal.output import Glyph
 from hal.stack import realm as realm_lines
 from hal.stack.apps import AppFailed, AppHeldOff, AppKind, AppOn, AppSwitchedOff, OffPlan
 from hal.stack.barrier import BarriersUnproven, Unproven
+from hal.stack.legal_step import PageChange
 from hal.stack.realm.reconcile import (
     Leftovers,
     NotRecorded,
@@ -19,6 +23,10 @@ from hal.stack.realm.reconcile import (
 from hal.stack.result_rows import (
     app_partial,
     app_row,
+    appkit_rows,
+    legal_rows,
+    not_written_partial,
+    not_written_row,
     partial_error,
     recreated_row,
     result_rows,
@@ -27,6 +35,7 @@ from hal.stack.result_rows import (
     waiting_row,
 )
 from hal.stack.service_recreate import Recreated
+from hal.stack.unit_plans import NotWritten
 
 SNAPSHOT = "37c2a56056d17297895e58c1ff98493754064280352422f136596266498fe056"
 REMOVAL = realm_lines.Change("hallucinai", realm_lines.Kind.REMOVAL, "group", "/console", members=0)
@@ -283,6 +292,83 @@ def test_a_core_service_whose_barriers_were_proven_says_so_before_the_time() -> 
     row = recreated_row(Recreated("traefik", 3.4, barriers_proven=True))
 
     assert row.fact == "barriers proven · 3s"
+
+
+def shown(rows):
+    return [(row.glyph, row.subject, str(row.event), row.fact, row.details) for row in rows]
+
+
+@pytest.mark.parametrize(
+    ("labels", "stale", "event", "fact"),
+    [
+        (ALL_LABELS, (), "files written", "0.5.0"),
+        (("login theme",), (), "files written", "0.5.0 · only login theme"),
+        (ALL_LABELS[1:], (), "files written", "0.5.0 · only login theme, account theme"),
+        (
+            ALL_LABELS,
+            ("legal/assets/appkit-0.4.0", "a/appkit-0.4.0", "b/appkit-0.4.0"),
+            "files written",
+            "0.5.0 · removed appkit-0.4.0",
+        ),
+        (
+            ("legal assets",),
+            ("a/appkit-0.4.0",),
+            "files written",
+            "0.5.0 · only legal assets · removed appkit-0.4.0",
+        ),
+        ((), ("a/appkit-0.4.0", "b/appkit-0.3.0"), "files removed", "appkit-0.3.0, appkit-0.4.0"),
+    ],
+)
+def test_the_appkit_row_names_what_was_written_and_removed(labels, stale, event, fact) -> None:
+    rows = appkit_rows(appkit_plan(labels, stale))
+
+    assert shown(rows) == [(Glyph.DONE, "appkit", event, fact, ())]
+
+
+def test_an_appkit_plan_that_changes_nothing_has_no_row() -> None:
+    assert appkit_rows(appkit_plan()) == ()
+
+
+def test_the_legal_rows_name_pages_written_before_pages_that_gained_only_their_record() -> None:
+    plan = legal_plan(
+        {
+            "impressum": PageChange.UNRECORDED,
+            "datenschutz": PageChange.CHANGED,
+            "nutzungsbedingungen": PageChange.NEW,
+        }
+    )
+
+    assert shown(legal_rows(plan)) == [
+        (Glyph.DONE, "legal", "pages written", "datenschutz, nutzungsbedingungen", ()),
+        (Glyph.DONE, "legal", "record written", "impressum", ()),
+    ]
+
+
+def test_a_plan_without_legal_pages_has_no_legal_row() -> None:
+    assert legal_rows(legal_plan({})) == ()
+
+
+FAILURE = NotWritten("appkit", Path("/srv/hal/legal/assets"), "No space left on device")
+
+
+def test_a_failed_write_is_a_red_row_with_the_path_and_the_reason() -> None:
+    row = not_written_row(FAILURE)
+
+    assert (row.glyph, row.subject, str(row.event)) == (Glyph.FAILED, "appkit", "not written")
+    assert row.fact == "could not write /srv/hal/legal/assets (No space left on device)"
+
+
+def test_a_failed_write_ends_partial_with_no_unit_switched_and_the_command_that_ends_it() -> None:
+    assert not_written_partial(FAILURE) == (
+        "partial, appkit not written · no unit switched",
+        "hal apply",
+    )
+
+
+def test_the_path_and_the_reason_of_a_failed_write_are_escaped_in_the_row() -> None:
+    row = not_written_row(NotWritten("legal", Path("a\nb"), "x\x1b[31m"))
+
+    assert row.fact == "could not write a\\nb (x\\x1b[31m)"
 
 
 TWO_UNPROVEN = BarriersUnproven((Unproven("probe", "no route"), Unproven("echo", "cannot write")))

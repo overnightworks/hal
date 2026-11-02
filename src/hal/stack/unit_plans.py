@@ -327,6 +327,24 @@ class Progress:
     step: str = ""
 
 
+@dataclass(frozen=True)
+class NotWritten:
+    """A file step that could not write `path`, and why."""
+
+    subject: str
+    path: Path
+    reason: str
+
+    @classmethod
+    def from_error(cls, subject: str, path: Path, error: OSError) -> "NotWritten":
+        """A `shutil.Error` has no `strerror`; its text is the reason then."""
+        return cls(subject, path, error.strerror or str(error))
+
+    @property
+    def fact(self) -> str:
+        return f"could not write {self.path} ({self.reason})"
+
+
 def switch(
     engine: compose.Compose,
     plan: UnitPlan,

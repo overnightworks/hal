@@ -236,7 +236,7 @@ def test_an_unreadable_backup_summary_fails_the_app_as_not_backed_up(
 def test_a_failed_app_has_its_row_while_the_others_are_backed_up_and_the_repository_is_not_pruned(
     edge_backup, machine
 ):
-    machine.other_db_containers["edge"] = []
+    machine.lose_keycloak_database()
 
     outcome = edge_backup(*declare_shipped_apps(), "backup")
 
@@ -255,7 +255,7 @@ def test_a_failed_app_has_its_row_while_the_others_are_backed_up_and_the_reposit
 
 
 def test_a_single_failed_app_is_named_on_the_error_line(edge_backup, machine):
-    machine.other_db_containers["edge"] = []
+    machine.lose_keycloak_database()
 
     outcome = edge_backup(*declare_shipped_apps(), "backup", "keycloak")
 
@@ -268,7 +268,7 @@ def test_a_single_failed_app_is_named_on_the_error_line(edge_backup, machine):
 
 def _fail_keycloak_after_a_good_run(edge_backup, machine, *arguments):
     edge_backup(*declare_shipped_apps(), "backup")
-    machine.other_db_containers["edge"] = []
+    machine.lose_keycloak_database()
     return edge_backup(*declare_shipped_apps(), "backup", *arguments)
 
 
@@ -283,8 +283,12 @@ def _fail_keycloak_after_a_good_run(edge_backup, machine, *arguments):
             ("keycloak",),
             "error: keycloak not backed up · last good backup 18.10. 05:00",
         ),
+        (
+            ("keycloak", "--pre-apply"),
+            "error: keycloak not backed up · last good backup 18.10. 05:00",
+        ),
     ],
-    ids=["several apps", "one app"],
+    ids=["several apps", "one app", "one app before apply"],
 )
 def test_the_error_line_names_the_failed_apps_last_good_backup_in_local_time(
     edge_backup, machine, berlin_time, arguments, error_line
@@ -300,7 +304,7 @@ def test_the_error_line_shows_the_year_of_a_last_good_backup_from_another_year(
 ):
     edge_backup(*declare_shipped_apps(), "backup")
     machine.clock.moment = datetime(2027, 1, 5, 9, 0, tzinfo=UTC)
-    machine.other_db_containers["edge"] = []
+    machine.lose_keycloak_database()
 
     outcome = edge_backup(*declare_shipped_apps(), "backup", "keycloak")
 
@@ -320,7 +324,7 @@ def test_the_pruned_row_shows_the_span_of_forget_and_check(edge_backup, machine,
 def test_pre_apply_json_names_the_failed_apps_reason_on_the_error_line_and_prints_no_row(
     edge_backup, machine
 ):
-    machine.other_db_containers["edge"] = []
+    machine.lose_keycloak_database()
 
     outcome = edge_backup(*declare_shipped_apps(), "backup", "keycloak", "--pre-apply", "--json")
 

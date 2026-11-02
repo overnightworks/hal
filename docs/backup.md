@@ -121,9 +121,11 @@ With `LOG_FORMAT=json` every row, verdict and error of `hal backup` and `hal res
 flushed line: a journal priority (`<3>` error, `<4>` warning, `<6>` info) and a JSON object with
 `timestamp`, `level`, `logger`, `service` and `event`. journald removes the priority; by hand, cut it
 (`LOG_FORMAT=json hal backup | cut -c4- | jq`). Any other value than `json` or `text` stops every verb
-with exit 2. On the timer path, whose arguments are fixed, the events carry no host path, container
-id, argument or database row, and the password is never read into one; restic's and Docker's own
-stderr stays raw in the journal. `--json` stays the separate result for programs.
+with exit 2. A backup row's facts stand under `snapshot`, `bytes`, `seconds` and `reason`, any
+other row's under `fact` (`pruned` keeps its word there, beside its `seconds`). On the timer path,
+whose arguments are fixed, the events carry no host path, container id, argument or database row,
+and the password is never read into one; restic's and Docker's own stderr stays raw in the journal.
+`--json` stays the separate result for programs.
 
 ### One app, and the pre-apply snapshot
 
@@ -355,8 +357,8 @@ first failing command and never starts Keycloak after a failed load. If the
 load fails, `pg_restore`'s messages can quote rows of the dump, so they are
 discarded and the session runs with server error logging off (`keycloak` is the
 image's superuser, which may set that); only the exit code is printed. Delete
-`~/restore-keycloak` once you are done. The block acts on the compose project `edge`;
-`EDGE_COMPOSE_PROJECT` names another, which is how it was driven against a throwaway stack.
+`~/restore-keycloak` once you are done. The block acts on the compose project `hal`;
+`HAL_COMPOSE_PROJECT` names another, which is how it was driven against a throwaway stack.
 A failed realm step of `hal apply` names its pre-apply snapshot; restore that one with
 `hal restore keycloak --snapshot <ID> --target ~/restore-keycloak`.
 
@@ -366,7 +368,7 @@ set -euo pipefail
 umask 077
 restored=~/restore-keycloak
 container() {
-  docker ps --quiet --filter label=com.docker.compose.project="${EDGE_COMPOSE_PROJECT:-edge}" \
+  docker ps --quiet --filter label=com.docker.compose.project="${HAL_COMPOSE_PROJECT:-hal}" \
     --filter label=com.docker.compose.service="$1" \
     --filter label=com.docker.compose.oneoff=False
 }

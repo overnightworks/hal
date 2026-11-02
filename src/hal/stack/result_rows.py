@@ -6,6 +6,7 @@ from enum import StrEnum
 from hal.output import Glyph, Noun, Row, counted, format_duration, printable
 from hal.output.command import Verb, command
 from hal.stack import realm as realm_lines
+from hal.stack.appkit_step import AppkitPlan
 from hal.stack.apps import (
     AppFailed,
     AppHeldOff,
@@ -18,6 +19,8 @@ from hal.stack.apps import (
 )
 from hal.stack.barrier import BarriersUnproven
 from hal.stack.plan_rows import ChangeNoun, PlanEvent
+from hal.stack.legal_step import LEGAL_UNIT, LegalPlan, PageChange
+from hal.stack.plan_rows import ChangeNoun, PlanEvent, appkit_row
 from hal.stack.realm import Kind
 from hal.stack.realm.reconcile import (
     REALM_UNIT,
@@ -30,6 +33,7 @@ from hal.stack.realm.reconcile import (
     StepResult,
 )
 from hal.stack.service_recreate import Recreated
+from hal.stack.unit_plans import NotWritten
 
 # restic's short ID, which `hal restore --snapshot` takes as a prefix (`hal.backup.runner`'s
 # MIN_SNAPSHOT_PREFIX); `hal.stack` may not import `hal.backup`, so the length is repeated.
@@ -57,6 +61,11 @@ class ResultEvent(StrEnum):
     APP_HELD_OFF = "switched off meanwhile"
     RECREATED = "recreated"
     NOT_PROVEN = "not proven"
+    FILES_WRITTEN = "files written"
+    FILES_REMOVED = "files removed"
+    PAGES_WRITTEN = "pages written"
+    RECORD_WRITTEN = "record written"
+    NOT_WRITTEN = "not written"
 
 
 _APP_ON_EVENT = {
@@ -175,6 +184,41 @@ def unproven_partial() -> tuple[str, str]:
     return f"partial, barriers {ResultEvent.NOT_PROVEN}{_SEPARATOR}no unit switched", command(
         Verb.OFFLINE
     )
+
+
+def appkit_rows(plan: AppkitPlan) -> tuple[Row, ...]:
+    """The rows of a finished appkit write, none when nothing was planned: a write ends with the
+    whole plan done or with a failure, so the plan is what was written."""
+    return appkit_row(
+        plan,
+        (Glyph.DONE, ResultEvent.FILES_WRITTEN),
+        (Glyph.DONE, ResultEvent.FILES_REMOVED),
+        "removed",
+    )
+
+
+def legal_rows(plan: LegalPlan) -> tuple[Row, ...]:
+    """The rows of a finished legal write: the pages whose bytes were written, then the pages that
+    gained only their record."""
+    written = [page for page, change in plan.changed.items() if change is not PageChange.UNRECORDED]
+    recorded = [page for page, change in plan.changed.items() if change is PageChange.UNRECORDED]
+    rows = []
+    if written:
+        rows.append(Row(Glyph.DONE, LEGAL_UNIT, ResultEvent.PAGES_WRITTEN, ", ".join(written)))
+    if recorded:
+        rows.append(Row(Glyph.DONE, LEGAL_UNIT, ResultEvent.RECORD_WRITTEN, ", ".join(recorded)))
+    return tuple(rows)
+
+
+def not_written_row(failure: NotWritten) -> Row:
+    """A step that could not write; the path and the reason are escaped."""
+    return Row(Glyph.FAILED, failure.subject, ResultEvent.NOT_WRITTEN, printable(failure.fact))
+
+
+def not_written_partial(failure: NotWritten) -> tuple[str, str]:
+    """The run's `partial, ...` text for a failed write and the command that ends it."""
+    text = f"partial, {failure.subject} {ResultEvent.NOT_WRITTEN}{_SEPARATOR}no unit switched"
+    return text, command(Verb.APPLY)
 
 
 def waiting_row(grace_seconds: float) -> Row:

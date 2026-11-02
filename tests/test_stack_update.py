@@ -99,7 +99,7 @@ def test_an_apply_is_refused_while_the_update_waits_at_its_question(world, capsy
 
     world.run(at_the_question=apply_meanwhile)
 
-    assert seen["exit"] == apply.ApplyExit.REFUSED
+    assert seen["exit"] == apply.ApplyExit.GUARD_REFUSED
     assert "another `hal apply` or `hal update` is running" in errors(capsys)
 
 

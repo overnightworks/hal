@@ -46,6 +46,7 @@ from support.stack_apply_fakes import (
 from support.stack_core import bind, sha256
 from support.stack_plan_rows import detail_lines, find_row, plain, row_at
 
+from hal.stack import apply
 from hal.stack.plan_rows import PlanEvent
 from hal.stack.result_rows import ResultEvent
 
@@ -192,7 +193,7 @@ def test_a_declined_yes_recreates_nothing(
 
     exit_code, out, err = switch(answer="no")
 
-    assert exit_code == 1
+    assert exit_code == apply.ApplyExit.DECLINED
     assert find_row(out, "step-ca", PlanEvent.RECREATE, "definition changed")
     assert "aborted, nothing changed" in err
     assert scripted.changing_verbs() == []

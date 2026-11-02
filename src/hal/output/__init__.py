@@ -187,11 +187,21 @@ class TrailingNoun(StrEnum):
     """Like `Noun`, with the `s` after the last word (`new page`, `new pages`)."""
 
 
+class Field(StrEnum):
+    """A measured or named value of a row; the value is its key in the JSON event."""
+
+    SNAPSHOT = "snapshot"
+    BYTES = "bytes"
+    SECONDS = "seconds"
+    REASON = "reason"
+
+
 @dataclass(frozen=True)
 class Row:
     """One thing a command did or found. The caller owns its event enum; `fact` is one sentence;
     `count` is shown before the event, which takes the plural when it is a `Noun` or a
-    `TrailingNoun`. `details` are dim lines under the row."""
+    `TrailingNoun`. `details` are dim lines under the row. `fields` hold raw values, shown after
+    the fact in text (`BYTES` and `SECONDS` as units) and as keys of the JSON event."""
 
     glyph: Glyph
     subject: str
@@ -199,6 +209,7 @@ class Row:
     fact: str = ""
     count: int | None = None
     details: tuple[str, ...] = ()
+    fields: tuple[tuple[Field, str | int | float], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -308,9 +319,33 @@ def counted(count: int, noun: StrEnum) -> str:
     return f"{count} {_label(count, noun)}"
 
 
-def write_row(row: Row) -> None:
+_FACT_SEPARATOR = " · "
+
+
+def _field_text(field: Field, value: str | int | float) -> str:
+    if field is Field.BYTES:
+        return format_bytes(int(value))
+    if field is Field.SECONDS:
+        return format_duration(float(value))
+    return str(value)
+
+
+def _fact_text(row: Row) -> str:
+    parts = [row.fact] if row.fact else []
+    parts += [_field_text(field, value) for field, value in row.fields]
+    return printable(_FACT_SEPARATOR.join(parts)).rstrip()
+
+
+def _field_value(value: str | int | float) -> str | int | float:
+    if isinstance(value, str):
+        return printable(value).rstrip()
+    return round(value, 1)
+
+
+def write_row(row: Row, *, fresh_line: bool = False) -> None:
     """The row on stdout; text from outside is escaped before it is padded, so columns hold.
-    On a terminal only the glyph is coloured and the fact dim; a `·` row is dim as a whole."""
+    On a terminal only the glyph is coloured and the fact dim; a `·` row is dim as a whole.
+    `fresh_line` first ends a line a Ctrl-C left open."""
     stdout = sys.stdout
     if _json_on():
         _write_event(
@@ -321,13 +356,16 @@ def write_row(row: Row) -> None:
                 "subject": printable(row.subject),
                 "count": row.count,
                 "fact": printable(row.fact).rstrip(),
+                **{field.value: _field_value(value) for field, value in row.fields},
                 "details": [printable(detail) for detail in row.details],
             },
         )
         return
+    if fresh_line:
+        print(file=stdout)
     subject = printable(row.subject)
     event = printable(str(row.event)) if row.count is None else counted(row.count, row.event)
-    fact = printable(row.fact).rstrip()
+    fact = _fact_text(row)
     columns = f"{subject:<{SUBJECT_WIDTH}}  {event:<{EVENT_WIDTH}}"
     if row.glyph is Glyph.UNCHANGED:
         line = f"  {row.glyph.value} {columns} {fact}".rstrip()
@@ -385,7 +423,7 @@ def write_verdict(verdict: Verdict) -> None:
                 **counts,
                 "seconds": None
                 if verdict.elapsed_seconds is None
-                else round(verdict.elapsed_seconds, 1),
+                else _field_value(verdict.elapsed_seconds),
                 "details": [printable(detail) for detail in verdict.details],
                 "hint": printable(verdict.hint),
                 "next": printable(verdict.next_step),
@@ -402,7 +440,7 @@ def write_verdict(verdict: Verdict) -> None:
         if verdict.elapsed_seconds is not None
         else []
     )
-    print(" · ".join([headline, *counts, *details, *run_time, *hint]))
+    print(_FACT_SEPARATOR.join([headline, *counts, *details, *run_time, *hint]))
     if verdict.next_step:
         print(f"{_styled('next:', _CYAN, stdout)} {printable(verdict.next_step)}")
 
