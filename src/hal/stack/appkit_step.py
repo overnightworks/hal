@@ -21,7 +21,7 @@ from pathlib import Path
 from types import ModuleType
 
 from hal.output import Stream, write_line
-from hal.stack.unit_plans import Progress
+from hal.stack.unit_plans import NotWritten, Progress
 
 DISTRIBUTION = "overnightworks-appkit"
 APPKIT_UNIT = "appkit"
@@ -78,8 +78,13 @@ class AppkitPlan:
             if target.served(self.repository, self.version) in self.changed
         )
 
-    def write(self, progress: Progress) -> str | None:
-        """Write the directory and remove the stale ones; the failure line, or None. The progress
+    @property
+    def stale_names(self) -> tuple[str, ...]:
+        """The names of the stale directories, sorted, each once whatever the target."""
+        return tuple(sorted({path.name for path in self.stale}))
+
+    def write(self, progress: Progress) -> NotWritten | None:
+        """Write the directory and remove the stale ones; the failure, or None. The progress
         names this step only while it runs."""
         progress.unit, progress.step = APPKIT_UNIT, "write the appkit files"
         target = self.repository
@@ -90,7 +95,7 @@ class AppkitPlan:
                 target = self.repository / name
                 shutil.rmtree(target)
         except OSError as error:
-            return f"appkit: could not write {target} ({error.strerror})"
+            return NotWritten.from_error(APPKIT_UNIT, target, error)
         finally:
             progress.unit = progress.step = ""
         return None
@@ -197,7 +202,7 @@ def main(arguments: list[str]) -> int:
         write_line(f"appkit: cannot plan, {error}", stream=Stream.STDERR)
         return 2
     if failure:
-        write_line(failure, stream=Stream.STDERR)
+        write_line(f"{failure.subject}: {failure.fact}", stream=Stream.STDERR)
     return 1 if failure else 0
 
 

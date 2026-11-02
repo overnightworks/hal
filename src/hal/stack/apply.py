@@ -90,10 +90,21 @@ from hal.stack.plan_rows import (
     waiting_text,
 )
 from hal.stack.realm import reconcile
-from hal.stack.result_rows import app_partial, app_row, partial_error, result_rows, waiting_row
+from hal.stack.result_rows import (
+    app_partial,
+    app_row,
+    appkit_rows,
+    legal_rows,
+    not_written_partial,
+    not_written_row,
+    partial_error,
+    result_rows,
+    waiting_row,
+)
 from hal.stack.terminal import NEEDS_TERMINAL, at_terminal
 from hal.stack.unit_plans import (
     Action,
+    NotWritten,
     Progress,
     UnitPlan,
     plan_switches,
@@ -117,8 +128,10 @@ _PRIVATE_FILE = 0o600
 
 class ApplyExit(IntEnum):
     APPLIED_OR_NOTHING = 0
-    REFUSED = 1
+    REFUSED = 1  # inside `apply` it means failed or partial; the emergency verbs share it
     CANNOT_PLAN = 2
+    DECLINED = 3
+    GUARD_REFUSED = 4
 
 
 CANNOT_PLAN_ERRORS = (
@@ -218,10 +231,10 @@ def apply_local(
     started = verifier.clock()
     if not at_terminal():
         write_error(NEEDS_TERMINAL)
-        return ApplyExit.REFUSED
+        return ApplyExit.GUARD_REFUSED
     if refusal := checkout.not_live_checkout_line(repository, home or Path.home()):
         write_error(refusal)
-        return ApplyExit.CANNOT_PLAN
+        return ApplyExit.GUARD_REFUSED
     try:
         lock = take_apply_lock(state_directory)
     except OSError as error:
@@ -229,11 +242,11 @@ def apply_local(
         return ApplyExit.CANNOT_PLAN
     if lock is None:
         write_error(APPLY_RUNNING)
-        return ApplyExit.REFUSED
+        return ApplyExit.GUARD_REFUSED
     try:
         live = checkout.Git(repository, git)
-        if not on_clean_main(live):
-            return ApplyExit.CANNOT_PLAN
+        if refusal := refused_off_clean_main(live):
+            return ApplyExit.CANNOT_PLAN if refusal.cannot_tell else ApplyExit.GUARD_REFUSED
         if (origin := fetched(live, write_error)) is None or _waits_on_origin(origin):
             return ApplyExit.CANNOT_PLAN
         if not _environment_ready(repository, ensure_environment):
@@ -287,16 +300,17 @@ def cannot_take_lock_line(state_directory: Path, error: OSError) -> str:
     return f"cannot take {state_directory / APPLY_LOCK} ({error.strerror})"
 
 
-def on_clean_main(git: checkout.Git) -> bool:
-    """True on a born `main` with nothing changed; else False, after saying why (#95 rules 5, 6)."""
+def refused_off_clean_main(git: checkout.Git) -> checkout.Refusal | None:
+    """None on a born `main` with nothing changed; else the refusal, after saying why (#95
+    rules 5, 6)."""
     if (refusal := checkout.not_clean_main(git)) is None:
-        return True
+        return None
     if refusal.paths:
         write_row(local_changes_row(refusal.paths))
         write_error(refusal.message, f"git -C {checkout.LIVE_CHECKOUT} status")
     else:
         write_error(refusal.message)
-    return False
+    return refusal
 
 
 def _waits_on_origin(origin: checkout.Origin) -> bool:
@@ -402,8 +416,8 @@ def _missing_setups(planned: Plan, repository: Path, check: setup.SetupCheck) ->
 
 
 def _refusal(missing: Sequence[MissingSetup], planned: Plan, setups_ran: bool) -> int | None:
-    """REFUSED when a unit or app a stop keeps off still runs, or, after the setups ran, a unit
-    is still not set up: none is started."""
+    """GUARD_REFUSED when a unit or app a stop keeps off still runs, or, after the setups ran, a
+    unit is still not set up: none is started."""
     still_running = [
         *(still_runs_row(item.unit.key, item.check_line) for item in missing if item.kept_stopped),
         *(still_runs_row(key, "") for key in planned.app_plans.switched_off_still_running),
@@ -415,7 +429,7 @@ def _refusal(missing: Sequence[MissingSetup], planned: Plan, setups_ran: bool) -
             "switched off but still running, nothing switched",
             command(Verb.STOP, still_running[0].subject),
         )
-        return ApplyExit.REFUSED
+        return ApplyExit.GUARD_REFUSED
     if setups_ran and missing:
         write_error(
             "; ".join(
@@ -425,7 +439,7 @@ def _refusal(missing: Sequence[MissingSetup], planned: Plan, setups_ran: bool) -
             ),
             command(Verb.APPLY),
         )
-        return ApplyExit.REFUSED
+        return ApplyExit.GUARD_REFUSED
     return None
 
 
@@ -440,7 +454,7 @@ def _ask_and_run_setups(
         print(f"{item.unit.key} is not set up: {item.check_line}")
         if not confirmed(f"run `{item.unit.setup}` now"):
             write_error(f"aborted, nothing changed; run `{item.unit.setup}` yourself or answer yes")
-            return ApplyExit.REFUSED
+            return ApplyExit.DECLINED
     for item in missing:
         if (exit_code := _run_one_setup(item, repository, check, run_setup)) is not None:
             return exit_code
@@ -475,7 +489,7 @@ def _run_one_setup(
         return ApplyExit.REFUSED
     if line := setup.not_set_up_line(item.unit, repository, check):
         write_error(f"`{setup_command}` ran, still not set up: {line}")
-        return ApplyExit.REFUSED
+        return ApplyExit.GUARD_REFUSED
     return None
 
 
@@ -571,6 +585,29 @@ def _write_plan(planned: Plan) -> None:
     write_groups(plan_groups(planned))
 
 
+def _write_files(planned: Plan, progress: Progress) -> NotWritten | None:
+    """Appkit, then legal; a step's rows are said once its write returned, the first failure
+    stops the rest."""
+    if failure := planned.appkit.write(progress):
+        return failure
+    for row in appkit_rows(planned.appkit):
+        write_row(row)
+    if failure := planned.legal.write(progress):
+        return failure
+    for row in legal_rows(planned.legal):
+        write_row(row)
+    return None
+
+
+def _say_stopped(failure: NotWritten | str) -> None:
+    """The red row of a file step that could not write, when it was one, then the pair."""
+    if isinstance(failure, NotWritten):
+        write_row(not_written_row(failure))
+        write_error(*not_written_partial(failure))
+    else:
+        write_error(f"partial, {failure}; no unit switched", command(Verb.APPLY))
+
+
 def _confirm_and_switch(
     engine: compose.Compose,
     planned: Plan,
@@ -582,17 +619,15 @@ def _confirm_and_switch(
     _write_plan(planned)
     if not confirmed(f"apply {counted(changes_in(planned), ChangeNoun.CHANGE)}"):
         _say_aborted(completed_setups)
-        return ApplyExit.REFUSED
+        return ApplyExit.DECLINED
     changes = [plan for plan in planned.plans if plan.action is not Action.STAYS_STOPPED]
     progress = Progress()
     withheld: dict[str, str] = {}
     try:
-        if failure := (
-            planned.appkit.write(progress)
-            or planned.legal.write(progress)
-            or core_phase.run(engine, planned, marks, progress)
+        if failure := _write_files(planned, progress) or core_phase.run(
+            engine, planned, marks, progress
         ):
-            write_error(f"partial, {failure}; no unit switched", command(Verb.APPLY))
+            _say_stopped(failure)
             return ApplyExit.REFUSED
         for plan in changes:
             if since := switch(engine, plan, progress, marks, planned.read):
