@@ -28,6 +28,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from api_canary import verdicts
 from litellm import (
     CANARY_SECONDS,
     CREDENTIAL_FILE,
@@ -408,7 +409,7 @@ class FailureProbe(LitellmProbe):
         self.recreate_litellm()
         out, err = process.communicate(timeout=CANARY_SECONDS)
         self.record(out, err)
-        run = self.verdicts(out, process.returncode)
+        run = verdicts(out, process.returncode)
         expect(run.get("code") == UNAVAILABLE, f"F20: {run}")
         self.steer()
         again = self.canary(DEFAULT_APP)

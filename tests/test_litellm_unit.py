@@ -374,10 +374,41 @@ def prompt_sent_by(canary, monkeypatch, options: list[str]) -> str:
     return json.loads(body)["turn"]["messages"][0]["text"]
 
 
-def test_the_canary_adds_the_request_marker_to_the_prompt_it_sends(canary, monkeypatch):
+def test_the_canary_asks_for_the_request_marker_alone(canary, monkeypatch):
     prompt = prompt_sent_by(canary, monkeypatch, ["--request-marker", "r3quest-9c1"])
 
-    assert "r3quest-9c1" in prompt
+    assert prompt.endswith("r3quest-9c1")
+    assert canary.ANSWER_PROMPT not in prompt
+
+
+def test_an_exception_ends_the_canary_with_the_type_of_it_alone(canary, monkeypatch):
+    class Refusing:
+        def request(self, *_: object) -> None:
+            raise ConnectionRefusedError("secret-detail 10.0.0.7")
+
+    monkeypatch.setattr(canary.http.client, "HTTPConnection", lambda *_, **__: Refusing())
+    out = io.StringIO()
+
+    code = canary.main(["--marker", "m"], stdin=io.StringIO("person\nworkload\n"), out=out)
+
+    assert (code, out.getvalue()) == (1, "crashed ConnectionRefusedError\n")
+
+
+@pytest.mark.parametrize(
+    ("stdout", "expected"),
+    [
+        (
+            "answer 200\nroute api\nmarker yes\n",
+            {"answer": "200", "route": "api", "marker": "yes", "unknown": "0"},
+        ),
+        ("event a\nevent b\n", {"event": "b", "unknown": "0"}),
+        ("answer 4o3\nroute A route!\nmarker maybe\nhello\n", {"unknown": "4"}),
+        ("crashed Value_Error\ncrashed ValueError\n", {"crashed": "ValueError", "unknown": "1"}),
+        ("", {"unknown": "0"}),
+    ],
+)
+def test_a_line_outside_the_grammar_is_counted_and_never_kept(canary, stdout, expected):
+    assert canary.verdicts(stdout, 3) == {**expected, "exit": "3"}
 
 
 def test_the_canary_sends_the_plain_prompt_without_a_request_marker(canary, monkeypatch):

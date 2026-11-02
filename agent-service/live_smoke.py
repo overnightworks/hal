@@ -357,13 +357,13 @@ def memory_cell(idle: str | None, peak: str | None) -> Cell:
     )  # fmt: skip
 
 
-def remove_smoke_containers(stack: Stack) -> str | None:
-    """A smoke the host stopped waiting for leaves its `run --rm` container behind. Returns why
-    the clean-up failed, in one line that may still hold a secret, or None."""
+def remove_smoke_containers(stack: Stack, service: str = SMOKE_SERVICE) -> str | None:
+    """A run of `service` the host stopped waiting for leaves its `run --rm` container behind.
+    Returns why the clean-up failed, in one line that may still hold a secret, or None."""
     listed = stack.run([
         "docker", "ps", "-aq",
         "--filter", f"label=com.docker.compose.project={stack.project}",
-        "--filter", f"label=com.docker.compose.service={SMOKE_SERVICE}",
+        "--filter", f"label=com.docker.compose.service={service}",
     ])  # fmt: skip
     if listed.returncode != 0:
         return f"docker ps exited {listed.returncode}: {last_line(listed.stderr)}"
@@ -392,23 +392,19 @@ def paid_turn(
     tokens: Tokens,
     seconds: int = PAID_TURN_SECONDS,
     smoke_arguments: Sequence[str] = (),
+    service: str = SMOKE_SERVICE,
 ) -> PaidTurn:
     try:
         process = stack.compose(
-            "run",
-            "--rm",
-            "-T",
-            SMOKE_SERVICE,
-            *smoke_arguments,
-            stdin=f"{tokens.person}\n{tokens.workload}\n",
-            timeout=seconds,
-        )
+            "run", "--rm", "-T", service, *smoke_arguments,
+            stdin=f"{tokens.person}\n{tokens.workload}\n", timeout=seconds,
+        )  # fmt: skip
     except subprocess.TimeoutExpired:
         process = subprocess.CompletedProcess(
             [], TIMED_OUT, f"the host gave up after {seconds} s", ""
         )
     finally:
-        cleanup = remove_smoke_containers(stack)
+        cleanup = remove_smoke_containers(stack, service)
     return PaidTurn(process, cleanup)
 
 
