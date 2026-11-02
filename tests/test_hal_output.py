@@ -327,6 +327,29 @@ def test_a_fresh_line_error_starts_with_one_bare_newline_on_stderr(
     assert capsys.readouterr().err == "\nerror: interrupted\nnext: run it\n"
 
 
+@pytest.mark.parametrize(("fresh_line", "prefix"), [(True, "\n"), (False, "")])
+def test_a_fresh_line_row_starts_with_one_empty_line_and_the_default_does_not(
+    capsys: pytest.CaptureFixture[str], fresh_line: bool, prefix: str
+) -> None:
+    """A ^C leaves the cursor mid-line, so the row starts on a fresh one."""
+
+    write_row(Row(Glyph.FAILED, "system", Event.CHANGED), fresh_line=fresh_line)
+
+    assert capsys.readouterr().out == f"{prefix}  ✗ system          changed\n"
+
+
+def test_a_fresh_line_row_under_json_log_format_adds_no_empty_line_to_the_stream(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("LOG_FORMAT", "json")
+
+    write_row(Row(Glyph.FAILED, "system", Event.CHANGED), fresh_line=True)
+
+    shown = capsys.readouterr().out
+    assert shown.startswith("<")
+    assert shown.count("\n") == 1
+
+
 @pytest.mark.parametrize(
     ("variable", "value"), [("NO_COLOR", "1"), ("NO_COLOR", "anything"), ("TERM", "dumb")]
 )

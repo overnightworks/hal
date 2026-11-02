@@ -5,7 +5,7 @@
 # prompts with an empty line, prints how many sudo prompts (PROMPTS) and yes prompts (YESES) there were, and exits with
 # the command's exit code.
 # With PROOF_PREAUTH set the command prints @@HAL@@ when hal starts: prompts before it are PREPROMPTS, after it PROMPTS.
-# With PROOF_INTERRUPT set to a regex, the first output matching it is answered with Ctrl-C.
+# With PROOF_INTERRUPT set to a regex, the first output matching it is answered with Ctrl-C, PROOF_INTERRUPT_PRESSES (1 by default) times in one write.
 set timeout 1200
 set prompts 0
 set yeses 0
@@ -14,6 +14,7 @@ set answer [expr {[info exists env(PROOF_ANSWER)] ? $env(PROOF_ANSWER) : "yes"}]
 set answers [dict create eof "\004" interrupt "\003"]
 set preprompts 0
 set hal_started [expr {![info exists env(PROOF_PREAUTH)]}]
+set presses [expr {[info exists env(PROOF_INTERRUPT_PRESSES)] ? $env(PROOF_INTERRUPT_PRESSES) : 1}]
 set interrupted [expr {![info exists env(PROOF_INTERRUPT)]}]
 set interrupt_pattern [expr {[info exists env(PROOF_INTERRUPT)] ? $env(PROOF_INTERRUPT) : "(?!)"}]
 # `su -c` alone starts a session without a controlling terminal, so sudo could not read the password; --pty gives the command one.
@@ -40,7 +41,7 @@ expect {
     }
     -re {@@HAL@@} { set hal_started 1; exp_continue }
     -re $interrupt_pattern {
-        if {!$interrupted} { set interrupted 1; send -- "\003" }
+        if {!$interrupted} { set interrupted 1; send -- [string repeat "\003" $presses] }
         exp_continue
     }
     timeout { puts "TIMEOUT"; exit 124 }
