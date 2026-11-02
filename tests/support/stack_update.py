@@ -23,7 +23,9 @@ FAKE_SYNC = """#!/bin/sh
 echo "$$" > "$FAKE_LOG/sync.pid"
 printf '%s\\n' "$@" > "$FAKE_LOG/sync.args"
 for descriptor in /proc/$$/fd/*; do readlink "$descriptor"; done > "$FAKE_LOG/sync.fds"
-grep -E 'SigBlk|SigIgn' /proc/$$/status > "$FAKE_LOG/sync.mask"
+while IFS= read -r line; do
+    case "$line" in SigBlk:* | SigIgn:*) printf '%s\\n' "$line" ;; esac
+done < /proc/$$/status > "$FAKE_LOG/sync.mask"
 ps -o pgid=,sid= -p $$ > "$FAKE_LOG/sync.ids"
 case "${FAKE_SYNC-}" in
 fail) echo "uv: cannot fetch https://operator:hunter2@pypi.invalid/simple" >&2; exit 1 ;;
