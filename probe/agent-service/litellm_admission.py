@@ -1,4 +1,4 @@
-"""Probe of the API route's bound on parallel requests (#847 cells B0-B6): the stack of litellm.py
+"""Probe of the API route's bound on parallel requests (cells B0-B6): the stack of litellm.py
 (the real service, the one-route front, LiteLLM and the gateway's second entrypoint, against a
 fake Anthropic) with the fake holding requests until the probe releases them. Nothing live and
 nothing paid: the probe refuses to start unless `internet` is internal and holds only the fakes.
@@ -45,11 +45,6 @@ TOO_MANY = 429
 REQUEST_SECONDS = 60
 HOLDER_SECONDS = 120
 UPSTREAM_FAILURE = 529
-ADMITTED_BODY = {
-    "model": "anthropic/opus",
-    "messages": [{"role": "user", "content": "probe"}],
-    "tools": [],
-}
 CLIENT_PROGRAM = """\
 import json, socket, sys, time
 bearer, body = sys.argv[1:3]
@@ -90,11 +85,12 @@ class AdmissionProbe(LitellmProbe):
         return resolved["services"][LITELLM]["environment"]
 
     def client_command(self, name: str) -> list[str]:
+        body = {**self.good_body(), "messages": [{"role": "user", "content": "probe"}]}
         return [
             "docker", "run", "--rm", "-i", "--name", name, "--label", LABEL,
             f"--network={PROJECT}_litellm-api", "--read-only", "--user", "65534:65534",
             "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", self.image,
-            "python", "-I", "-", self.credential, json.dumps(ADMITTED_BODY), ROUTE,
+            "python", "-I", "-", self.credential, json.dumps(body), ROUTE,
         ]  # fmt: skip
 
     def start_client(self) -> subprocess.Popen:
@@ -199,6 +195,7 @@ class AdmissionProbe(LitellmProbe):
         before = len(self.provider_requests())
         statuses = [self.one_request()["status"] for _ in range(bound + 1)]
         expect(TOO_MANY not in statuses, f"B6: a failed request kept its slot: {statuses}")
+        expect(200 not in statuses, f"B6: the steer had no effect: {statuses}")
         sent = len(self.provider_requests()) - before
         expect(sent == bound + 1, f"B6: the fake got {sent} of {bound + 1} requests")
         self.steer_fake()

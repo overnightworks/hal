@@ -308,8 +308,10 @@ has no `[api]` table.
   the service key; a missing or malformed value stops the hook from loading, and the route then
   refuses everything. It counts HTTP requests, not runs (a later tool round of an admitted run can
   be refused), per LiteLLM process in memory (a second worker or replica would multiply it), and
-  all apps share the one key. `probe/agent-service/litellm_admission.py` proves it on the
-  fake-only stack.
+  all apps share the one key. A request whose client left keeps its slot until the provider call
+  ends or 3600 s pass (`cancel_on_disconnect` is off and `config.yaml` sets no `request_timeout`),
+  so stalled calls can refuse the route for up to an hour. `probe/agent-service/litellm_admission.py`
+  proves it on the fake-only stack.
 - **A change reaches LiteLLM only through a recreate** of its container: `config.yaml` (model
   remapping included), `auth.py`, `gate.py`, `start.sh` and the bound are read once at start, and the three
   secrets (provider key, master key and service credential) are files mounted at create time.
@@ -329,10 +331,10 @@ has no `[api]` table.
   path only.
 - **Proof:** `probe/agent-service/litellm.py` runs the whole path on a fake-only stack (its
   docstring gives the command line): the fake Anthropic and a fake issuer sit on `internet`, made
-  internal, and the probe refuses to start otherwise. Re-run it for every LiteLLM, Traefik or Docker
+  internal, and the probe refuses to start otherwise. Re-run it and `litellm_admission.py` (the bound) for every LiteLLM, Traefik or Docker
   bump. `probe/agent-service/litellm_failures.py` drives the failure, key and rotation
   cases on the same stack, `litellm_admission.py` the bound, and `litellm_retention.py` the retention census of the route. The CI job `front` runs the front's table of requests (`tests/test_litellm_front.py`) for
-  every Traefik bump; a LiteLLM bump still needs the probe.
+  every Traefik bump; a LiteLLM bump still needs the probes.
 
 ## Proofs
 
