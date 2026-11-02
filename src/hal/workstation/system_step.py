@@ -123,16 +123,14 @@ def read_events(returncode: int, event_lines: Sequence[str]) -> PlaybookRun:
     return PlaybookFinished(changed) if returncode == 0 else PlaybookUnfinished()
 
 
-def _forget_the_sudo_ticket() -> subprocess.CalledProcessError | None:
+def _forget_the_sudo_ticket() -> StepFailed | None:
     try:
         subprocess.run(["sudo", "-k"], check=True)  # noqa: S607 - sudo is found on PATH by design
     except subprocess.CalledProcessError as failure:
-        return failure
+        unforgotten = StepFailed(f"sudo could not forget its ticket (exit {failure.returncode}) · it may still be valid")
+        unforgotten.__cause__ = failure
+        return unforgotten
     return None
-
-
-def _ticket_sentence(failure: subprocess.CalledProcessError | None) -> str:
-    return "" if failure is None else f"sudo could not forget its ticket (exit {failure.returncode}) · it may still be valid"
 
 
 def run_playbook_as_root(argv: Sequence[str]) -> PlaybookRun:
@@ -148,7 +146,7 @@ def run_playbook_as_root(argv: Sequence[str]) -> PlaybookRun:
     """
     environment = {name: value for name, value in os.environ.items() if not name.startswith("ANSIBLE_")}
     event_lines: list[str] = []
-    unforgotten: subprocess.CalledProcessError | None = None
+    unforgotten: StepFailed | None = None
     try:
         with subprocess.Popen(["sudo", "env", "PYTHONDONTWRITEBYTECODE=1", "sh", "-c", 'exec "$@" 2>&1', "sh", *argv], stdout=subprocess.PIPE, text=True, cwd=PLAYBOOK.parent, env=environment) as playbook:  # noqa: S603, S607 - argv is the packaged playbook and sudo is found on PATH by design
             try:
@@ -160,9 +158,9 @@ def run_playbook_as_root(argv: Sequence[str]) -> PlaybookRun:
             finally:
                 unforgotten = _forget_the_sudo_ticket()
                 if unforgotten is not None and not isinstance(sys.exception(), KeyboardInterrupt):
-                    raise StepFailed(_ticket_sentence(unforgotten)) from unforgotten
+                    raise unforgotten
     except KeyboardInterrupt as ctrl_c:
-        raise SystemStepInterrupted(_ticket_sentence(unforgotten)) from ctrl_c
+        raise SystemStepInterrupted("" if unforgotten is None else str(unforgotten)) from ctrl_c
     return read_events(playbook.returncode, event_lines)
 
 
