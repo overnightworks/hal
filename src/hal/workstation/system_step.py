@@ -159,7 +159,7 @@ def run_playbook_as_root(argv: Sequence[str]) -> PlaybookRun:
                         write_line(line, end="", flush=True)
             finally:
                 unforgotten = _forget_the_sudo_ticket()
-                if unforgotten and not isinstance(sys.exception(), KeyboardInterrupt):
+                if unforgotten is not None and not isinstance(sys.exception(), KeyboardInterrupt):
                     raise StepFailed(_ticket_sentence(unforgotten)) from unforgotten
     except KeyboardInterrupt as ctrl_c:
         raise SystemStepInterrupted(_ticket_sentence(unforgotten)) from ctrl_c
