@@ -386,9 +386,6 @@ class FollowerPlan:
     digests: Digests
     gate: Gate
 
-    def recreated(self) -> str:
-        return f"{self.service} is recreated and runs the checked-out {', '.join(self.digests)}"
-
 
 def plan_followers(
     config: Mapping[str, Any],
