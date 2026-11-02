@@ -97,7 +97,7 @@ COMMAND_TIMEOUT_SECONDS = 120
 def run_command(argv: Sequence[str]) -> str | None:
     """Run an external command; None when the tool is missing, hangs or fails."""
     try:
-        completed = subprocess.run(argv, capture_output=True, text=True, timeout=COMMAND_TIMEOUT_SECONDS, check=False)
+        completed = subprocess.run(argv, capture_output=True, text=True, timeout=COMMAND_TIMEOUT_SECONDS, check=False)  # noqa: S603 - argv comes from the workstation checks and no shell runs
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return None
     return completed.stdout if completed.returncode == 0 else None

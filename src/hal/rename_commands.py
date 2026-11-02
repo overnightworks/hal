@@ -147,7 +147,7 @@ class Halfway(NamedTuple):
 
 def _output_of(argv: Sequence[str]) -> str:
     environment = {name: value for name, value in os.environ.items() if not name.startswith("GIT_")}
-    return subprocess.run(
+    return subprocess.run(  # noqa: S603 - argv is built by the program itself and no shell runs
         argv, capture_output=True, text=True, check=True, stdin=subprocess.DEVNULL, env=environment
     ).stdout  # fmt: skip
 
@@ -171,14 +171,14 @@ def processes_inside(roots: Sequence[Path]) -> list[RunningProcess]:
 
 
 def _github_knows(name: str) -> bool:
-    return subprocess.run(
-        ["gh", "api", f"repos/{OWNER}/{name}"], capture_output=True, stdin=subprocess.DEVNULL
+    return subprocess.run(  # noqa: S603 - argv is built by the program itself and no shell runs
+        ["gh", "api", f"repos/{OWNER}/{name}"], capture_output=True, stdin=subprocess.DEVNULL  # noqa: S607 - gh is found on PATH by design
     ).returncode == 0  # fmt: skip
 
 
 def _uv(project: Path, arguments: tuple[str, ...]) -> None:
-    subprocess.run(
-        ["uv", *arguments],
+    subprocess.run(  # noqa: S603 - argv is built by the program itself and no shell runs
+        ["uv", *arguments],  # noqa: S607 - uv is found on PATH by design
         cwd=project, check=True, stdin=subprocess.DEVNULL,
     )  # fmt: skip
 
@@ -186,7 +186,7 @@ def _uv(project: Path, arguments: tuple[str, ...]) -> None:
 def _uv_tools() -> str:
     try:
         return subprocess.run(
-            ["uv", "tool", "list", "--show-version-specifiers"],
+            ["uv", "tool", "list", "--show-version-specifiers"],  # noqa: S607 - uv is found on PATH by design
             capture_output=True, text=True, stdin=subprocess.DEVNULL,
         ).stdout  # fmt: skip
     except FileNotFoundError:  # no uv, no uv tools
