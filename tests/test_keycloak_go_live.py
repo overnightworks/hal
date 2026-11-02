@@ -25,6 +25,7 @@ from hal.stack import switches
 SCRIPT = Path(__file__).resolve().parents[1] / "keycloak" / "go-live"
 SECRET_FILES = ("db-password", "config-cli-secret", "bootstrap-admin-password")
 OVERLAY = "keycloak/bootstrap.compose.yaml"
+ADMIN_FRONTEND = re.search(r":(/\S+):ro", (SCRIPT.parents[1] / OVERLAY).read_text())[1]
 OTP_ADMIN = "alice"
 SENTINEL_PASSWORD = "sentinel-first-password-7f3a"
 
@@ -89,8 +90,7 @@ class Keycloak:
 
     def changed_something(self) -> bool:
         return any(
-            {"up", "run", "--force-recreate"} & set(command)
-            or "/opt/edge/admin-frontend.sh" in command
+            {"up", "run", "--force-recreate"} & set(command) or ADMIN_FRONTEND in command
             for command in self.commands
         )
 
@@ -170,7 +170,7 @@ class Keycloak:
         return self.done()
 
     def compose_exec(self, command: list[str]):
-        if "/opt/edge/admin-frontend.sh" in command:
+        if ADMIN_FRONTEND in command:
             assert OVERLAY in command
             self.master_moved = True
             return self.done()
@@ -502,7 +502,7 @@ def test_a_run_whose_apply_failed_applies_again_and_goes_on(go_live, keycloak, s
     assert go_live.run() == 0
 
     assert keycloak.import_completed
-    assert not any("/opt/edge/admin-frontend.sh" in command for command in keycloak.commands)
+    assert not any(ADMIN_FRONTEND in command for command in keycloak.commands)
     assert (
         len(session.asked) == 3
     )  # the backup question of the first run, name and Enter of the second
@@ -601,7 +601,7 @@ def test_a_run_stopped_after_the_apply_never_moves_master_again_and_starts_the_e
     assert go_live.run() == 0
 
     assert keycloak.edge_up
-    assert not any("/opt/edge/admin-frontend.sh" in command for command in keycloak.commands)
+    assert not any(ADMIN_FRONTEND in command for command in keycloak.commands)
     assert len(session.asked) == 3
 
 

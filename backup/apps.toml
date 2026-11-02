@@ -17,7 +17,7 @@ audio_reference_column = "mp3_path"  # relative to the audio volume's root
 
 # A DB-only app: no volume, so its snapshot holds the dump and the manifest only.
 [app.keycloak]
-compose_project = "edge"
+compose_project = "hal"
 db_service = "keycloak-db"
 dump = "pg_dump_custom"
 db_user = "keycloak"

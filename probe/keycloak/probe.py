@@ -618,9 +618,9 @@ class Stack:
         return output
 
     def move_master_to_admin_entrypoint(self) -> None:
-        result = self.compose(
-            "exec", "-T", "keycloak", "/opt/edge/admin-frontend.sh", bootstrap=True
-        )
+        overlay = (REPO / "keycloak" / "bootstrap.compose.yaml").read_text()
+        script = re.search(r":(/\S+/admin-frontend\.sh):ro", overlay)[1]
+        result = self.compose("exec", "-T", "keycloak", script, bootstrap=True)
         output = result.stdout + result.stderr
         expect(
             result.returncode == 0, f"admin-frontend.sh exited {result.returncode}:\n{tail(output)}"
@@ -1029,7 +1029,7 @@ class RealmStepStand:
         """As Compose resolves it, but config-cli's entrypoint is the stand's copy, not REPO's."""
         config = self.engine.resolved_configuration()
         for mount in config["services"][reconcile.CONFIG_CLI]["volumes"]:
-            if mount["target"] == "/opt/edge/entrypoint.sh":
+            if mount["target"].endswith(f"/{ENTRYPOINT_FILE}"):
                 mount["source"] = str(self.repository / "keycloak" / ENTRYPOINT_FILE)
         return config
 
