@@ -101,6 +101,14 @@ system_row_names_every_counted_task() {  # system_row_names_every_counted_task <
     return
 }
 
+system_row_count_is_the_recap_changed() {  # system_row_count_is_the_recap_changed <log>: the system row's count is the recap's changed= of the same -v run
+    local log=$1 count recap
+    count=$(sed -nE 's/^  [^ ]+ system +will change +([0-9]+) tasks?\r?$/\1/p' "$EVIDENCE/$log.log")
+    recap=$(sed -nE 's/^ *[^ ]+ +: ok=[0-9]+ +changed=([0-9]+) .*/\1/p' "$EVIDENCE/$log.log" | tr -d '\r')
+    [[ -n $count && $count == "$recap" ]]
+    return
+}
+
 plan_row_in_log() {  # plan_row_in_log <log> <row> <event regex>: a row of the plan, before the yes prompt
     local log=$1 row=$2 event=$3
     before_the_yes "$log" | grep -qP -- "^  [^ ]+ $row +$event( |\\r?$)"
@@ -373,12 +381,12 @@ cell_10() {  # the lists are fresh as on the PC: a dry run cannot update them, a
     verdict 10 "it names each task that would change under the row, and shows no Ansible text" \
         'row_in_log cell10 system "will change +[0-9]+ tasks?" && system_row_names_every_counted_task cell10 && ! grep -qE "TASK \[|PLAY RECAP|^\+\+\+ " "$EVIDENCE/cell10.log"'
     verdict 10 "with -v it shows would change, with the diff indented and without task names under the row" \
-        'row_in_log cell10-verbose system "will change +[0-9]+ tasks?" && grep -qE "^    \+\+\+ " "$EVIDENCE/cell10-verbose.log" && [ -z "$(system_row_details cell10-verbose)" ]'
+        'row_in_log cell10-verbose system "will change +[0-9]+ tasks?" && system_row_count_is_the_recap_changed cell10-verbose && grep -qE "^    \+\+\+ " "$EVIDENCE/cell10-verbose.log" && [ -z "$(system_row_details cell10-verbose)" ]'
     verdict DK4 "the dry run on a Docker still on json-file shows the log-driver line and the restart as changes, and writes nothing" \
         'in_log cell10-verbose "+    \"log-driver\": \"journald\"" && system_row_details cell10 | grep -qx "Restart Docker" && [ ! -e "$DAEMON_JSON" ]'
     at_coloured_terminal cell10-colour "export TERM=xterm; $HAL_BIN setup --dry-run"
     verdict C1 "a dry run at a terminal colours its rows and its verdict; the run with NO_COLOR above has no escape code" \
-        'grep -qP "^  \x1b\[[0-9;]+m\S+\x1b\[0m system " "$EVIDENCE/cell10-colour.log" && grep -qP "^\x1b\[1;[0-9;]+m\S+ setup plan" "$EVIDENCE/cell10-colour.log" && ! grep -qP "\x1b" "$EVIDENCE/cell10.log"'
+        'grep -qP "(^|\x1b\[K)  \x1b\[[0-9;]+m\S+\x1b\[0m system " "$EVIDENCE/cell10-colour.log" && grep -qP "^\x1b\[1;[0-9;]+m\S+ setup plan" "$EVIDENCE/cell10-colour.log" && ! grep -qP "\x1b" "$EVIDENCE/cell10.log"'
     return
 }
 
@@ -1794,19 +1802,28 @@ active_sudo_is() {  # active_sudo_is <alternative>
     return
 }
 
-at_sudo_terminal() {  # at_sudo_terminal <log> <ticket: none|present> <hal args>: hal at a terminal, then the sudo ticket asked for in the same session
+at_sudo_terminal() {  # at_sudo_terminal <log> <ticket: none|present> <hal args>: hal at a terminal (coloured with PROOF_COLOURED, else without colour), then the sudo ticket asked for in the same session
     # `sudo -k` first makes "none" true; "present" answers `sudo -v` first, counted apart from hal's prompts. `trap : INT` catches
     # Ctrl-C without ignoring it, so hal and sudo still get it and the shell survives to print TICKET=.
-    local log=$1 ticket=$2 arguments=$3 preauth=""
+    local log=$1 ticket=$2 arguments=$3 preauth="" terminal=at_terminal terminfo=""
     [[ $ticket == present ]] && preauth="sudo -v; "
-    PROOF_PREAUTH=1 at_terminal "$log" \
-        "trap : INT; sudo -k; ${preauth}echo @@HAL@@; $HAL_BIN $arguments; code=\$?; sudo -n true; echo TICKET=\$?; exit \$code"
+    [[ -n ${PROOF_COLOURED:-} ]] && { terminal=at_coloured_terminal; terminfo="export TERM=xterm; "; }
+    PROOF_PREAUTH=1 "$terminal" "$log" \
+        "${terminfo}trap : INT; sudo -k; ${preauth}echo @@HAL@@; $HAL_BIN $arguments; code=\$?; sudo -n true; echo TICKET=\$?; exit \$code"
     return
 }
 
 hal_prompts_are() {  # hal_prompts_are <log> <count> [<count before hal>]
     local log=$1 count=$2 count_before=${3:-}
     grep -qx "PROMPTS=$count" "$EVIDENCE/$log.log" && { [[ -z $count_before ]] || grep -qx "PREPROMPTS=$count_before" "$EVIDENCE/$log.log"; }
+    return
+}
+
+frame_after_the_prompt() {  # frame_after_the_prompt <log>: the first live line frame stands after the system's own password prompt
+    local log=$1 prompt frame
+    prompt=$(grep -obaP '\[sudo[^]]*\] [Pp]ass' "$EVIDENCE/$log.log" | head -n 1 | cut -d: -f1)
+    frame=$(grep -obaP '\x1b\[K.*system +[A-Z]' "$EVIDENCE/$log.log" | head -n 1 | cut -d: -f1)
+    [[ -n $prompt && -n $frame && $frame -gt $prompt ]]
     return
 }
 
@@ -1869,6 +1886,24 @@ cell_p_interrupted() {  # cell_p_interrupted <cell> <log> <ticket> [<presses>]: 
     return
 }
 
+cell_p_live_interrupted() {  # cell_p_live_interrupted <cell> <log>: Ctrl-C at the first live line frame, without -v at a coloured terminal
+    local cell=$1 log=$2 code
+    PROOF_COLOURED=1 PROOF_INTERRUPT='system +[A-Z]' at_sudo_terminal "$log" none setup
+    code=$?
+    verdict "$cell" "Ctrl-C at the live line: one prompt, the frame after it, the row, the pair, 130, the ticket gone" \
+        "[ \$code -eq 130 ] && active_sudo_is \"\$sudo_alternative\" && hal_prompts_are $log 1 && frame_after_the_prompt $log && row_in_log $log system interrupted && in_log $log 'error: setup stopped at system · /etc may be partial' && in_log $log 'next: hal setup' && ticket_is_gone $log"
+    return
+}
+
+cell_p_live_applies() {  # cell_p_live_applies <cell> <log>: an apply without -v at a coloured terminal shows the live line and never the password
+    local cell=$1 log=$2 code
+    PROOF_COLOURED=1 at_sudo_terminal "$log" none setup
+    code=$?
+    verdict "$cell" "the apply shows live line frames after the one prompt, the row, and the password is in no line" \
+        "[ \$code -eq 0 ] && active_sudo_is \"\$sudo_alternative\" && hal_prompts_are $log 1 && frame_after_the_prompt $log && row_in_log $log system '(changed|unchanged)' && ! grep -qaF -- \"\$PROOF_PASSWORD\" \"\$EVIDENCE/$log.log\" && ticket_is_gone $log"
+    return
+}
+
 cell_p_dry_run() {  # cell_p_dry_run <cell> <log> <ticket> <prompts>
     local cell=$1 log=$2 ticket=$3 prompts=$4 code
     at_sudo_terminal "$log" "$ticket" "setup --dry-run -v"
@@ -1918,6 +1953,9 @@ cells_sudo() {  # cells_sudo <suffix> <alternative>: P1-P10 under one variant of
     cell_p_interrupted "P7$suffix" "p7$suffix" present
     cell_p_interrupted "P6d$suffix" "p6d$suffix" none 2
     at_sudo_terminal "p-converge$suffix" none "$APPLY_ARGUMENTS"
+    cell_p_live_applies "S4$suffix" "s4$suffix"
+    cell_p_live_interrupted "S3$suffix" "s3$suffix"
+    at_sudo_terminal "p-converge-live$suffix" none "$APPLY_ARGUMENTS"
     cell_p_dry_run "P8$suffix" "p8$suffix" none 1
     cell_p_dry_run "P9$suffix" "p9$suffix" present 0
     cell_p_config_of_root "P10$suffix" "p10$suffix"
