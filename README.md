@@ -47,8 +47,8 @@ in `src/hal/grammar.py`, the fleet rules for command lines are overnightworks/qu
 renamed repository's clones on this PC, asks one `yes` before it moves, and ends 0, 1 (declined or
 findings), 3 or 4 ([docs/naming.md](docs/naming.md), P1).
 `hal apply` ends 0, 1 (declined), 4 (a guard said no) or 3 (cannot plan, a failed step, a partial run;
-the printed line says which). Of the six stack commands, `hal update` and `hal apply` keep the
-grammar's codes; `stop`, `start`, `offline`, `online` and `hal setup` deviate from it (Exception E
+the printed line says which), and 2 or 130 as the grammar says. Of the six stack commands, `hal update`
+keeps the grammar's codes; `hal apply` deviates only by Exception E2, E3 and the publish's 3; `stop`, `start`, `offline`, `online` and `hal setup` deviate from it (Exception E
 in [docs/stack.md](docs/stack.md)); `hal setup` prints five rows, a verdict
 and, when it stops, an `error:`/`next:` pair, asks one `yes` before it acts (`--dry-run` only shows), and ends 0, 1 (declined), 3 or 4 (no terminal).
 

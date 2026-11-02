@@ -624,11 +624,11 @@ class Probe(McpNetworks, TraefikMcpFollows):
 
     def hal(
         self, copy: Path, *arguments: str, terminal: bool, fails: bool = False,
-        typed: bytes = b"yes\n",
+        typed: bytes = b"yes\n", declined: bool = False,
     ) -> str:  # fmt: skip
         if arguments[0] in ("apply", "start"):
             self.guard.expect(edge_copy.copy_compose_command(copy), once=False)
-        exit_code = HAL_FAILURE if fails else 0
+        exit_code = edge_copy.HAL_DECLINED if declined else HAL_FAILURE if fails else 0
         return run_hal(
             copy, self.environment, *arguments, terminal=terminal, exit_code=exit_code, typed=typed
         )
@@ -766,7 +766,7 @@ class Probe(McpNetworks, TraefikMcpFollows):
     def proof_12_apply_runs_the_setup(self) -> None:
         copy = self.start_without_keys()
 
-        out = self.hal(copy, "apply", "--local", terminal=True, fails=True, typed=b"no\n")
+        out = self.hal(copy, "apply", "--local", terminal=True, declined=True, typed=b"no\n")
         expect("aborted, nothing changed" in out, f"a no said: {out[-160:]}")  # (i)
         expect(not self.secrets_dir.exists(), "keys exist after a no")
         expect(not self.volumes_that_exist(), "a volume exists after a no")

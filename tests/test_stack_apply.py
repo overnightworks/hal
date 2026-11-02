@@ -633,7 +633,7 @@ def test_an_interrupted_setup_says_that_keys_may_exist_and_how_to_go_on(
     assert err.splitlines()[-1] == "next: hal apply"
 
 
-def test_a_setup_that_leaves_the_check_failing_is_exit_1(
+def test_a_setup_that_leaves_the_check_failing_is_a_guard_refusal(
     switch, scripted, missing_setup, setup_run
 ):
     """#69 rule 5: --check still 1 after the setup."""
@@ -982,15 +982,15 @@ def git_that_breaks(_tree, _arguments, _profile):
     ("arrange", "outcome"),
     [
         pytest.param({}, 0, id="exit 0"),
-        pytest.param({"answer": "no"}, apply.ApplyExit.DECLINED, id="exit 1"),
-        pytest.param({"git": git_that_is_missing}, apply.ApplyExit.GUARD_REFUSED, id="G25"),
+        pytest.param({"answer": "no"}, apply.ApplyExit.DECLINED, id="declined"),
+        pytest.param({"git": git_that_is_missing}, apply.ApplyExit.CANNOT_PLAN, id="G25"),
         pytest.param({"git": git_that_breaks}, RuntimeError, id="an exception"),
         pytest.param({"while_prompt_waits": interrupted_at_the_prompt}, KeyboardInterrupt,
                      id="Ctrl-C"),
     ],
 )  # fmt: skip
 def test_the_lock_is_free_again_however_the_apply_ends(switch, state, arrange, outcome):
-    """#95 rule 4, G9 and G25: after exit 0, 1, 2, an exception or Ctrl-C the lock is free."""
+    """#95 rule 4, G9 and G25: after an end of any exit, an exception or Ctrl-C the lock is free."""
     if isinstance(outcome, int):
         exit_code, _, _ = switch(**arrange)
         assert exit_code == outcome
@@ -1002,10 +1002,10 @@ def test_the_lock_is_free_again_however_the_apply_ends(switch, state, arrange, o
 
 
 def test_a_missing_git_is_one_line(switch):
-    """#95 G25: git missing is exit 2 with one line."""
+    """#95 G25: git missing is a cannot-plan end with one line."""
     exit_code, _, err = switch(git=git_that_is_missing)
 
-    assert exit_code == apply.ApplyExit.GUARD_REFUSED
+    assert exit_code == apply.ApplyExit.CANNOT_PLAN
     assert err.splitlines() == [
         "error: cannot read the live checkout, cannot run git (No such file or directory)"
     ]
@@ -1014,8 +1014,7 @@ def test_a_missing_git_is_one_line(switch):
 def test_a_lock_that_flock_refuses_is_exit_2_and_leaves_no_descriptor_open(
     switch, state, scripted_git, monkeypatch
 ):
-    """#95 rule 4: a flock error other than contention (ENOLCK) is exit 2 with one line, and the
-    descriptor opened for `apply.lock` is closed again."""
+    """#95 rule 4: a flock error other than contention (ENOLCK) is one line and closes the fd."""
     refused = refuse_flock(monkeypatch, OSError(errno.ENOLCK, os.strerror(errno.ENOLCK)))
 
     exit_code, _, err = switch()
@@ -1250,7 +1249,8 @@ def test_only_the_first_failing_guard_speaks(
         )
 
     assert [line for line in GUARD_LINES if line in err] == [GUARD_LINES[first]]
-    assert exit_code == apply.ApplyExit(2 if first == 5 else 4)
+    ends = apply.ApplyExit
+    assert exit_code == (ends.CANNOT_PLAN if first == 5 else ends.GUARD_REFUSED)
     assert scripted.calls == []
 
 

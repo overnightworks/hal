@@ -52,7 +52,7 @@ sys.path.insert(0, str(REPO / "src"))  # edge's own facts; its modules need only
 
 import edge_copy  # noqa: E402
 from alias_routing import AliasRouting  # noqa: E402
-from edge_copy import HAL_FAILURE, HAL_OK, ProbeFailed, expect  # noqa: E402
+from edge_copy import HAL_DECLINED, HAL_FAILURE, HAL_OK, ProbeFailed, expect  # noqa: E402
 from emergency_switch import EmergencySwitch  # noqa: E402
 from switched_off import SwitchedOff  # noqa: E402
 
@@ -467,7 +467,7 @@ class Probe:
     def cell_a7_declined(self) -> None:
         self.release(TAGS["a7"])
         before, head, record = self.only()["id"], self.head(), self.record.read_text()
-        out = self.apply(typed=b"no\n", exit_code=HAL_FAILURE)
+        out = self.apply(typed=b"no\n", exit_code=HAL_DECLINED)
         expect("aborted, nothing changed" in out, out[-200:])
         expect(
             (self.only()["id"], self.head(), self.record.read_text()) == (before, head, record),
@@ -488,7 +488,7 @@ class Probe:
             "the old state changed",
         )
         self.serves(TAGS["a3"])
-        again = self.apply(typed=b"no\n", exit_code=HAL_FAILURE)
+        again = self.apply(typed=b"no\n", exit_code=HAL_DECLINED)
         expect(f"update to {tag} did not finish" in again, again[-300:])
         write_line("A9 held: a failed build keeps the old container and record; the plan says so")
 
@@ -499,7 +499,7 @@ class Probe:
         expect(f"not healthy at {tag} after {HEALTH_WAIT_SECONDS}s" in out, out[-300:])
         expect(self.deployed()["tag"] == TAGS["a3"], "the record moved")
         expect(self.ask("/version")[0] == 404, "Traefik still routes an unhealthy container")
-        again = self.apply(typed=b"no\n", exit_code=HAL_FAILURE)
+        again = self.apply(typed=b"no\n", exit_code=HAL_DECLINED)
         expect(
             f"update {TAGS['a3']} → {tag} · update to {tag} did not finish" in again,
             again[-300:],
@@ -536,7 +536,7 @@ class Probe:
         tag = TAGS["a12"]
         self.release(tag)
         self.record.unlink()
-        out = self.apply(typed=b"no\n", exit_code=HAL_FAILURE)
+        out = self.apply(typed=b"no\n", exit_code=HAL_DECLINED)
         expect(
             re.search(rf"\+ {self.key}\s+switch on\s+{tag} · into ~/srv/{self.key}", out),
             out[-300:],
@@ -574,7 +574,7 @@ class Probe:
                 "setup",
             )
             previous = self.deployed()["tag"]
-            out = self.apply(typed=b"no\n", exit_code=HAL_FAILURE)
+            out = self.apply(typed=b"no\n", exit_code=HAL_DECLINED)
             expect(f"update to {tag} did not finish" in out, out[-400:])
             expect("nothing to change" not in out, out[-400:])
             expect(

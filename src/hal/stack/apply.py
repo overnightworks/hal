@@ -117,7 +117,7 @@ _PRIVATE_FILE = 0o600
 
 class ApplyExit(IntEnum):
     APPLIED_OR_NOTHING = 0
-    REFUSED = 1
+    REFUSED = 1  # inside `apply` it means failed or partial; the emergency verbs share it
     CANNOT_PLAN = 2
     DECLINED = 3
     GUARD_REFUSED = 4
@@ -234,8 +234,8 @@ def apply_local(
         return ApplyExit.GUARD_REFUSED
     try:
         live = checkout.Git(repository, git)
-        if not on_clean_main(live):
-            return ApplyExit.GUARD_REFUSED
+        if refusal := refused_off_clean_main(live):
+            return ApplyExit.CANNOT_PLAN if refusal.cannot_tell else ApplyExit.GUARD_REFUSED
         if (origin := fetched(live, write_error)) is None or _waits_on_origin(origin):
             return ApplyExit.CANNOT_PLAN
         if not _environment_ready(repository, ensure_environment):
@@ -289,16 +289,17 @@ def cannot_take_lock_line(state_directory: Path, error: OSError) -> str:
     return f"cannot take {state_directory / APPLY_LOCK} ({error.strerror})"
 
 
-def on_clean_main(git: checkout.Git) -> bool:
-    """True on a born `main` with nothing changed; else False, after saying why (#95 rules 5, 6)."""
+def refused_off_clean_main(git: checkout.Git) -> checkout.Refusal | None:
+    """None on a born `main` with nothing changed; else the refusal, after saying why (#95
+    rules 5, 6)."""
     if (refusal := checkout.not_clean_main(git)) is None:
-        return True
+        return None
     if refusal.paths:
         write_row(local_changes_row(refusal.paths))
         write_error(refusal.message, f"git -C {checkout.LIVE_CHECKOUT} status")
     else:
         write_error(refusal.message)
-    return False
+    return refusal
 
 
 def _waits_on_origin(origin: checkout.Origin) -> bool:
@@ -404,8 +405,8 @@ def _missing_setups(planned: Plan, repository: Path, check: setup.SetupCheck) ->
 
 
 def _refusal(missing: Sequence[MissingSetup], planned: Plan, setups_ran: bool) -> int | None:
-    """REFUSED when a unit or app a stop keeps off still runs, or, after the setups ran, a unit
-    is still not set up: none is started."""
+    """GUARD_REFUSED when a unit or app a stop keeps off still runs, or, after the setups ran, a
+    unit is still not set up: none is started."""
     still_running = [
         *(still_runs_row(item.unit.key, item.check_line) for item in missing if item.kept_stopped),
         *(still_runs_row(key, "") for key in planned.app_plans.switched_off_still_running),

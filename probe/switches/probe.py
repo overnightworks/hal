@@ -354,7 +354,7 @@ class Probe:
         before = self.container_ids()["traefik"]
         traefik_yml.write_text(published + HARMLESS_EDIT)
         try:
-            out = self.hal("apply", "--local", terminal=True, exit_code=edge_copy.HAL_FAILURE)
+            out = self.hal("apply", "--local", terminal=True, exit_code=edge_copy.HAL_REFUSED)
         finally:
             traefik_yml.write_text(published)
         expect(
