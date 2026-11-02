@@ -579,12 +579,14 @@ their placeholders filled, to:
 
 - `/etc/systemd/system/cloudflared.service`, the clean base unit;
 - `/etc/systemd/system/cloudflared.service.d/20-nonroot.conf` and
-  `30-edge-global-stop.conf`, so the tunnel stays down after a reboot while
-  `~/.local/state/edge/global-stop` exists;
-- `/etc/polkit-1/rules.d/10-edge-cloudflared-stop.rules`, so you may *stop*
-  `cloudflared.service` without a password, and only stop.
+  `30-edge-global-stop.conf` and `30-hal-global-stop.conf`, so the tunnel stays
+  down after a reboot while `~/.local/state/edge/global-stop` or
+  `~/.local/state/hal/global-stop` exists;
+- `/etc/polkit-1/rules.d/10-edge-cloudflared-stop.rules` and
+  `10-hal-cloudflared-stop.rules`, so you may *stop* `cloudflared.service`
+  without a password, and only stop.
 
-All four are root-owned, mode 644. `@HOME@` and `@OPERATOR_USER@` are your
+All six are root-owned, mode 644. `@HOME@` and `@OPERATOR_USER@` are your
 home and your user; `@TUNNEL_ID@` is `tunnel:` in `/etc/cloudflared/config.yml`,
 and without it the step fails before writing anything. Once the new base unit
 is in place, `10-root-binary.conf` is deleted. Every run of `hal setup` reloads systemd; `--dry-run` does not.
@@ -661,11 +663,13 @@ below and rsyslog's conffiles are home's own and are not backed up. `/etc/docker
   `10-root-binary.conf` and `20-nonroot.conf` from the backup (their content
   before the first run is in the inventory of #9). Restore
   `30-edge-global-stop.conf` from the backup too, or remove it when the backup
-  has none, because the step created it; until then the global-stop condition
-  stays in force. Then run `sudo systemctl daemon-reload`, and remove
-  `/etc/polkit-1/rules.d/10-edge-cloudflared-stop.rules`.
+  has none, because the step created it, and remove `30-hal-global-stop.conf`;
+  until then the global-stop condition stays in force. Then run
+  `sudo systemctl daemon-reload`, and remove
+  `/etc/polkit-1/rules.d/10-edge-cloudflared-stop.rules` and
+  `10-hal-cloudflared-stop.rules`.
 - **A failed `hal setup`.** Files are copied in the order above, so some may already be in place, and
-  `10-root-binary.conf` is deleted only after all four are. The `daemon-reload` handler does not run
+  `10-root-binary.conf` is deleted only after all six are. The `daemon-reload` handler does not run
   after a failure, so systemd may still run its old configuration. Two cases:
   - A failure while copying leaves some files in place and `10-root-binary.conf` still there. Run
     `hal setup` again: it copies the rest, deletes the drop-in and reloads systemd.

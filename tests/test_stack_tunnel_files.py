@@ -7,16 +7,21 @@ import re
 from pathlib import Path
 
 import pytest
+import yaml
 
 from hal.stack import switches, tunnel
+from hal.workstation.layout import Layout
 
 TUNNEL_FILES = Path(__file__).resolve().parents[1] / "tunnel"
 BASE_UNIT = TUNNEL_FILES / tunnel.CLOUDFLARED_UNIT
 DROP_INS = TUNNEL_FILES / f"{tunnel.CLOUDFLARED_UNIT}.d"
 NONROOT_DROP_IN = DROP_INS / "20-nonroot.conf"
 BOOT_DROP_IN = DROP_INS / tunnel.BOOT_DROP_IN
-POLKIT_RULE = TUNNEL_FILES / "polkit" / "10-edge-cloudflared-stop.rules"
+HAL_DROP_IN = DROP_INS / "30-hal-global-stop.conf"
+POLKIT_RULES = tuple(sorted((TUNNEL_FILES / "polkit").glob("*.rules")))
 ALL_FILES = tuple(sorted(path for path in TUNNEL_FILES.rglob("*") if path.is_file()))
+
+PLAYBOOK = Path(__file__).resolve().parents[1] / "src/hal/workstation/system/playbook.yml"
 
 PLACEHOLDER = re.compile(r"@[A-Z_]+@")
 
@@ -32,12 +37,19 @@ def key_value_lines(text: str) -> list[str]:
     return [line for line in text.splitlines() if "=" in line and not line.startswith("#")]
 
 
+def test_every_shipped_tunnel_file_is_installed_and_every_installed_file_is_shipped():
+    """The directory against the playbook's `system_files`, both read: a file nobody installs and an
+    entry without a file are both red."""
+    installed = {
+        entry["src"] for entry in yaml.safe_load(PLAYBOOK.read_text())[0]["vars"]["system_files"]
+    }
+    shipped = {path.relative_to(TUNNEL_FILES).as_posix() for path in ALL_FILES}
+    assert shipped == installed
+
+
 def test_the_boot_drop_in_carries_the_name_edge_checks_for():
     """#76 rule 3, cell 1."""
-    assert sorted(path.name for path in DROP_INS.iterdir()) == [
-        NONROOT_DROP_IN.name,
-        tunnel.BOOT_DROP_IN,
-    ]
+    assert BOOT_DROP_IN.is_file()
 
 
 def test_the_boot_drop_in_skips_the_tunnel_while_the_global_stop_exists(tmp_path, monkeypatch):
@@ -52,9 +64,26 @@ def test_the_boot_drop_in_skips_the_tunnel_while_the_global_stop_exists(tmp_path
     assert "[Unit]" in rendered.splitlines()
 
 
-def test_the_polkit_rule_grants_only_the_operators_stop_of_the_tunnel():
+def test_the_hal_drop_in_names_the_marker_below_hal_state_dir(tmp_path):
+    """#858 A1: rendered with a temporary home, the condition names `hal_state_dir`."""
+    state_dir = Layout(tmp_path).hal_state_dir
+    rendered = render(HAL_DROP_IN.read_text(), {"HOME": str(tmp_path)})
+    assert key_value_lines(rendered) == [
+        f"ConditionPathExists=!{state_dir / switches.GLOBAL_STOP_FILE}",
+        f"RequiresMountsFor={state_dir}",
+    ]
+    assert "[Unit]" in rendered.splitlines()
+
+
+def test_the_polkit_rules_exist():
+    assert POLKIT_RULES
+
+
+@pytest.mark.parametrize("path", POLKIT_RULES, ids=lambda path: path.name)
+def test_the_polkit_rule_grants_only_the_operators_stop_of_the_tunnel(path):
     """#76 rule 1, rule 3, cell 3."""
-    rule = POLKIT_RULE.read_text()
+    rule = path.read_text()
+    assert "||" not in rule
     for condition in (
         f'action.id == "{tunnel.MANAGE_UNITS_ACTION}"',
         f'action.lookup("unit") == "{tunnel.CLOUDFLARED_UNIT}"',
@@ -68,10 +97,11 @@ def test_the_polkit_rule_grants_only_the_operators_stop_of_the_tunnel():
     assert "subject.active" not in rule
 
 
-def test_the_polkit_rule_is_es5():
+@pytest.mark.parametrize("path", POLKIT_RULES, ids=lambda path: path.name)
+def test_the_polkit_rule_is_es5(path):
     """#76 rule 1, cell 4: polkit 124 runs its rules on Duktape."""
     code = "\n".join(
-        line for line in POLKIT_RULE.read_text().splitlines() if not line.lstrip().startswith("//")
+        line for line in path.read_text().splitlines() if not line.lstrip().startswith("//")
     )
     assert "=>" not in code
     assert not re.search(r"\b(let|const)\b", code)
