@@ -226,7 +226,8 @@ def test_apply_with_an_app_failing_health_is_exit_3_and_publishes_nothing(hal, a
     result = hal("apply", answers=("yes",))
 
     assert result.exit_code == ExitCode.FAILURE
-    assert "partial, hopin is not healthy" in result.err
+    assert "partial, hopin failed" in result.err
+    assert "not healthy at" in result.out
     assert applying.publish_never_began()
 
 

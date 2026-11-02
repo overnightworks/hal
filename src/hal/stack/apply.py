@@ -74,7 +74,7 @@ from hal.output import (
 from hal.output.command import Verb, command
 from hal.stack import barrier, catalog, checkout, compose, core, environment, setup, switches
 from hal.stack.appkit_step import AppkitError, Rename, plan_appkit
-from hal.stack.apps import AppError, AppRuntime, plan_apps, retry_command
+from hal.stack.apps import AppError, AppOn, AppRuntime, plan_apps
 from hal.stack.core_phase import CorePhase
 from hal.stack.legal_section import LegalError
 from hal.stack.legal_step import RECORD_FILE, plan_legal
@@ -90,7 +90,7 @@ from hal.stack.plan_rows import (
     waiting_text,
 )
 from hal.stack.realm import reconcile
-from hal.stack.result_rows import partial_error, result_rows, waiting_row
+from hal.stack.result_rows import app_partial, app_row, partial_error, result_rows, waiting_row
 from hal.stack.terminal import NEEDS_TERMINAL, at_terminal
 from hal.stack.unit_plans import (
     Action,
@@ -535,12 +535,11 @@ def _apply_realm(
 def _apply_apps(planned: Plan, marks: switches.Switches, progress: Progress) -> bool:
     """The app step after the realm step; says its lines and whether it ended partial."""
     failed = False
-    for plan, failure in planned.app_plans.run(marks, progress):
-        if failure:
-            write_error(f"partial, {failure}", retry_command(plan.app.key, failure))
+    for result in planned.app_plans.run(marks, progress):
+        write_row(app_row(result))
+        if not isinstance(result, AppOn):
+            write_error(*app_partial(result))
             failed = True
-        else:
-            print(f"{plan.app.key} is on at {plan.release.tag}")
     return failed
 
 
