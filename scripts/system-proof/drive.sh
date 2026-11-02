@@ -387,6 +387,8 @@ cell_10() {  # the lists are fresh as on the PC: a dry run cannot update them, a
     at_coloured_terminal cell10-colour "export TERM=xterm; $HAL_BIN setup --dry-run"
     verdict C1 "a dry run at a terminal colours its rows and its verdict; the run with NO_COLOR above has no escape code" \
         'grep -qP "(^|\x1b\[K)  \x1b\[[0-9;]+m\S+\x1b\[0m system " "$EVIDENCE/cell10-colour.log" && grep -qP "^\x1b\[1;[0-9;]+m\S+ setup plan" "$EVIDENCE/cell10-colour.log" && ! grep -qP "\x1b" "$EVIDENCE/cell10.log"'
+    verdict LS1 "the coloured dry run shows live line frames after the system's own prompt and no Ansible task text" \
+        'frame_after_the_prompt cell10-colour && ! grep -qaE "TASK \[" "$EVIDENCE/cell10-colour.log"'
     return
 }
 
@@ -395,7 +397,7 @@ cell_1() {
     at_terminal cell1 "$HAL_BIN setup"
     code=$?
     verdict 1 "apply exits 0 after one prompt, with no Ansible text" \
-        '[ $code -eq 0 ] && asked_once cell1 && row_in_log cell1 system changed && ! grep -qE "TASK \[|PLAY RECAP" "$EVIDENCE/cell1.log"'
+        '[ $code -eq 0 ] && asked_once cell1 && row_in_log cell1 system changed && ! grep -qE "TASK \[|PLAY RECAP" "$EVIDENCE/cell1.log" && ! grep -qaP "\x1b" "$EVIDENCE/cell1.log"'
     verdict 1 "the apply announces needs sudo once, before the system's password prompt" \
         '[ "$(grep -c "^  › system  *needs sudo" "$EVIDENCE/cell1.log")" -eq 1 ] && announced_before_prompt cell1'
     verdict 1 "the six files are root-owned, mode 644" '[ "$(stat -c "%U %a" "${SYSTEM_FILES[@]}" | sort -u)" = "root 644" ]'
