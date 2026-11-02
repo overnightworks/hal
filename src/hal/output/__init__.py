@@ -1,6 +1,7 @@
 """The one owner of how this repository's tools print to a terminal: text from outside made safe
 to show, and the form of a row, a verdict, an error, the indented detail lines under a row, an
-aligned table and the `yes` that confirms an action, whether the run is `-v`, and under
+aligned table, the `yes` that confirms an action and the live line of the task running now on
+stderr at a terminal, whether the run is `-v`, and under
 `LOG_FORMAT=json` the same row, verdict and error as one journal event per line.
 `hal.output.command` owns the program name, `hal.output.hidden_paste` a secret pasted unseen.
 It imports nothing else of this repository."""
@@ -9,12 +10,17 @@ It imports nothing else of this repository."""
 
 import json
 import os
+import shutil
+import signal
 import sys
-from collections.abc import Iterator, Sequence
+import threading
+import time
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum, StrEnum
+from types import FrameType
 from typing import TextIO
 
 from hal.output.command import PROGRAM
@@ -290,6 +296,129 @@ def printable(text: str) -> str:
         character if character.isprintable() else character.encode("unicode_escape").decode()
         for character in text
     )
+
+
+LIVE_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧"
+LIVE_TICK_SECONDS = 0.125
+LIVE_STOP_SECONDS = 1.0
+_ERASE_LINE = "\r\x1b[K"
+_LIVE_STYLE = f"{_DIM};{_CYAN}"
+
+
+def _fit_frame(lead: str, name: str, trail: str, width: int) -> str:
+    """`lead`, `name` and `trail` in `width` columns: the name gives way with `…` so that `trail`,
+    the time, stays; a terminal without room for one character of it cuts the whole frame."""
+    room = width - len(lead) - len(trail)
+    if len(name) <= room:
+        return f"{lead}{name}{trail}"
+    if room > 0:
+        return f"{lead}{name[: room - 1]}…{trail}"
+    return f"{f'{lead}{name}{trail}'[: width - 1]}…" if width > 0 else ""
+
+
+class _LiveLine:
+    """One transient line on stderr: the task running now and its own time. One thread redraws it
+    and, as its last act, erases it, so a terminal stopped with Ctrl-S cannot hold `stop`.
+
+    The barrier is `_stop_decided`, a plain flag so that a signal can read it at any instruction:
+    from the moment it is set no frame starts, whether or not the thread could be joined."""
+
+    def __init__(self, subject: str) -> None:
+        self._subject = subject
+        self._stream = sys.stderr
+        self._lock = threading.Lock()
+        self._wake = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._text = ""
+        self._started = 0.0
+        self._frame = 0
+        self._stop_decided = False
+        self._erase = False
+        self._ctrl_c_held = False
+        self._ctrl_c_before = signal.getsignal(signal.SIGINT)
+
+    def show(self, text: str) -> None:
+        with self._lock:
+            self._text = text
+            self._started = time.monotonic()
+            self._draw()
+            if self._thread is None:
+                self._thread = threading.Thread(target=self._redraw, daemon=True)
+                self._thread.start()
+
+    def on_ctrl_c(self, _signal_number: int, _frame: FrameType | None) -> None:
+        """Runs in place of the `KeyboardInterrupt`, wherever the Ctrl-C lands, also at the end of
+        the block where no `except` would see it: the line ends first, then `stop` raises it. A
+        Ctrl-C while `stop` runs leaves the line, unless the thread wrote the erase or a stopped
+        terminal still holds it, and waits."""
+        self._erase = False
+        self._ctrl_c_held = True
+        self.stop(erase=False)
+
+    def stop(self, *, erase: bool) -> None:
+        """Ends the thread, then gives Ctrl-C back and raises one that came meanwhile. Only the
+        first call acts. The wait ends at `LIVE_STOP_SECONDS`: a write the terminal holds, a frame
+        or the erase, keeps its daemon thread and lands at Ctrl-Q: that costs just the line."""
+        if self._stop_decided:
+            return
+        self._erase = erase
+        self._stop_decided = True
+        self._wake.set()
+        if self._thread is not None and self._thread.is_alive():
+            self._thread.join(LIVE_STOP_SECONDS)
+            if self._thread.is_alive():
+                self._erase = False
+        signal.signal(signal.SIGINT, self._ctrl_c_before)
+        if self._ctrl_c_held:
+            signal.raise_signal(signal.SIGINT)
+
+    def _redraw(self) -> None:
+        while not self._wake.wait(LIVE_TICK_SECONDS):
+            with self._lock:
+                self._draw()
+        if self._erase:
+            self._stream.write(_ERASE_LINE)
+            self._stream.flush()
+
+    def _draw(self) -> None:
+        if self._stop_decided:
+            return
+        glyph = LIVE_FRAMES[self._frame % len(LIVE_FRAMES)]
+        self._frame += 1
+        elapsed = format_duration(time.monotonic() - self._started)
+        line = _fit_frame(
+            f"  {glyph} {printable(self._subject):<{SUBJECT_WIDTH}}  ",
+            printable(self._text),
+            f" · {elapsed}",
+            shutil.get_terminal_size().columns - 1,
+        )
+        self._stream.write(f"{_ERASE_LINE}{_styled(line, _LIVE_STYLE, self._stream)}")
+        self._stream.flush()
+
+
+@contextmanager
+def live_line(subject: str) -> Iterator[Callable[[str], None]]:
+    """The live line of a long step, drawn on stderr under `subject` while the block runs:
+    `show(text)` names the task now running, and its time restarts. Only for a person at a
+    terminal outside `-v` and `LOG_FORMAT=json`; elsewhere `show` does nothing. A normal end
+    erases the line; a Ctrl-C leaves it, so the next row can end it with `fresh_line`, and no byte
+    of the line follows the `KeyboardInterrupt`, apart from a write a terminal stopped with Ctrl-S
+    still holds. Only the main thread may call it: it takes SIGINT for the length of the block,
+    unless the caller put its own handler there, which then stays."""
+    if is_verbose() or _json_on() or not _colour_on(sys.stderr):
+        yield lambda _text: None
+        return
+    line = _LiveLine(subject)
+    if signal.getsignal(signal.SIGINT) is signal.default_int_handler:
+        signal.signal(signal.SIGINT, line.on_ctrl_c)
+    interrupted = False
+    try:
+        yield line.show
+    except KeyboardInterrupt:
+        interrupted = True
+        raise
+    finally:
+        line.stop(erase=not interrupted)
 
 
 VOWELS = "aeiou"

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -12,11 +13,12 @@ from typing import Any
 import pytest
 
 from hal.grammar import ExitCode
+import hal.output
 from hal.output import verbose_run
 from hal.workstation import system_step
 from hal.workstation.system_step import PlaybookFinished, PlaybookRun, PlaybookUnfinished
-from support.terminal_support import put_stdout_on_a_terminal
-from support.workstation_support import Sandbox, StubSudo, run_hal_setup
+from support.terminal_support import TerminalStream, put_stdout_on_a_terminal
+from support.workstation_support import FRESH_APPLY, Sandbox, StubSudo, lines_of_the_run, run_hal_setup
 
 COUNTS = system_step.EVENT_MARK + json.dumps({"event": "counts", "changed": 3, "failed": 0, "unreachable": 0})
 FAILED_COUNTS = system_step.EVENT_MARK + json.dumps({"event": "counts", "changed": 1, "failed": 1, "unreachable": 0})
@@ -24,6 +26,7 @@ UNREACHABLE_COUNTS = system_step.EVENT_MARK + json.dumps({"event": "counts", "ch
 FAILED_RESULT = system_step.EVENT_MARK + json.dumps({"event": "result", "status": "failed", "msg": "names no `tunnel:`; nothing was written"})
 CHANGED_WRITE = system_step.EVENT_MARK + json.dumps({"event": "changed", "task": "Write edge files"})
 CHANGED_RESTART = system_step.EVENT_MARK + json.dumps({"event": "changed", "task": "Restart Docker"})
+TASK_START = system_step.EVENT_MARK + json.dumps({"event": "task", "task": "Read the default log driver"})
 UNREACHABLE_RESULT = system_step.EVENT_MARK + json.dumps({"event": "result", "status": "unreachable", "msg": "no route"})
 
 
@@ -50,7 +53,13 @@ MALFORMED_COUNTS = [
         (4, [UNREACHABLE_RESULT, UNREACHABLE_COUNTS], PlaybookUnfinished("no route")),
         (0, [FAILED_RESULT, COUNTS, COUNTS], PlaybookUnfinished()),
         (0, [], PlaybookUnfinished()),
+        (0, [TASK_START, CHANGED_WRITE, COUNTS], PlaybookFinished(3, ("Write edge files",))),
         (0, [system_step.EVENT_MARK + json.dumps({"event": "task"}), COUNTS], PlaybookUnfinished()),
+        (0, [system_step.EVENT_MARK + json.dumps({"event": "task", "task": None}), COUNTS], PlaybookUnfinished()),
+        (0, [system_step.EVENT_MARK + json.dumps({"event": "task", "task": 7}), COUNTS], PlaybookUnfinished()),
+        (0, [system_step.EVENT_MARK + json.dumps({"event": "task", "task": ["a"]}), COUNTS], PlaybookUnfinished()),
+        (0, [system_step.EVENT_MARK + json.dumps({"event": "task", "task": {"a": 1}}), COUNTS], PlaybookUnfinished()),
+        (0, [system_step.EVENT_MARK + json.dumps({"event": "started"}), COUNTS], PlaybookUnfinished()),
         (0, [system_step.EVENT_MARK + "not json", COUNTS], PlaybookUnfinished()),
         (0, [system_step.EVENT_MARK + json.dumps({"event": "changed"}), COUNTS], PlaybookUnfinished()),
         (1, [COUNTS], PlaybookUnfinished()),
@@ -63,6 +72,12 @@ MALFORMED_COUNTS = [
         "unreachable",
         "two counts events",
         "no counts event",
+        "task events are ignored",
+        "task event without a name",
+        "task named null",
+        "task named by a number",
+        "task named by an array",
+        "task named by an object",
         "unknown event",
         "unreadable event",
         "changed event without a task",
@@ -420,3 +435,122 @@ def test_a_missing_sudo_fails_alone_without_a_ticket_to_forget(tmp_path: Path, m
         system_step.run_playbook_as_root(["ansible-playbook"])
 
     assert refusal.value.__context__ is None
+
+
+# --- the live task line -----------------------------------------------------
+
+ERASE = "\r\x1b[K"
+ANSI = re.compile(r"\x1b\[[0-9;]*[mK]")
+READ_LOG_DRIVER = "Read the default log driver"
+WRITE_EDGE_FILES = "Write edge files"
+
+
+class FlagOnFirstFrame(TerminalStream):
+    """A terminal that raises a flag file once the first frame has been handed to it, as the play waits for the person to see it."""
+
+    def __init__(self, flag: Path) -> None:
+        super().__init__()
+        self.flag = flag
+
+    def write(self, text: str, /) -> int:
+        written = super().write(text)
+        if len(text) > len(ERASE):
+            self.flag.touch()
+        return written
+
+
+def stderr_on_a_terminal(monkeypatch: pytest.MonkeyPatch, stream: TerminalStream | None = None) -> TerminalStream:
+    """Stderr on a terminal that never redraws by itself, so a frame is one task the runner read; stdout stays where the test has it."""
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("TERM", "xterm-256color")
+    monkeypatch.setattr(hal.output, "LIVE_TICK_SECONDS", 3600)
+    terminal = stream or TerminalStream()
+    monkeypatch.setattr(sys, "stderr", terminal)
+    return terminal
+
+
+def shown_tasks(terminal: TerminalStream) -> list[str]:
+    visible = [ANSI.sub("", frame) for frame in terminal.getvalue().split("\r")]
+    return [match.group(1) for frame in visible if (match := re.search(r"system +(.*?) \xb7 [<\d]", frame))]
+
+
+def play_starting(tmp_path: Path, *names: str, after: str = "") -> str:
+    """The script of a play whose callback marks one task start for each name, then runs `after`."""
+    events = tmp_path / "task-events"
+    events.write_text("".join(f"{system_step.EVENT_MARK}{json.dumps({'event': 'task', 'task': name})}\n" for name in names))
+    return f"cat {events}\n{after}"
+
+
+def test_hal_setup_without_v_shows_each_task_on_stderr_and_erases_the_line_with_stdout_as_before(
+    sandbox: Sandbox, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    terminal = stderr_on_a_terminal(monkeypatch)
+    a_play_under_stub_sudo(sandbox, tmp_path, monkeypatch, play_starting(tmp_path, READ_LOG_DRIVER, WRITE_EDGE_FILES))
+
+    code = run_hal_setup(home=sandbox.home, secrets_setup_boundaries=sandbox.secrets_boundaries)
+
+    assert (code, lines_of_the_run(capsys.readouterr().out)) == (ExitCode.OK, FRESH_APPLY)
+    assert shown_tasks(terminal) == [READ_LOG_DRIVER, WRITE_EDGE_FILES]
+    assert terminal.getvalue().endswith(ERASE)
+
+
+def test_hal_setup_dry_run_shows_the_tasks_of_the_check_the_same_way(
+    sandbox: Sandbox, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    terminal = stderr_on_a_terminal(monkeypatch)
+    a_play_under_stub_sudo(sandbox, tmp_path, monkeypatch, play_starting(tmp_path, READ_LOG_DRIVER))
+
+    run_hal_setup("--dry-run", home=sandbox.home, secrets_setup_boundaries=sandbox.secrets_boundaries)
+
+    assert shown_tasks(terminal) == [READ_LOG_DRIVER]
+    assert terminal.getvalue().endswith(ERASE)
+
+
+def test_a_play_that_never_marks_a_task_start_leaves_stderr_to_sudos_prompt(tmp_path: Path, stub_sudo: StubSudo, monkeypatch: pytest.MonkeyPatch) -> None:
+    terminal = stderr_on_a_terminal(monkeypatch)
+    playbook = fake_ansible(tmp_path, "echo 'TASK [Write edge files]'")
+
+    system_step.run_playbook_as_root([str(playbook)])
+
+    assert terminal.getvalue() == ""
+
+
+def test_a_ctrl_c_in_the_play_leaves_the_live_line_and_hal_setup_still_ends_with_the_row_the_pair_and_sudo_k(
+    sandbox: Sandbox, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    flag = tmp_path / "first-frame-seen"
+    terminal = stderr_on_a_terminal(monkeypatch, FlagOnFirstFrame(flag))
+    after = f"until [ -e {flag} ]; do sleep 0.05; done\nkill -INT $PPID\nsleep 3"
+    stub = a_play_under_stub_sudo(sandbox, tmp_path, monkeypatch, play_starting(tmp_path, READ_LOG_DRIVER, after=after))
+
+    code = run_hal_setup(home=sandbox.home, secrets_setup_boundaries=sandbox.secrets_boundaries)
+
+    assert code == ExitCode.INTERRUPTED
+    assert capsys.readouterr().out.splitlines()[-2:] == ["  \u2717 system          interrupted", "  \xb7 secrets         not run"]
+    assert shown_tasks(terminal) == [READ_LOG_DRIVER]
+    assert "error: setup stopped at system" in ANSI.sub("", terminal.getvalue())
+    assert terminal.getvalue().count(ERASE) == 1
+    assert stub.calls()[-1][0] == "-k"
+
+
+def test_a_play_that_fills_the_pipe_finishes_with_the_live_line_on(tmp_path: Path, stub_sudo: StubSudo, monkeypatch: pytest.MonkeyPatch) -> None:
+    stderr_on_a_terminal(monkeypatch)
+    fills_the_pipe = "head -c 1000000 /dev/zero | tr '\\0' 'x' | fold -w 100\necho"
+    playbook = fake_ansible(tmp_path, play_starting(tmp_path, READ_LOG_DRIVER, after=fills_the_pipe))
+
+    assert system_step.run_playbook_as_root([str(playbook)]) == PlaybookFinished(3)
+
+
+@pytest.mark.parametrize(
+    "unreadable",
+    ["not json", '{"event": "task"}', "[1]", '{"event": "task", "task": null}', '{"event": "task", "task": 7}'],
+    ids=["no json", "task without a name", "json of another shape", "null name", "number name"],
+)
+def test_a_marked_line_that_cannot_be_read_shows_nothing_and_leaves_the_run_unfinished(
+    tmp_path: Path, stub_sudo: StubSudo, monkeypatch: pytest.MonkeyPatch, unreadable: str
+) -> None:
+    terminal = stderr_on_a_terminal(monkeypatch)
+    playbook = fake_ansible(tmp_path, f"echo '{system_step.EVENT_MARK}{unreadable}'")
+
+    assert system_step.run_playbook_as_root([str(playbook)]) == PlaybookUnfinished()
+    assert terminal.getvalue() == ""
