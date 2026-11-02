@@ -39,7 +39,7 @@ from support.stack_apply_fakes import (
 )
 from support.stack_plan_rows import detail_lines, find_row, plain, row_at
 
-from hal.stack import apply, appkit_step
+from hal.stack import appkit_step, apply
 from hal.stack.legal_step import RECORD_FILE
 from hal.stack.plan_rows import LegalEvent
 from hal.stack.result_rows import ResultEvent
