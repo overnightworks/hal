@@ -354,3 +354,85 @@ def test_the_real_login_runner_keeps_the_operators_environment_and_adds_its_home
 def test_the_real_login_runner_reports_a_missing_cli_as_none(tmp_path: Path) -> None:
     """#666 D1: an absent executable is answered with None, which the wizard words as 'not installed'."""
     assert run_command([str(tmp_path / "no-such-cli")], {}) is None
+
+
+GROK_ENTRY_NAME = "agent-service/grok"
+
+
+@pytest.fixture
+def shipped_grok_home(tmp_path: Path, use_manifest) -> Path:
+    """A home whose manifest is the shipped entry of the Grok login alone, as shipped, so a walk touches no other entry."""
+    shipped = secrets_view.MANIFEST_PATH.read_text()
+    (block,) = [part for part in shipped.split("[[secret]]") if f'name = "{GROK_ENTRY_NAME}"' in part]
+    use_manifest(f"[[secret]]{block}")
+    home = tmp_path / "home"
+    home.mkdir()
+    return home
+
+
+def test_the_shipped_grok_entry_is_a_login_made_with_both_home_variables(shipped_grok_home: Path) -> None:
+    """#677 G2: the CLI keeps its state below HOME as well as GROK_HOME, so a private home must cover both."""
+    (entry,) = load_manifest(secrets_view.MANIFEST_PATH)
+
+    assert entry.create is not None
+    assert {"GROK_HOME", "HOME"} <= set(entry.create.home)
+    assert entry.read_by == ("agent-service",)
+
+
+def test_the_shipped_grok_entry_signs_in_through_a_private_home_that_is_gone_afterwards(
+    shipped_grok_home: Path, boundaries: Boundaries, cli: FakeCli, capsys
+) -> None:
+    """#677 G3: the walk runs the entry's own command with every home variable at one fresh folder, keeps only the login file at the ruled rights, and prints no content."""
+    (entry,) = load_manifest(secrets_view.MANIFEST_PATH)
+    assert entry.create is not None
+    folder = shipped_grok_home / entry.folder
+    cli.siblings = (".cache/state", "logs/grok.log")
+
+    end = run_wizard(shipped_grok_home, boundaries)
+
+    captured = capsys.readouterr()
+    ((argv, variables),) = cli.calls
+    (private_home,) = set(variables.values())
+    assert end is WalkEnd.DONE
+    assert argv == entry.create.run
+    assert set(variables) == set(entry.create.home)
+    assert not Path(private_home).exists()
+    assert stat.S_IMODE(folder.stat().st_mode) == 0o700
+    assert stat.S_IMODE((shipped_grok_home / entry.place).stat().st_mode) == 0o600
+    assert sorted(path.name for path in folder.iterdir()) == [entry.place.name]
+    assert f"✓ {entry.name} signed in" in squeezed(captured.out)[-1]
+    assert cli.content not in captured.out + captured.err
+
+
+def test_a_grok_login_already_present_is_left_untouched_and_the_cli_does_not_run(
+    shipped_grok_home: Path, boundaries: Boundaries, cli: FakeCli
+) -> None:
+    """#677 G4."""
+    (entry,) = load_manifest(secrets_view.MANIFEST_PATH)
+    login = private_directory(shipped_grok_home, str(entry.folder)) / entry.place.name
+    login.write_text("kept")
+
+    end = run_wizard(shipped_grok_home, boundaries)
+
+    assert end is WalkEnd.DONE
+    assert cli.calls == []
+    assert login.read_text() == "kept"
+
+
+@pytest.mark.parametrize("options", [("-v",), ("--by-service",)], ids=["verbose", "by service"])
+def test_hal_secrets_lists_the_shipped_grok_entry_without_its_content(
+    shipped_grok_home: Path, probe: FakeProbe, capsys, options: tuple[str, ...]
+) -> None:
+    """#677 G5, G6: the entry is listed by name, and under agent-service for the inverted view; the login's content is never printed."""
+    (entry,) = load_manifest(secrets_view.MANIFEST_PATH)
+    login = private_directory(shipped_grok_home, str(entry.folder)) / entry.place.name
+    login.write_text("FAKE-LOGIN-CONTENT-0000")
+    login.chmod(0o600)
+
+    run_hal_secrets(shipped_grok_home, probe, *options)
+
+    output = capsys.readouterr().out
+    assert GROK_ENTRY_NAME in output
+    assert "FAKE-LOGIN-CONTENT-0000" not in output
+    if "--by-service" in options:
+        assert any(line.startswith("| agent-service |") and GROK_ENTRY_NAME in line for line in output.splitlines())

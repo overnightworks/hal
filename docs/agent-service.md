@@ -103,6 +103,12 @@ stood there without following a link, and removes the rest, however the login en
 prints the file. `hal secrets -v` lists the entry `agent-service/codex`; every file in the folder besides
 `auth.json` and the service's `.auth.json.new` is an unknown file there.
 
+A third login, for Grok, lives in `~/.secrets/agent-service/grok/auth.json` (folder 0700, file 0600) under the
+same rules: its own refresh token apart from the operator's `~/.grok`, and `hal setup` walks the device-code
+sign-in when the file is missing and leaves a present one untouched. hal runs `grok login --device-code` with
+both `GROK_HOME` and `HOME` at the fresh private folder, keeps only `auth.json` and removes whatever the CLI
+left. The service does not bind this login yet. `hal secrets -v` lists the entry `agent-service/grok`.
+
 **Why 1000:1000.** The service's reader refuses a login file that group or others can touch, so the
 container user must own the directory and the file. 1000 is the operator's uid on this PC, so his
 own `claude setup-token` writes a file the container can read. Another uid needs its own renewal
