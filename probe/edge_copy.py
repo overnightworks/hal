@@ -306,8 +306,8 @@ def run_command(
     env: Mapping[str, str] | None = None,
     timeout: int | None = None,
 ) -> subprocess.CompletedProcess[Any]:
-    """`command` run with its output captured: the one place the probes start a program."""
-    return subprocess.run(  # noqa: S603 - argv is built by the probe and no shell runs
+    """`command` run with its output captured."""
+    return subprocess.run(  # noqa: S603 - the probe builds argv and finds each program on PATH by design
         command, capture_output=True, check=check, text=text, input=input, stdin=stdin,
         cwd=cwd, env=env, timeout=timeout,
     )  # fmt: skip
