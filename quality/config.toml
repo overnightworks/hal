@@ -57,3 +57,263 @@ reason = "the step-ca configuration, bind-mounted by compose.yaml"
 [[root.allow]]
 entry = "tunnel/"
 reason = "the cloudflared units and drop-ins that hal apply installs"
+
+[[layout.allow]]
+path = "tests/test_agent_egress.py"
+rule = "test-layout"
+reason = "it tests compose.yaml, the gateway files and the probe overlay of the agent service's egress, which no module of src/hal mirrors"
+
+[[layout.allow]]
+path = "tests/test_agent_service_api_credential.py"
+rule = "test-layout"
+reason = "it tests agent-service/setup and the gate's credential reader, outside src/hal, which no module of src/hal mirrors"
+
+[[layout.allow]]
+path = "tests/test_agent_service_cells_12b.py"
+rule = "test-layout"
+reason = "it tests the agent service's login command, outside src/hal, which no module of src/hal mirrors"
+
+[[layout.allow]]
+path = "tests/test_agent_service_census_client.py"
+rule = "test-layout"
+reason = "it tests the agent service's host-side census, outside src/hal, which no module of src/hal mirrors"
+
+[[layout.allow]]
+path = "tests/test_agent_service_census_watch.py"
+rule = "test-layout"
+reason = "it tests the agent service's census watch mode, outside src/hal, which no module of src/hal mirrors"
+
+[[layout.allow]]
+path = "tests/test_agent_service_containment.py"
+rule = "test-layout"
+reason = "it tests the agent service's containment probe, outside src/hal, which no module of src/hal mirrors"
+
+[[layout.allow]]
+path = "tests/test_agent_service_fake_app.py"
+rule = "test-layout"
+reason = "it tests the agent service's fake app, outside src/hal, which no module of src/hal mirrors"
+
+[[layout.allow]]
+path = "tests/test_agent_service_image.py"
+rule = "test-layout"
+reason = "it tests the agent service's image recipe and its probe, outside src/hal, which no module of src/hal mirrors"
+
+[[layout.allow]]
+path = "tests/test_agent_service_live_canary.py"
+rule = "test-layout"
+reason = "it tests agent-service/live_canary.py, outside src/hal, which no module of src/hal mirrors"
+
+[[layout.allow]]
+path = "tests/test_agent_service_live_signer.py"
+rule = "test-layout"
+reason = "it tests agent-service/live_signer.py, outside src/hal, which no module of src/hal mirrors"
+
+[[layout.allow]]
+path = "tests/test_agent_service_live_smoke.py"
+rule = "test-layout"
+reason = "it tests agent-service/live_smoke.py, outside src/hal, which no module of src/hal mirrors"
+
+[[layout.allow]]
+path = "tests/test_agent_service_login_checks.py"
+rule = "test-layout"
+reason = "it tests the agent service's login checks, outside src/hal, which no module of src/hal mirrors"
+
+[[layout.allow]]
+path = "tests/test_agent_service_mcp_signer.py"
+rule = "test-layout"
+reason = "it tests agent-service/mcp_signer.py, outside src/hal, which no module of src/hal mirrors"
+
+[[layout.allow]]
+path = "tests/test_agent_service_retention_census.py"
+rule = "test-layout"
+reason = "it tests the agent service's retention census and LiteLLM's config, outside src/hal, which no module of src/hal mirrors"
+
+[[layout.allow]]
+path = "tests/test_agent_service_run_client.py"
+rule = "test-layout"
+reason = "it tests the agent service's run client, outside src/hal, which no module of src/hal mirrors"
+
+[[layout.allow]]
+path = "tests/test_agent_service_setup.py"
+rule = "test-layout"
+reason = "it tests agent-service/setup, outside src/hal, which no module of src/hal mirrors"
+
+[[layout.allow]]
+path = "tests/test_agent_service_signing_key.py"
+rule = "test-layout"
+reason = "it tests the signing key that agent-service/setup makes, outside src/hal, which no module of src/hal mirrors"
+
+[[layout.allow]]
+path = "tests/test_agent_service_smoke.py"
+rule = "test-layout"
+reason = "it tests agent-service/smoke.py and the agent-smoke service of compose.yaml, outside src/hal, which no module of src/hal mirrors"
+
+[[layout.allow]]
+path = "tests/test_agent_service_tree_census.py"
+rule = "test-layout"
+reason = "it tests the agent service's in-container census, outside src/hal, which no module of src/hal mirrors"
+
+[[layout.allow]]
+path = "tests/test_agent_service_unit.py"
+rule = "test-layout"
+reason = "it tests the agent-service service of compose.yaml and its service.toml, outside src/hal, which no module of src/hal mirrors"
+
+[[layout.allow]]
+path = "tests/test_device_sign_in.py"
+rule = "test-layout"
+reason = "it tests agent-service/device_sign_in.py, outside src/hal, which no module of src/hal mirrors"
+
+[[layout.allow]]
+path = "tests/test_keycloak_agents_client.py"
+rule = "test-layout"
+reason = "it tests the agents client of keycloak/realm.yaml against fleet.yaml, which no module of src/hal mirrors"
+
+[[layout.allow]]
+path = "tests/test_keycloak_go_live.py"
+rule = "test-layout"
+reason = "it tests keycloak/go-live, outside src/hal, which no module of src/hal mirrors"
+
+[[layout.allow]]
+path = "tests/test_keycloak_probe.py"
+rule = "test-layout"
+reason = "it tests probe/keycloak/probe.py, outside src/hal, which no module of src/hal mirrors"
+
+[[layout.allow]]
+path = "tests/test_keycloak_probe_admin.py"
+rule = "test-layout"
+reason = "it tests probe/keycloak/probe.py, outside src/hal, which no module of src/hal mirrors"
+
+[[layout.allow]]
+path = "tests/test_keycloak_probe_appkit.py"
+rule = "test-layout"
+reason = "it tests probe/keycloak/probe.py, outside src/hal, which no module of src/hal mirrors"
+
+[[layout.allow]]
+path = "tests/test_keycloak_probe_logout_record.py"
+rule = "test-layout"
+reason = "it tests probe/keycloak/probe.py, outside src/hal, which no module of src/hal mirrors"
+
+[[layout.allow]]
+path = "tests/test_litellm_front.py"
+rule = "test-layout"
+reason = "it tests the litellm-front service of compose.yaml, outside src/hal, which no module of src/hal mirrors"
+
+[[layout.allow]]
+path = "tests/test_litellm_gate.py"
+rule = "test-layout"
+reason = "it tests agent-service/litellm/gate.py, outside src/hal, which no module of src/hal mirrors"
+
+[[layout.allow]]
+path = "tests/test_litellm_unit.py"
+rule = "test-layout"
+reason = "it tests the LiteLLM services of compose.yaml and agent-service/litellm/start.sh, outside src/hal, which no module of src/hal mirrors"
+
+[[layout.allow]]
+path = "tests/test_old_names.py"
+rule = "test-layout"
+reason = "it tests every tracked file of the repository, not one module, which no module of src/hal mirrors"
+
+[[layout.allow]]
+path = "tests/test_probe_isolation.py"
+rule = "test-layout"
+reason = "it tests probe/edge_copy.py and the probes' shipped scripts, outside src/hal, which no module of src/hal mirrors"
+
+[[layout.allow]]
+path = "tests/test_probe_run.py"
+rule = "test-layout"
+reason = "it tests probe/edge_copy.py's run loop, outside src/hal, which no module of src/hal mirrors"
+
+[[layout.allow]]
+path = "tests/test_secret_check.py"
+rule = "test-layout"
+reason = "it tests the repository's structural secret check, not one module, which no module of src/hal mirrors"
+
+[[layout.allow]]
+path = "tests/test_step_ca_init.py"
+rule = "test-layout"
+reason = "it tests step-ca/init and step-ca/ca.json, outside src/hal, which no module of src/hal mirrors"
+
+[[layout.allow]]
+path = "tests/test_step_ca_verdict.py"
+rule = "test-layout"
+reason = "it tests the step-ca probe, outside src/hal, which no module of src/hal mirrors"
+
+[[layout.allow]]
+path = "tests/test_traefik_mcp.py"
+rule = "test-layout"
+reason = "it tests compose.yaml, traefik-mcp.yml and mcp/dynamic as files, not one module, which no module of src/hal mirrors"
+
+[[layout.allow]]
+path = "agent-service/litellm/start.sh"
+rule = "script-name"
+reason = "the LiteLLM container starts it by this name (compose.yaml and config.yaml name it)"
+
+[[layout.allow]]
+path = "agent-service/setup"
+rule = "script-name"
+reason = "the operator runs it by this name and hal apply names it in its prompt"
+
+[[layout.allow]]
+path = "bin/hal"
+rule = "script-name"
+reason = "the operator's launcher; the name is the command he types"
+
+[[layout.allow]]
+path = "bin/hal-sync"
+rule = "script-name"
+reason = "bin/hal and the update step call it by this name"
+
+[[layout.allow]]
+path = "keycloak/admin-frontend.sh"
+rule = "script-name"
+reason = "keycloak/bootstrap.compose.yaml mounts it into the bootstrap container by this name"
+
+[[layout.allow]]
+path = "keycloak/entrypoint.sh"
+rule = "script-name"
+reason = "compose.yaml mounts it as the entrypoint of the keycloak containers"
+
+[[layout.allow]]
+path = "keycloak/go-live"
+rule = "script-name"
+reason = "the operator runs it by this name (docs/keycloak.md, Go-live)"
+
+[[layout.allow]]
+path = "src/hal/workstation/hooks/commit-hook"
+rule = "script-name"
+reason = "hal setup reads it as the template of the global git hooks"
+
+[[layout.allow]]
+path = "scripts/system-proof/drive.sh"
+rule = "script-name"
+reason = "run.sh calls it by this name inside the proof container"
+
+[[layout.allow]]
+path = "scripts/system-proof/run.sh"
+rule = "script-name"
+reason = "the operator's probe recipes and the proof Dockerfile name it"
+
+[[layout.allow]]
+path = "scripts/system-proof/terminal.exp"
+rule = "script-name"
+reason = "drive.sh calls it by this name to answer prompts at a pseudo-terminal"
+
+[[layout.allow]]
+path = "step-ca/init"
+rule = "script-name"
+reason = "the operator runs it by this name (docs/internal-ca.md)"
+
+[[layout.allow]]
+path = "external/tofurc"
+rule = "file-suffix"
+reason = "hal's tofu wrapper passes it by this name as TF_CLI_CONFIG_FILE"
+
+[[compose.allow]]
+file = "compose.yaml"
+service = "traefik"
+reason = "it terminates TLS on the host's own interfaces"
+
+[[compose.allow]]
+file = "probe/agent-service/compose.probe.yaml"
+service = "capture-host"
+reason = "it captures in the host's own network namespace, loopback included"
