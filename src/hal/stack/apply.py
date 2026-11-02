@@ -75,7 +75,7 @@ from hal.output.command import Verb, command
 from hal.stack import barrier, catalog, checkout, compose, core, environment, setup, switches
 from hal.stack.appkit_step import AppkitError, Rename, plan_appkit
 from hal.stack.apps import AppError, AppFailed, AppHeldOff, AppRuntime, plan_apps
-from hal.stack.core_phase import CorePhase
+from hal.stack.core_phase import CoreFailure, CorePhase
 from hal.stack.legal_section import LegalError
 from hal.stack.legal_step import RECORD_FILE, plan_legal
 from hal.stack.plan import Plan
@@ -99,6 +99,8 @@ from hal.stack.result_rows import (
     not_written_row,
     partial_error,
     result_rows,
+    unproven_partial,
+    unproven_row,
     waiting_row,
 )
 from hal.stack.terminal import NEEDS_TERMINAL, at_terminal
@@ -599,11 +601,16 @@ def _write_files(planned: Plan, progress: Progress) -> NotWritten | None:
     return None
 
 
-def _say_stopped(failure: NotWritten | str) -> None:
-    """The red row of a file step that could not write, when it was one, then the pair."""
+def _say_stopped(failure: NotWritten | CoreFailure) -> None:
+    """The row and pair of a run stopped before any unit was switched: a file step that could not
+    write, or barriers that are not proven (the one failure whose way on is `hal offline`); any
+    other failure is a pair."""
     if isinstance(failure, NotWritten):
         write_row(not_written_row(failure))
         write_error(*not_written_partial(failure))
+    elif isinstance(failure, barrier.BarriersUnproven):
+        write_row(unproven_row(failure))
+        write_error(*unproven_partial())
     else:
         write_error(f"partial, {failure}; no unit switched", command(Verb.APPLY))
 
