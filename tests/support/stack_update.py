@@ -22,10 +22,11 @@ from hal.stack.update import UpdateEnd
 FAKE_SYNC = """#!/bin/sh
 echo "$$" > "$FAKE_LOG/sync.pid"
 printf '%s\\n' "$@" > "$FAKE_LOG/sync.args"
-for descriptor in /proc/$$/fd/*; do readlink "$descriptor"; done > "$FAKE_LOG/sync.fds"
+# dash clears an inherited mask after its first fork, so the read must precede any child.
 while IFS= read -r line; do
     case "$line" in SigBlk:* | SigIgn:*) printf '%s\\n' "$line" ;; esac
 done < /proc/$$/status > "$FAKE_LOG/sync.mask"
+for descriptor in /proc/$$/fd/*; do readlink "$descriptor"; done > "$FAKE_LOG/sync.fds"
 ps -o pgid=,sid= -p $$ > "$FAKE_LOG/sync.ids"
 case "${FAKE_SYNC-}" in
 fail) echo "uv: cannot fetch https://operator:hunter2@pypi.invalid/simple" >&2; exit 1 ;;
