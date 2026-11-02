@@ -260,6 +260,9 @@ noch einmal und der Plan folgt mit seinem eigenen `yes`. Ein Setup, das scheiter
 unterbrochen wird, schaltet nichts (Exit 3); was es gemacht hat, bleibt auch nach einem `no` zum Plan
 (Loeschen bleibt Handarbeit). Ohne Terminal laeuft nie ein Setup. Eine per `hal stop` ausgeschaltete,
 noch laufende Einheit, die nicht eingerichtet ist, wird abgewiesen (`hal stop` noch einmal).
+Nach den Setups und vor dem Plan prueft `hal apply` jeden Dienst, den dieser Lauf neu anlegt: nennt er ein
+Compose-Secret, dessen Datei fehlt, endet der Lauf vor dem `yes` mit Exit 4, nichts geaendert; die Zeile
+nennt den Pfad, `next: hal setup`.
 
 **Exit.** Die Nummern stehen in Exception E. Der Grund steht in der Zeile (ein anderes `hal apply` oder ein
 `hal update` haelt `apply.lock`; falscher Checkout oder Zweig, Baum nicht sauber, `.env` abweichend oder
