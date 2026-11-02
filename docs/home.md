@@ -530,7 +530,7 @@ come before the system step, which is the one that asks for sudo:
    the call, so `hal setup` leaves no cached sudo ticket. Ansible's stderr joins its output inside sudo; sudo's password
    prompt stays on the terminal, and the password never passes through hal. Without `-v` none of Ansible's text is shown;
    at a terminal one live line on stderr names the task running now and its own time (`⠋ system  Read the default log driver · 9s`)
-   from the first task on and is erased when the play ends; a pipe, `NO_COLOR`, `TERM=dumb` and `LOG_FORMAT=json` show none.
+   from the first task on and is erased when the play ends. It names each task as the play reaches it, so a skipped task flashes by; a pipe, `NO_COLOR`, `TERM=dumb` and `LOG_FORMAT=json` show none.
    With `-v` Ansible's text streams indented and escaped under the current row, and there is no live line. hal's own output
    callback `hal_events`, selected by the packaged `ansible.cfg`, writes one marker line per started task (handlers included),
    per changed task, per unreachable result and per
