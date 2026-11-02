@@ -106,7 +106,7 @@ def _drained_and_restored(terminal: int, settings: list) -> bytes:
                 rest += chunk
         finally:
             termios.tcsetattr(terminal, termios.TCSANOW, settings)
-    except termios.error, OSError:
+    except (termios.error, OSError):
         raise TerminalNotRestored from None
     return rest
 
