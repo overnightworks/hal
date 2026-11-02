@@ -1,0 +1,8 @@
+claim_id = "0c6611bde25742d096d33fab7e1ce2ea"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "b92cd102ca9f7fbb2cd444ad54e0d6575693d96b"
+branch = "claude/issue-859-a5-2d-app-rows"
+scope = ["docs/design/hal-output.html", "probe/apps/probe.py", "src/hal/stack/apply.py", "src/hal/stack/apps.py", "src/hal/stack/result_rows.py", "tests/support/stack_apps.py", "tests/test_stack_apply_apps.py", "tests/test_stack_apply_publish.py", "tests/test_stack_apps.py", "tests/test_stack_apps_switch.py", "tests/test_stack_result_rows.py"]
+opened_commit = "b75dd37b6149a3d4c16ce614cd6ad69d68567497"
+whole_reason = "The typed result removes the strings that apply.py, the app tests, the probe cells and the picture read today, so the three production files and the pins of that text land in one commit."
