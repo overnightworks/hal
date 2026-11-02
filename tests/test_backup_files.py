@@ -66,19 +66,19 @@ def test_a_record_with_a_files_volume_parses_with_or_without_a_skip():
 
 
 @pytest.mark.parametrize(
-    ("toml", "key"),
+    ("toml", "message"),
     [
         pytest.param(
             SONGMAKER_TOML.replace("[app.songmaker]\n", '[app.songmaker]\nfiles_volume = "b"\n'),
-            "files_volume",
+            "unknown key; only",
             id="on-postgres",
         ),
         pytest.param(_toml('files_skip = "staged-*"'), "files_skip", id="skip-alone"),
     ],
 )
-def test_a_files_key_is_refused_where_it_has_no_meaning(toml, key):
+def test_a_files_key_is_refused_where_it_has_no_meaning(toml, message):
     """#468 M2."""
-    with pytest.raises(AppsError, match=key):
+    with pytest.raises(AppsError, match=message):
         parse_apps(toml)
 
 

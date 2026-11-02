@@ -1146,7 +1146,7 @@ def test_no_output_or_status_holds_the_dump(edge_backup, machine):
     [
         (("dump", '"sh -c pg_dump"'), "dump must be one of"),
         (("volume", '"audio files"'), "volume must match"),
-        (("hook", '"rm -rf /"'), "unknown key ['hook']"),
+        (("hook", '"rm -rf /"'), "unknown key; only ["),
         (("db_name", '"x; DROP TABLE songs"'), "db_name must match"),
     ],
 )

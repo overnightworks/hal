@@ -1,19 +1,23 @@
 """The one owner of how this repository's tools print to a terminal: text from outside made safe
 to show, and the form of a row, a verdict, an error, the indented detail lines under a row, an
-aligned table and the `yes` that confirms an action, and whether the run is `-v`.
+aligned table and the `yes` that confirms an action, whether the run is `-v`, and under
+`LOG_FORMAT=json` the same row, verdict and error as one journal event per line.
 `hal.output.command` owns the program name, `hal.output.hidden_paste` a secret pasted unseen.
 It imports nothing else of this repository."""
 
 # ruff: noqa: T201 - this is the one output owner of the hal program
 
+import json
 import os
 import sys
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum, StrEnum
 from typing import TextIO
+
+from hal.output.command import PROGRAM
 
 CONFIRMATION = "yes"
 DETAIL_INDENT = "    "
@@ -51,6 +55,72 @@ def is_verbose() -> bool:
     return _verbose
 
 
+_logger = PROGRAM
+
+
+@contextmanager
+def logger_run(name: str) -> Iterator[None]:
+    """The logger a JSON event names for the length of one run, handed once by the door like
+    `verbose_run`."""
+    global _logger
+    previous = _logger
+    _logger = name
+    try:
+        yield
+    finally:
+        _logger = previous
+
+
+class LogFormat(StrEnum):
+    TEXT = "text"
+    JSON = "json"
+
+
+LOG_FORMAT_VARIABLE = "LOG_FORMAT"
+
+
+def log_format_refusal() -> str | None:
+    """What is wrong with `LOG_FORMAT`, or None. The writers read the variable on every write and
+    treat every value but `json` as text, so the door refuses a bad value before anything runs."""
+    value = os.environ.get(LOG_FORMAT_VARIABLE)
+    if value is None or value in LogFormat:
+        return None
+    return f"{LOG_FORMAT_VARIABLE} must be {LogFormat.JSON} or {LogFormat.TEXT}, not {value}"
+
+
+def _json_on() -> bool:
+    return os.environ.get(LOG_FORMAT_VARIABLE) == LogFormat.JSON
+
+
+class Level(Enum):
+    """A journal event's level with its syslog priority."""
+
+    ERROR = ("error", 3)
+    WARNING = ("warning", 4)
+    INFO = ("info", 6)
+
+    @classmethod
+    def of(cls, glyph: "Glyph") -> "Level":
+        return _LEVELS.get(glyph, cls.INFO)
+
+
+def _write_event(level: Level, stream: TextIO, event: str, fields: dict[str, object]) -> None:
+    """One flushed line: the priority `journald` strips, then a compact JSON object that leads
+    with the common fields. A field with no value is left out; text from outside is escaped by
+    the caller."""
+    name, priority = level.value
+    common = {
+        "timestamp": datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+        "level": name,
+        "logger": _logger,
+        "service": PROGRAM,
+        "event": event,
+    }
+    present = {key: value for key, value in fields.items() if value not in ("", [], None)}
+    body = json.dumps({**common, **present}, ensure_ascii=False, separators=(",", ":"))
+    print(f"<{priority}>{body}", file=stream, flush=True)
+
+
 def _colour_on(stream: TextIO) -> bool:
     """Colour only for a person: the stream is a terminal, `NO_COLOR` is empty or unset, and the
     terminal is not `dumb`."""
@@ -79,6 +149,8 @@ class Glyph(Enum):
     def verdict_style(self) -> str:
         return _VERDICT_STYLES[self]
 
+
+_LEVELS = {Glyph.FAILED: Level.ERROR, Glyph.NEEDS_YOU: Level.WARNING}
 
 _ROW_STYLES = {
     Glyph.DONE: "32",
@@ -219,9 +291,7 @@ def _plural(word: str) -> str:
     return f"{word}s"
 
 
-def counted(count: int, noun: StrEnum) -> str:
-    """`1 app`, `3 apps`: the count before the label, which takes the plural when it is a `Noun`
-    (after its first word) or a `TrailingNoun` (after its last)."""
+def _label(count: int, noun: StrEnum) -> str:
     text = printable(str(noun))
     if count != 1:
         if isinstance(noun, Noun):
@@ -229,7 +299,13 @@ def counted(count: int, noun: StrEnum) -> str:
             text = f"{_plural(first)}{separator}{rest}"
         elif isinstance(noun, TrailingNoun):
             text = _plural(text)
-    return f"{count} {text}"
+    return text
+
+
+def counted(count: int, noun: StrEnum) -> str:
+    """`1 app`, `3 apps`: the count before the label, which takes the plural when it is a `Noun`
+    (after its first word) or a `TrailingNoun` (after its last)."""
+    return f"{count} {_label(count, noun)}"
 
 
 def write_row(row: Row, *, fresh_line: bool = False) -> None:
@@ -237,6 +313,19 @@ def write_row(row: Row, *, fresh_line: bool = False) -> None:
     On a terminal only the glyph is coloured and the fact dim; a `·` row is dim as a whole.
     `fresh_line` first ends a line a Ctrl-C left open."""
     stdout = sys.stdout
+    if _json_on():
+        _write_event(
+            Level.of(row.glyph),
+            stdout,
+            printable(str(row.event)),
+            {
+                "subject": printable(row.subject),
+                "count": row.count,
+                "fact": printable(row.fact).rstrip(),
+                "details": [printable(detail) for detail in row.details],
+            },
+        )
+        return
     if fresh_line:
         print(file=stdout)
     subject = printable(row.subject)
@@ -289,6 +378,23 @@ def write_verdict(verdict: Verdict) -> None:
     shown_counts = ", ".join(counted(number, label) for number, label in verdict.counts if number)
     hint = [printable(verdict.hint)] if verdict.hint else []
     headline_text = printable(verdict.summary) or shown_counts
+    if _json_on():
+        counts = {_label(0, label): number for number, label in verdict.counts if number}
+        _write_event(
+            Level.of(verdict.glyph),
+            stdout,
+            headline_text,
+            {
+                **counts,
+                "seconds": None
+                if verdict.elapsed_seconds is None
+                else round(verdict.elapsed_seconds, 1),
+                "details": [printable(detail) for detail in verdict.details],
+                "hint": printable(verdict.hint),
+                "next": printable(verdict.next_step),
+            },
+        )
+        return
     headline = _styled(
         f"{verdict.glyph.value} {headline_text}", verdict.glyph.verdict_style, stdout
     )
@@ -308,6 +414,14 @@ def write_error(message: str, next_step: str | None = None, *, fresh_line: bool 
     """`error: <message>` and, when there is a way on, `next: <command>` on stderr; on a terminal
     the labels are bold red and cyan. `fresh_line` first ends a line a hidden prompt left open."""
     stderr = sys.stderr
+    if _json_on():
+        _write_event(
+            Level.ERROR,
+            stderr,
+            "error",
+            {"message": printable(message), "next": printable(next_step or "")},
+        )
+        return
     if fresh_line:
         print(file=stderr)
     print(f"{_styled('error:', _BOLD_RED, stderr)} {printable(message)}", file=stderr)

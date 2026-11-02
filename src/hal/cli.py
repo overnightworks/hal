@@ -18,7 +18,7 @@ from hal import (
     version,
 )
 from hal.grammar import Command, ExitCode
-from hal.output import verbose_run, write_error
+from hal.output import log_format_refusal, logger_run, verbose_run, write_error
 from hal.output.command import PROGRAM
 from hal.workstation import secrets_view
 
@@ -68,6 +68,9 @@ def build_parser(commands: Sequence[Command]) -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    if refusal := log_format_refusal():
+        write_error(refusal)
+        return ExitCode.USAGE
     arguments = sys.argv[1:] if argv is None else argv
     parser = build_parser(COMMANDS)
     if not arguments:
@@ -75,7 +78,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return ExitCode.OK
     try:
         parsed = parser.parse_args(arguments)
-        with verbose_run(parsed.verbose):
+        with verbose_run(parsed.verbose), logger_run(f"{PROGRAM}.{parsed.command}"):
             return parsed.run(parsed)
     except KeyboardInterrupt:
         return ExitCode.INTERRUPTED
