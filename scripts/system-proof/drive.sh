@@ -1837,9 +1837,9 @@ cell_p_fails_in_the_play() {  # cell_p_fails_in_the_play <cell> <log> <ticket> <
     return
 }
 
-cell_p_interrupted() {  # cell_p_interrupted <cell> <log> <ticket>: Ctrl-C at the first task
-    local cell=$1 log=$2 ticket=$3 code
-    PROOF_INTERRUPT='TASK \[' at_sudo_terminal "$log" "$ticket" "$APPLY_ARGUMENTS"
+cell_p_interrupted() {  # cell_p_interrupted <cell> <log> <ticket> [<presses>]: Ctrl-C at the first task, pressed once or in quick succession
+    local cell=$1 log=$2 ticket=$3 presses=${4:-1} code
+    PROOF_INTERRUPT_PRESSES=$presses PROOF_INTERRUPT='TASK \[' at_sudo_terminal "$log" "$ticket" "$APPLY_ARGUMENTS"
     code=$?
     verdict "$cell" "Ctrl-C mid-play prints the system row on its own line and the pair, stops with 130 and the ticket is gone" \
         "[ \$code -eq 130 ] && active_sudo_is \"\$sudo_alternative\" && row_in_log $log system interrupted && in_log $log 'error: setup stopped at system · /etc may be partial' && in_log $log 'next: hal setup' && ticket_is_gone $log"
@@ -1893,6 +1893,7 @@ cells_sudo() {  # cells_sudo <suffix> <alternative>: P1-P10 under one variant of
     cell_p_wrong_password "P5$suffix" "p5$suffix"
     cell_p_interrupted "P6$suffix" "p6$suffix" none
     cell_p_interrupted "P7$suffix" "p7$suffix" present
+    cell_p_interrupted "P6d$suffix" "p6d$suffix" none 2
     at_sudo_terminal "p-converge$suffix" none "$APPLY_ARGUMENTS"
     cell_p_dry_run "P8$suffix" "p8$suffix" none 1
     cell_p_dry_run "P9$suffix" "p9$suffix" present 0

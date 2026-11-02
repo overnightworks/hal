@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -184,8 +185,22 @@ def test_a_failing_sudo_k_after_a_ctrl_c_is_the_same_interrupted_step_carrying_t
 def test_a_second_ctrl_c_while_the_play_stops_is_still_the_interrupted_step_carrying_the_ticket_sentence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """The first Ctrl-C is a real signal from the play; the second is raised from the play's context exit."""
+
+    class PlayPopenInterruptedOnExit(subprocess.Popen[str]):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, **kwargs)
+            self.is_the_play = kwargs.get("stdout") == subprocess.PIPE
+
+        def __exit__(self, exception_type: Any, *exit_arguments: Any) -> None:
+            super().__exit__(exception_type, *exit_arguments)
+            if self.is_the_play and exception_type is KeyboardInterrupt:
+                raise KeyboardInterrupt
+
+    monkeypatch.setattr(subprocess, "Popen", PlayPopenInterruptedOnExit)
     stub = StubSudo(tmp_path, monkeypatch, forgetting_exit_code=1)
-    playbook = fake_ansible(tmp_path, "trap '' PIPE\nkill -INT $PPID\nwhile printf '.\\n' 2>/dev/null; do :; done\nkill -INT $PPID")
+    # ulimit -t ends a play whose first signal never arrives; the printf loop ends on EPIPE once the runner closes the pipe.
+    playbook = fake_ansible(tmp_path, "ulimit -t 2\ntrap '' PIPE\nkill -INT $PPID\nwhile printf '.\\n' 2>/dev/null; do :; done")
 
     with pytest.raises(system_step.SystemStepInterrupted) as interrupted:
         system_step.run_playbook_as_root([str(playbook)])
@@ -204,6 +219,7 @@ def test_a_failing_sudo_k_after_another_exception_is_a_failed_step_carrying_the_
     with pytest.raises(system_step.StepFailed) as failure:
         system_step.run_playbook_as_root([str(playbook)])
 
+    assert type(failure.value) is system_step.StepFailed
     assert str(failure.value) == TICKET_SENTENCE
 
 
