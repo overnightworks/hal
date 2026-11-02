@@ -18,7 +18,7 @@ from pathlib import Path
 
 from hal.workstation import secrets_setup
 from hal.workstation.layout import Layout
-from hal.output import write_line
+from hal.output import Tone, is_verbose, write_detail
 from hal.output.command import Verb, command
 
 PLAYBOOK = Path(__file__).parent / "system" / "playbook.yml"
@@ -64,6 +64,7 @@ class SystemStepInterrupted(StepFailed):
 
 
 class EventKind(Enum):
+    CHANGED = "changed"
     RESULT = "result"
     COUNTS = "counts"
 
@@ -76,6 +77,14 @@ class TaskStatus(Enum):
 @dataclass(frozen=True)
 class PlaybookFinished:
     changed: int
+    tasks: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class TasksWouldChange:
+    """What the system step's check returns where it found something to change: the names of the tasks that would."""
+
+    tasks: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -101,14 +110,19 @@ def read_events(returncode: int, event_lines: Sequence[str]) -> PlaybookRun:
 
     The reason is the message of the last failed or unreachable result, given only when the counts name a failed or unreachable host:
     inside a rescue it is the rescue's own failure that ended the play, and a rescued failure is no cause.
+    `tasks` are the names of the changed tasks, in the order they changed.
     An event that is no known event, or a count that is no non-negative integer, is a run that did not finish.
     """
     message = ""
+    tasks: list[str] = []
     counts: list[tuple[int, int, int]] = []
     for line in event_lines:
         try:
             event = json.loads(line.removeprefix(EVENT_MARK))
-            if EventKind(event["event"]) is EventKind.RESULT:
+            kind = EventKind(event["event"])
+            if kind is EventKind.CHANGED:
+                tasks.append(str(event["task"]))
+            elif kind is EventKind.RESULT:
                 TaskStatus(event["status"])
                 message = str(event["msg"])
             else:
@@ -120,7 +134,7 @@ def read_events(returncode: int, event_lines: Sequence[str]) -> PlaybookRun:
     changed, failed, unreachable = counts[0]
     if failed or unreachable:
         return PlaybookUnfinished(message)
-    return PlaybookFinished(changed) if returncode == 0 else PlaybookUnfinished()
+    return PlaybookFinished(changed, tuple(tasks)) if returncode == 0 else PlaybookUnfinished()
 
 
 def _forget_the_sudo_ticket() -> StepFailed | None:
@@ -137,31 +151,43 @@ def run_playbook_as_root(argv: Sequence[str]) -> PlaybookRun:
     """Runs `argv` under one `sudo` in the packaged `system/` directory, then makes sudo forget its ticket.
 
     The system asks for the password at the terminal, which stays stdin and stderr's; Ansible's stderr joins its stdout inside
-    sudo, which is shown line by line, and the lines the callback marks are read as events and not shown.
+    sudo, and the lines the callback marks are read as events and not shown.
     No `ANSIBLE_*` variable reaches the play, so the packaged `ansible.cfg` there decides. `sudo -k` follows whatever
     the play did, and a failing `sudo -k` fails the step;
-    a Ctrl-C in the play is a `SystemStepInterrupted`, which a failing `sudo -k` keeps; it never follows a sudo that did not start.
+    a Ctrl-C in the play, or between the start of sudo and the reading, is a `SystemStepInterrupted`, which a failing `sudo -k` keeps;
+    it never follows a sudo that did not start.
+    The pipe is read to its end either way; a line the callback does not mark is shown only with `-v`, indented, escaped and dim.
     Root's Python writes no bytecode, which would leave root-owned files in the operator's tool environment.
     No timeout: a person types the password; the run asks its yes at a terminal first and `--dry-run` reaches here only when `needs_first` finds one.
     """
     environment = {name: value for name, value in os.environ.items() if not name.startswith("ANSIBLE_")}
     event_lines: list[str] = []
     unforgotten: StepFailed | None = None
+    forgotten = False
     try:
         with subprocess.Popen(["sudo", "env", "PYTHONDONTWRITEBYTECODE=1", "sh", "-c", 'exec "$@" 2>&1', "sh", *argv], stdout=subprocess.PIPE, text=True, cwd=PLAYBOOK.parent, env=environment) as playbook:  # noqa: S603, S607 - argv is the packaged playbook and sudo is found on PATH by design
             try:
                 for line in playbook.stdout:
                     if line.startswith(EVENT_MARK):
                         event_lines.append(line)
-                    else:
-                        write_line(line, end="", flush=True)
+                    elif is_verbose():
+                        write_detail(line.rstrip("\n"), tone=Tone.DIM, flush=True)
             finally:
                 unforgotten = _forget_the_sudo_ticket()
+                forgotten = True
                 if unforgotten is not None and not isinstance(sys.exception(), KeyboardInterrupt):
                     raise unforgotten
     except KeyboardInterrupt as ctrl_c:
+        if not forgotten:
+            unforgotten = _forget_the_sudo_ticket()
         raise SystemStepInterrupted("" if unforgotten is None else str(unforgotten)) from ctrl_c
     return read_events(playbook.returncode, event_lines)
+
+
+def _unfinished_fact(who: str, *flags: str) -> str:
+    """Without `-v` the fact says how to see why; under `-v` the text above it already does."""
+    why = "its output above says why" if is_verbose() else f"{command(Verb.SETUP, *flags, '-v')} shows why"
+    return f"{who} did not finish · {why}"
 
 
 class UnresolvableRunningUser(ValueError):
@@ -221,22 +247,22 @@ class SystemStep:
             return NEEDS_ANSIBLE
         return ""
 
-    def check(self) -> CheckState:
-        """At a terminal, Ansible's check mode asks for sudo once and shows the diff; without what it needs nothing is read."""
+    def check(self) -> CheckState | TasksWouldChange:
+        """At a terminal, Ansible's check mode asks for sudo once and names the tasks that would change; without what it needs nothing is read."""
         if self.needs_first():
             return CheckState.NOT_CHECKED
         match self._run_playbook(check=True):
-            case PlaybookFinished(changed):
-                return CheckState.WOULD_CHANGE if changed else CheckState.UNCHANGED
+            case PlaybookFinished(changed, tasks):
+                return TasksWouldChange(tasks) if changed else CheckState.UNCHANGED
             case unfinished:
-                raise StepFailed(unfinished.reason or "Ansible's check did not finish · its output above says why")
+                raise StepFailed(unfinished.reason or _unfinished_fact("Ansible's check", "--dry-run"))
 
     def apply(self) -> Applied:
         match self._run_playbook(check=False):
             case PlaybookFinished(changed):
                 return Applied.CHANGED if changed else Applied.UNCHANGED
             case unfinished:
-                raise StepFailed(unfinished.reason or "Ansible did not finish · its output above says why")
+                raise StepFailed(unfinished.reason or _unfinished_fact("Ansible"))
 
     def _run_playbook(self, check: bool) -> PlaybookRun:
         argv = [

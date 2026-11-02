@@ -701,10 +701,24 @@ Type <span class="w">yes</span> to set up 1 open row: yes
 <span class="w">✓ setup up to date</span> <span class="d">· 5 unchanged · 21s</span></pre>
       </figure>
       <figure>
+        <figcaption><span class="tag new">neu S3a</span> <code>--dry-run</code>, das System würde sich ändern: ohne <code>-v</code> kein Ansible-Text, jede Aufgabe als Detailzeile; mit <code>-v</code> läuft Ansibles Text eingerückt darüber und die Zeile bleibt ohne Namen</figcaption>
+<pre class="term"><span class="p">$</span> <span class="u">hal setup --dry-run</span>
+<span class="b">  ~</span> system          will change    <span class="d">2 tasks</span>
+<span class="d">    Write edge files</span>
+<span class="d">    Restart Docker</span>
+<span class="b">~ setup plan</span> <span class="d">· 1 open, 4 unchanged · 21s · run hal setup</span>
+
+<span class="p">$</span> <span class="u">hal setup --dry-run -v</span>
+<span class="d">    TASK [Write edge files] ***</span>
+<span class="d">    --- before</span>
+<span class="d">    +++ after</span>
+<span class="b">  ~</span> system          will change    <span class="d">2 tasks</span>
+<span class="b">~ setup plan</span> <span class="d">· 1 open, 4 unchanged · 21s · run hal setup</span></pre>
+      </figure>
+      <figure>
         <figcaption><span class="tag fail">neu S2, kaputt</span> gescheitert: Ansible lief und brach ab, die Meldung der gescheiterten Aufgabe ist der Grund der roten Zeile</figcaption>
 <pre class="term"><span class="p">$</span> <span class="u">hal setup</span>
 <span class="n">… Plan, dann das yes</span>
-<span class="d">… Ansible: PLAY RECAP, fatal …</span>
 <span class="r">  ✗</span> system          failed         <span class="d">/etc/cloudflared/config.yml names no `tunnel:`; nothing was written</span>
 <span class="d">  · secrets         not run</span>
 <span class="rw">error:</span> setup stopped at system · /etc may be partial
@@ -713,7 +727,7 @@ Type <span class="w">yes</span> to set up 1 open row: yes
     </div>
   </div>
   <ul class="why">
-    <li><b>Probelauf (Vorschlag des Kopfs):</b> <code>hal setup --dry-run</code> ändert nichts und fragt nicht. <code>~</code> heißt „würde sich ändern“, <code>!</code> heißt „nicht geprüft, du musst an ein Terminal“. Das Urteil zählt offene und unveränderte Zeilen und nennt den nächsten Befehl.</li>
+    <li><b>Probelauf (Vorschlag des Kopfs):</b> <code>hal setup --dry-run</code> ändert nichts und fragt nicht. <code>~</code> heißt „würde sich ändern“, <code>!</code> heißt „nicht geprüft, du musst an ein Terminal“. Das Urteil zählt offene und unveränderte Zeilen und nennt den nächsten Befehl. Ohne <code>-v</code> steht kein Text von Ansible da; <code>will change  2 tasks</code> nennt die Aufgaben als Detailzeilen, mit <code>-v</code> nennt Ansibles eigener Text sie.</li>
     <li><b>Gescheitert:</b> „failed“ heißt, ein Schritt brach ab; in einem gescheiterten Plan oder bei <code>--dry-run</code> steht <code>/etc unchanged</code>, nach dem yes, im Lauf des System-Schritts (auch wenn Docker oder sudo ihn verweigert), <code>/etc may be partial</code>. Ohne Terminal kommt es nicht so weit, das zeigt „setup: Plan, yes, Lauf“. <code>next:</code> ist der verschluckte Befehl oder <code>hal setup</code>.</li>
     <li><b>Agent-Lauf:</b> der Schritt, der einen Menschen braucht, wird übersprungen und gezählt, nicht als Fehler gemeldet.</li>
   </ul>
@@ -1571,7 +1585,7 @@ Type <span class="w">yes</span> to apply 7 changes: yes
         <tr><td><code>(block 6; Keycloak with a dump first, K11b)</code>, <code>(#50 SW3)</code></td><td>nichts</td><td>interne Kürzel sagen dir nichts</td></tr>
         <tr><td><code>Type 'yes' to apply exactly this plan:</code></td><td><code>Type yes to apply 7 changes:</code></td><td>die Zahl sagt, was „this plan“ ist; das eigene yes von Cloudflare entfällt, sobald der Plan gezeigt wurde und gleich ist (neu für #361)</td></tr>
         <tr><td><code>Type yes to run &lt;setup&gt; now</code></td><td><code>Type yes to apply 8 changes:</code>, die Setups als <code>+ step-ca  setup</code>-Zeilen</td><td>die eine Zahl zählt auch die Setups; kein yes je Setup vor dem Plan (neu für #361)</td></tr>
-        <tr><td><code>would change</code>, <code>not checked (needs …)</code></td><td><code>~ system  2 changes</code>, <code>› system  needs sudo</code></td><td>Plan-Zeichen statt Zustandssätzen</td></tr>
+        <tr><td><code>would change</code>, <code>not checked (needs …)</code></td><td><code>~ system  will change  2 tasks</code>, <code>› system  needs sudo</code></td><td>Plan-Zeichen statt Zustandssätzen</td></tr>
         <tr><td><code>idle memory.current 63156224</code>, <code>(0) 0</code></td><td><code>60 MiB idle</code>, <code>0 in …</code></td><td>Zahlen, die man liest, ohne zu rechnen</td></tr>
       </tbody>
     </table>
