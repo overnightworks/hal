@@ -119,8 +119,8 @@ def update_checkout(
 
 
 def _update(live: checkout.Git, engine: compose.Compose) -> UpdateEnd:
-    if apply.refused_off_clean_main(live):
-        return UpdateEnd.REFUSED
+    if refusal := apply.refused_off_clean_main(live):
+        return UpdateEnd.FAILED if refusal.cannot_tell else UpdateEnd.REFUSED
     if (origin := fetched(live, write_error)) is None:
         return UpdateEnd.FAILED
     if origin.standing is checkout.Standing.CURRENT:
@@ -135,11 +135,12 @@ def _update(live: checkout.Git, engine: compose.Compose) -> UpdateEnd:
     if not confirmed(f"update the checkout to {origin.short}"):
         write_error(f"aborted, {_NOTHING_CHANGED}; {waiting_text(origin.behind)}")
         return UpdateEnd.DECLINED
-    if reason := _changed_since_planned(live, origin):
+    if refusal := _changed_since_planned(live, origin):
+        reason = refusal.message
         write_error(
             reason if _NOTHING_CHANGED in reason else f"{reason}; {_NOTHING_CHANGED}", _AGAIN
         )
-        return UpdateEnd.REFUSED
+        return UpdateEnd.FAILED if refusal.cannot_tell else UpdateEnd.REFUSED
     return _Merge(live, origin).run()
 
 
@@ -181,22 +182,25 @@ def _effect_of(path: str, directories: Collection[str], files: Collection[str]) 
     return Effect.OTHER
 
 
-def _changed_since_planned(git: checkout.Git, origin: checkout.Origin) -> str | None:
-    """Why the update must not start after the `yes`, else None; says the dirty paths itself."""
+def _changed_since_planned(git: checkout.Git, origin: checkout.Origin) -> checkout.Refusal | None:
+    """Why the update must not start after the `yes`, else None; says the dirty paths itself. A
+    git that cannot answer keeps `cannot_tell`."""
     try:
         if refusal := checkout.not_clean_main(git):
             if refusal.paths:
                 write_row(local_changes_row(refusal.paths))
-            return refusal.message
+            return refusal
         head = git.full()
         if head != origin.head_sha:
-            return f"HEAD moved while the question waited, planned {origin.head_sha}, now {head}"
+            return checkout.Refusal(
+                f"HEAD moved while the question waited, planned {origin.head_sha}, now {head}"
+            )
         if not git.is_commit(origin.sha):
-            return f"{origin.sha} is no commit any more"
+            return checkout.Refusal(f"{origin.sha} is no commit any more")
         if not git.is_ancestor(head, origin.sha):
-            return f"{origin.sha} is no fast-forward of HEAD {head}"
+            return checkout.Refusal(f"{origin.sha} is no fast-forward of HEAD {head}")
     except checkout.GitError as error:
-        return f"cannot read the live checkout, {error}"
+        return checkout.Refusal.cannot_read(error)
     return None
 
 

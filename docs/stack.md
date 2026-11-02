@@ -177,7 +177,7 @@ kommen aus der Konfiguration des Checkouts, nie aus den Containern, und sagen de
 ein laufender Container eingehaengt hat. Dann fragt es `Type yes to update the checkout to <Hash>:`.
 Nur das genaue `yes` gilt (alles andere: `aborted, nothing changed`, Exit 1). Nach dem `yes` prueft es
 noch einmal, dass der Baum ein sauberes `main` auf dem geplanten HEAD ist und der gemerkte Hash ein
-Fast-Forward davon ist (sonst Exit 4, nichts geaendert). Dann merged es genau diesen vollen Hash
+Fast-Forward davon ist (sonst Exit 4, nichts geaendert; kann git dabei nicht antworten, Exit 3). Dann merged es genau diesen vollen Hash
 (`merge --ff-only` in einer eigenen Sitzung, ohne Hooks, ohne ignorierte Dateien zu ueberschreiben),
 prueft HEAD, Zweig und Baum, fuehrt `bin/hal-sync` des gemergten Baums aus
 (`uv sync --locked` in einer eigenen Prozessgruppe, ohne den Lock zu erben) und prueft HEAD noch einmal.
@@ -187,7 +187,8 @@ und importiert nach dem Merge nichts mehr. Steht der Checkout schon auf `origin/
 `checkout current`, `nothing to update` und `next: hal apply` und endet mit 0, ohne Frage.
 
 **Exit.** Die Codes der Grammatik: 0 aktualisiert oder nichts zu tun, 1 abgelehnt, 4 verweigert (ein
-Waechter oder die Pruefung nach dem `yes`), 3 Fehlschlag, 130 Ctrl-C. Ab dem Merge endet jeder behandelte
+Waechter oder die Pruefung nach dem `yes`; ein git, das nicht antworten kann, ist
+keine Verweigerung), 3 Fehlschlag (dieses git eingeschlossen, auch bei der Pruefung nach dem `yes`), 130 Ctrl-C. Ab dem Merge endet jeder behandelte
 Fehler mit 3 und einer `error:`-Zeile mit `partial`, dem vollen Hash und dem Schritt (`merge`,
 `check HEAD after the merge`, `sync the dependencies`, `check HEAD after the sync`,
 `write the closing verdict`), dazu `next: hal apply`. Ab kurz vor dem Merge bis zum Ende wird ein Ctrl-C
