@@ -37,13 +37,15 @@ IN_ORDER = (
 def cell(probe: Probe) -> None:
     """With the barrier of the probe unit active, as P4 leaves it."""
     probe.edit_traefik_yml()
-    read_only = stat.S_IRUSR | stat.S_IXUSR
     dynamic = probe.barrier.parent
-    dynamic.chmod(read_only)
+    original = stat.S_IMODE(dynamic.stat().st_mode)
+    # Traefik reads `dynamic/` as another user than the owner: only the write bits go, or it
+    # could not read the directory at all, in this apply or after the mode is restored.
+    dynamic.chmod(original & ~(stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH))
     try:
         out = probe.hal("apply", "--local", terminal=True, exit_code=HAL_FAILURE)
     finally:
-        dynamic.chmod(stat.S_IRWXU)
+        dynamic.chmod(original)
     position = 0
     for pattern in IN_ORDER:
         found = re.compile(pattern).search(out, position)
