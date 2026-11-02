@@ -1,0 +1,8 @@
+claim_id = "205d8321b6bf4b30a1c887dd7086632c"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "1e540e83f4a0108cc137d4759905c12d73ae8277"
+branch = "claude/issue-901-protocol-6-lock-tag-smoke"
+scope = ["agent-service/image/requirements.txt", "agent-service/smoke.py", "compose.yaml", "docs/agent-service.md"]
+opened_commit = "ee699804ec53798fe16723068f4cf6e7d9ae2a51"
+whole_reason = "The lock, the tag, the smoke and the build line name one release, and the tests hold them equal."
