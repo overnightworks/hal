@@ -26,8 +26,9 @@ always removes its containers, volumes, networks and images, found by their comp
 
 Measured teardown: 2 s (K 50 s, CAP 1780 s).
 
-Needs an empty or new --scratch directory, `uv` (it runs `uv sync` in the copy) and a Docker that
-may pull busybox and Traefik.
+Needs an existing, empty --scratch directory and leaves it empty, passed, failed, stopped or
+crashed (`edge_copy.run_probe`); also `uv` (it runs `uv sync` in the copy) and a Docker that may
+pull busybox and Traefik.
 """
 
 from __future__ import annotations
@@ -40,7 +41,6 @@ import os
 import re
 import secrets
 import shlex
-import signal
 import subprocess
 import sys
 import time
@@ -70,7 +70,6 @@ COMPOSE_SECONDS = 300
 READY_SECONDS = 90
 REQUEST_SECONDS = 3
 POLL_SECONDS = 0.5
-NOT_RUNNABLE = 3
 TAGS = {  # by cell, in the order they are cut: each is newer than the one before
     "a1": "v2026.10.22.1",
     "a3": "v2026.10.22.2",
@@ -671,41 +670,27 @@ def prove(probe: Probe, *, switch_only: bool) -> int:
     return 0
 
 
-def raise_interrupt(_signal: int, _frame: object) -> None:
-    raise KeyboardInterrupt
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--scratch", type=Path, required=True)
+    parser.add_argument("--scratch", type=edge_copy.scratch_directory, required=True)
     parser.add_argument(
         "--switch-only", action="store_true", help="only A1 and the emergency-switch cells D1-D7"
     )
     arguments = parser.parse_args(argv)
-    if arguments.scratch.exists() and any(arguments.scratch.iterdir()):
-        write_line("PROBE FAILED: --scratch is not empty")
-        return NOT_RUNNABLE
-    arguments.scratch.mkdir(parents=True, exist_ok=True)
-    probe = Probe(arguments.scratch)
-    signal.signal(signal.SIGTERM, raise_interrupt)  # `timeout` ends the probe with SIGTERM
-    try:
-        exit_code = prove(probe, switch_only=arguments.switch_only)
-    except BaseException:
-        probe.teardown()  # a failure the probe did not foresee must not leave its containers
-        raise
-    signal.signal(signal.SIGTERM, signal.SIG_IGN)
-    try:
-        probe.teardown()
-    except (ProbeFailed, subprocess.TimeoutExpired) as failure:
-        write_line(f"PROBE FAILED: teardown, {failure}")
-        exit_code = 1
-    if exit_code == 0 and arguments.switch_only:
-        write_line("PROBE PASSED: #255 A1, D1, D2, D4, D7 hold")
-    elif exit_code == 0:
-        write_line(
+
+    def passed(_probe: Probe) -> int:
+        if arguments.switch_only:
+            return edge_copy.passed_line("PROBE PASSED: #255 A1, D1, D2, D4, D7 hold")
+        return edge_copy.passed_line(
             "PROBE PASSED: #255 A1-A4, A7-A9, A12, A18, A23, B5, B8, C1-C5, D1, D2, D4, D7 hold"
         )
-    return exit_code
+
+    return edge_copy.run_probe(
+        arguments.scratch,
+        Probe,
+        lambda probe: prove(probe, switch_only=arguments.switch_only),
+        passed,
+    )
 
 
 if __name__ == "__main__":
