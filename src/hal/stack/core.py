@@ -317,17 +317,6 @@ class CorePlan:
     digests: Digests
     left_unstarted: bool
 
-    @property
-    def files(self) -> str:
-        return ", ".join(self.digests)
-
-    def recreated(self, followed: Collection[str]) -> str:
-        """The success line once the recreate is observed and every barrier is proven; one for a
-        followed service names the files it runs."""
-        if self.service in followed:
-            return f"{self.service} is recreated and runs the checked-out {self.files}"
-        return f"{self.service} is recreated"
-
 
 def plan_core(
     config: Mapping[str, Any],

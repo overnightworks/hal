@@ -90,8 +90,6 @@ class CorePhase:
                     return failure
         except (compose.ComposeError, core.CoreError) as error:
             return f"could not {progress.step}, {error}"
-        if recreates and len(recreates) == len(planned.core):
-            print("the core is current")
         return None
 
     def _stopped_meanwhile(
@@ -126,6 +124,7 @@ class CorePhase:
         every active barrier, and only then record it; the failure line of the first step that
         fails."""
         config = planned.fleet.config
+        started = self.watch.clock()
         progress.step = f"recreate {plan.service}"
         engine.recreate(plan.service)
         progress.step = f"observe {plan.service} running"
@@ -134,12 +133,13 @@ class CorePhase:
             verb = "is" if len(down) == 1 else "are"
             return f"{' and '.join(down)} {verb} not running after the {plan.service} recreate"
         progress.step = "prove the barriers"
-        if unproven := self._unproven_barrier(planned, marks, plan.service):
-            return unproven
+        proven = self._prove_barriers(planned, marks, plan.service)
+        if isinstance(proven, str):
+            return proven
         if plan.service in followed:
             progress.step = f"record {plan.service} in {core.APPLIED_FILE}"
             self.record.write(plan.service, plan.digests, followed)
-        print(plan.recreated(followed))
+        _say_recreated(Recreated(plan.service, self.watch.clock() - started, proven))
         return None
 
     def record_switched_on(
@@ -165,25 +165,22 @@ class CorePhase:
         progress.step = "find the services edge follows"
         return core.followed_services(planned.fleet.config, planned.checkout)
 
-    def _unproven_barrier(
-        self, planned: Plan, marks: switches.Switches, service: str
-    ) -> str | None:
-        """Say each proven barrier; the failure line naming every one that is not, after all
-        active barriers were tried (S9)."""
+    def _prove_barriers(self, planned: Plan, marks: switches.Switches, service: str) -> bool | str:
+        """Whether at least one barrier was proven, once all active barriers were tried and none
+        is unproven (S9); else the failure line naming every one that is not."""
+        proven = False
         unproven: list[barrier.Unproven] = []
         for proof in barrier.prove_active(
             planned.fleet.units, planned.fleet.profile_services, planned.fleet.config, marks,
             self.repository, self.verifier, planned.app_plans.catalogued,
         ):  # fmt: skip
             match proof:
-                case barrier.Proven(unit):
-                    print(f"the barrier of {unit} is proven")
-                case barrier.NoHost(unit):
-                    print(f"{unit}: no host behind Traefik, so no barrier")
+                case barrier.Proven():
+                    proven = True
                 case barrier.Unproven():
                     unproven.append(proof)
         if not unproven:
-            return None
+            return proven
         units = ", ".join(proof.unit for proof in unproven)
         if len(unproven) == 1:
             barriers, failures = f"the barrier of {units} is", unproven[0].failure

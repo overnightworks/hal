@@ -91,12 +91,10 @@ UNCONFIGURED = (404, b"404 page not found\n", None)  # a Traefik that has loaded
 WHOAMI_SEEN = b"Hostname:"
 HELLO_ANSWERING = "hello answering"
 TRAEFIK_FILE = "traefik.yml"
-RECREATED = "traefik is recreated and runs the checked-out traefik.yml"
 TRAEFIK_KEPT = "the traefik container is the old one"
-SOCKET_PROXY_RECREATED = "socket-proxy is recreated"  # also a fact of the plan: look from the end
-CORE_CURRENT = "the core is current"
 CORE = ("socket-proxy", "traefik")
 COMPOSE_FILE = "compose.yaml"
+BARRIERS_PROVEN = "barriers proven"
 HARMLESS_EDIT = "# an edit that changes no setting\n"
 READY_SECONDS = 90
 BEHIND_BARRIER_SECONDS = 10
@@ -112,6 +110,12 @@ WHOAMI_ANCHOR = f"image: &whoami {WHOAMI_IMAGE}"
 WHOAMI_ALIAS = "image: *whoami"
 RESPELLED_WHOAMI = f"docker.io/{WHOAMI_IMAGE}"  # the same digest, so nothing is pulled
 OLD_IMAGE = str(PlanEvent.OLD_IMAGE)
+
+
+def result_row(out: str, service: str) -> re.Match[str] | None:
+    """The `recreated` result row of a service in the output of `hal apply`, whose whitespace
+    `run_hal` has collapsed; group 1 is its fact."""
+    return re.search(rf"✓ {re.escape(service)} recreated ((?:{BARRIERS_PROVEN} · )?\S+)", out)
 
 
 class Probe:
@@ -327,7 +331,8 @@ class Probe:
         before = self.container_ids()["traefik"]
         out = self.hal("apply", "--local", terminal=True)  # also starts hello
         expect(
-            "traefik recreate traefik.yml has no applied record" in out and RECREATED in out,
+            "traefik recreate traefik.yml has no applied record" in out
+            and result_row(out, "traefik"),
             f"the first apply said: {out[-200:]}",
         )
         expect(self.container_ids()["traefik"] != before, TRAEFIK_KEPT)
@@ -367,7 +372,7 @@ class Probe:
         self.edit_traefik_yml()
         out = self.hal("apply", "--local", terminal=True)
         expect(
-            "traefik recreate traefik.yml changed" in out and RECREATED in out,
+            "traefik recreate traefik.yml changed" in out and result_row(out, "traefik"),
             f"apply after the edit said: {out[-200:]}",
         )
         expect(self.container_ids()["traefik"] != before, TRAEFIK_KEPT)
@@ -379,9 +384,9 @@ class Probe:
         self.compose("--profile", UNIT, "up", "--detach", "hello")
         self.edit_traefik_yml()
         out = self.hal("apply", "--local", terminal=True)
-        proven = f"the barrier of {UNIT} is proven"
+        row = result_row(out, "traefik")
         expect(
-            proven in out and RECREATED in out and out.index(proven) < out.index(RECREATED),
+            row and BARRIERS_PROVEN in row.group(1),
             f"apply with the barrier said: {out[-300:]}",
         )
         expect(self.answers_the_barrier(), f"{HOST} answers {self.ask()} after the recreate")
@@ -445,7 +450,7 @@ class Probe:
         self.label_core_service("socket-proxy", "q1")
         before, after, out = self.apply_core_change()
         expect(
-            SOCKET_PROXY_RECREATED in out and all(after[s] != before[s] for s in CORE),
+            result_row(out, "socket-proxy") and all(after[s] != before[s] for s in CORE),
             f"apply after the Q1 socket-proxy label said: {out[-400:]}",
         )
 
@@ -461,9 +466,11 @@ class Probe:
         before, after, out = self.apply_core_change()
         expect(
             "socket-proxy recreate definition changed" in out
-            and "traefik recreate" in out
-            and out.count("socket-proxy is recreated") == 2  # the fact of traefik's row, the result
-            and out.rindex(SOCKET_PROXY_RECREATED) < out.index(RECREATED) < out.index(CORE_CURRENT),
+            and "traefik recreate traefik.yml changed · socket-proxy is recreated" in out
+            and out.count("socket-proxy is recreated") == 1  # the fact of traefik's plan row
+            and result_row(out, "socket-proxy")
+            and result_row(out, "traefik")
+            and result_row(out, "socket-proxy").start() < result_row(out, "traefik").start(),
             f"apply after the socket-proxy label said: {out[-400:]}",
         )
         expect(all(after[s] != before[s] for s in CORE), "a core container is the old one")
@@ -482,7 +489,7 @@ class Probe:
         expect(
             "traefik recreate definition changed" in out
             and "socket-proxy recreate" not in out
-            and RECREATED in out,
+            and result_row(out, "traefik"),
             f"apply after the traefik label said: {out[-300:]}",
         )
         expect(after["socket-proxy"] == before["socket-proxy"], "socket-proxy was recreated")
@@ -504,11 +511,9 @@ class Probe:
         self.compose("--profile", UNIT, "up", "--detach", "hello")
         self.label_core_service("socket-proxy", "q5")
         _, _, out = self.apply_core_change()
-        proven = f"the barrier of {UNIT} is proven"
+        row = result_row(out, "socket-proxy")
         expect(
-            proven in out
-            and SOCKET_PROXY_RECREATED in out
-            and out.index(proven) < out.rindex(SOCKET_PROXY_RECREATED),
+            row and BARRIERS_PROVEN in row.group(1),
             f"apply with the barrier said: {out[-400:]}",
         )
         expect(self.answers_the_barrier(), f"{HOST} answers {self.ask()} after the recreate")
