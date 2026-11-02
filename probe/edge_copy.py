@@ -52,8 +52,9 @@ PROBE_IDENTITY = {"user.name": "edge probe", "user.email": "probe@edge.invalid"}
 # The fixed network names of compose.yaml (`name: hal_<suffix>`) that apps join as external
 # networks; they survive the project's rename, so a probe must never create or remove one.
 LIVE_NETWORK_PREFIX = "hal_"
-FIXED_NAME_SECTIONS = ("networks", "volumes")
-NAME_LINE = re.compile(r"^(\s+name:\s+)(\S+)\s*$", re.MULTILINE)
+LIVE_NETWORK_NAME = re.compile(
+    rf"^(\s+name:\s+){re.escape(LIVE_NETWORK_PREFIX)}(\w+)\s*$", re.MULTILINE
+)
 GUARDED_COMPOSE_VERBS = {"up", "run", "down"}  # what creates or removes networks
 # The networks of compose.yaml that pin a /24 so agent-egress has one address on each; a probe
 # moves each to a free /24 of its own, so it never collides with the live stack's.
@@ -76,55 +77,15 @@ def expect(condition: bool, message: str) -> None:
         raise ProbeFailed(message)
 
 
-def fixed_names(text: str) -> set[str]:
-    """The top-level `name:` of every network and volume of compose.yaml `text`."""
-    document = yaml.safe_load(text) or {}
-    return {
-        entry["name"]
-        for section in FIXED_NAME_SECTIONS
-        for entry in (document.get(section) or {}).values()
-        if entry and "name" in entry
-    }
-
-
 def namespaced_compose(text: str, project: str) -> str:
-    """`text` of compose.yaml with every fixed network and volume name `<owner>_<suffix>` moved to
-    `<project>_<suffix>`, so a probe's stack shares none with the live one. Refuses a text with no
-    such name, and one in which a name outside the project remains."""
-    fixed = fixed_names(text)
-    expect(bool(fixed), "compose.yaml names no fixed network or volume name to move")
-    expect(all("_" in name for name in fixed), f"a fixed name has no <owner>_ prefix: {fixed}")
-    namespaced = NAME_LINE.sub(
-        lambda line: (
-            f"{line[1]}{project}_{line[2].partition('_')[2]}" if line[2] in fixed else line[0]
-        ),
-        text,
-    )
-    remaining = sorted(
-        name for name in fixed_names(namespaced) if not name.startswith(f"{project}_")
-    )
-    expect(not remaining, f"a fixed name remains after the rewrite: {remaining}")
+    """`text` of compose.yaml with every fixed network name `hal_<suffix>` moved to
+    `<project>_<suffix>`, so a probe's stack shares no network with the live one. Refuses a text
+    with no such name, and one in which a `hal_` name remains."""
+    namespaced, renamed = LIVE_NETWORK_NAME.subn(rf"\g<1>{project}_\g<2>", text)
+    expect(renamed > 0, "compose.yaml names no fixed hal_ network to move")
+    remaining = re.findall(rf"name:\s+{LIVE_NETWORK_PREFIX}\S*", namespaced)
+    expect(not remaining, f"a hal_ network name remains after the rewrite: {remaining}")
     return namespaced
-
-
-def write_namespaced_compose(repository: Path, directory: Path, project: str) -> Path:
-    """The path of `repository`'s compose.yaml written into `directory` with its names moved
-    (namespaced_compose). The text is moved before anything is written: a compose.yaml a probe owns
-    never holds a live name, however early its setup is cut."""
-    moved = namespaced_compose((repository / deploy_checkout.COMPOSE_FILE).read_text(), project)
-    target = directory / deploy_checkout.COMPOSE_FILE
-    target.write_text(moved)
-    return target
-
-
-def shipped_script_copy(repository: Path, directory: Path, script: str) -> Path:
-    """The path of a copy of `repository`'s `script` at the same place under `directory`. A shipped
-    script resolves the compose file of the tree it stands in, and a project name moves no fixed
-    name, so a probe runs it only from beside a `write_namespaced_compose` file."""
-    target = directory / script
-    target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(repository / script, target)
-    return target
 
 
 def beside_the_live_edge(text: str, project: str) -> str:
@@ -268,17 +229,15 @@ def _without_services(text: str, apps: set[str]) -> dict:
     return {**_document(text), "services": services}
 
 
-def expect_project_names(resolved: dict, project: str) -> None:
-    """Raises `ProbeFailed` when a network or volume of a resolved compose configuration (`config
-    --format json`) is not named `<project>_...`: a call that resolves one would touch a live
-    network or volume."""
-    for section in FIXED_NAME_SECTIONS:
-        foreign = {
-            key: entry["name"]
-            for key, entry in (resolved.get(section) or {}).items()
-            if not entry["name"].startswith(f"{project}_")
-        }
-        expect(not foreign, f"{section} outside the project {project}: {foreign}")
+def expect_project_networks(resolved: dict, project: str) -> None:
+    """Raises `ProbeFailed` when a network of a resolved compose configuration (`config --format
+    json`) is not named `<project>_...`: a call that resolves one would touch a live network."""
+    foreign = {
+        key: network["name"]
+        for key, network in (resolved.get("networks") or {}).items()
+        if not network["name"].startswith(f"{project}_")
+    }
+    expect(not foreign, f"networks outside the project {project}: {foreign}")
 
 
 def copy_compose_prefix(copy: Path) -> list[str]:
@@ -322,9 +281,9 @@ def free_subnet(candidates: Sequence[str], occupied: Sequence[str]) -> ipaddress
 
 class NetworkGuard:
     """Checks, before a compose call that starts or removes something, that what the call's files
-    and profiles resolve is the probe's project and names only networks and volumes of it (P26).
-    `run` returns the stdout of a command. A command is resolved once unless `once` is false, for a
-    file that changes between calls."""
+    and profiles resolve is the probe's project and names only networks of it (P26). `run` returns
+    the stdout of a command. A command is resolved once unless `once` is false, for a file that
+    changes between calls."""
 
     def __init__(self, project: str, run: Callable[[list[str]], str | bytes]) -> None:
         self.project, self.run = project, run
@@ -338,7 +297,7 @@ class NetworkGuard:
             name = resolved.get("name")
             expect(name is not None, f"the resolved configuration names no project: {prefix}")
             expect(name == self.project, f"the project is {name!r}, not {self.project}")
-            expect_project_names(resolved, self.project)
+            expect_project_networks(resolved, self.project)
             self.checked.add(key)
 
     def expect_call(self, command: list[str]) -> None:
@@ -391,22 +350,9 @@ class LiveProject:
         return f"{len(self.containers)} containers, {len(self.volumes)} volumes"
 
 
-def compose_project_name(text: str) -> str:
-    """The project the compose.yaml `text` names at its top level: the live one."""
-    return yaml.safe_load(text)["name"]
-
-
-def resolved_volumes(text: str, project: str) -> set[str]:
-    """Every volume name compose.yaml `text` resolves under `project`: the fixed `name:` of a
-    volume, else `<project>_<key>`."""
-    volumes = yaml.safe_load(text).get("volumes") or {}
-    return {(entry or {}).get("name", f"{project}_{key}") for key, entry in volumes.items()}
-
-
 def live_project(repository: Path) -> LiveProject:
     """The live project of `repository`'s compose.yaml (its top-level `name`) as the daemon has it
-    now; empty when the live stack is down. Its volumes are those labelled with the project and
-    every one compose.yaml resolves, whatever its label."""
+    now; empty when the live stack is down."""
 
     def docker(*arguments: str) -> list[str]:
         return subprocess.run(
@@ -414,8 +360,7 @@ def live_project(repository: Path) -> LiveProject:
             timeout=APPLY_SECONDS,
         ).stdout.splitlines()  # fmt: skip
 
-    text = (repository / deploy_checkout.COMPOSE_FILE).read_text()
-    name = compose_project_name(text)
+    name = yaml.safe_load((repository / deploy_checkout.COMPOSE_FILE).read_text())["name"]
     selector = f"label={PROJECT_LABEL}={name}"
     identifiers = docker("container", "ls", "--all", "--quiet", "--no-trunc", "--filter", selector)
     inspected = docker(
@@ -424,8 +369,7 @@ def live_project(repository: Path) -> LiveProject:
     return LiveProject(
         name,
         frozenset(tuple(line.split(" ", 2)) for line in inspected),
-        frozenset(docker("volume", "ls", "--quiet", "--filter", selector))
-        | resolved_volumes(text, name).intersection(docker("volume", "ls", "--quiet")),
+        frozenset(docker("volume", "ls", "--quiet", "--filter", selector)),
     )
 
 
@@ -442,26 +386,30 @@ def expect_live_project_unchanged(before: LiveProject, repository: Path) -> str:
     return f"the live project {before.name} is untouched: {after.counts()}"
 
 
-def repository_copy(repository: Path, home: Path, scratch: Path, project: str) -> Path:
+def repository_copy(
+    repository: Path, home: Path, scratch: Path, project: str | None = None
+) -> Path:
     """The files of `repository` that git tracks or would track, as the live checkout of `home`: a
     `main` pushed to the bare remote `<scratch>/origin.git`, with its ignored `.env` written by the
-    first `hal apply --local` and its own venv from `uv sync`. The copy's compose.yaml is never the
-    original: it is written with every fixed network and volume name moved to `<project>_...`
-    (write_namespaced_compose), so neither the copy's `hal apply` nor a teardown after a cut setup
-    reaches a live one. Its fleet.yaml has no app entry (without_inherited_apps): a probe adds its
-    own fixture apps. Copying again over an existing copy publishes what differs."""
+    first `hal apply --local` and its own venv from `uv sync`. With a `project`, the copy's
+    compose.yaml names its fixed networks `<project>_...` (namespaced_compose), so the copy's
+    `hal apply` touches no live network. Its fleet.yaml has no app entry (without_inherited_apps),
+    with or without a `project`: a probe adds its own fixture apps.
+    Copying again over an existing copy publishes what differs."""
     copy = checkout.live_checkout(home)
     listing = subprocess.run(
         ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
         capture_output=True, cwd=repository, check=True, timeout=APPLY_SECONDS,
     )  # fmt: skip
     for name in filter(None, listing.stdout.decode().split("\0")):
-        if name != deploy_checkout.COMPOSE_FILE and (repository / name).is_file():
+        if (repository / name).is_file():
             (copy / name).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(repository / name, copy / name)
     fleet_file = copy / catalog.FLEET_FILE
     fleet_file.write_text(without_inherited_apps(fleet_file.read_text()))
-    write_namespaced_compose(repository, copy, project)
+    if project:
+        compose_file = copy / deploy_checkout.COMPOSE_FILE
+        compose_file.write_text(namespaced_compose(compose_file.read_text(), project))
     if not (copy / ".git").is_dir():
         remote = scratch / REMOTE
         git(scratch, "init", "--quiet", "--bare", "--initial-branch", checkout.MAIN, str(remote))

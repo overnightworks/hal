@@ -1052,7 +1052,7 @@ Type <span class="w">yes</span> to apply 8 changes: yes
 <span class="live">  <span class="spin"></span> hopin           build at v2026.10.27.1 · 48s</span>  <span class="n">← nur live</span>
 <span class="g">  ✓</span> hopin           updated        <span class="d">v2026.10.27.1 · running · 1m42s</span>
 <span class="rw">error:</span> 1 of 8 failed, 1 skipped · Cloudflare not touched
-<span class="c">next:</span> docker logs --tail 50 hal-agent-service-1</pre>
+<span class="c">next:</span> docker logs --tail 50 edge-agent-service-1</pre>
       </figure>
       <figure>
         <figcaption><span class="tag new">neu A5-2a</span> nach dem yes: der Realm als eine Zeile, seine Änderungen und was nur in Keycloak liegt darunter</figcaption>
@@ -1223,7 +1223,7 @@ Type <span class="w">yes</span> to apply 5 changes: yes
 <span class="hd">core</span>
 <span class="r">  ✗</span> traefik         not running    <span class="d">exited within 5s of the start</span>
 <span class="rw">error:</span> 1 of 5 failed, 3 skipped · Cloudflare not touched
-<span class="c">next:</span> docker logs --tail 50 hal-traefik-1</pre>
+<span class="c">next:</span> docker logs --tail 50 edge-traefik-1</pre>
         <p class="was">Die drei Cloudflare-Zeilen des Plans gelten als übersprungen. Cloudflare wird nur nach einem sauberen lokalen Lauf berührt; der Schreib-Token wird gar nicht erst gelesen. Gleiche Form, wenn die Bereitschaftsprüfung vor Cloudflare scheitert.</p>
       </figure>
     </div>

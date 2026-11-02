@@ -158,7 +158,7 @@ eigener Fund, nie ein sauberer Lauf.
   ein entfernter Container auch nicht. Gesunde erscheinen nur als Zahl. Ein Container einer App, die mit `hal stop`
   abgeschaltet ist (eine Datei unter `~/.local/state/edge/stopped/`; nur der Name wird gelesen), ist mit jedem Code ungleich 0
   kein Fund, und der Bericht nennt die Schalter; `container-restarting`, `container-dead` und `container-unhealthy` bleiben
-  Funde. Eine Einheit von edges eigenem Stack (Projekt `hal`) erscheint nach `hal stop` weiter, weil nur `hal` weiß, welche Dienste eine Einheit bilden und dafür noch niemand zuständig ist; `hal alarm` meldet sie deshalb nach der eingestellten Zahl Läufe. `docker-unreadable`, wenn Docker nicht lesbar ist.
+  Funde. Eine Einheit von edges eigenem Stack (Projekt `edge`) erscheint nach `hal stop` weiter, weil nur `hal` weiß, welche Dienste eine Einheit bilden und dafür noch niemand zuständig ist; `hal alarm` meldet sie deshalb nach der eingestellten Zahl Läufe. `docker-unreadable`, wenn Docker nicht lesbar ist.
 - **`platform`, Jobs.** `systemctl --user list-units --state=failed` für `hal*`: nur die erste Spalte, der Einheitenname
   (`hal-backup.service`), wird gelesen, nie die Beschreibung. Jede fehlgeschlagene `hal*`-Einheit ist ein `job-failed`
   (Action needed, Gegenstand der Name samt Endung); sie verschwindet mit `reset-failed` oder einem erfolgreichen Lauf. Passt ein Name nicht
