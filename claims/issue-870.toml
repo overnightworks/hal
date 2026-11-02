@@ -1,8 +1,0 @@
-claim_id = "24ea6c63ea104cf3a873c99ae64fb73a"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "c97ba2af54da347c6bf9a6503b9d23c020aca024"
-branch = "claude/issue-870-s4a-live-canary"
-scope = ["agent-service/api_canary.py", "agent-service/live_canary.py", "agent-service/live_smoke.py", "agent-service/retention_census.py", "compose.yaml", "docs/agent-service.md", "docs/home.md", "probe/agent-service/litellm.py", "probe/agent-service/litellm_failures.py", "probe/agent-service/litellm_live_canary.py", "probe/agent-service/litellm_retention.py", "tests/support/live_smoke_fakes.py", "tests/test_agent_service_live_canary.py", "tests/test_agent_service_retention_census.py", "tests/test_agent_service_smoke.py", "tests/test_litellm_unit.py"]
-opened_commit = "8066964275c7571e05267855b8c84b4f0ea621f6"
-whole_reason = "S4a is one command: the shipped one-off canary, the census hardening it needs, the wrapper that joins them, and the one probe run that proves them together."
