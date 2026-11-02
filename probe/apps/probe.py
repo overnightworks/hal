@@ -57,7 +57,7 @@ from emergency_switch import EmergencySwitch  # noqa: E402
 from switched_off import SwitchedOff  # noqa: E402
 
 from hal.output import write_line  # noqa: E402
-from hal.stack import checkout  # noqa: E402
+from hal.stack import checkout, deploy_checkout  # noqa: E402
 
 CORE_PROJECT = "edge-apps-probe"
 DOMAIN = "probe.invalid"
@@ -141,6 +141,9 @@ class Probe:
         self.origin = scratch / "app-origin.git"
         self.work = scratch / "app-work"
         self.shas: dict[str, str] = {}
+        self.guard = edge_copy.NetworkGuard(
+            CORE_PROJECT, lambda command: self.docker(*command[1:]).stdout
+        )
 
     # --- docker ------------------------------------------------------------------------------
 
@@ -164,6 +167,10 @@ class Probe:
             "compose", "-p", self.key, "--project-directory", str(self.srv), "--file",
             str(self.srv / "compose.yaml"), *arguments, check=check,
         )  # fmt: skip
+
+    def core_compose(self, *arguments: str, check: bool = True) -> None:
+        """Compose on the copy's own file, once the guard has read what the call resolves."""
+        self.docker(*edge_copy.guarded_compose(self.copy, self.guard, arguments), check=check)
 
     def containers(self) -> list[dict[str, str]]:
         """Every container of the app's project: id, name, state, health, service, tag label."""
@@ -201,9 +208,9 @@ class Probe:
         )
         if ids := set(images.stdout.decode().split()):
             self.docker("image", "rm", "--force", *ids, check=False)
-        if self.copy.exists():
-            self.docker(
-                "compose", "--profile", "*", "down", "--volumes", "--remove-orphans", check=False
+        if (self.copy / deploy_checkout.COMPOSE_FILE).exists():
+            self.core_compose(
+                "--profile", "*", "down", "--volumes", "--remove-orphans", check=False
             )
 
     # --- the origin of the app ---------------------------------------------------------------
@@ -300,7 +307,7 @@ class Probe:
     # --- the copy, its Traefik and hal -------------------------------------------------------
 
     def bring_up(self) -> None:
-        self.copy = edge_copy.repository_copy(REPO, self.home, self.scratch)
+        self.copy = edge_copy.repository_copy(REPO, self.home, self.scratch, CORE_PROJECT)
         (self.copy / "fleet.yaml").write_text(
             f"cloudflare:\n  zone: {DOMAIN}\ngithub:\n  org: {ORGANISATION}\n\nservices:\n"
             f"  {self.key}:\n    repo: {{default_branch: master}}\n    run: {{enabled: true}}\n"
@@ -321,7 +328,7 @@ class Probe:
         (self.copy / "traefik.yml").write_text(private)
         edge_copy.publish(self.copy, "probe: a Traefik of its own")
         self.start_origin()
-        self.docker("compose", "up", "--detach", "socket-proxy", "traefik")
+        self.core_compose("up", "--detach", "socket-proxy", "traefik")
         self.wait_until(
             "the probe's Traefik answers", lambda: self.ask("/", host="nobody")[0] == 404
         )

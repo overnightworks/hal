@@ -479,7 +479,7 @@ class GoLive:
         if not self.bootstrap_present():
             raise StepFailure(f"{BOOTSTRAP_SECRET} is gone but master is not on {ADMIN_URL}")
         self.compose_must(
-            "exec", "-T", "keycloak", "/opt/edge/admin-frontend.sh", bootstrap=True,
+            "exec", "-T", "keycloak", "/opt/hal/admin-frontend.sh", bootstrap=True,
             timeout=SHORT_COMMAND_SECONDS,
         )  # fmt: skip
 
