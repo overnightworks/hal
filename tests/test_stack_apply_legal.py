@@ -39,7 +39,7 @@ from support.stack_apply_fakes import (
 )
 from support.stack_plan_rows import detail_lines, find_row, plain, row_at
 
-from hal.stack import appkit_step
+from hal.stack import appkit_step, apply
 from hal.stack.legal_step import RECORD_FILE
 from hal.stack.plan_rows import LegalEvent
 from hal.stack.result_rows import ResultEvent
@@ -157,7 +157,7 @@ def test_a_changed_text_goes_live_only_after_yes_and_the_plan_names_its_page(wor
 
     declined_exit, declined_out, _ = world.switch(answer="no")
 
-    assert declined_exit == 1
+    assert declined_exit == apply.ApplyExit.DECLINED
     assert find_row(declined_out, "legal", LegalEvent.EDITED_PAGE, "datenschutz")
     assert "nutzungsbedingungen" not in declined_out
     assert 'id="neu"' not in world.built_page("datenschutz")
@@ -392,7 +392,7 @@ def test_a_refused_section_stops_the_run_before_the_question_and_writes_nothing(
 def test_a_link_to_a_block_that_left_refuses_the_run(world):
     """L13."""
     world.edit(PRIVACY, link_to_the_agent_service)
-    assert world.switch(answer="no")[0] == 1
+    assert world.switch(answer="no")[0] == apply.ApplyExit.DECLINED
     write_fleet(world.repository, WITHOUT_AGENT)
 
     exit_code, _, err = world.switch()

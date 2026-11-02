@@ -119,7 +119,7 @@ def update_checkout(
 
 
 def _update(live: checkout.Git, engine: compose.Compose) -> UpdateEnd:
-    if not apply.on_clean_main(live):
+    if apply.refused_off_clean_main(live):
         return UpdateEnd.REFUSED
     if (origin := fetched(live, write_error)) is None:
         return UpdateEnd.FAILED

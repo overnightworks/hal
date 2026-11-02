@@ -223,7 +223,8 @@ def test_a_git_that_fails_is_a_refusal_not_an_error(main_tree, tmp_path, monkeyp
     monkeypatch.setenv("PATH", str(tmp_path / "empty"))
 
     assert checkout.not_clean_main(checkout.Git(main_tree)) == checkout.Refusal(
-        "cannot read the live checkout, cannot run git (No such file or directory)"
+        "cannot read the live checkout, cannot run git (No such file or directory)",
+        cannot_tell=True,
     )
 
 
