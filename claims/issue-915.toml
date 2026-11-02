@@ -1,8 +1,0 @@
-claim_id = "4cc13da43dbb4a208ffca62e382a9b53"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "d7b850999820612a040643ba26926faabbc14bf1"
-branch = "claude/issue-915-app-litellm-key-files"
-scope = ["docs/agent-service.md", "docs/architecture.md", "docs/home.md", "quality/baseline.toml", "src/hal/workstation/manifest_fields.py", "src/hal/workstation/secrets_manifest.toml", "src/hal/workstation/secrets_setup.py", "src/hal/workstation/secrets_view.py", "tests/test_workstation_secrets_setup.py", "tests/test_workstation_secrets_view.py"]
-opened_commit = "9c4dd1c221fc5297602ddd4f849c25c70f1a3468"
-whole_reason = "One generated secret kind gains a prefix and three entries use it; the rule and the documents that name generated secrets move in the same change."
