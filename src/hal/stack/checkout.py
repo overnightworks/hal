@@ -28,7 +28,7 @@ import re
 import signal
 import subprocess
 from collections.abc import Callable, Collection, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum, StrEnum
 from pathlib import Path
 
@@ -452,11 +452,11 @@ def not_on_main(git: Git) -> str | None:
 class Refusal:
     """Why a checkout is not a born `main` with nothing changed; `paths` are the changed paths of
     a dirty tree, in git's order; `cannot_tell` is a git that could not be asked, which is no
-    verdict on the checkout. It is left out of equality: the message already says it."""
+    verdict on the checkout."""
 
     message: str
     paths: tuple[str, ...] = ()
-    cannot_tell: bool = field(default=False, compare=False)
+    cannot_tell: bool = False
 
 
 def not_clean_main(git: Git) -> Refusal | None:
