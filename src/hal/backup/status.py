@@ -104,7 +104,7 @@ class Status:
             document["unattributed"] = self.unattributed.as_json()
         return document
 
-    def attempt(self, started: datetime) -> Self:
+    def attempt(self, started: datetime) -> Status:
         """A new run starts: history carries over, the verdict does not."""
         return Status(
             state=State.RUNNING,

@@ -29,7 +29,7 @@ extend-include = ["keycloak/go-live", "step-ca/init", "agent-service/setup"]
 [tool.ruff.per-file-target-version]
 # The LiteLLM image runs Python 3.13, which predates PEP 758's bare except list.
 "agent-service/litellm/*.py" = "py313"
-# agent-service/setup imports these on CI's system python 3.12; #472 removes this line when CI's runner moves to the PC's release.
+# agent-service/setup imports these on CI's system python, which is older than the floor.
 "src/hal/output/*.py" = "py312"
 
 [tool.ruff.format]
