@@ -10,7 +10,7 @@ services:
       - source: keycloak_bootstrap_admin_password
         target: KC_BOOTSTRAP_ADMIN_PASSWORD
     volumes:
-      - ./keycloak/admin-frontend.sh:/opt/hal/admin-frontend.sh:ro
+      - ./keycloak/admin-frontend.sh:/opt/edge/admin-frontend.sh:ro
 
   keycloak-config-cli:
     environment:

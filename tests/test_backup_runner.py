@@ -1108,7 +1108,7 @@ def test_keycloak_reported_failed_while_songmaker_is_still_backed_up_when_keyclo
     edge_backup, machine
 ):
     """#107 T7: keycloak is recorded failed, songmaker is still backed up."""
-    machine.lose_keycloak_database()
+    machine.other_db_containers["edge"] = []
 
     outcome = edge_backup(*declare_shipped_apps(), "backup")
 

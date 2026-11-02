@@ -22,7 +22,7 @@ re-checks, and shows a fresh plan.
 **`step-ca/init`** makes the key material in one-off containers without a network and prints no secret.
 It writes `~/.secrets/step-ca/` (directory 0700): `root_ca_key` (0600, never mounted into a running
 container), `root_ca.crt` (0644) and `password` (0644, protects the root and the intermediate key). It
-puts the intermediate and a copy of the root certificate into the `step-ca` volume (`edge_step-ca`) and creates the empty
+puts the intermediate and a copy of the root certificate into the `step-ca` volume and creates the empty
 `traefik-mcp-acme` volume, so `apply` never creates one. A second run changes nothing; after an
 interruption it completes what is missing and never overwrites a key. Back up `~/.secrets/step-ca/` and
 the `step-ca` volume. The root certificate is what other services trust.
@@ -63,8 +63,8 @@ partial-state behaviour) and of the gateway (reachable only with the root, 24-ho
 http refused, the network split as ruled, songmaker's route (exactly `/mcp`, no other path or
 name reaches the stand-in), no new host listener, renewal without restart, apply on and off
 keeping both volumes, the emergency switch, setup asked by apply, the follower recreate rules). Its
-compose calls and `step-ca/init` run from a copy of `compose.yaml` whose fixed network and volume names are moved into the
-probe's project, and each checks first that it resolves no other network or volume, so it never touches a live
+compose calls run from a copy of `compose.yaml` whose fixed `hal_*` network names are moved into the
+probe's project, and each checks first that it resolves no other network, so it never touches a live
 one. It takes 13 to 20 minutes and, like every probe stack, runs under `/tmp/probe-stack.lock` with a time cap (its
 docstring gives the command line). Re-run it for every step-ca or Traefik upgrade.
 
