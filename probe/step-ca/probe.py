@@ -12,7 +12,7 @@ calls and that copy resolve only the project's networks and volumes (edge_copy.p
         python3 probe/step-ca/probe.py --scratch DIR  # teardown measured 1 s (K 30 s, CAP 1800 s)
 
 The CA and the gateway are only reachable on their internal compose networks, so every call to
-them runs from a throwaway container on the network a client would sit on. Needs an empty or new
+them runs from a throwaway container on the network a client would sit on. Needs an existing empty
 --scratch directory. Proof 9 waits for a renewal, 10 runs three applies, 11 drives the emergency
 switch, 12 runs the setup from `hal apply`, 13 lets traefik-mcp follow its file and definition
 through about ten applies (traefik_mcp_follows.py), and 14 drives songmaker's route (#346
