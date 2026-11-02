@@ -268,6 +268,15 @@ def _declared_mode(path: Path, where: str, raw: Mapping[str, object]) -> tuple[i
     return mode, string(path, where, raw, "loosest_mode_reason")
 
 
+def _value_prefix(path: Path, where: str, raw: Mapping[str, object], kind: SecretKind) -> str:
+    """The text `hal setup` puts before a value it generates; a service password only."""
+    if "value_prefix" not in raw:
+        return ""
+    if kind is not SecretKind.SERVICE_PASSWORD:
+        raise fail(path, where, "value_prefix belongs to a service-password entry only")
+    return string(path, where, raw, "value_prefix")
+
+
 def _is_github_right(right: str) -> bool:
     permission, _, level = right.partition(":")
     return bool(permission) and level in GITHUB_ACCESS_LEVELS
@@ -304,8 +313,6 @@ def _entry(path: Path, index: int, raw: object) -> SecretEntry:
     kind = _enum_value(path, where, raw, "kind", SecretKind)
     require_key_of_kind(path, where, raw, "mirror_of", kind, SecretKind.DERIVED_MIRROR)
     require_key_of_kind(path, where, raw, "page", kind, SecretKind.UNVERIFIED_TOKEN)
-    if "value_prefix" in raw and kind is not SecretKind.SERVICE_PASSWORD:
-        raise fail(path, where, "value_prefix belongs to a service-password entry only")
     retirement = _retirement(path, where, raw)
     source = _token_source(path, where, raw, kind)
     loosest_mode, loosest_mode_reason = _declared_mode(path, where, raw)
@@ -330,7 +337,7 @@ def _entry(path: Path, index: int, raw: object) -> SecretEntry:
         loosest_mode=loosest_mode,
         loosest_mode_reason=loosest_mode_reason,
         create=create,
-        value_prefix=string(path, where, raw, "value_prefix") if "value_prefix" in raw else "",
+        value_prefix=_value_prefix(path, where, raw, kind),
     )
     if entry.written_by_setup and (len(patterns) != 1 or _has_wildcard(patterns[0].name)):
         raise fail(path, where, "paths of an entry the wizard writes must be exactly one place without a wildcard")

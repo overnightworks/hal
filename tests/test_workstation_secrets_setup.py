@@ -10,18 +10,21 @@ from pathlib import Path
 from urllib.parse import parse_qsl, urlsplit
 
 import pytest
-from support.workstation_support import symlinked_folder_fix
+from support.workstation_secrets_report import findings_of, report_of
+from support.workstation_support import FakeProbe, plant_secrets, run_hal_secrets, symlinked_folder_fix
 from support.workstation_secrets_support import (
     FakeCli,
     FakeSync,
     FakeTerminal,
     private_directory,
+    WIZARD_NOW,
     run_wizard,
     squeezed,
 )
 
 from hal.output.hidden_paste import TerminalCannotHide, TerminalNotRestored
 from hal.workstation import secrets_setup
+from hal.workstation.manifest_fields import ManifestError
 from hal.workstation.secrets_setup import (
     CLOUDFLARE_TOKEN_PAGE,
     NO_BROWSER,
@@ -707,6 +710,17 @@ def test_setup_creates_each_apps_litellm_key_prefixed_and_keeps_existing_files(
     assert [path.read_text() for path in paths] == values
 
 
+def test_a_value_prefix_on_another_kind_is_refused_at_load_naming_the_entry(tmp_path: Path) -> None:
+    """#915 K3: a prefix belongs to a service-password entry only."""
+    manifest = tmp_path / "manifest.toml"
+    manifest.write_text(
+        '[[secret]]\nname = "gitlab"\nkind = "token"\npaths = ["~/.secrets/gitlab"]\nread_by = []\nrecreate = "r"\nvalue_prefix = "sk-"\n'
+    )
+
+    with pytest.raises(ManifestError, match=r"gitlab.*value_prefix"):
+        load_manifest(manifest)
+
+
 def test_the_master_key_keeps_its_unprefixed_value_form(home: Path, use_manifest, boundaries: Boundaries) -> None:
     """#915 K5: only entries that declare a value_prefix get one."""
     _use_packaged_entries(use_manifest, ("litellm/master-key",))
@@ -714,6 +728,25 @@ def test_the_master_key_keeps_its_unprefixed_value_form(home: Path, use_manifest
     run_wizard(home, boundaries)
 
     assert not (home / ".secrets/litellm/master-key").read_text().startswith("sk-")
+
+
+def test_each_apps_litellm_key_is_listed_with_its_readers_and_mode_0644_is_no_finding(tmp_path: Path, probe: FakeProbe, capsys) -> None:
+    """#915 K4: the three app key files are declared secrets, readable by their container user."""
+    home = tmp_path / "home"
+    plant_secrets(home)
+    apps = ("songmaker", "hopin", "presentator")
+    for app in apps:
+        (home / ".secrets/litellm/apps" / app).chmod(0o644)
+
+    code = run_hal_secrets(home, probe, now=WIZARD_NOW)
+    report = report_of(home)
+    capsys.readouterr()
+    by_service = run_hal_secrets(home, probe, "--by-service", now=WIZARD_NOW)
+    listing = capsys.readouterr().out
+
+    assert (code, by_service) == (0, 0)
+    assert findings_of(report, "loose-mode") == {}
+    assert all(f"| {app} | " in listing and "litellm" in listing.split(f"| {app} |")[1].splitlines()[0] for app in apps)
 
 
 def test_the_real_terminal_fact_is_false_while_stdio_is_captured(capsys: pytest.CaptureFixture[str]) -> None:
