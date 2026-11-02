@@ -131,9 +131,8 @@ class Probe(McpNetworks, TraefikMcpFollows):
         self.environment.pop("DOCKER_STEPCA_INIT_PASSWORD", None)
         self.scratch = scratch
         self.compose_file = scratch / COMPOSE_FILE
-        self.compose_file.write_text(
-            edge_copy.namespaced_compose((REPO / COMPOSE_FILE).read_text(), PROJECT)
-        )
+        compose_text = (REPO / COMPOSE_FILE).read_text()
+        self.compose_file.write_text(edge_copy.namespaced_compose(compose_text, PROJECT))
         self.compose_files = [self.compose_file, STAND_IN_OVERLAY]
         self.guard = edge_copy.NetworkGuard(PROJECT, lambda command: self.run(command).stdout)
         self.listeners_before: set[str] = set()
@@ -176,9 +175,8 @@ class Probe(McpNetworks, TraefikMcpFollows):
         return json.loads(self.compose("config", "--format", "json").stdout)
 
     def image_and_volume(self) -> tuple[str, str]:
-        return self.composed["services"]["step-ca"]["image"], self.composed["volumes"]["step-ca"][
-            "name"
-        ]
+        composed = self.composed
+        return composed["services"]["step-ca"]["image"], composed["volumes"]["step-ca"]["name"]
 
     def in_volume(self, *tool: str, writable: bool = False) -> bytes:
         image, volume = self.image_and_volume()
