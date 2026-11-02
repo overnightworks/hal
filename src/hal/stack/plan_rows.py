@@ -206,6 +206,7 @@ def appkit_row(
     glyphs, events and verb `removal`: the version, the targets when not all changed and the stale
     names; the names alone when only stale directories go."""
     names = ", ".join(plan.stale_names)
+    rows = []
     if plan.changed:
         facts = [plan.version]
         labels = plan.changed_labels
@@ -213,10 +214,10 @@ def appkit_row(
             facts.append(f"only {', '.join(labels)}")
         if names:
             facts.append(f"{removal} {names}")
-        return (Row(written[0], APPKIT_UNIT, written[1], _SEPARATOR.join(facts)),)
-    if names:
-        return (Row(removed[0], APPKIT_UNIT, removed[1], names),)
-    return ()
+        rows.append(Row(written[0], APPKIT_UNIT, written[1], _SEPARATOR.join(facts)))
+    elif names:
+        rows.append(Row(removed[0], APPKIT_UNIT, removed[1], names))
+    return tuple(rows)
 
 
 def _appkit_rows(plan: AppkitPlan) -> tuple[Row, ...]:
