@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "agent-service"))
 
 import live_smoke  # noqa: E402
+from device_sign_in import SignInFailed  # noqa: E402
 from live_smoke import Cell, LiveSmokeFailed, Report, Verdict  # noqa: E402
 from smoke import served_line  # noqa: E402
 from support.live_smoke_fakes import (  # noqa: E402
@@ -650,3 +651,30 @@ def test_the_listeners_probe_container_logs_to_none():
 
     (probe,) = [command for command in stack.asked if command[:2] == ["docker", "run"]]
     assert probe[probe.index("--log-driver") + 1] == "none"
+
+
+@pytest.mark.parametrize(
+    ("failure", "code", "printed"),
+    [
+        (LiveSmokeFailed("the stack did not come up"), 1, "live smoke: the stack did not come up"),
+        (SignInFailed("the realm refused"), 1, "live smoke: the realm refused"),
+        (
+            subprocess.TimeoutExpired("docker", 1),
+            1,
+            "live smoke: a docker command ran out of time",
+        ),
+        (KeyboardInterrupt(), 130, "live smoke: interrupted"),
+    ],
+)
+def test_a_failed_live_run_ends_with_its_exit_code_and_its_line_on_standard_error(
+    monkeypatch, capsys, failure, code, printed
+):
+    def failing(*_):
+        raise failure
+
+    monkeypatch.setattr(live_smoke, "read_secret", failing)
+
+    assert live_smoke.main([]) == code
+    captured = capsys.readouterr()
+    assert captured.err.strip() == printed
+    assert captured.out == ""
