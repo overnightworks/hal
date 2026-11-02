@@ -2184,9 +2184,8 @@ def test_start_from_a_runs_no_setup_check(start, scripted, repository, state, se
 
 PROBE_STOPPED = DISABLED + "  probe:\n    run: {enabled: true}\n"
 RECREATE_SOCKET_PROXY = [*RECREATE_TRAEFIK[:-1], "socket-proxy"]
-RECREATED = "traefik is recreated and runs the checked-out traefik.yml"
-SOCKET_PROXY_RECREATED = "\nsocket-proxy is recreated\n"  # the line, not the plan row
-CORE_CURRENT = "the core is current"
+TRAEFIK_RECREATED = ("traefik", ResultEvent.RECREATED)
+SOCKET_PROXY_RECREATED = ("socket-proxy", ResultEvent.RECREATED)
 UNFINISHED = {"traefik": {}}
 
 
@@ -2220,7 +2219,7 @@ def test_a_first_apply_recreates_traefik_proves_the_barriers_and_records_its_fil
     assert [call for call in scripted.calls if call[2] == "up"] == [RECREATE_TRAEFIK]
     assert scripted.container_ids["traefik"] != ids["traefik"]
     assert scripted.container_ids["socket-proxy"] == ids["socket-proxy"]
-    assert out.index("the barrier of probe is proven") < out.index(RECREATED)
+    assert find_row(out, *TRAEFIK_RECREATED, "barriers proven · 5s")
     assert applied(state) == {"traefik": {"traefik.yml": sha256(repository / "traefik.yml")}}
 
 
@@ -2319,7 +2318,7 @@ def test_a_restarting_traefik_is_recreated(core_files, switch, scripted):
 
     assert exit_code == 0
     assert RECREATE_TRAEFIK in scripted.calls
-    assert RECREATED in out
+    assert find_row(out, *TRAEFIK_RECREATED)
 
 
 def test_a_failed_recreate_is_partial_marks_the_record_unfinished_and_touches_no_unit(
@@ -2335,7 +2334,7 @@ def test_a_failed_recreate_is_partial_marks_the_record_unfinished_and_touches_no
     assert "partial, could not recreate traefik, `docker compose up` exited 1" in err
     assert applied(state) == UNFINISHED
     assert unit_calls(scripted) == []
-    assert RECREATED not in out
+    assert not find_row(out, *TRAEFIK_RECREATED)
 
 
 @pytest.mark.parametrize(
@@ -2370,7 +2369,7 @@ def test_a_record_that_cannot_be_written_is_partial_names_the_step_and_touches_n
     assert scripted.container_ids["socket-proxy"] == ids["socket-proxy"]
     assert applied(state) == record_left
     assert unit_calls(scripted) == []
-    assert RECREATED not in out
+    assert not find_row(out, *TRAEFIK_RECREATED)
 
 
 def test_a_traefik_not_running_after_the_recreate_is_partial(core_files, switch, scripted, state):
@@ -2382,7 +2381,7 @@ def test_a_traefik_not_running_after_the_recreate_is_partial(core_files, switch,
     assert exit_code == 1
     assert "partial, traefik is not running after the traefik recreate" in err
     assert applied(state) == UNFINISHED
-    assert RECREATED not in out
+    assert not find_row(out, *TRAEFIK_RECREATED)
 
 
 def test_a_traefik_that_dies_right_after_the_recreate_is_partial_and_the_next_run_recreates_again(
@@ -2398,7 +2397,7 @@ def test_a_traefik_that_dies_right_after_the_recreate_is_partial_and_the_next_ru
     assert exit_code == 1
     assert "partial, traefik is not running after the traefik recreate" in err
     assert applied(state) == UNFINISHED
-    assert RECREATED not in out
+    assert not find_row(out, *TRAEFIK_RECREATED)
     assert scripted.containers["traefik"] == "restarting"
     _, again, _ = switch("no")
     assert find_row(again, "traefik", PlanEvent.RECREATE, "the last recreate did not finish")
@@ -2421,7 +2420,7 @@ def test_an_unproven_barrier_after_the_recreate_is_partial_and_the_next_run_recr
         "no unit switched" in err
     )
     assert applied(state) == UNFINISHED
-    assert RECREATED not in out
+    assert not find_row(out, *TRAEFIK_RECREATED)
     ingress.rejecting = False
     exit_code, out, _ = switch()
     assert exit_code == 0
@@ -2477,7 +2476,7 @@ def test_a_recreate_that_did_not_finish_is_planned_again_after_traefik_yml_is_re
 
     assert exit_code == 0
     assert find_row(out, "traefik", PlanEvent.RECREATE, "the last recreate did not finish")
-    assert RECREATED in out
+    assert find_row(out, *TRAEFIK_RECREATED)
     assert applied(state) == {"traefik": {"traefik.yml": sha256(repository / "traefik.yml")}}
 
 
@@ -2565,7 +2564,7 @@ def test_a_changed_socket_proxy_definition_recreates_socket_proxy_then_traefik(
     applied_core, switch, scripted, state, repository
 ):
     """#87 rules 2, 4, 5, cell D1: the plan names both, socket-proxy first; each gets a new
-    container by exactly edge's recreate argv; both success lines, then the core is current."""
+    container by exactly edge's recreate argv; both result rows, socket-proxy first."""
     ids = dict(scripted.container_ids)
     scripted.change_definition("socket-proxy")
 
@@ -2577,7 +2576,7 @@ def test_a_changed_socket_proxy_definition_recreates_socket_proxy_then_traefik(
     )
     assert up_calls(scripted) == [RECREATE_SOCKET_PROXY, RECREATE_TRAEFIK]
     assert all(scripted.container_ids[service] != ids[service] for service in ids)
-    assert out.index(SOCKET_PROXY_RECREATED) < out.index(RECREATED) < out.index(CORE_CURRENT)
+    assert row_at(out, *SOCKET_PROXY_RECREATED) < row_at(out, *TRAEFIK_RECREATED)
     assert applied(state) == {"traefik": {"traefik.yml": sha256(repository / "traefik.yml")}}
 
 
@@ -2592,7 +2591,7 @@ def test_a_changed_traefik_definition_recreates_only_traefik(applied_core, switc
     assert find_row(out, "traefik", PlanEvent.RECREATE, "definition changed")
     assert up_calls(scripted) == [RECREATE_TRAEFIK]
     assert scripted.container_ids["socket-proxy"] == ids["socket-proxy"]
-    assert CORE_CURRENT in out
+    assert find_row(out, *TRAEFIK_RECREATED)
 
 
 @pytest.mark.parametrize("service", ["socket-proxy", "traefik"])
@@ -2671,7 +2670,7 @@ def test_a_failed_socket_proxy_recreate_is_partial_leaves_traefik_unfinished_and
     assert applied(state) == UNFINISHED
     assert scripted.container_ids == ids
     assert unit_calls(scripted) == []
-    assert SOCKET_PROXY_RECREATED not in out
+    assert not find_row(out, *SOCKET_PROXY_RECREATED)
     scripted.failing_verb = None
     _, again, _ = switch("no")
     assert find_row(again, "socket-proxy", PlanEvent.RECREATE, "definition changed")
@@ -2682,8 +2681,7 @@ def test_a_socket_proxy_its_recreate_left_created_is_recreated_by_the_next_run(
     applied_core, switch, scripted, state, repository
 ):
     """#87 rule 4: a socket-proxy that cannot start stays created with the new label, so the
-    first run is partial; once it can start again, the next run recreates it, then traefik, and
-    the core is current."""
+    first run is partial; once it can start again, the next run recreates it, then traefik."""
     scripted.change_definition("socket-proxy")
     scripted.unstartable.add("socket-proxy")
 
@@ -2698,7 +2696,7 @@ def test_a_socket_proxy_its_recreate_left_created_is_recreated_by_the_next_run(
     assert exit_code == 0
     assert find_row(out, "socket-proxy", PlanEvent.RECREATE, "the last recreate did not finish")
     assert up_calls(scripted) == [RECREATE_SOCKET_PROXY, RECREATE_TRAEFIK]
-    assert out.index(SOCKET_PROXY_RECREATED) < out.index(RECREATED) < out.index(CORE_CURRENT)
+    assert row_at(out, *SOCKET_PROXY_RECREATED) < row_at(out, *TRAEFIK_RECREATED)
     assert scripted.containers["socket-proxy"] == "running"
     assert applied(state) == {"traefik": {"traefik.yml": sha256(repository / "traefik.yml")}}
 
@@ -2720,14 +2718,14 @@ def test_a_traefik_its_recreate_left_created_is_recreated_by_the_next_run(
     assert exit_code == 0
     assert find_row(out, "traefik", PlanEvent.RECREATE, "the last recreate did not finish")
     assert up_calls(scripted) == [RECREATE_TRAEFIK]
-    assert out.index(RECREATED) < out.index(CORE_CURRENT)
+    assert find_row(out, *TRAEFIK_RECREATED)
 
 
 def test_a_crash_looping_socket_proxy_is_partial_and_the_next_run_is_partial_again(
     applied_core, switch, scripted, state
 ):
     """#87 rule 4, P15, cell D8: traefik is observed together with socket-proxy, so a proxy that
-    restarts after its recreate never lets a later run say the core is current."""
+    restarts after its recreate never lets a later run recreate traefik."""
     scripted.change_definition("socket-proxy")
     scripted.crash_loops.add("socket-proxy")
 
@@ -2741,7 +2739,7 @@ def test_a_crash_looping_socket_proxy_is_partial_and_the_next_run_is_partial_aga
     assert exit_code == 1
     assert find_row(out, "traefik", PlanEvent.RECREATE, "the last recreate did not finish")
     assert "partial, socket-proxy is not running after the traefik recreate" in err
-    assert CORE_CURRENT not in out
+    assert not find_row(out, *TRAEFIK_RECREATED)
 
 
 def test_a_core_left_down_whole_after_the_traefik_recreate_names_both_in_start_order(
@@ -2770,10 +2768,9 @@ def test_every_core_recreate_proves_the_barriers_before_its_success_line(
     exit_code, out, _ = switch()
 
     assert exit_code == 0
-    proven = "the barrier of probe is proven"
-    assert out.index(proven) < out.index(SOCKET_PROXY_RECREATED)
-    assert out.index(SOCKET_PROXY_RECREATED) < out.rindex(proven) < out.index(RECREATED)
-    assert out.count(proven) == 2
+    assert row_at(out, *SOCKET_PROXY_RECREATED, "barriers proven") < row_at(
+        out, *TRAEFIK_RECREATED, "barriers proven"
+    )
 
 
 def test_an_unproven_barrier_after_the_socket_proxy_recreate_names_the_unit_and_the_stop(
@@ -2790,7 +2787,7 @@ def test_an_unproven_barrier_after_the_socket_proxy_recreate_names_the_unit_and_
     assert "the barrier of probe is not proven after the socket-proxy recreate (" in err
     assert "probe may be reachable through Traefik; to close the tunnel now: hal offline" in err
     assert up_calls(scripted) == [RECREATE_SOCKET_PROXY]
-    assert SOCKET_PROXY_RECREATED not in out
+    assert not find_row(out, *SOCKET_PROXY_RECREATED)
     assert applied(state) == UNFINISHED
 
 
@@ -2937,11 +2934,11 @@ def test_the_config_hashes_are_read_from_a_real_config_hash_answer():
         (False, "socket-proxy is recreated"),
     ],
 )
-def test_the_core_is_not_current_while_a_changed_core_service_is_not_started(
+def test_a_changed_core_service_that_is_not_started_is_named_and_prints_no_row(
     traefik_yml_changed, why, applied_core, switch, scripted, repository
 ):
     """#87 rules 3, 5, cell D12 (scenario R3e): socket-proxy is recreated; a stopped traefik it
-    pulls in is only named, with or without a change of its own, and the core is not current."""
+    pulls in is only named, with or without a change of its own, and prints no row."""
     scripted.change_definition("socket-proxy")
     scripted.containers["traefik"] = "exited"
     if traefik_yml_changed:
@@ -2952,8 +2949,8 @@ def test_the_core_is_not_current_while_a_changed_core_service_is_not_started(
     assert exit_code == 0
     assert find_row(out, "traefik", PlanEvent.NOT_STARTED, f"{why} · not running")
     assert up_calls(scripted) == [RECREATE_SOCKET_PROXY]
-    assert SOCKET_PROXY_RECREATED in out
-    assert CORE_CURRENT not in out
+    assert find_row(out, *SOCKET_PROXY_RECREATED)
+    assert not find_row(out, *TRAEFIK_RECREATED)
 
 
 def test_a_socket_proxy_change_and_a_unit_switch_share_one_yes_and_the_core_goes_first(
@@ -2972,7 +2969,7 @@ def test_a_socket_proxy_change_and_a_unit_switch_share_one_yes_and_the_core_goes
     starting_step_ca = unit_calls(scripted)[0]
     assert scripted.calls.index(RECREATE_TRAEFIK) < scripted.calls.index(starting_step_ca)
     assert up_calls(scripted)[:2] == [RECREATE_SOCKET_PROXY, RECREATE_TRAEFIK]
-    assert out.index(CORE_CURRENT) < out.index("step-ca is on")
+    assert row_at(out, *TRAEFIK_RECREATED) < plain(out).index("step-ca is on")
 
 
 # --- #93: a core service stopped between the plan and the yes is not started ------------------
@@ -3323,7 +3320,7 @@ def test_a_core_change_a_follower_change_and_a_unit_switch_share_one_yes_in_orde
     step_ca_applied, switch, scripted, repository, state, ingress
 ):
     """#89 rules 1, 3, cell F13: socket-proxy, traefik, traefik-mcp, then the unit; the barriers
-    are proven after each core recreate only; the core is current."""
+    are proven after each core recreate only."""
     scripted.config["services"]["echo"] = {"profiles": ["echo"]}
     write_fleet(
         repository,
@@ -3340,10 +3337,12 @@ def test_a_core_change_a_follower_change_and_a_unit_switch_share_one_yes_in_orde
     assert plain(out).count("Type yes to apply") == 1
     assert up_calls(scripted)[:3] == [RECREATE_SOCKET_PROXY, RECREATE_TRAEFIK, RECREATE_FOLLOWER]
     assert unit_calls(scripted, "echo") == [up_calls(scripted)[3]]
-    proven, shown = "the barrier of probe is proven", plain(out)
-    assert shown.count(proven) == 2
     at = find_row(out, *FOLLOWER_RECREATED).start()
-    assert shown.rindex(proven) < shown.index(CORE_CURRENT) < at < shown.index("echo is on")
+    assert row_at(out, *SOCKET_PROXY_RECREATED, "barriers proven") < row_at(
+        out, *TRAEFIK_RECREATED, "barriers proven"
+    )
+    assert row_at(out, *TRAEFIK_RECREATED, "barriers proven") < at < plain(out).index("echo is on")
+    assert not find_row(out, "traefik-mcp", ResultEvent.RECREATED, "barriers proven")
 
 
 def test_a_follower_of_a_unit_the_catalog_does_not_name_is_never_planned(

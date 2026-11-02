@@ -274,3 +274,9 @@ def test_a_recreated_service_is_a_done_row_with_the_time_it_took() -> None:
 
     assert (row.glyph, row.subject, str(row.event)) == (Glyph.DONE, "traefik-mcp", "recreated")
     assert row.fact == "3s"
+
+
+def test_a_core_service_whose_barriers_were_proven_says_so_before_the_time() -> None:
+    row = recreated_row(Recreated("traefik", 3.4, barriers_proven=True))
+
+    assert row.fact == "barriers proven · 3s"
