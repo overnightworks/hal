@@ -8,7 +8,7 @@ run on the default model through the run client (run_client.py), whose call of `
 prints only verdicts, counts and role names. An agent runs it only with a dummy login made with
 `mktemp`.
 
-    flock -o -w 1200 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 50 1780 \\
+    flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 50 1780 \\
         python3 probe/agent-service/cells_12b.py --login-directory DIR
 
 Measured teardown: 11 s (K 50 s, CAP 1780 s).

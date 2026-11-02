@@ -3,7 +3,7 @@ litellm.py (the real service, the one-route front, LiteLLM and the gateway's sec
 against a fake Anthropic) with the fake steered through its control file. Nothing live and nothing
 paid: the probe refuses to start unless `internet` is internal and holds only the fakes.
 
-    flock -o -w 1200 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \\
+    flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \\
         python3 probe/agent-service/litellm_failures.py --scratch DIR
 
 Measured: a run takes about 8 minutes (F10 waits for the fake's 120 s hold limit) and its

@@ -2,7 +2,7 @@
 service; #346 P26, P36): the gateway `agent-egress` and either the stand-in `agent-probe` or
 the real `agent-service` of compose.yaml, in a throwaway compose project of their own.
 
-    flock -o -w 1200 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 50 1780 \\
+    flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 50 1780 \\
         python3 probe/agent-service/egress.py --scratch DIR [--target stand-in|service]
 
 Measured teardown: 2 s (K 50 s, CAP 1780 s).
