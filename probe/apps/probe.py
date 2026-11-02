@@ -12,11 +12,12 @@ HEAD, C5 off with a leftover container. D and R: `emergency_switch.py`, `alias_r
 exits: 0 or 3.
 
 It never touches the live stack. It runs its own Traefik and socket proxy of a copy of the
-repository under the compose project `edge-apps-probe`, on two free loopback ports instead of 8081
-and 8090, constrained to a label key of its own (`probe-<random>.name`) instead of `edge.name`, so
-the live Traefik's constraint never matches the probe's app and the probe's Traefik never matches a
-live container; it sends no request to the live stack. The app, its checkout (`~/srv/<key>` under a
-throwaway HOME) and its origin (a bare repository reached through `url.<file>.insteadOf`) are the
+repository under the compose project `edge-apps-probe`, on the probe loopback address
+`edge_copy.PROBE_HOST` with the live entrypoint ports, constrained to a label key of its own
+(`probe-<random>.name`) instead of `edge.name`, so the live Traefik's constraint never matches the
+probe's app and the probe's Traefik never matches a live container; it sends no request to the
+live stack. The app, its checkout (`~/srv/<key>` under a throwaway HOME) and its origin (a bare
+repository reached through `url.<file>.insteadOf`) are the
 probe's own. The probe never runs `hal online`, `hal offline` or `--all`, so no tunnel is named. It
 always removes its containers, volumes, networks and images, found by their compose project.
 
@@ -40,11 +41,12 @@ import re
 import secrets
 import shlex
 import signal
-import socket
 import subprocess
 import sys
 import time
 from pathlib import Path
+
+import yaml
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "probe"))  # the helper of the probes, importable by path too
@@ -110,19 +112,12 @@ GHOST = f"services:\n  ghost:\n    image: {BUSYBOX}\n    command: [sleep, '3600'
 FORBIDDEN_VERBS = ("online", "offline", "--all")
 
 
-def free_port() -> int:
-    with socket.socket() as taken:
-        taken.bind(("127.0.0.1", 0))
-        return taken.getsockname()[1]
-
-
 class Probe:
     def __init__(self, scratch: Path) -> None:
         self.scratch = scratch
         suffix = secrets.token_hex(3)
         self.key = f"apps-probe-{suffix}"
         self.label, self.alias_label = (f"probe-{suffix}.{field}" for field in ("name", "alias"))
-        self.edge_port, self.admin_port = free_port(), free_port()
         self.home = scratch / "home"
         self.home.mkdir(parents=True)
         self.environment = {
@@ -314,16 +309,13 @@ class Probe:
         )
         traefik = (self.copy / "traefik.yml").read_text()
         expect(
-            traefik.count("edge.name") == 2
-            and traefik.count("edge.alias") == 1
-            and "127.0.0.1:8081" in traefik,
+            traefik.count("edge.name") == 2 and traefik.count("edge.alias") == 1,
             "traefik.yml changed shape",
         )
-        private = (
-            traefik.replace("edge.name", self.label)
-            .replace("edge.alias", self.alias_label)
-            .replace("127.0.0.1:8081", f"127.0.0.1:{self.edge_port}")
-            .replace("127.0.0.1:8090", f"127.0.0.1:{self.admin_port}")
+        beside = edge_copy.beside_the_live_edge(traefik, self.key)
+        private = beside.replace("edge.name", self.label).replace("edge.alias", self.alias_label)
+        self.edge_port = int(
+            yaml.safe_load(private)["entryPoints"]["edge"]["address"].rpartition(":")[2]
         )
         (self.copy / "traefik.yml").write_text(private)
         edge_copy.publish(self.copy, "probe: a Traefik of its own")
@@ -368,7 +360,7 @@ class Probe:
     ) -> tuple[int, str, http.client.HTTPMessage] | None:
         """(status, body, headers) of the probe's Traefik's answer; None when it gives none."""
         connection = http.client.HTTPConnection(
-            "127.0.0.1", self.edge_port, timeout=REQUEST_SECONDS
+            edge_copy.PROBE_HOST, self.edge_port, timeout=REQUEST_SECONDS
         )
         try:
             connection.request("GET", path, headers={"Host": host or f"{self.key}.{DOMAIN}"})
