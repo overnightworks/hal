@@ -8,7 +8,7 @@ the proofs and always removes its containers, networks and volumes. It never tou
 stack: the project name and HOME are set in the environment of every command, and its compose
 calls and that copy resolve only the project's networks and volumes (edge_copy.py, P26).
 
-    flock -o -w 1200 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \\
+    flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \\
         python3 probe/step-ca/probe.py --scratch DIR  # teardown measured 1 s (K 30 s, CAP 1800 s)
 
 The CA and the gateway are only reachable on their internal compose networks, so every call to

@@ -4,7 +4,7 @@ throwaway compose project, against a fake Anthropic. Nothing live and nothing pa
 refuses to start unless the resolved copy marks `internet` internal and holds only the two fake
 hosts, and it never calls `egress.py`'s live cells.
 
-    flock -o -w 1200 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \\
+    flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \\
         python3 probe/agent-service/litellm.py --scratch DIR
 
 Measured: a run takes about a minute and its teardown a few seconds (K 30 s, CAP 1800 s).

@@ -3,7 +3,7 @@
 # account (#331, cells A1-1 to A1-9), of the mail of `hal check` (#390, cells D1-D8), of rsyslog's removal (#422, cells R0-R7) and of a real Docker engine and the journal as its default log driver (DK1-DK7, #432): a throwaway Ubuntu 26.04 with systemd as PID 1, never the live PC, never the
 # real /etc or ~/.secrets.
 #
-#   flock -o -w 1200 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \
+#   flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \
 #       scripts/system-proof/run.sh <edge checkout> <evidence dir> <part>
 #
 # <part> is `fresh` (the first container: install, fresh, both reboots and their stages), `prepared` (the second:
