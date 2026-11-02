@@ -96,7 +96,7 @@ reason = "it tests the agent service's fake app, outside src/hal, which no modul
 [[layout.allow]]
 path = "tests/test_agent_service_image.py"
 rule = "test-layout"
-reason = "it tests the agent service's image recipe and its probe, outside src/hal, which no module of src/hal mirrors"
+reason = "it tests the agent service's image recipe, its probe and scripts/agent_service_lock.py, outside src/hal, which no module of src/hal mirrors"
 
 [[layout.allow]]
 path = "tests/test_agent_service_live_canary.py"
@@ -206,7 +206,7 @@ reason = "it tests agent-service/litellm/gate.py, outside src/hal, which no modu
 [[layout.allow]]
 path = "tests/test_litellm_unit.py"
 rule = "test-layout"
-reason = "it tests the LiteLLM services of compose.yaml and agent-service/litellm/start.sh, outside src/hal, which no module of src/hal mirrors"
+reason = "it tests the LiteLLM services of compose.yaml, agent-service/litellm/start.sh and agent-service/api_canary.py, outside src/hal, which no module of src/hal mirrors"
 
 [[layout.allow]]
 path = "tests/test_old_names.py"
@@ -226,7 +226,7 @@ reason = "it tests probe/edge_copy.py's run loop, outside src/hal, which no modu
 [[layout.allow]]
 path = "tests/test_secret_check.py"
 rule = "test-layout"
-reason = "it tests the repository's structural secret check, not one module, which no module of src/hal mirrors"
+reason = "it tests keycloak/secret-check/secret_check.py, outside src/hal, which no module of src/hal mirrors"
 
 [[layout.allow]]
 path = "tests/test_step_ca_init.py"
@@ -291,7 +291,7 @@ reason = "run.sh calls it by this name inside the proof container"
 [[layout.allow]]
 path = "scripts/system-proof/run.sh"
 rule = "script-name"
-reason = "the operator's probe recipes and the proof Dockerfile name it"
+reason = "docs/home.md's proof command runs it by this name"
 
 [[layout.allow]]
 path = "scripts/system-proof/terminal.exp"
@@ -311,7 +311,7 @@ reason = "hal's tofu wrapper passes it by this name as TF_CLI_CONFIG_FILE"
 [[compose.allow]]
 file = "compose.yaml"
 service = "traefik"
-reason = "it terminates TLS on the host's own interfaces"
+reason = "it binds the loopback entrypoints of traefik.yml in the host's own namespace, 127.0.0.1:8081 for the tunnel and 127.0.0.1:8090 for this PC"
 
 [[compose.allow]]
 file = "probe/agent-service/compose.probe.yaml"
