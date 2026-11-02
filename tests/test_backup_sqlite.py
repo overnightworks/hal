@@ -255,7 +255,7 @@ def test_a_sqlite_record_refuses_a_file_name_that_is_not_one_plain_segment(file_
     """#461 A1 M3: the file name is one plain segment."""
     toml = SQLITE_TOML.replace("presentator.sqlite3", file_name)
 
-    with pytest.raises(AppsError, match="unknown key; only"):
+    with pytest.raises(AppsError, match="database_file must match"):
         parse_apps(toml)
 
 
@@ -263,7 +263,7 @@ def test_a_postgres_record_refuses_the_sqlite_keys():
     """#461 A1 M2: a Postgres record refuses the SQLite keys."""
     toml = SONGMAKER_TOML.replace("[app.songmaker]\n", '[app.songmaker]\ndatabase_file = "x"\n')
 
-    with pytest.raises(AppsError, match="database_file"):
+    with pytest.raises(AppsError, match="unknown key; only"):
         parse_apps(toml)
 
 
