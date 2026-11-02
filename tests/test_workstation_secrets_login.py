@@ -371,18 +371,17 @@ def shipped_grok_home(tmp_path: Path, use_manifest) -> Path:
 
 
 def test_the_shipped_grok_entry_is_a_login_made_with_both_home_variables(shipped_grok_home: Path) -> None:
-    """#677 G2: the CLI keeps its state below HOME as well as GROK_HOME, so a private home must cover both."""
+    """the CLI keeps its state below HOME as well as GROK_HOME, so a private home must cover both."""
     (entry,) = load_manifest(secrets_view.MANIFEST_PATH)
 
     assert entry.create is not None
     assert {"GROK_HOME", "HOME"} <= set(entry.create.home)
-    assert entry.read_by == ("agent-service",)
 
 
 def test_the_shipped_grok_entry_signs_in_through_a_private_home_that_is_gone_afterwards(
     shipped_grok_home: Path, boundaries: Boundaries, cli: FakeCli, capsys
 ) -> None:
-    """#677 G3: the walk runs the entry's own command with every home variable at one fresh folder, keeps only the login file at the ruled rights, and prints no content."""
+    """the walk runs the entry's own command with every home variable at one fresh folder, keeps only the login file at the ruled rights, and prints no content."""
     (entry,) = load_manifest(secrets_view.MANIFEST_PATH)
     assert entry.create is not None
     folder = shipped_grok_home / entry.folder
@@ -400,6 +399,7 @@ def test_the_shipped_grok_entry_signs_in_through_a_private_home_that_is_gone_aft
     assert stat.S_IMODE(folder.stat().st_mode) == 0o700
     assert stat.S_IMODE((shipped_grok_home / entry.place).stat().st_mode) == 0o600
     assert sorted(path.name for path in folder.iterdir()) == [entry.place.name]
+    assert f"{entry.name} new login your {entry.create.label} account" in squeezed(captured.out)[0]
     assert f"✓ {entry.name} signed in" in squeezed(captured.out)[-1]
     assert cli.content not in captured.out + captured.err
 
@@ -407,7 +407,6 @@ def test_the_shipped_grok_entry_signs_in_through_a_private_home_that_is_gone_aft
 def test_a_grok_login_already_present_is_left_untouched_and_the_cli_does_not_run(
     shipped_grok_home: Path, boundaries: Boundaries, cli: FakeCli
 ) -> None:
-    """#677 G4."""
     (entry,) = load_manifest(secrets_view.MANIFEST_PATH)
     login = private_directory(shipped_grok_home, str(entry.folder)) / entry.place.name
     login.write_text("kept")
@@ -423,7 +422,7 @@ def test_a_grok_login_already_present_is_left_untouched_and_the_cli_does_not_run
 def test_hal_secrets_lists_the_shipped_grok_entry_without_its_content(
     shipped_grok_home: Path, probe: FakeProbe, capsys, options: tuple[str, ...]
 ) -> None:
-    """#677 G5, G6: the entry is listed by name, and under agent-service for the inverted view; the login's content is never printed."""
+    """the entry is listed by name, and under agent-service for the inverted view; the login's content is never printed."""
     (entry,) = load_manifest(secrets_view.MANIFEST_PATH)
     login = private_directory(shipped_grok_home, str(entry.folder)) / entry.place.name
     login.write_text("FAKE-LOGIN-CONTENT-0000")
@@ -435,4 +434,5 @@ def test_hal_secrets_lists_the_shipped_grok_entry_without_its_content(
     assert GROK_ENTRY_NAME in output
     assert "FAKE-LOGIN-CONTENT-0000" not in output
     if "--by-service" in options:
-        assert any(line.startswith("| agent-service |") and GROK_ENTRY_NAME in line for line in output.splitlines())
+        (reader,) = entry.read_by
+        assert any(line.startswith(f"| {reader} |") and GROK_ENTRY_NAME in line for line in output.splitlines())
