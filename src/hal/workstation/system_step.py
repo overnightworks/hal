@@ -108,23 +108,38 @@ def _count(event: dict[str, object], name: str) -> int:
     return count
 
 
+def _task_name(event: dict[str, object]) -> str:
+    name = event["task"]
+    if type(name) is not str:
+        raise ValueError("task is no name")
+    return name
+
+
+_UNREADABLE_EVENT = (ValueError, KeyError, TypeError)
+
+
+def _event_of(event_line: str) -> tuple[EventKind, dict[str, object]]:
+    """The kind and the fields of a marked line; one of `_UNREADABLE_EVENT` when it holds no known event."""
+    event = json.loads(event_line.removeprefix(EVENT_MARK))
+    return EventKind(event["event"]), event
+
+
 def read_events(returncode: int, event_lines: Sequence[str]) -> PlaybookRun:
     """A run finished when Ansible exited 0 and the callback reported exactly one count without a failed or unreachable host.
 
     The reason is the message of the last failed or unreachable result, given only when the counts name a failed or unreachable host:
     inside a rescue it is the rescue's own failure that ended the play, and a rescued failure is no cause.
     `tasks` are the names of the changed tasks, in the order they changed; a task's start is read only for its name and shown by the runner.
-    An event that is no known event, or a count that is no non-negative integer, is a run that did not finish.
+    An event that is no known event, a task's name that is no string, or a count that is no non-negative integer, is a run that did not finish.
     """
     message = ""
     tasks: list[str] = []
     counts: list[tuple[int, int, int]] = []
     for line in event_lines:
         try:
-            event = json.loads(line.removeprefix(EVENT_MARK))
-            kind = EventKind(event["event"])
+            kind, event = _event_of(line)
             if kind is EventKind.TASK:
-                str(event["task"])
+                _task_name(event)
             elif kind is EventKind.CHANGED:
                 tasks.append(str(event["task"]))
             elif kind is EventKind.RESULT:
@@ -132,7 +147,7 @@ def read_events(returncode: int, event_lines: Sequence[str]) -> PlaybookRun:
                 message = str(event["msg"])
             else:
                 counts.append((_count(event, "changed"), _count(event, "failed"), _count(event, "unreachable")))
-        except (ValueError, KeyError, TypeError):
+        except _UNREADABLE_EVENT:
             return PlaybookUnfinished()
     if len(counts) != 1:
         return PlaybookUnfinished()
@@ -155,9 +170,9 @@ def _forget_the_sudo_ticket() -> StepFailed | None:
 def _started_task(event_line: str) -> str | None:
     """The task name a `task` event carries, or None for any other line; an unreadable line is `read_events`'s to judge."""
     try:
-        event = json.loads(event_line.removeprefix(EVENT_MARK))
-        return str(event["task"]) if EventKind(event["event"]) is EventKind.TASK else None
-    except (ValueError, KeyError, TypeError):
+        kind, event = _event_of(event_line)
+        return _task_name(event) if kind is EventKind.TASK else None
+    except _UNREADABLE_EVENT:
         return None
 
 

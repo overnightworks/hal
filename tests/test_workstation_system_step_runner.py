@@ -55,6 +55,10 @@ MALFORMED_COUNTS = [
         (0, [], PlaybookUnfinished()),
         (0, [TASK_START, CHANGED_WRITE, COUNTS], PlaybookFinished(3, ("Write edge files",))),
         (0, [system_step.EVENT_MARK + json.dumps({"event": "task"}), COUNTS], PlaybookUnfinished()),
+        (0, [system_step.EVENT_MARK + json.dumps({"event": "task", "task": None}), COUNTS], PlaybookUnfinished()),
+        (0, [system_step.EVENT_MARK + json.dumps({"event": "task", "task": 7}), COUNTS], PlaybookUnfinished()),
+        (0, [system_step.EVENT_MARK + json.dumps({"event": "task", "task": ["a"]}), COUNTS], PlaybookUnfinished()),
+        (0, [system_step.EVENT_MARK + json.dumps({"event": "task", "task": {"a": 1}}), COUNTS], PlaybookUnfinished()),
         (0, [system_step.EVENT_MARK + json.dumps({"event": "started"}), COUNTS], PlaybookUnfinished()),
         (0, [system_step.EVENT_MARK + "not json", COUNTS], PlaybookUnfinished()),
         (0, [system_step.EVENT_MARK + json.dumps({"event": "changed"}), COUNTS], PlaybookUnfinished()),
@@ -70,6 +74,10 @@ MALFORMED_COUNTS = [
         "no counts event",
         "task events are ignored",
         "task event without a name",
+        "task named null",
+        "task named by a number",
+        "task named by an array",
+        "task named by an object",
         "unknown event",
         "unreadable event",
         "changed event without a task",
@@ -429,7 +437,7 @@ def test_a_missing_sudo_fails_alone_without_a_ticket_to_forget(tmp_path: Path, m
     assert refusal.value.__context__ is None
 
 
-# --- the live task line (#918) ----------------------------------------------
+# --- the live task line -----------------------------------------------------
 
 ERASE = "\r\x1b[K"
 ANSI = re.compile(r"\x1b\[[0-9;]*[mK]")
@@ -520,7 +528,8 @@ def test_a_ctrl_c_in_the_play_leaves_the_live_line_and_hal_setup_still_ends_with
     assert code == ExitCode.INTERRUPTED
     assert capsys.readouterr().out.splitlines()[-2:] == ["  \u2717 system          interrupted", "  \xb7 secrets         not run"]
     assert shown_tasks(terminal) == [READ_LOG_DRIVER]
-    assert not terminal.getvalue().endswith(ERASE)
+    assert "error: setup stopped at system" in ANSI.sub("", terminal.getvalue())
+    assert terminal.getvalue().count(ERASE) == 1
     assert stub.calls()[-1][0] == "-k"
 
 
@@ -532,11 +541,16 @@ def test_a_play_that_fills_the_pipe_finishes_with_the_live_line_on(tmp_path: Pat
     assert system_step.run_playbook_as_root([str(playbook)]) == PlaybookFinished(3)
 
 
+@pytest.mark.parametrize(
+    "unreadable",
+    ["not json", '{"event": "task"}', "[1]", '{"event": "task", "task": null}', '{"event": "task", "task": 7}'],
+    ids=["no json", "task without a name", "json of another shape", "null name", "number name"],
+)
 def test_a_marked_line_that_cannot_be_read_shows_nothing_and_leaves_the_run_unfinished(
-    tmp_path: Path, stub_sudo: StubSudo, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, stub_sudo: StubSudo, monkeypatch: pytest.MonkeyPatch, unreadable: str
 ) -> None:
     terminal = stderr_on_a_terminal(monkeypatch)
-    playbook = fake_ansible(tmp_path, f"echo '{system_step.EVENT_MARK}not json'")
+    playbook = fake_ansible(tmp_path, f"echo '{system_step.EVENT_MARK}{unreadable}'")
 
     assert system_step.run_playbook_as_root([str(playbook)]) == PlaybookUnfinished()
     assert terminal.getvalue() == ""
