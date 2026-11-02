@@ -33,7 +33,7 @@ class Manifest:
         return json.dumps(document) + "\n"
 
     @classmethod
-    def from_json(cls, text: str) -> "Manifest":
+    def from_json(cls, text: str) -> Manifest:
         try:
             document = json.loads(text)
             if document["schema"] != MANIFEST_SCHEMA:

@@ -60,17 +60,17 @@ class StepRow:
     done_fact: str | None = None  # what the done row says when it differs from the planned fact
 
     @classmethod
-    def of_move(cls, kind: StepKind, source: Path, target: Path) -> "StepRow":
+    def of_move(cls, kind: StepKind, source: Path, target: Path) -> StepRow:
         if kind is StepKind.MOVE_MEMORY:
             return cls(kind, "Claude project memory of the clone")
         return cls(kind, f"{source} → {target}", str(target))
 
     @classmethod
-    def of_repair(cls, worktrees: Path, count: int) -> "StepRow":
+    def of_repair(cls, worktrees: Path, count: int) -> StepRow:
         return cls(StepKind.REPAIR_WORKTREES, f"{count} in {worktrees}")
 
     @classmethod
-    def of_origin(cls, url: str, deploy_checkout: Path | None) -> "StepRow":
+    def of_origin(cls, url: str, deploy_checkout: Path | None) -> StepRow:
         fact = f"{url} · deploy checkout {deploy_checkout}" if deploy_checkout else url
         return cls(StepKind.SET_URL, fact)
 

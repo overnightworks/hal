@@ -305,7 +305,7 @@ class Backup:
     run: compose.Runner
 
     @classmethod
-    def installed(cls, repository: Path, waiting: Waiting) -> "Backup":
+    def installed(cls, repository: Path, waiting: Waiting) -> Backup:
         """`waiting` is told when a stopped hal is waited for."""
         return cls(
             (str(repository / ".venv" / "bin" / PROGRAM),),
@@ -318,7 +318,7 @@ class Backup:
         result = self._run(arguments, "the Keycloak backup failed")
         try:
             snapshot = json.loads(result.stdout)["snapshot"]
-        except (ValueError, KeyError, TypeError):
+        except ValueError, KeyError, TypeError:
             snapshot = None
         if not isinstance(snapshot, str):
             raise RealmError(f"{command(Verb.BACKUP)} named no pre-apply snapshot")
@@ -478,7 +478,7 @@ class Realm:
         try:
             files = [(self.checkout.path / name).read_text() for name in REALM_FILES]
             declared = [declared_identities.declared_realm(text) for text in files]
-        except (OSError, UnicodeDecodeError, declared_identities.DeclaredError):
+        except OSError, UnicodeDecodeError, declared_identities.DeclaredError:
             return Leftovers((), (), False, unread)
         absent = tuple(realm.realm for realm in declared if realm.realm not in after)
         return Leftovers(tuple(only_in_keycloak(after, declared)), absent, True, unread)

@@ -582,7 +582,7 @@ def inspect_network(stack: Stack, reference: str) -> dict:
         raise LiveSmokeFailed(f"docker network inspect {reference} failed")
     try:
         return json.loads(answer.stdout)[0]
-    except (ValueError, IndexError):
+    except ValueError, IndexError:
         raise LiveSmokeFailed(f"docker network inspect {reference} gave no network") from None
 
 

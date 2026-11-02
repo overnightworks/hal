@@ -48,7 +48,7 @@ class Settings:
     gid: int
 
     @classmethod
-    def for_home(cls, home: Path, uid: int, gid: int) -> "Settings":
+    def for_home(cls, home: Path, uid: int, gid: int) -> Settings:
         state = home / ".local/state/edge"
         return cls(
             repository=home / "backups/restic",

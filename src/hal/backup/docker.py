@@ -266,7 +266,7 @@ _SILENT_SERVER_SETTINGS = (
 
 
 @contextmanager
-def restore_server(image: str) -> Iterator["RestoreServer"]:
+def restore_server(image: str) -> Iterator[RestoreServer]:
     """A PostgreSQL without network or volume of ours; removed again whatever happens.
 
     Removal goes by container ID and only to containers with our owner label: a foreign

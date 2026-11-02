@@ -184,7 +184,7 @@ class Census:
         result = self.run(["docker", "inspect", name], None)
         try:
             document = json.loads(result.stdout)[0] if result.returncode == 0 else None
-        except (ValueError, IndexError):
+        except ValueError, IndexError:
             return None
         return document if isinstance(document, dict) else None
 
@@ -261,6 +261,6 @@ def _last_line(result: Completed) -> dict | None:
         return None
     try:
         report = json.loads(result.stdout.strip().splitlines()[-1])
-    except (ValueError, IndexError):
+    except ValueError, IndexError:
         return None
     return None if "error" in report else report

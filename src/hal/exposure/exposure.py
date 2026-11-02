@@ -34,7 +34,7 @@ class PortRange:
     last: int
 
     @classmethod
-    def single(cls, port: int) -> "PortRange":
+    def single(cls, port: int) -> PortRange:
         return cls(port, port)
 
     def contains(self, port: int) -> bool:

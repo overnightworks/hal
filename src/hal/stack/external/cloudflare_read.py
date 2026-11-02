@@ -335,7 +335,7 @@ def _answer(path: str, status: int, body: bytes) -> dict:
         raise CloudflareReadError(f"{path}: HTTP {status}, the answer is too large")
     try:
         payload = json.loads(body)
-    except (ValueError, RecursionError):
+    except ValueError, RecursionError:
         payload = None
     errors = payload.get("errors") if isinstance(payload, dict) else None
     first = errors[0] if isinstance(errors, list) and errors and isinstance(errors[0], dict) else {}

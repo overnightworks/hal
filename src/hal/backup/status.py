@@ -104,7 +104,7 @@ class Status:
             document["unattributed"] = self.unattributed.as_json()
         return document
 
-    def attempt(self, started: datetime) -> "Status":
+    def attempt(self, started: datetime) -> Status:
         """A new run starts: history carries over, the verdict does not."""
         return Status(
             state=State.RUNNING,
@@ -120,10 +120,10 @@ class Status:
     def last_backup_of(self, app: str) -> datetime | None:
         return self._history_of(app).last_successful_backup
 
-    def entering(self, phase: Phase) -> "Status":
+    def entering(self, phase: Phase) -> Self:
         return replace(self, phase=phase)
 
-    def backed_up(self, app: str, at: datetime, snapshot_id: str) -> "Status":
+    def backed_up(self, app: str, at: datetime, snapshot_id: str) -> Self:
         previous = self._history_of(app)
         history = AppHistory(
             last_snapshot_id=snapshot_id,
@@ -132,20 +132,20 @@ class Status:
         )
         return self._with_history(app, history)
 
-    def restore_tested(self, at: datetime, apps: Iterable[str]) -> "Status":
+    def restore_tested(self, at: datetime, apps: Iterable[str]) -> Self:
         tested = {
             app: replace(self._history_of(app), last_successful_restore_test=at) for app in apps
         }
         return replace(self, apps={**self.apps, **tested})
 
-    def attributed_to(self, app: str) -> "Status":
+    def attributed_to(self, app: str) -> Self:
         """The one move of legacy evidence, called only once restic has confirmed it."""
         assert self.unattributed is not None  # noqa: S101 - restic confirmed the move before this call
         return replace(self._with_history(app, self.unattributed), unattributed=None)
 
     def failed(
         self, category: ExitCategory, app: str | None = None, phase: Phase | None = None
-    ) -> "Status":
+    ) -> Self:
         return replace(
             self,
             state=State.FAILED,
@@ -154,13 +154,13 @@ class Status:
             exit_category=category,
         )
 
-    def succeeded(self) -> "Status":
+    def succeeded(self) -> Self:
         return replace(self, state=State.OK)
 
     def _history_of(self, app: str) -> AppHistory:
         return self.apps.get(app, AppHistory())
 
-    def _with_history(self, app: str, history: AppHistory) -> "Status":
+    def _with_history(self, app: str, history: AppHistory) -> Self:
         return replace(self, apps={**self.apps, app: history})
 
 

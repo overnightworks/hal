@@ -510,7 +510,7 @@ class FakeProber:
         self.asked: list[str] = []
         self.paths: list[str] = []
 
-    def __call__(self) -> "FakeProber":
+    def __call__(self) -> FakeProber:
         return self
 
     def ask(self, name: str, path: str = "/"):
@@ -543,7 +543,7 @@ class RecordingReadyProber:
         self.otherwise = otherwise
         self.asked: list[tuple[str, str, str]] = []  # (name, path, target)
 
-    def __call__(self, target: str) -> "_AskingTarget":
+    def __call__(self, target: str) -> _AskingTarget:
         return _AskingTarget(self, target)
 
     @property

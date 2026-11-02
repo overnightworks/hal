@@ -176,7 +176,7 @@ class Verifier:
             return False
         try:
             return wanted(self.fetch(address, host, allowed, self.clock))
-        except (OSError, http.client.HTTPException):
+        except OSError, http.client.HTTPException:
             return False
 
 
