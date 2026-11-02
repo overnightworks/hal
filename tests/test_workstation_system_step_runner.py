@@ -185,13 +185,26 @@ def test_a_second_ctrl_c_while_the_play_stops_is_still_the_interrupted_step_carr
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     stub = StubSudo(tmp_path, monkeypatch, forgetting_exit_code=1)
-    playbook = fake_ansible(tmp_path, f"kill -INT $PPID\nuntil grep -q '^-k' {stub.log}; do sleep 0.05; done\nkill -INT $PPID\nsleep 3")
+    playbook = fake_ansible(tmp_path, "trap '' PIPE\nkill -INT $PPID\nwhile printf '.\\n' 2>/dev/null; do :; done\nkill -INT $PPID")
 
     with pytest.raises(system_step.SystemStepInterrupted) as interrupted:
         system_step.run_playbook_as_root([str(playbook)])
 
     assert str(interrupted.value) == TICKET_SENTENCE
     assert stub.calls()[-1][0] == "-k"
+
+
+def test_a_failing_sudo_k_after_another_exception_is_a_failed_step_carrying_the_ticket_sentence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ruled E1: a ticket that could not be forgotten is never swallowed, whatever raised first."""
+    StubSudo(tmp_path, monkeypatch, forgetting_exit_code=1)
+    playbook = fake_ansible(tmp_path, r"printf '\377\n'")
+
+    with pytest.raises(system_step.StepFailed) as failure:
+        system_step.run_playbook_as_root([str(playbook)])
+
+    assert str(failure.value) == TICKET_SENTENCE
 
 
 def test_a_play_that_runs_on_after_a_ctrl_c_is_not_waited_for(tmp_path: Path, stub_sudo: StubSudo) -> None:
