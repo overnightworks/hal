@@ -1,4 +1,4 @@
-"""The system step of `hal setup` (#40) in a sandbox: the Ansible apply and its check mode, the running user that picks the role, and the failures that stop only this step."""
+"""The system step of `hal setup` in a sandbox: the Ansible apply and its check mode, the running user that picks the role, and the failures that stop only this step."""
 
 from __future__ import annotations
 
