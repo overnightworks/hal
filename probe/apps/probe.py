@@ -480,7 +480,7 @@ class Probe:
             (self.only()["id"], self.head(), self.record.read_text()) == (before, head, record),
             "something changed",
         )
-        write_line("A7 held: a declined yes leaves HEAD, the container and the record (hal 3)")
+        write_line("A7 held: a declined yes leaves HEAD, the container and the record (hal 1)")
 
     def cell_a9_build_fails(self) -> None:
         tag = TAGS["a9"]

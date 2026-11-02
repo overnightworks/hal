@@ -35,7 +35,7 @@ both strings, and the apply still changes nothing and asks nothing; Z3 reverted,
 
 The copy is a clean `main` with a bare remote: every edit above is published (committed and
 pushed) before the apply that follows it (#95 P1); the #95 cell P2, after P2, applies with one
-unpublished `traefik.yml` edit and requires exit 3 naming it, with traefik's container kept. The
+unpublished `traefik.yml` edit and requires exit 4 naming it, with traefik's container kept. The
 #783 cells P1-P4 (`checkout_update.py`) push commits to the remote from a work clone and drive
 `hal update` and `hal apply --local` through the copy's `bin/hal`: apply refuses behind origin and
 names `hal update`, the update syncs the new lock and the next apply runs the merged code, and a
@@ -363,7 +363,7 @@ class Probe:
         )
         expect(self.container_ids()["traefik"] == before, "an unpublished edit recreated traefik")
         write_line(
-            f"#95 P2 held: an unpublished {TRAEFIK_FILE} edit is named, exit 3, traefik kept"
+            f"#95 P2 held: an unpublished {TRAEFIK_FILE} edit is named, exit 4, traefik kept"
         )
 
     def cell_p3_edited_traefik_yml(self) -> None:

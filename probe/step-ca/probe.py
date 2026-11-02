@@ -622,12 +622,13 @@ class Probe(McpNetworks, TraefikMcpFollows):
         publish(copy, f"probe: step-ca enabled {enabled}")
 
     def hal(
-        self, copy: Path, *args: str, terminal: bool, exit_code: int = 0, typed: bytes = b"yes\n",
+        self, copy: Path, *arguments: str, terminal: bool, exit_code: int = 0,
+        typed: bytes = b"yes\n",
     ) -> str:  # fmt: skip
-        if args[0] in ("apply", "start"):
+        if arguments[0] in ("apply", "start"):
             self.guard.expect(edge_copy.copy_compose_command(copy), once=False)
         return run_hal(
-            copy, self.environment, *args, terminal=terminal, exit_code=exit_code, typed=typed
+            copy, self.environment, *arguments, terminal=terminal, exit_code=exit_code, typed=typed
         )
 
     def hal_apply(self, copy: Path, enabled: bool) -> str:
@@ -745,9 +746,7 @@ class Probe(McpNetworks, TraefikMcpFollows):
 
     def start_without_keys(self) -> Path:
         """No keys, no volumes, no containers; an enabled copy of the repository."""
-        self.compose(
-            "down", "--volumes", "--remove-orphans", "--timeout", "10", own_session=True
-        )  # fmt: skip
+        self.compose("down", "--volumes", "--remove-orphans", "--timeout", "10", own_session=True)
         shutil.rmtree(self.secrets_dir, ignore_errors=False)
         copy = self.repository_copy()
         self.set_enabled(copy, True)
@@ -763,8 +762,9 @@ class Probe(McpNetworks, TraefikMcpFollows):
     def proof_12_apply_runs_the_setup(self) -> None:
         copy = self.start_without_keys()
 
-        out = self.hal(copy, "apply", "--local", terminal=True, typed=b"no\n",
-                       exit_code=HAL_DECLINED)  # fmt: skip
+        out = self.hal(
+            copy, "apply", "--local", terminal=True, typed=b"no\n", exit_code=HAL_DECLINED
+        )
         expect("aborted, nothing changed" in out, f"a no said: {out[-160:]}")  # (i)
         expect(not self.secrets_dir.exists(), "keys exist after a no")
         expect(not self.volumes_that_exist(), "a volume exists after a no")
