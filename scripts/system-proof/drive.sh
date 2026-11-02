@@ -1902,7 +1902,7 @@ cell_p_live_applies() {  # cell_p_live_applies <cell> <log>: an apply without -v
     PROOF_COLOURED=1 at_sudo_terminal "$log" none setup
     code=$?
     verdict "$cell" "the apply shows live line frames after the one prompt, the row, and the password is in no line" \
-        "[ \$code -eq 0 ] && active_sudo_is \"\$sudo_alternative\" && hal_prompts_are $log 1 && frame_after_the_prompt $log && row_in_log $log system '(changed|unchanged)' && ! grep -qaF -- \"\$PROOF_PASSWORD\" \"\$EVIDENCE/$log.log\" && ticket_is_gone $log"
+        "[ \$code -eq 0 ] && active_sudo_is \"\$sudo_alternative\" && hal_prompts_are $log 1 && frame_after_the_prompt $log && grep -qaP 'system +(changed|unchanged)' \"\$EVIDENCE/$log.log\" && ! grep -qaF -- \"\$PROOF_PASSWORD\" \"\$EVIDENCE/$log.log\" && ticket_is_gone $log"
     return
 }
 
