@@ -1,0 +1,8 @@
+claim_id = "9c438b74cccf473faf8474f5f2c58b95"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "0465ba361aa99af8cf9068152d625862bc96bf8e"
+branch = "claude/issue-871-a5-3c-core-rows"
+scope = ["docs/design/hal-output.html", "probe/switches/probe.py", "quality/baseline.toml", "src/hal/stack/core.py", "src/hal/stack/core_phase.py", "src/hal/stack/result_rows.py", "src/hal/stack/service_recreate.py", "tests/test_stack_apply.py", "tests/test_stack_apply_recreate.py", "tests/test_stack_result_rows.py"]
+opened_commit = "c7a69ef181f2d9359df8f9b4eb129e30ad45f214"
+whole_reason = "One printed row and the four bare lines it replaces: the production files, their pins and the picture move in one commit."
