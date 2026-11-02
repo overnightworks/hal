@@ -14,10 +14,12 @@ from hal.stack.unit_plans import Progress, Recreate, since_of
 @dataclass(frozen=True)
 class Recreated:
     """A service recreated and observed running, after `seconds` of the lock, the recreate and
-    the watch."""
+    the watch; `barriers_proven` says a core recreate proved at least one barrier and none
+    failed."""
 
     service: str
     seconds: float
+    barriers_proven: bool = False
 
 
 @dataclass(frozen=True)
