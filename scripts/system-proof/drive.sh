@@ -84,7 +84,7 @@ before_the_yes() {  # before_the_yes <log>: the plan, the output up to the yes p
 
 row_in_log() {  # row_in_log <log> <row> <event regex>: a row of hal setup's run (or of a run that asked no yes), whatever its glyph
     local log=$1 row=$2 event=$3
-    after_the_yes "$log" | grep -qP -- "^  [^ ]+ $row +$event( |\\r?$)"
+    after_the_yes "$log" | grep -qP -- "(^|\\x1b\\[K)  [^ ]+ $row +$event( |\\r?$)"
     return
 }
 
@@ -1893,7 +1893,7 @@ cell_p_live_interrupted() {  # cell_p_live_interrupted <cell> <log>: Ctrl-C at t
     PROOF_COLOURED=1 PROOF_INTERRUPT='system +[A-Z]' at_sudo_terminal "$log" none setup
     code=$?
     verdict "$cell" "Ctrl-C at the live line: one prompt, the frame after it, the row, the pair, 130, the ticket gone" \
-        "[ \$code -eq 130 ] && active_sudo_is \"\$sudo_alternative\" && hal_prompts_are $log 1 && frame_after_the_prompt $log && row_in_log $log system interrupted && in_log $log 'error: setup stopped at system · /etc may be partial' && in_log $log 'next: hal setup' && ticket_is_gone $log"
+        "[ \$code -eq 130 ] && active_sudo_is \"\$sudo_alternative\" && hal_prompts_are $log 1 && frame_after_the_prompt $log && row_in_log $log system interrupted && grep -qaP \"error:(\\x1b\\[[0-9;]*m)? setup stopped at system · /etc may be partial\" \"\$EVIDENCE/$log.log\" && grep -qaP \"next:(\\x1b\\[[0-9;]*m)? hal setup\" \"\$EVIDENCE/$log.log\" && ticket_is_gone $log"
     return
 }
 
