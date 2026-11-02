@@ -18,9 +18,9 @@ postgres_major = 17
     ("text", "message"),
     [
         ("[app", "apps.toml is not valid TOML"),
-        ("[other]", "apps.toml: unknown key ['other']"),
+        ("[other]", "apps.toml: unknown key; only ['app'] is allowed"),
         ("", "apps.toml declares no app"),
-        ('[app."Not Plain"]', "the app name is not plain enough"),
+        ('[app."Not Plain"]', "apps.toml: an app name must match [a-z_][a-z0-9_-]{0,62}"),
         (f"[app.{PRE_APPLY_TAG}]", "the app name is taken by the restic tag"),
         ("[app]\nkeycloak = 1", "apps.toml [app.keycloak]: must be a table"),
         (f"[app.keycloak]\n{KEYCLOAK_RECORD}restore_test = 1", "restore_test: must be a table"),
@@ -38,5 +38,5 @@ def test_a_refused_dump_names_the_plain_values_it_allows():
         parse_apps(text)
 
     assert str(refusal.value).endswith(
-        "dump must be one of ['pg_dump_custom', 'sqlite_online_copy'], not 'sh'"
+        "dump must be one of ['pg_dump_custom', 'sqlite_online_copy']"
     )

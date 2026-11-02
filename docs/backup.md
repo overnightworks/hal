@@ -117,6 +117,14 @@ To run now, start the same units the timers take (`systemctl --user start hal-ba
 `hal-backup-restore-test.service`); the last journal line of the unit is the verdict.
 `hal restore --list` lists the snapshots of host `hal` only. Both `forget` runs leave other hosts' snapshots alone.
 
+With `LOG_FORMAT=json` every row, verdict and error of `hal backup` and `hal restore --test` is one
+flushed line: a journal priority (`<3>` error, `<4>` warning, `<6>` info) and a JSON object with
+`timestamp`, `level`, `logger`, `service` and `event`. journald removes the priority; by hand, cut it
+(`LOG_FORMAT=json hal backup | cut -c4- | jq`). Any other value than `json` or `text` stops every verb
+with exit 2. The events carry no host path, container id, argument or database row, and the password
+is never read into one; restic's and Docker's own stderr stays raw in the journal. `--json` stays the
+separate result for programs.
+
 ### One app, and the pre-apply snapshot
 
 `hal backup <app>` and `hal restore --test <app>` work on that app alone: its dump, its
