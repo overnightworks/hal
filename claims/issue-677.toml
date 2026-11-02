@@ -1,7 +1,0 @@
-claim_id = "d878e15ad89045138e6ed5a887472198"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "1e540e83f4a0108cc137d4759905c12d73ae8277"
-branch = "claude/issue-677-grok-login-entry"
-scope = ["docs/agent-service.md", "src/hal/workstation/secrets_manifest.toml", "tests/test_workstation_secrets_login.py"]
-opened_commit = "e111bab2b22278ed2d4a7655ca4c10fe3dd5b412"
