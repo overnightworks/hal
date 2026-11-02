@@ -322,8 +322,9 @@ class _LiveLine:
             self._started = time.monotonic()
             self._draw()
             if self._thread is None:
-                self._thread = threading.Thread(target=self._redraw, daemon=True)
-                self._thread.start()
+                redrawer = threading.Thread(target=self._redraw, daemon=True)
+                redrawer.start()
+                self._thread = redrawer
 
     def stop(self, *, erase: bool) -> None:
         self._stopped.set()
