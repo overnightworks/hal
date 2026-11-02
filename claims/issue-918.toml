@@ -1,0 +1,8 @@
+claim_id = "dbea210d288345a68be35c37730dd419"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "d7b850999820612a040643ba26926faabbc14bf1"
+branch = "claude/issue-918-live-task-line"
+scope = ["docs/design/hal-output.html", "docs/home.md", "scripts/system-proof/drive.sh", "src/hal/output/__init__.py", "src/hal/workstation/setup.py", "src/hal/workstation/system/callback_plugins/hal_events.py", "src/hal/workstation/system_step.py", "tests/test_hal_output_live_line.py", "tests/test_workstation_system_callback.py", "tests/test_workstation_system_step_runner.py"]
+opened_commit = "5d535f14b0743ed514b237451ec778461910d7df"
+whole_reason = "One event, its reader, the owner that draws it and the word it draws under, with the proof that drives them at a terminal: a half of them either reads an unknown event as a failed run or draws nothing."
