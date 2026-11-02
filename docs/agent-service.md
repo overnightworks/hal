@@ -254,12 +254,11 @@ enabled yet (`api_groups` and `[api]` are unset in `service.toml`), so a member 
 gets 403 `not_enabled`. The operator ruled on 28.10.2026
 ([#299 comment](https://github.com/overnightworks/hal/issues/299#issuecomment-6464712955)) that the
 agent service writes its own privacy section, `agent-dienst` in `legal/sections/agent-service/datenschutz.html`,
-and describes only the API route; it does not speak of the subscription, which no user can ever use. Every
-other app or service links `/datenschutz#agent-dienst` and says in its own text only what it sends.
-Which groups
-may use an AI feature is decided by the service's subscription and api groups only, the same in
-every app; an app adds no AI group of its own. Membership in the app (`/apps/<name>`) stays separate
-access to the app.
+and describes only the API route; it does not speak of the subscription, which no user can ever use, and no
+text a person reads speaks of the subscription. Every other app or service links
+`/datenschutz#agent-dienst` and says in its own text only what it sends. Which groups may use an AI
+feature is decided by the service's subscription and api groups only, the same in every app; an app
+adds no AI group of its own. Membership in the app (`/apps/<name>`) stays separate access to the app.
 
 ## An app's side
 
