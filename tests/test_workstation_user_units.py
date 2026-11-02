@@ -433,7 +433,7 @@ def dependency_link_of_another_target(machine: Machine, unit: Path) -> str:
 def symlinked_dependency_directory(machine: Machine, unit: Path) -> str:
     elsewhere = machine.user_units.parent / "elsewhere"
     elsewhere.mkdir()
-    (elsewhere / "hal-backup.service").symlink_to("/tmp/foreign.service")
+    (elsewhere / "hal-backup.service").symlink_to("/tmp/foreign.service")  # noqa: S108 - a symlink target that is never opened
     (machine.user_units / "custom.target.requires").symlink_to(elsewhere)
     return "custom.target.requires/hal-backup.service"
 

@@ -235,7 +235,7 @@ def front_answers(shared: bytes = b"-", **replaced: tuple[int, bytes]) -> dict:
         ("docker", "inspect", "front"): (0, inspect_answer([("/etc/traefik/traefik.yml", False)])),
         ("docker", "exec", "front", "cat", "/proc/1/mountinfo"): (0, FRONT_TABLE),
         ("docker", "exec", "front", "tar", "-c", "/dev"): (0, tar_of({"dev/null": b""})),
-        ("docker", "exec", "front", "tar", "-c", "/dev/shm"): (0, tar_of({"dev/shm/x": shared})),
+        ("docker", "exec", "front", "tar", "-c", "/dev/shm"): (0, tar_of({"dev/shm/x": shared})),  # noqa: S108 - a mount path of the fake container and no test creates it
         ("docker", "exec", "front", "tar", "-c", "/etc/hosts"): (0, tar_of({"hosts": b"-"})),
         ("docker", "logs", "front"): (0, LOG_CLEAN),
     } | {tuple(key.split()): value for key, value in replaced.items()}
@@ -263,7 +263,7 @@ def test_a_clean_container_without_python_is_searched_and_inventoried_in_every_s
     assert sweep.found == {}
     assert sweep.inventory["front"] == (
         "/dev tmpfs",
-        "/dev/shm tmpfs",
+        "/dev/shm tmpfs",  # noqa: S108 - a mount path of the fake container and no test creates it
         "/etc/hosts ext4",
         "log json-file",
     )
@@ -367,7 +367,7 @@ def test_an_inspected_tmpfs_is_accounted_for_and_searched(retention) -> None:
     table = FRONT_TABLE + b"\n27 20 0:25 / /tmp rw - tmpfs tmpfs rw"
     answers = front_answers(
         **{
-            "docker inspect front": (0, inspect_answer(tmpfs={"/tmp": "size=1m"})),
+            "docker inspect front": (0, inspect_answer(tmpfs={"/tmp": "size=1m"})),  # noqa: S108 - a mount path of the fake container and no test creates it
             "docker exec front cat /proc/1/mountinfo": (0, table),
             "docker exec front tar -c /tmp": (0, tar_of({"tmp/c": ANSWER.encode()})),
         }

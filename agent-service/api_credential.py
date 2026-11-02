@@ -44,7 +44,7 @@ def gate() -> ModuleType:
     """The credential reader's rules, loaded from the file LiteLLM mounts: one hal-side copy."""
     name = "agent_service_credential_gate"
     spec = importlib.util.spec_from_file_location(name, GATE)
-    assert spec is not None and spec.loader is not None
+    assert spec is not None and spec.loader is not None  # noqa: S101 - narrows the type and a fixed .py path always has a loader
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module  # its dataclass resolves annotations through it
     try:
