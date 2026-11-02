@@ -262,7 +262,7 @@ services:
   realm-observer:
     # The probe's python pin (probe/keycloak/compose.probe.yaml); ci.yml checks the two are equal.
     # agent-probe below carries the same pin; Dependabot moves all of them in one pull.
-    image: python:3.13.17-alpine@sha256:fa0bb0d0cd7c7d6cef30a69094d32ac2b71c7304c87c6107fec100e1ee4eda02
+    image: python:3.14.8-alpine@sha256:f6a589d43c42b9e7f7dc67a12d37132491f362859a5d750607710cc56da3bc72
     profiles: [apply]
     logging: *one-off-logging
     user: "65534:65534"
@@ -554,7 +554,7 @@ services:
   # attachments, hardened like the service, listening on nothing.
   agent-probe:
     <<: *agent-attachments
-    image: python:3.13.17-alpine@sha256:fa0bb0d0cd7c7d6cef30a69094d32ac2b71c7304c87c6107fec100e1ee4eda02
+    image: python:3.14.8-alpine@sha256:f6a589d43c42b9e7f7dc67a12d37132491f362859a5d750607710cc56da3bc72
     profiles: [agent-probe]
     user: "65534:65534"
     read_only: true

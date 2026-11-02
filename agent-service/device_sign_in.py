@@ -86,7 +86,7 @@ def post_form(
                 status, document = http.HTTPStatus.OK, read_answer(answer, deadline, clock)
         except urllib.error.HTTPError as refusal:
             status, document = refusal.code, read_answer(refusal, deadline, clock)
-    except (OSError, http.client.HTTPException, ValueError):
+    except OSError, http.client.HTTPException, ValueError:
         raise SignInFailed(f"the {path} endpoint gave no answer to read") from None
     if not isinstance(document, dict):
         raise SignInFailed(f"the {path} endpoint gave no answer to read")

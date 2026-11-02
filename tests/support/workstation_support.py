@@ -417,15 +417,16 @@ class FakePlaybook:
         self.succeeds = True
         self.failure = ""
         self.applied = False
+        self.tasks = ("Write edge files", "Restart Docker")
 
     def __call__(self, argv: Sequence[str]) -> system_step.PlaybookRun:
         self.calls.append(list(argv))
-        changed = 0 if self.applied else 1
+        tasks = () if self.applied else self.tasks
         if self.succeeds and "--check" not in argv:
             self.applied = True
         if not self.succeeds:
             return system_step.PlaybookUnfinished(self.failure)
-        return system_step.PlaybookFinished(changed)
+        return system_step.PlaybookFinished(len(tasks), tasks)
 
 
 @dataclass

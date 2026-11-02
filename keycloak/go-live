@@ -168,7 +168,7 @@ def edge_backup_is_set_up() -> bool:
     settings = BackupSettings.for_home(Path.home(), os.getuid(), os.getgid())
     try:
         backup_runner.require_secret_and_repository(settings)
-    except (backup_runner.StepFailed, OSError):
+    except backup_runner.StepFailed, OSError:
         return False
     return True
 

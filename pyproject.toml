@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
     "pyyaml>=6",
-    "overnightworks-appkit @ https://github.com/overnightworks/appkit/releases/download/v0.12.0/overnightworks_appkit-0.12.0-py3-none-any.whl#sha256=e0d53c0fd192292865ca0f098ed4525fd5f33a55448bdf03bfbbb4660fbf17e5",
+    "overnightworks-appkit @ https://github.com/overnightworks/appkit/releases/download/v0.12.1/overnightworks_appkit-0.12.1-py3-none-any.whl#sha256=713041332b779dca028b240cec48ebb4ba4c085c492784dd5046e43d8c284a71",
 ]
 
 [project.scripts]
@@ -24,8 +24,13 @@ module-name = "hal"
 
 [tool.ruff]
 line-length = 100
-target-version = "py312"
 extend-include = ["keycloak/go-live", "step-ca/init", "agent-service/setup"]
+
+[tool.ruff.per-file-target-version]
+# The LiteLLM image runs Python 3.13, which predates PEP 758's bare except list.
+"agent-service/litellm/*.py" = "py313"
+# agent-service/setup imports these on CI's system python, which is older than the floor.
+"src/hal/output/*.py" = "py312"
 
 [tool.ruff.format]
 # home's tree is imported as it is: home-tools#56 / home-tools#45 move its texts.

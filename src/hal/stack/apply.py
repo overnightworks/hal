@@ -26,7 +26,9 @@ the operator's terminal (key material is made there, never here) and `--check` m
 before a fresh plan is shown. A unit with an emergency switch (`hal stop`) or a barrier a stop
 left is never started and its switch is never cleared here: only `hal start` ends it. If it is
 enabled in the catalog, declares a setup, and its containers still run while it is not set up,
-the run is refused: nothing is asked or published.
+the run is refused: nothing is asked or published. After the setups, and before the plan is
+shown, a service this run creates that names a secret file which does not exist refuses the run
+with that path and `next: hal setup`, where Compose would refuse it at `up`.
 An app (an entry with `repo`) is planned last, in the same plan and under the same `yes`: its
 newest release tag is checked out, built, started and recorded once its containers are settled
 (`apps.py`).
@@ -68,6 +70,7 @@ from hal.output import (
     counted,
     write_error,
     write_groups,
+    write_line,
     write_row,
     write_verdict,
 )
@@ -75,7 +78,7 @@ from hal.output.command import Verb, command
 from hal.stack import barrier, catalog, checkout, compose, core, environment, setup, switches
 from hal.stack.appkit_step import AppkitError, Rename, plan_appkit
 from hal.stack.apps import AppError, AppFailed, AppHeldOff, AppRuntime, plan_apps
-from hal.stack.core_phase import CorePhase
+from hal.stack.core_phase import CoreFailure, CorePhase
 from hal.stack.legal_section import LegalError
 from hal.stack.legal_step import RECORD_FILE, plan_legal
 from hal.stack.plan import Plan
@@ -99,6 +102,8 @@ from hal.stack.result_rows import (
     not_written_row,
     partial_error,
     result_rows,
+    unproven_partial,
+    unproven_row,
     waiting_row,
 )
 from hal.stack.terminal import NEEDS_TERMINAL, at_terminal
@@ -416,8 +421,9 @@ def _missing_setups(planned: Plan, repository: Path, check: setup.SetupCheck) ->
 
 
 def _refusal(missing: Sequence[MissingSetup], planned: Plan, setups_ran: bool) -> int | None:
-    """GUARD_REFUSED when a unit or app a stop keeps off still runs, or, after the setups ran, a
-    unit is still not set up: none is started."""
+    """GUARD_REFUSED when a unit or app a stop keeps off still runs, when, after the setups ran, a
+    unit is still not set up, or when a service this run creates lacks its secret file: none is
+    started."""
     still_running = [
         *(still_runs_row(item.unit.key, item.check_line) for item in missing if item.kept_stopped),
         *(still_runs_row(key, "") for key in planned.app_plans.switched_off_still_running),
@@ -440,7 +446,20 @@ def _refusal(missing: Sequence[MissingSetup], planned: Plan, setups_ran: bool) -
             command(Verb.APPLY),
         )
         return ApplyExit.GUARD_REFUSED
-    return None
+    return None if missing else _refused_for_absent_secrets(planned)
+
+
+def _refused_for_absent_secrets(planned: Plan) -> int | None:
+    """GUARD_REFUSED when a service this run creates names a secret file that does not exist:
+    Compose would refuse it at `up`, after the services before it ran."""
+    absent = setup.absent_secret_files(planned.fleet.config, planned.created_services)
+    if not absent:
+        return None
+    write_error(
+        "; ".join(f"{item.service} needs {item.file}" for item in absent) + "; nothing switched",
+        command(Verb.SETUP),
+    )
+    return ApplyExit.GUARD_REFUSED
 
 
 def _ask_and_run_setups(
@@ -451,7 +470,7 @@ def _ask_and_run_setups(
 ) -> int | None:
     """Ask for every setup first, then run them in turn; an exit code when the run ends here."""
     for item in missing:
-        print(f"{item.unit.key} is not set up: {item.check_line}")
+        write_line(f"{item.unit.key} is not set up: {item.check_line}")
         if not confirmed(f"run `{item.unit.setup}` now"):
             write_error(f"aborted, nothing changed; run `{item.unit.setup}` yourself or answer yes")
             return ApplyExit.DECLINED
@@ -599,11 +618,16 @@ def _write_files(planned: Plan, progress: Progress) -> NotWritten | None:
     return None
 
 
-def _say_stopped(failure: NotWritten | str) -> None:
-    """The red row of a file step that could not write, when it was one, then the pair."""
+def _say_stopped(failure: NotWritten | CoreFailure) -> None:
+    """The row and pair of a run stopped before any unit was switched: a file step that could not
+    write, or barriers that are not proven (the one failure whose way on is `hal offline`); any
+    other failure is a pair."""
     if isinstance(failure, NotWritten):
         write_row(not_written_row(failure))
         write_error(*not_written_partial(failure))
+    elif isinstance(failure, barrier.BarriersUnproven):
+        write_row(unproven_row(failure))
+        write_error(*unproven_partial())
     else:
         write_error(f"partial, {failure}; no unit switched", command(Verb.APPLY))
 
@@ -662,5 +686,5 @@ def _report_switched(
     if mismatched or withheld or later_steps_failed:
         return ApplyExit.REFUSED
     for plan in changes:
-        print(f"{plan.unit.key} is {plan.action}")
+        write_line(f"{plan.unit.key} is {plan.action}")
     return ApplyExit.APPLIED_OR_NOTHING

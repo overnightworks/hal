@@ -36,8 +36,11 @@ capability, `no-new-privileges`, no core dump and `restart: unless-stopped`; `/t
 the working root `/run/agent-service/cli` are size-bounded tmpfs mounts owned by 1000 with mode 0700
 (the service refuses to start on a working root that is not owned by its user with exactly that
 mode), all `nosuid,nodev,noexec`. The unit `agent-service` of `fleet.yaml` starts it with
-`agent-egress`: `hal apply` brings both up. A missing image, login directory, signing key or CA root stops the start
-(`pull_policy: never`, `create_host_path: false`, and a compose file secret that has no source), so apply reports the unit partial and never on.
+`agent-egress`: `hal apply` brings both up. A missing image or login directory stops the start
+(`pull_policy: never`, `create_host_path: false`), so apply reports the unit partial and never on. A missing signing key or CA root file is
+asked of its unit's setup first (`agent-service/setup`, `step-ca/init`); a file still missing after the
+setups, such as the root while `step-ca` is off or stopped, refuses `hal apply` before its `yes`,
+naming the path and `next: hal setup`, with nothing switched.
 
 It signs for songmaker's origin, `https://songmaker.mcp.internal`, the name `traefik-mcp` answers to on `mcp`, which it joins
 beside the per-app agent networks and `egress` (never `mcp-songmaker`). The key reaches it as the compose secret
@@ -277,6 +280,10 @@ networks:
 and calls `http://agent-service:8080` (the service's own default port; the smoke and the unit probe
 use it). No CA mount is needed: the service is plain http on an isolated internal network, and no
 host process can reach it, because the network has no host address and publishes no port.
+
+An app that calls LiteLLM directly holds only its own key, the file `~/.secrets/litellm/apps/<app>` (`songmaker`,
+`hopin`, `presentator`). `hal setup` creates a missing one with the prefix `sk-` that LiteLLM requires of a custom
+key, mode 0644 in a 0700 folder so the app's container reads it as its own user; no service reads the file today.
 
 ## The API route
 

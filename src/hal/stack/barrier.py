@@ -176,7 +176,7 @@ class Verifier:
             return False
         try:
             return wanted(self.fetch(address, host, allowed, self.clock))
-        except (OSError, http.client.HTTPException):
+        except OSError, http.client.HTTPException:
             return False
 
 
@@ -366,6 +366,13 @@ class NoHost:
 class Unproven:
     unit: str
     failure: str
+
+
+@dataclass(frozen=True)
+class BarriersUnproven:
+    """Every barrier that was active and not proven after a core recreate, in the order tried."""
+
+    proofs: tuple[Unproven, ...]
 
 
 type ActiveProof = Proven | NoHost | Unproven

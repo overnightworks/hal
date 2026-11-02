@@ -30,12 +30,15 @@ from hal.output import (
     Noun,
     Row,
     Verdict,
+    log_format_refusal,
     printable,
     write_error,
     write_row,
     write_verdict,
 )
 from hal.stack.realm import reconcile
+from hal.workstation.jobs import TIMER_JOBS
+from hal.workstation.user_units import service_text
 
 SOURCE = Path(__file__).resolve().parents[1] / "src"
 HOSTILE = f'ESC \x1b[31m, newline \n, quote ", prefix <3>, separator {chr(0x2028)} end'
@@ -269,6 +272,31 @@ def test_a_good_restore_test_is_events_of_hal_restore(edge_backup):
 
     assert outcome.exit_code == 0, outcome.err
     assert {event["logger"] for _, event in events(outcome.out)} == {"hal.restore"}
+
+
+@pytest.mark.parametrize(
+    ("job", "arguments", "logger"),
+    [
+        ("hal-backup", ("backup",), "hal.backup"),
+        ("hal-backup-restore-test", ("restore", "--test"), "hal.restore"),
+    ],
+)
+def test_a_good_run_under_the_environment_a_backup_unit_declares_is_json_events(
+    edge_backup, monkeypatch, job, arguments, logger
+):
+    unit = service_text(next(each for each in TIMER_JOBS if each.name == job), "%h/hal")
+    [declared] = [line for line in unit.splitlines() if line.startswith("Environment=")]
+    variable, value = declared.removeprefix("Environment=").split("=", 1)
+    monkeypatch.setenv(variable, value)
+    assert log_format_refusal() is None
+    edge_backup("backup")
+
+    outcome = edge_backup(*arguments)
+
+    assert outcome.exit_code == 0, outcome.err
+    parsed = events(outcome.out)
+    assert {event["logger"] for _, event in parsed} == {logger}
+    assert parsed[-1][1]["event"] in {"backup done", "restore test done"}
 
 
 @pytest.mark.usefixtures("json_log")

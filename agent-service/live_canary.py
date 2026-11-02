@@ -208,7 +208,7 @@ def bind_to_front(stack: Stack, say: Verdicts) -> list[Target] | None:
     try:
         targets = route_targets(stack)
         reason = Reason.CONTAINER_MISSING if targets is None else gateway_reason(stack)
-    except (OSError, subprocess.TimeoutExpired):
+    except OSError, subprocess.TimeoutExpired:
         targets, reason = None, Reason.CONTAINER_MISSING
     if reason is not None:
         say.refuse(C0, reason)
@@ -248,7 +248,7 @@ def canary_turn(
     """C1 and the clean-up of the turn's container. True when the answer held the marker."""
     try:
         tokens = obtain_tokens()
-    except (LiveSmokeFailed, SignInFailed):
+    except LiveSmokeFailed, SignInFailed:
         say.refuse(C1, Reason.SIGN_IN_FAILED)
         return False
     except Exception as failure:

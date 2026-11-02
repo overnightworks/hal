@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "agent-service"))
 
 import live_signer  # noqa: E402
+from device_sign_in import SignInFailed  # noqa: E402
 from live_smoke import LiveSmokeFailed, Report, Verdict  # noqa: E402
 from support.live_smoke_fakes import (  # noqa: E402
     KNOWN,
@@ -521,3 +522,35 @@ def test_l3b_an_absent_shared_network_is_held_and_nothing_is_removed():
     assert code == 0
     assert any(line.startswith("L3 shared network") and " held" in line for line in printed)
     assert not any(command[:3] == ["docker", "network", "rm"] for command in stack.asked)
+
+
+@pytest.mark.parametrize(
+    ("raising_name", "failure", "code", "printed"),
+    [
+        ("sign_in_with", SignInFailed("the realm refused"), 1, "live signer: the realm refused"),
+        (
+            "stack_of",
+            subprocess.TimeoutExpired("docker", 1),
+            1,
+            "live signer: a docker command ran out of time",
+        ),
+        ("stack_of", KeyboardInterrupt(), 130, "live signer: interrupted"),
+    ],
+)
+def test_a_failed_live_signer_run_ends_with_its_exit_code_and_its_line_on_standard_error(
+    tmp_path, capsys, monkeypatch, raising_name, failure, code, printed
+):
+    service = tmp_path / "service.toml"
+    service.write_text(f'[apps.songmaker]\nmcp_origin = "{ORIGIN}"\n', encoding="utf-8")
+    monkeypatch.setattr(live_signer, "read_secret", lambda *_: "a-secret-value")
+    monkeypatch.setattr(live_signer, "occupied_network_cell", lambda _: None)
+
+    def failing(*_):
+        raise failure
+
+    seams = {"sign_in_with": lambda _: TOKENS, "stack_of": FakeStack} | {raising_name: failing}
+
+    assert live_signer.main([], service_toml=service, **seams) == code
+    captured = capsys.readouterr()
+    assert captured.err.strip() == printed
+    assert captured.out == ""

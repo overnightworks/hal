@@ -555,7 +555,7 @@ That is the operator's „zumindest durchleiten zu den Seiten“, and edge#19 ru
 
 | # | Step | Kind | First-ever | Re-setup | Done when (the tool verifies) |
 |---|---|---|---|---|---|
-| 1 | Install Ubuntu 24.04, disk encryption per D10, the operator's user | manual (the installer) | same | same | the desktop runs |
+| 1 | Install Ubuntu 26.04, disk encryption per D10, the operator's user | manual (the installer) | same | same | the desktop runs |
 | 2 | `sudo apt install -y gh && gh auth login --web && gh repo clone overnightworks/home-tools ~/git/home-tools && ~/git/home-tools/bootstrap` | one line, printed on paper and at the top of `docs/architecture.md`; the login is guided by `gh`. **`bootstrap` does not exist today**; home-tools#9 builds it | same | same | `hal --help` answers |
 | 3 | `hal setup` (asks one yes) | one command, asks for `sudo` once | same | same | `hal setup --dry-run` shows nothing left to change; `hal check` reports L0 clean (Docker loopback default, cloudflared installed and **disabled**, restic, `tofu` pinned, Tailscale, auto-login off; the agent user once D14 is done) |
 | 4 | **Secrets** | guided | `hal setup`: per secret, open the provider page, paste hidden, verify, store (HopIn's TURN key ID and API token: stored, not verified). Generated service passwords need no typing | `hal restore secrets --repo <off-disk repository> --target ~/.secrets` (`--repo` planned): the recovery form below | `hal secrets` without findings |
@@ -897,7 +897,7 @@ The rules are labelled "§10 rule n", because [edge#50](https://github.com/overn
 - Identity: OIDC code flow with PKCE and static endpoints (webauth#49 ruled out discovery at login), W5/W9 logout, and W10 bearer or device login for CLIs.
 - Data and runtime: SQL over a DSN, the Redis protocol, the S3 API once files leave a host, OCI images with compose.
 - Operations: OpenMetrics `/metrics` where an app exposes metrics, X.509/ACME, secrets as files.
-- LLM vendors only behind agent-service.
+- LLM vendors only behind agent-service or LiteLLM; an app holds only its LiteLLM key.
 
 **§10 rule 6: logs go to stdout and stderr.** No app writes a log file to a volume or a host path.
 

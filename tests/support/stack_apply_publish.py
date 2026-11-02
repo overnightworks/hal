@@ -69,8 +69,8 @@ class Result:
 class World:
     """Plain `hal apply` over the scripted local part and the fake publish."""
 
-    run: "functools.partial[Result]"
-    settle_local: "functools.partial[None]"
+    run: functools.partial[Result]
+    settle_local: functools.partial[None]
     scripted: object
     scripted_git: object
     setup_check: object

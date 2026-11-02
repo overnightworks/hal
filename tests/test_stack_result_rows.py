@@ -9,6 +9,7 @@ from support.stack_plan_rows import APP, NEW, app_plan
 from hal.output import Glyph
 from hal.stack import realm as realm_lines
 from hal.stack.apps import AppFailed, AppHeldOff, AppKind, AppOn, AppSwitchedOff, OffPlan
+from hal.stack.barrier import BarriersUnproven, Unproven
 from hal.stack.legal_step import PageChange
 from hal.stack.realm.reconcile import (
     Leftovers,
@@ -29,6 +30,8 @@ from hal.stack.result_rows import (
     partial_error,
     recreated_row,
     result_rows,
+    unproven_partial,
+    unproven_row,
     waiting_row,
 )
 from hal.stack.service_recreate import Recreated
@@ -366,3 +369,36 @@ def test_the_path_and_the_reason_of_a_failed_write_are_escaped_in_the_row() -> N
     row = not_written_row(NotWritten("legal", Path("a\nb"), "x\x1b[31m"))
 
     assert row.fact == "could not write a\\nb (x\\x1b[31m)"
+
+
+TWO_UNPROVEN = BarriersUnproven((Unproven("probe", "no route"), Unproven("echo", "cannot write")))
+
+
+def test_unproven_barriers_are_one_red_row_naming_every_key_in_the_order_tried() -> None:
+    row = unproven_row(TWO_UNPROVEN)
+
+    assert (row.glyph, row.subject, str(row.event)) == (Glyph.FAILED, "barriers", "not proven")
+    assert row.fact == "probe, echo · may be reachable through Traefik"
+
+
+def test_each_unproven_barrier_has_one_detail_and_the_way_on_comes_last() -> None:
+    row = unproven_row(TWO_UNPROVEN)
+
+    assert row.details == (
+        "probe: no route",
+        "echo: cannot write",
+        "then: hal apply repeats the proof · hal online reopens only once every barrier is proven",
+    )
+
+
+def test_unproven_barriers_end_partial_with_hal_offline_as_the_next_step() -> None:
+    assert unproven_partial() == (
+        "partial, barriers not proven · no unit switched",
+        "hal offline",
+    )
+
+
+def test_the_failure_text_of_an_unproven_barrier_is_escaped_in_its_detail() -> None:
+    row = unproven_row(BarriersUnproven((Unproven("probe", "a\x1b[31m\nb"),)))
+
+    assert row.details[0] == "probe: a\\x1b[31m\\nb"

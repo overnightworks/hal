@@ -21,7 +21,7 @@ from shlex import join as shell_join
 from shlex import quote
 from typing import TYPE_CHECKING
 
-from hal.output import Glyph, Noun, Row, TrailingNoun, Verdict, confirmed, counted, write_error, write_row, write_verdict
+from hal.output import Glyph, Noun, Row, TrailingNoun, Verdict, confirmed, counted, is_verbose, write_error, write_row, write_verdict
 from hal.output.command import Verb, command
 from hal.workstation import secrets_setup
 from hal.workstation.secrets_setup import WalkEnd
@@ -32,6 +32,7 @@ from hal.workstation.system_step import (
     CheckState,
     StepFailed,
     SystemStep,
+    TasksWouldChange,
     SystemStepInterrupted,
     UnresolvableRunningUser,
 )
@@ -146,6 +147,10 @@ class StillOpenSecret(Noun):
     SECRET = "secret still open"  # noqa: S105 - a noun for a count and no credential
 
 
+class ChangingTask(Noun):
+    TASK = "task"
+
+
 class OpenRow(TrailingNoun):
     ROW = "open row"
 
@@ -175,9 +180,10 @@ class Outcome:
     event: SetupEvent
     fact: str = ""
     count: int | None = None
+    details: tuple[str, ...] = ()
 
     def row(self, subject: SetupRow) -> Row:
-        return Row(EVENT_LOOK[self.event].glyph, subject, self.event, self.fact, self.count)
+        return Row(EVENT_LOOK[self.event].glyph, subject, self.event, self.fact, self.count, self.details)
 
 
 @dataclass(frozen=True)
@@ -228,6 +234,7 @@ class Step:
     and `next_step` the command that goes on from there.
     `needs_first` names what a `not checked` dry run lacks; only the system step can end up there.
     `open_fact` names what a dry run that found something to change shows on its row.
+    `check` may return `TasksWouldChange`, which adds the count and, without `-v`, the names the row of a step that would change shows.
     `apply` may return `UnitsApplied`, which adds the fact the row of a changed step shows.
     `before_apply` is the row printed before an apply that waits on the operator (the wizard, sudo's password), or nothing.
     `operators_only` marks a step the agents' account skips: it needs sudo, the operator's units or the operator's secrets.
@@ -236,7 +243,7 @@ class Step:
 
     name: str
     row: SetupRow
-    check: Callable[[], CheckState]
+    check: Callable[[], CheckState | TasksWouldChange]
     apply: Callable[[], Applied | UnitsApplied]
     why: str
     failure: str
@@ -263,6 +270,8 @@ class Step:
                 return Outcome(SetupEvent.NOT_CHECKED, f"needs {self.needs_first()}")
             case CheckState.WOULD_CHANGE:
                 return Outcome(self.events.open, self.open_fact())
+            case TasksWouldChange(tasks):
+                return Outcome(self.events.open, counted(len(tasks), ChangingTask.TASK), details=() if is_verbose() else tasks)
         return Outcome(self.events.unchanged)
 
 
@@ -622,7 +631,7 @@ def _run_row(row: SetupRow, steps: tuple[Step, ...], role: ExecutionRole, mode: 
             outcomes.append(step.run(mode is Pass.RUN))
         except (OSError, StepFailed) as error:
             raise _RowStopped(step, error) from error
-    return max(outcomes, key=lambda candidate: EVENT_LOOK[candidate.event].severity)
+    return max(reversed(outcomes), key=lambda candidate: EVENT_LOOK[candidate.event].severity)
 
 
 def _failure_detail(row: SetupRow, error: OSError | StepFailed, step: Step, mode: Pass) -> str:

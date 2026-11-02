@@ -9,7 +9,8 @@
 # language" states that class with its measured examples; change a declared object here.
 # Deleting anything is done in the admin console, after a backup.
 # The songmaker, hopin and presentator clients are here before the go-live; the other app clients
-# arrive with each app's cutover, together with its live redirect and logout URLs.
+# arrive with each app's cutover, together with its live redirect and logout URLs. The public client
+# `agents` is the one sign-in of a person's own AI agents (docs/keycloak.md, "The agents client").
 realm: hallucinai
 enabled: true
 # The pages' look lives in the theme files (keycloak/themes/hallucinai), so changing it is no realm change.
@@ -45,13 +46,18 @@ groups:
       - name: songmaker
         subGroups:
           - name: admin
+          # Empty at first; webauth admits an agent token only for a member (docs/keycloak.md).
+          - name: mcp
       - name: presentator
         subGroups:
           - name: admin
+          # Empty at first; webauth admits an agent token only for a member (docs/keycloak.md).
+          - name: mcp
       - name: hopin
         subGroups:
           # hopin's admin role, by webauth's group rule (/apps/<app>/admin means admin).
           - name: admin
+          - name: mcp
   - name: services
     subGroups:
       - name: agent-service
@@ -112,6 +118,60 @@ clientScopes:
         consentRequired: false
         config:
           included.client.audience: speech-service
+          id.token.claim: "false"
+          access.token.claim: "true"
+          userinfo.token.claim: "false"
+          introspection.token.claim: "true"
+  - name: mcp-songmaker
+    description: An agent's access to songmaker's MCP front
+    protocol: openid-connect
+    attributes:
+      include.in.token.scope: "true"
+      display.on.consent.screen: "true"
+      consent.screen.text: songmaker
+    protocolMappers:
+      - name: mcp-songmaker-audience
+        protocol: openid-connect
+        protocolMapper: oidc-audience-mapper
+        consentRequired: false
+        config:
+          included.custom.audience: https://songmaker.hallucinai.de/mcp
+          id.token.claim: "false"
+          access.token.claim: "true"
+          userinfo.token.claim: "false"
+          introspection.token.claim: "true"
+  - name: mcp-presentator
+    description: An agent's access to presentator's MCP front
+    protocol: openid-connect
+    attributes:
+      include.in.token.scope: "true"
+      display.on.consent.screen: "true"
+      consent.screen.text: presentator
+    protocolMappers:
+      - name: mcp-presentator-audience
+        protocol: openid-connect
+        protocolMapper: oidc-audience-mapper
+        consentRequired: false
+        config:
+          included.custom.audience: https://presentator.hallucinai.de/mcp
+          id.token.claim: "false"
+          access.token.claim: "true"
+          userinfo.token.claim: "false"
+          introspection.token.claim: "true"
+  - name: mcp-hopin
+    description: An agent's access to hopin's MCP front
+    protocol: openid-connect
+    attributes:
+      include.in.token.scope: "true"
+      display.on.consent.screen: "true"
+      consent.screen.text: hopin
+    protocolMappers:
+      - name: mcp-hopin-audience
+        protocol: openid-connect
+        protocolMapper: oidc-audience-mapper
+        consentRequired: false
+        config:
+          included.custom.audience: https://hopin.hallucinai.de/mcp
           id.token.claim: "false"
           access.token.claim: "true"
           userinfo.token.claim: "false"
@@ -263,3 +323,34 @@ clients:
       backchannel.logout.session.required: "false"
     defaultClientScopes: *songmaker_presentator_scopes
     optionalClientScopes: []
+  # The public sign-in of a person's own AI agents: the authorization code with PKCE at one fixed
+  # loopback address, no secret, no refresh token (so none is offline either), and the realm's
+  # lifespan. A token carries the audience of an app's /mcp only for the optional scope mcp-<app>;
+  # the app admits it only for a member of /apps/<app>/mcp (webauth), so this client grants no right.
+  # The type header is what webauth's token check requires.
+  - clientId: agents
+    name: agents
+    enabled: true
+    publicClient: true
+    consentRequired: true
+    standardFlowEnabled: true
+    implicitFlowEnabled: false
+    directAccessGrantsEnabled: false
+    serviceAccountsEnabled: false
+    frontchannelLogout: false
+    alwaysDisplayInConsole: false
+    redirectUris:
+      - "http://localhost:28471/callback"
+    webOrigins: []
+    attributes:
+      pkce.code.challenge.method: "S256"
+      use.refresh.tokens: "false"
+      access.token.header.type.rfc9068: "true"
+    defaultClientScopes:
+      - basic
+      - groups
+    optionalClientScopes:
+      - mcp-songmaker
+      - mcp-presentator
+      - mcp-hopin
+      - offline_access

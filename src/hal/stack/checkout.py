@@ -150,7 +150,7 @@ def run_in_own_group(
     child runs. A call that does not finish within `timeout` (None: never), or an exception while
     it waits, ends with the whole group killed and every pipe read to its end before the exception
     goes on. Raises OSError when it cannot start."""
-    with subprocess.Popen(
+    with subprocess.Popen(  # noqa: S603 - argv is a git call or the sync script of the checkout and no shell parses it
         command,
         env=environment,
         stdin=subprocess.DEVNULL,
@@ -459,7 +459,7 @@ class Refusal:
     cannot_tell: bool = False
 
     @classmethod
-    def cannot_read(cls, error: GitError) -> "Refusal":
+    def cannot_read(cls, error: GitError) -> Refusal:
         return cls(f"cannot read the live checkout, {error}", cannot_tell=True)
 
 
