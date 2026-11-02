@@ -7,6 +7,7 @@ import sys
 from collections.abc import Iterator
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 
 import pytest
 from support.script_module import loaded_script
@@ -46,7 +47,7 @@ def test_a_probe_with_every_cell_driven_passes(capsys: pytest.CaptureFixture[str
 @pytest.mark.parametrize(
     ("not_driven", "left_behind", "exit_code", "verdict"),
     [
-        (["P13 (no image)"], False, 2, "PROBE INCOMPLETE"),
+        (["P13 (no image)"], False, mcp_networks.INCOMPLETE_EXIT_CODE, "PROBE INCOMPLETE"),
         (["P13 (no image)"], True, 1, None),
         ([], True, 1, None),
         ([], False, 0, "PROBE PASSED"),
@@ -79,7 +80,7 @@ def test_main_ends_with_the_verdict_of_the_driven_cells(
     docker.chmod(0o755)
     monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
 
-    def prove_filling(drive: ModuleType) -> int:
+    def prove_filling(drive: Any) -> int:
         drive.not_driven.extend(not_driven)
         return 0
 

@@ -673,7 +673,7 @@ def _run_and_clean_up(
 
 
 def passed_line(line: str) -> int:
-    """The verdict of a probe that only passes: print its line, exit code 0."""
+    """What the verdict of a probe that only passes calls: print its line, exit code 0."""
     print(line)
     return 0
 
@@ -688,7 +688,8 @@ def run_probe(
     probe, prove it, tear it down even when `timeout` ends the proof with SIGTERM or anything
     escapes, and then empty the scratch. The exit code is the proof's, or 1 when the teardown or
     the emptying fails. On success `verdict` ends the run: it is called with
-    the probe and its result is the exit code (`passed_line` for a probe that only passes)."""
+    the probe and its result is the exit code (a probe that only passes has its verdict call
+    `passed_line`)."""
     try:
         # The operator chooses --scratch (made absolute at the argparse boundary) and any directory
         # they name is valid, so there is nothing to sanitise; O_NOFOLLOW refuses a symlink.
