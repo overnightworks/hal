@@ -1,0 +1,8 @@
+claim_id = "61d1de6ca50845d89738d16a3431dad4"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "0db6cd17c0caec70e473d5f4783f94b492caa4d7"
+branch = "claude/issue-905-realm-agents-client"
+scope = ["docs/keycloak.md", "keycloak/realm.yaml", "probe/keycloak/README.md", "probe/keycloak/agents_client_cell.py", "probe/keycloak/probe.py", "tests/test_keycloak_agents_client.py"]
+opened_commit = "ec9b5d4bac9df7e895cd950587dbe926513127ef"
+whole_reason = "One realm change and its proof: the client, scopes and groups in realm.yaml, the document that states them, and the probe cell with its relation test; the cell needs probe.py's wiring and README."
