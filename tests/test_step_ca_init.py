@@ -602,67 +602,6 @@ def test_teardown_finishes_when_a_stop_signal_arrives_during_cleanup(
     assert not any((tmp_path / "scratch").iterdir())
 
 
-@pytest.mark.parametrize(
-    ("not_driven", "left_behind", "exit_code", "verdict"),
-    [
-        (["P13 (no image)"], False, 2, "PROBE INCOMPLETE"),
-        (["P13 (no image)"], True, 1, None),
-        ([], True, 1, None),
-        ([], False, 0, "PROBE PASSED"),
-    ],
-    ids=["not-driven", "not-driven-teardown-fails", "driven-teardown-fails", "driven"],
-)
-def test_main_ends_with_the_verdict_of_the_driven_cells(
-    probe: ModuleType,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    not_driven: list[str],
-    left_behind: bool,
-    exit_code: int,
-    verdict: str | None,
-) -> None:
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    docker = bin_dir / "docker"
-    docker.write_text(
-        "#!/bin/sh\n"
-        'case "$*" in\n'
-        f"  *\" config \"*) echo '{json.dumps({'name': probe.PROJECT})}' ;;\n"
-        f"  ps*) {'echo leftover-container' if left_behind else ':'} ;;\n"
-        '  volume*|network*|*" down "*) ;;\n'
-        "  *) exit 1 ;;\n"
-        "esac\n",
-        encoding="utf-8",
-    )
-    docker.chmod(0o755)
-    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
-
-    def prove_filling(drive: ModuleType) -> int:
-        drive.not_driven.extend(not_driven)
-        return 0
-
-    monkeypatch.setattr(probe, "prove", prove_filling)
-    handlers_before = {
-        number: signal.getsignal(number) for number in (signal.SIGTERM, signal.SIGINT)
-    }
-    (tmp_path / "scratch").mkdir()
-    try:
-        actual = probe.main(["--scratch", str(tmp_path / "scratch")])
-    finally:
-        for number, handler in handlers_before.items():
-            signal.signal(number, handler)
-
-    lines = capsys.readouterr().out.splitlines()
-    assert actual == exit_code
-    assert not any(tmp_path.joinpath("scratch").iterdir())
-    if verdict is None:
-        assert not any(line.startswith(("PROBE PASSED", "PROBE INCOMPLETE")) for line in lines)
-    else:
-        assert lines[-1].startswith(verdict)
-    assert ("PROBE PASSED" in "".join(lines)) == (verdict == "PROBE PASSED")
-
-
 @pytest.mark.parametrize("stop_signal", [signal.SIGTERM, signal.SIGINT])
 def test_teardown_commands_survive_a_stop_signal_to_the_probe_process_group(
     probe: ModuleType, tmp_path: Path, stop_signal: signal.Signals

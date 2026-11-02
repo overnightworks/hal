@@ -773,17 +773,15 @@ def prove(probe: Probe) -> int:
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
-    return edge_copy.run_main(
-        __doc__.splitlines()[0],
-        argv,
-        Probe,
-        prove,
-        lambda _probe: edge_copy.passed_line(
-            "PROBE PASSED: #61 proofs 1-7, #70 proof 8, #85 P1-P7, #87 Q1-Q6, #91 Z1-Z3, "
-            "#95 P1-P2, #592 V1, V4, V6-V8, #783 P1-P4, #884 D19 hold"
-        ),
+def verdict(_probe: Probe) -> int:
+    return edge_copy.passed_line(
+        "PROBE PASSED: #61 proofs 1-7, #70 proof 8, #85 P1-P7, #87 Q1-Q6, #91 Z1-Z3, "
+        "#95 P1-P2, #592 V1, V4, V6-V8, #783 P1-P4, #884 D19 hold"
     )
+
+
+def main(argv: list[str] | None = None) -> int:
+    return edge_copy.run_main(__doc__.splitlines()[0], argv, Probe, prove, verdict)
 
 
 if __name__ == "__main__":
