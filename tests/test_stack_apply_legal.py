@@ -37,9 +37,12 @@ from support.stack_apply import (
 from support.stack_apply_fakes import (
     ScriptedCompose,
 )
-from support.stack_plan_rows import detail_lines, find_row, plain
+from support.stack_plan_rows import detail_lines, find_row, plain, row_at
 
+from hal.stack import appkit_step, apply
+from hal.stack.legal_step import RECORD_FILE
 from hal.stack.plan_rows import LegalEvent
+from hal.stack.result_rows import ResultEvent
 
 FLEET = (
     f"cloudflare:\n  zone: {ZONE}\nservices:\n"
@@ -121,6 +124,10 @@ def test_the_first_apply_names_and_writes_the_three_pages_readable_by_the_unit(w
     )
     assert re.search(r"^  \+ legal +3 new pages ", plain(out), re.MULTILINE)
     assert detail_lines(out) == []
+    assert find_row(
+        out, "legal", ResultEvent.PAGES_WRITTEN, "impressum, datenschutz, nutzungsbedingungen"
+    )
+    assert not find_row(out, "legal", ResultEvent.RECORD_WRITTEN)
     assert world.built_names() == THE_PAGES
     for name in THE_PAGES[1:]:
         assert stat.S_IMODE((world.built / name).stat().st_mode) == 0o644
@@ -150,7 +157,7 @@ def test_a_changed_text_goes_live_only_after_yes_and_the_plan_names_its_page(wor
 
     declined_exit, declined_out, _ = world.switch(answer="no")
 
-    assert declined_exit == 1
+    assert declined_exit == apply.ApplyExit.DECLINED
     assert find_row(declined_out, "legal", LegalEvent.EDITED_PAGE, "datenschutz")
     assert "nutzungsbedingungen" not in declined_out
     assert 'id="neu"' not in world.built_page("datenschutz")
@@ -385,7 +392,7 @@ def test_a_refused_section_stops_the_run_before_the_question_and_writes_nothing(
 def test_a_link_to_a_block_that_left_refuses_the_run(world):
     """L13."""
     world.edit(PRIVACY, link_to_the_agent_service)
-    assert world.switch(answer="no")[0] == 1
+    assert world.switch(answer="no")[0] == apply.ApplyExit.DECLINED
     write_fleet(world.repository, WITHOUT_AGENT)
 
     exit_code, _, err = world.switch()
@@ -427,21 +434,99 @@ def test_without_an_enabled_legal_unit_there_is_no_step_and_no_line(world, servi
     assert world.built_names() == [".gitkeep"]
 
 
+def test_the_appkit_row_comes_before_the_legal_row_after_the_yes(world):
+    for target in appkit_step.served_directories(world.repository):
+        shutil.rmtree(target)
+
+    _, out, _ = world.switch()
+
+    assert row_at(out, "appkit", ResultEvent.FILES_WRITTEN) < row_at(
+        out, "legal", ResultEvent.PAGES_WRITTEN
+    )
+
+
+def test_a_page_that_gained_only_its_record_is_named_as_a_record_written(world):
+    world.switch()
+    (world.state / RECORD_FILE).unlink()
+
+    _, out, _ = world.switch()
+
+    assert find_row(out, "legal", ResultEvent.RECORD_WRITTEN, "impressum")
+    assert not find_row(out, "legal", ResultEvent.PAGES_WRITTEN)
+
+
 def test_a_write_that_fails_is_partial_and_switches_no_unit(world):
     """L3."""
     world.built.chmod(0o500)
     try:
-        exit_code, _, err = world.switch()
+        exit_code, out, err = world.switch()
     finally:
         world.built.chmod(0o700)
 
     assert exit_code == 1
+    assert find_row(
+        out,
+        "legal",
+        ResultEvent.NOT_WRITTEN,
+        "could not write legal/built/impressum.html (Permission denied)",
+    )
+    assert not find_row(out, "legal", ResultEvent.PAGES_WRITTEN)
     assert err.splitlines() == [
-        "error: partial, legal: could not write legal/built/impressum.html (Permission denied); "
-        "no unit switched",
+        "error: partial, legal not written · no unit switched",
         "next: hal apply",
     ]
     assert world.scripted.changing_verbs() == []
+
+
+@pytest.mark.parametrize("failing", ["copy", "removal"])
+def test_a_failed_appkit_write_stops_the_run_before_legal_writes_anything(world, failing):
+    served = appkit_step.served_directories(world.repository)[0]
+    if failing == "removal":
+        (served.parent / "appkit-0.0.1").mkdir()
+    else:
+        shutil.rmtree(served)
+    served.parent.chmod(0o500)
+    try:
+        exit_code, out, _ = world.switch()
+    finally:
+        served.parent.chmod(0o700)
+
+    assert exit_code == 1
+    assert find_row(out, "appkit", ResultEvent.NOT_WRITTEN, "could not write ")
+    assert not find_row(out, "legal", ResultEvent.PAGES_WRITTEN)
+    assert not re.search(r"[✓✗] legal", plain(out))
+    assert world.built_names() == [".gitkeep"]
+    assert world.scripted.changing_verbs() == []
+
+
+def test_a_failed_legal_write_keeps_the_appkit_row_that_was_written_before(world):
+    for target in appkit_step.served_directories(world.repository):
+        shutil.rmtree(target)
+    world.built.chmod(0o500)
+    try:
+        _, out, _ = world.switch()
+    finally:
+        world.built.chmod(0o700)
+
+    assert find_row(out, "appkit", ResultEvent.FILES_WRITTEN)
+    assert find_row(out, "legal", ResultEvent.NOT_WRITTEN)
+    assert not re.search(r"✓ legal", plain(out))
+
+
+def test_a_failed_record_write_names_the_record_and_the_next_apply_writes_it(world):
+    record = world.state / RECORD_FILE
+    record.mkdir(parents=True)
+    exit_code, out, _ = world.switch()
+    record.rmdir()
+
+    assert exit_code == 1
+    assert find_row(out, "legal", ResultEvent.NOT_WRITTEN, f"could not write {record} (")
+    assert not find_row(out, "legal", ResultEvent.PAGES_WRITTEN)
+    assert world.scripted.changing_verbs() == []
+
+    _, next_out, _ = world.switch()
+
+    assert find_row(next_out, "legal", ResultEvent.RECORD_WRITTEN)
 
 
 @pytest.mark.usefixtures("unreadable_profile_bind")

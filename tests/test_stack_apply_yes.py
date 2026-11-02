@@ -49,6 +49,7 @@ from support.stack_plan_rows import (
 )
 
 from hal.stack import checkout
+from hal.stack.apply import ApplyExit
 from hal.stack.external import cli as external_cli
 from hal.stack.legal_step import PageChange
 from hal.stack.plan_rows import changes_in
@@ -146,14 +147,20 @@ def test_an_answer_but_the_exact_yes_is_declined_in_one_error_and_changes_nothin
 ):
     exit_code, _, err = switch(answer)
 
-    assert (exit_code, lines_of(err)) == (1, ["error: aborted, nothing changed"])
+    assert (exit_code, lines_of(err)) == (
+        ApplyExit.DECLINED,
+        ["error: aborted, nothing changed"],
+    )
     assert scripted.changing_verbs() == []
 
 
 def test_a_closed_stdin_at_the_prompt_is_a_no(switch, scripted):  # noqa: F811
     exit_code, _, err = switch(while_prompt_waits=lambda: sys.stdin.truncate(0))
 
-    assert (exit_code, lines_of(err)) == (1, ["error: aborted, nothing changed"])
+    assert (exit_code, lines_of(err)) == (
+        ApplyExit.DECLINED,
+        ["error: aborted, nothing changed"],
+    )
     assert scripted.changing_verbs() == []
 
 
@@ -161,7 +168,7 @@ def test_a_declined_plan_after_a_setup_names_the_setup_that_ran(switch, missing_
     exit_code, _, err = switch("yes\nno")
 
     assert (exit_code, lines_of(err)) == (
-        1,
+        ApplyExit.DECLINED,
         ["error: aborted, setup of step-ca completed; nothing switched"],
     )
 
@@ -241,7 +248,7 @@ def test_a_dirty_tree_is_a_failed_checkout_row_with_its_paths_then_one_error(
 
     exit_code, out, err = switch()
 
-    assert exit_code == 2
+    assert exit_code == ApplyExit.GUARD_REFUSED
     assert re.search(r"^  ✗ checkout +local changes +2 files$", plain(out), re.MULTILINE)
     assert detail_lines(out) == ["fleet.yaml", "dynamic/x.yml"]
     assert lines_of(err) == [
@@ -295,7 +302,7 @@ def test_without_a_terminal_apply_refuses_in_one_error(switch, scripted):  # noq
     exit_code, _, err = switch(at_a_terminal=False)
 
     assert (exit_code, lines_of(err)) == (
-        1,
+        ApplyExit.GUARD_REFUSED,
         ["error: refused, stdin and stdout must be a terminal"],
     )
     assert scripted.calls == []
@@ -336,7 +343,7 @@ def test_units_still_not_set_up_after_their_setups_ran_end_in_one_error(
 
     exit_code, _, err = switch("yes\nyes")
 
-    assert exit_code == 1
+    assert exit_code == ApplyExit.GUARD_REFUSED
     assert lines_of(err) == [
         "error: step-ca is not set up after the setups ran; nothing switched; "
         "run `step-ca/init` first; not set up again; "

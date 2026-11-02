@@ -83,17 +83,21 @@ names `edge_keycloak-db` and `edge_step-ca`, set in `compose.yaml`). Never run `
 socket directory volume is tmpfs and holds nothing; remove its definition alone with
 `docker volume rm hal_socket-proxy-run`. Then revert the commit.
 
-## Exception E: where five of the six stack commands and `hal setup` deviate
+## Exception E: where the stack commands and `hal setup` deviate
 
-`hal`'s exit codes are in `src/hal/grammar.py`, its error form in `src/hal/output/__init__.py`, and `hal --help` shows both. `hal apply`, `stop`, `start`,
-`offline` and `online` end with 0, 2 for a usage error, or with 3 for every outcome of the stack that
-is not "applied or nothing to do"; an uncaught Ctrl-C ends with 130. They deviate in exactly three
-ways (`hal update`, the sixth, keeps the grammar: its section below):
+`hal`'s exit codes are in `src/hal/grammar.py`, its error form in `src/hal/output/__init__.py`, and `hal --help` shows both. `hal apply` ends with 0 (applied or nothing to do), 1 when
+the person declined the `yes`, 4 when a guard said no (no terminal, the apply lock is held, the
+checkout is not the live one or not a clean `main`, a unit is disabled or not set up), 2 for a usage
+error, and 3 for a cannot-plan end (also a git that cannot be asked), a failed step and a partial run;
+the printed line names which (`partial, …` after a step ran and a later one failed). `apply` deviates
+from the grammar only by E2 and E3 below, and by the publish: the published exit of the Cloudflare
+part stays as it is, so a no at the publish step's own `yes` still ends 3 until S6-4 of
+overnightworks/edge#296 cuts the publish's closing lines. `stop`, `start`, `offline` and `online` end
+with 0, 2 for a usage error, or with 3 for every outcome of the stack that is not "applied or nothing
+to do", a declined `yes` and a guard's refusal included; an uncaught Ctrl-C ends with 130. `hal update`
+keeps the grammar (its section below). The deviations are:
 
-- **E1:** (until overnightworks/edge#50 classifies the stack's outcomes) a guard refusal decided by the stack ends with 3, not 4: no terminal, the apply lock is held,
-  `yes` declined, the unit is disabled or not set up, a barrier is unproven, or the checkout is not the
-  live one or not a clean `main`.
-- **E2:** (until #50 classifies the stack's outcomes) a Ctrl-C that the stack catches ends by what the stack then observes, not with 130. `apply`,
+- **E2:** a Ctrl-C that the stack catches ends by what the stack then observes, not with 130. `apply`,
   `stop` and `start` print their `interrupted …` line and end with 3. `offline` drops the interrupt and
   reports the tunnel as observed: 3 with its `partial …` line while the tunnel still runs, 0 when it did
   stop, the marker is recorded and the boot drop-in is present. A Ctrl-C the stack does not catch ends
@@ -132,16 +136,16 @@ wie bei `--local`: nichts wird veroeffentlicht.
 **Der lokale Teil.** Er bringt jede Einheit in den Zustand, den `enabled` sagt. An:
 `docker compose --profile <Einheit> up -d` fuer genau die Dienste des Profils. Aus: `stop`, dann `rm -f`
 derselben Dienste; nie `down`, nie `-v`, nie ein Volume (R1). Er zeigt den Plan, laeuft nur an einem
-Terminal und wendet ihn erst nach der Eingabe `yes` an (alles andere: Abbruch, Exit 3); danach liest er
+Terminal und wendet ihn erst nach der Eingabe `yes` an (alles andere: Abbruch, Exit 1); danach liest er
 die Container noch einmal und meldet nur, was er sieht. Ein zweiter Lauf meldet `nothing to change`.
 "An" heisst: jeder Dienst der Einheit hat seinen Container laufen (oder ein Einmal-Dienst ist fertig),
 nicht, dass er gesund ist; die Gesundheit zeigt `docker compose ps`.
 
-**Wo und woraus er laeuft.** Nur aus dem Live-Checkout `~/srv/hal` als Haupt-Worktree (sonst Exit 3
+**Wo und woraus er laeuft.** Nur aus dem Live-Checkout `~/srv/hal` als Haupt-Worktree (sonst Exit 4
 mit dem Grund), sonst haengte er das Live-Projekt an einen fremden Baum. Dann, jeweils mit nur der
 ersten verweigernden Zeile: weder ein anderes `hal apply --local` noch ein `hal update` laeuft
-(Exit 3; `stop` und `start` warten nie darauf), HEAD steht auf `main` (Exit 3) und der Baum ist
-sauber (Exit 3, jeder geaenderte oder unverfolgte Pfad auf eigener Zeile; ignorierte wie `.env`
+(Exit 4; `stop` und `start` warten nie darauf), HEAD steht auf `main` (Exit 4) und der Baum ist
+sauber (Exit 4, jeder geaenderte oder unverfolgte Pfad auf eigener Zeile; ignorierte wie `.env`
 zaehlen nicht, "ignoriert" ist nur, was die `.gitignore` des Repositorys sagt). Git laeuft dabei ohne
 Hooks, ohne fsmonitor und ohne die globale Konfiguration.
 
@@ -248,7 +252,7 @@ laufenden Dienst; Exit 0 eingerichtet, 1 nicht eingerichtet (die letzte Zeile is
 was fehlt, ohne Skriptnamen und ohne `FAILED at`), 2 es kann es nicht sagen (ebenso die blosse Tatsache).
 Eine laufende, im Katalog eingeschaltete Einheit mit `setup` wird bei jedem Apply geprueft: ist sie nicht
 eingerichtet, bekommt sie die Setup-Frage und sperrt das Publizieren. Die Frage kommt vor dem Plan ("Type
-yes to run `<setup>` now"; nur das genaue `yes` zaehlt, `no` bricht den ganzen Lauf ab, Exit 3, nichts
+yes to run `<setup>` now"; nur das genaue `yes` zaehlt, `no` bricht den ganzen Lauf ab, Exit 1, nichts
 geaendert). Nach `yes` laeuft das Setup in deinem Terminal, ohne Argumente, ohne Zeitlimit, Ausgabe
 ungefiltert; die Schluessel macht allein dieser Befehl, `hal apply` sieht sie nie. Dann prueft `--check`
 noch einmal und der Plan folgt mit seinem eigenen `yes`. Ein Setup, das scheitert oder per Ctrl-C
@@ -256,14 +260,13 @@ unterbrochen wird, schaltet nichts (Exit 3); was es gemacht hat, bleibt auch nac
 (Loeschen bleibt Handarbeit). Ohne Terminal laeuft nie ein Setup. Eine per `hal stop` ausgeschaltete,
 noch laufende Einheit, die nicht eingerichtet ist, wird abgewiesen (`hal stop` noch einmal).
 
-**Exit.** `hal apply` endet mit 0 (angewendet und beobachtet oder nichts zu tun), mit 2 bei einem
-Aufruf, den hal nicht versteht, und mit 3 fuer alles andere: verweigert (auch: ein anderes
-`hal apply` oder ein `hal update` haelt `apply.lock`), abgebrochen, fehlgeschlagen, teilweise oder nicht
-planbar (falscher Checkout oder Zweig, Baum nicht sauber, `.env` abweichend oder unlesbar, keine Gruppe
-`docker`, `cloudflare.zone` ungueltig, git nicht befragbar, Abruf gescheitert, Checkout vor oder neben
-`origin/main`, Checkout hinter `origin/main` (dann mit `next: hal update`), Katalog oder Compose
-ungueltig, `traefik.yml` oder `traefik-mcp.yml` fehlt, ein Setup-Check, der es nicht sagen kann, u. a.).
-Die Zeile nennt den Grund. Das blosse `hal apply` bricht nach einem lokalen Teil, der nicht mit 0
+**Exit.** Die Nummern stehen in Exception E. Der Grund steht in der Zeile (ein anderes `hal apply` oder ein
+`hal update` haelt `apply.lock`; falscher Checkout oder Zweig, Baum nicht sauber, `.env` abweichend oder
+unlesbar, keine Gruppe `docker`, `cloudflare.zone` ungueltig, git nicht befragbar, Abruf gescheitert,
+Checkout vor oder neben `origin/main`, Checkout hinter `origin/main` (dann mit `next: hal update`),
+Katalog oder Compose ungueltig, `traefik.yml` oder `traefik-mcp.yml` fehlt, ein Setup-Check, der es
+nicht sagen kann, u. a.).
+Das blosse `hal apply` bricht nach einem lokalen Teil, der nicht mit 0
 endete, ab ("nothing published"); die Zahl in "the publish did not end clean (exit N)" ist die der
 Publish-Phase, deren 2 dort zu 1 wird. Dasselbe `3` kommt vom `uv sync` des Starters `bin/hal`; seine
 `error:`-Zeile nennt das Sync.

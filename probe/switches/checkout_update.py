@@ -20,9 +20,16 @@ import tomllib
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from edge_copy import HAL_FAILURE, NOTHING_TO_CHANGE, ProbeFailed, advance_origin, expect, git
+from edge_copy import (
+    HAL_DECLINED,
+    HAL_FAILURE,
+    NOTHING_TO_CHANGE,
+    ProbeFailed,
+    advance_origin,
+    expect,
+    git,
+)
 
-from hal.grammar import ExitCode
 from hal.output import write_line
 from hal.output.command import Verb, command
 from hal.stack import checkout
@@ -30,7 +37,6 @@ from hal.stack import checkout
 if TYPE_CHECKING:
     from probe import Probe
 
-DECLINED = ExitCode.FINDINGS  # hal's exit for an update answered `no`
 IMPORT_FAILED = 1  # Python's exit for a traceback
 MARKER_VARIABLE = "HAL_PROBE_MARKER"
 PROJECT_FILE = "pyproject.toml"
@@ -126,7 +132,7 @@ def cell_p1_behind_and_declined(probe: Probe) -> None:
     refused = apply_local(probe, exit_code=HAL_FAILURE)
     for shown in ("! checkout 1 behind", "1 commit waits on origin main", "next: hal update"):
         expect(shown in refused, f"apply behind origin said {shown!r}? {refused[-300:]}")
-    declined = update(probe, typed=b"no\n", exit_code=DECLINED)
+    declined = update(probe, typed=b"no\n", exit_code=HAL_DECLINED)
     for shown in ("aborted, nothing changed", "directory bind", BIND_FILE, "other"):
         expect(shown in declined, f"the declined update said {shown!r}? {declined[-400:]}")
     expect(declined.index(BIND_FILE) < declined.index("README.md"), "groups out of order")
