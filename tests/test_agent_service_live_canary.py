@@ -83,12 +83,8 @@ class Route:
             if live_canary.STARTED_AT in command:
                 return completed(STARTED, 0, SENTINEL)
             return completed(f"/{container_of(command[-1].removeprefix('id-'))}\n")
-        if "exec" in command and "stat" in command:
-            return completed(f"{STARTED_EPOCH - self.file_age:.9f}\n", self.stat_code, SENTINEL)
-        if "exec" in command and "cat" in command:
-            if isinstance(self.toml, Exception):
-                raise self.toml
-            return completed(self.toml, self.toml_code, SENTINEL)
+        if "exec" in command:
+            return self.service_file(command)
         if "agent-canary" in command:
             self.marker = command[command.index("--marker") + 1]
             self.timeline.append("canary")
@@ -100,6 +96,13 @@ class Route:
         if command[:2] == ["docker", "rm"]:
             return completed("", self.leftover_removal, SENTINEL)
         return completed("", 0, SENTINEL)
+
+    def service_file(self, command: list[str]) -> subprocess.CompletedProcess:
+        if "stat" in command:
+            return completed(f"{STARTED_EPOCH - self.file_age:.9f}\n", self.stat_code, SENTINEL)
+        if isinstance(self.toml, Exception):
+            raise self.toml
+        return completed(self.toml, self.toml_code, SENTINEL)
 
     def census(self, command, stdin=None) -> Completed:
         self.census_calls.append(list(command))
