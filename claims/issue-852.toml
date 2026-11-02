@@ -1,7 +1,0 @@
-claim_id = "6c124570d9a94da7808d3dfd3e298edc"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "ef0eb3b01a21ea194cbc856923bdbc3851143770"
-branch = "claude/issue-852-apps-probe-run-probe"
-scope = ["probe/apps/probe.py", "tests/test_probe_isolation.py"]
-opened_commit = "e1dca9cc6fd84a870ae3bc369b8d68e446c4b7f8"
