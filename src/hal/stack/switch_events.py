@@ -8,6 +8,7 @@ built with a `✓`.
 
 from dataclasses import dataclass, replace
 from enum import StrEnum
+from typing import Self
 
 from hal.output import Glyph, Row, write_error, write_row
 from hal.output.command import Verb, command
@@ -78,13 +79,13 @@ class Closing:
     stop_failure: str | None = None
     interruption: Interruption | None = None
 
-    def with_barrier(self, part: BarrierPart, failure: str | None = None) -> Closing:
+    def with_barrier(self, part: BarrierPart, failure: str | None = None) -> Self:
         return replace(self, barrier=part, barrier_failure=failure)
 
-    def with_stop(self, part: StopPart, failure: str | None = None) -> Closing:
+    def with_stop(self, part: StopPart, failure: str | None = None) -> Self:
         return replace(self, stop=part, stop_failure=failure)
 
-    def interrupted(self, step: Interruption) -> Closing:
+    def interrupted(self, step: Interruption) -> Self:
         return replace(self, interruption=step)
 
     @property

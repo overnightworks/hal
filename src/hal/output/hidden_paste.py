@@ -106,7 +106,8 @@ def _drained_and_restored(terminal: int, settings: list) -> bytes:
                 rest += chunk
         finally:
             termios.tcsetattr(terminal, termios.TCSANOW, settings)
-    except termios.error, OSError:
+    # The system python of agent-service/setup imports this and predates PEP 758's bare except list.
+    except (termios.error, OSError):  # fmt: skip
         raise TerminalNotRestored from None
     return rest
 
