@@ -342,9 +342,10 @@ def _field_value(value: str | int | float) -> str | int | float:
     return round(value, 1)
 
 
-def write_row(row: Row) -> None:
+def write_row(row: Row, *, fresh_line: bool = False) -> None:
     """The row on stdout; text from outside is escaped before it is padded, so columns hold.
-    On a terminal only the glyph is coloured and the fact dim; a `·` row is dim as a whole."""
+    On a terminal only the glyph is coloured and the fact dim; a `·` row is dim as a whole.
+    `fresh_line` first ends a line a Ctrl-C left open."""
     stdout = sys.stdout
     if _json_on():
         _write_event(
@@ -360,6 +361,8 @@ def write_row(row: Row) -> None:
             },
         )
         return
+    if fresh_line:
+        print(file=stdout)
     subject = printable(row.subject)
     event = printable(str(row.event)) if row.count is None else counted(row.count, row.event)
     fact = _fact_text(row)
