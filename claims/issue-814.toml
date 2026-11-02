@@ -1,8 +1,0 @@
-claim_id = "ca02108bf8034c03946073a8ddcba577"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "7b9eb99f578105ca29c42369b4a6ccaa65c68199"
-branch = "claude/issue-814-s1c-a-retention-census-proves-the-api-ro"
-scope = ["agent-service/api_canary.py", "agent-service/retention_census.py", "agent-service/tree_census.py", "compose.yaml", "docs/agent-service.md", "probe/agent-service/census_client.py", "probe/agent-service/fake_anthropic.py", "probe/agent-service/litellm.py", "probe/agent-service/litellm_retention.py", "probe/agent-service/login_checks.py", "probe/agent-service/tree_census.py", "tests/test_agent_service_census_client.py", "tests/test_agent_service_census_watch.py", "tests/test_agent_service_retention_census.py", "tests/test_agent_service_tree_census.py", "tests/test_litellm_unit.py"]
-opened_commit = "24397ed87660a1424352c884fa3ed7c75061957d"
-whole_reason = "S1c is one retention claim: the census that inventories and searches every sink of the API route, the in-container search it shares with the 12b probes, the request marker the canary sends, and the probe that drives them."
