@@ -66,10 +66,16 @@ class World:
     def plan(self) -> apps.AppsPlan:
         return apps.plan_apps(self.repository, self.fleet, self.runtime, self.marks)
 
-    def run(self, plan: apps.AppsPlan | None = None) -> list[str | None]:
-        """The failure line of each app's run; None where it is on and recorded."""
+    def run(self, plan: apps.AppsPlan | None = None) -> list[apps.AppResult]:
+        """The result of each app's run."""
         planned = plan or self.plan()
-        return [failure for _, failure in planned.run(self.marks, self.progress)]
+        return list(planned.run(self.marks, self.progress))
+
+    def held_off_causes(self, plan: apps.AppsPlan | None = None) -> list[str]:
+        """The causes of the runs a stop won; fails when any other result came."""
+        results = self.run(plan)
+        assert all(isinstance(result, apps.AppHeldOff) for result in results)
+        return [result.cause for result in results]
 
     def deployed(self) -> dict[str, str] | None:
         record = self.state / "deployed" / KEY
@@ -91,6 +97,7 @@ def world(repository, state, home, runtime, docker) -> World:
 def deploy(world: World, origin: Origin, tag: str, files: dict[str, str] | None = None) -> str:
     """The app switched on at a new release `tag`, healthy and recorded; its sha."""
     sha = origin.release(tag, files)
-    assert world.run() == [None]
+    [result] = world.run()
+    assert isinstance(result, apps.AppOn)
     assert world.deployed()["sha"] == sha
     return sha

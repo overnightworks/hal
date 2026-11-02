@@ -4,7 +4,17 @@ Nothing here parses a string or prints; `plan_rows` is the planned run's twin.""
 from enum import StrEnum
 
 from hal.output import Glyph, Noun, Row, counted, format_duration, printable
+from hal.output.command import Verb, command
 from hal.stack import realm as realm_lines
+from hal.stack.apps import (
+    AppFailed,
+    AppHeldOff,
+    AppKind,
+    AppOn,
+    AppPlan,
+    AppResult,
+    OffPlan,
+)
 from hal.stack.plan_rows import ChangeNoun, PlanEvent
 from hal.stack.realm import Kind
 from hal.stack.realm.reconcile import (
@@ -35,6 +45,19 @@ class ResultEvent(StrEnum):
     REALM_APPLIED = "realm applied"
     REALM_FAILED = "realm failed"
     WAITING = "waiting"
+    APP_SWITCHED_ON = "switched on"
+    APP_STARTED_AGAIN = "started again"
+    APP_UPDATED = "updated"
+    APP_FAILED = "failed"
+    APP_SWITCH_OFF_FAILED = "switch off failed"
+    APP_HELD_OFF = "switched off meanwhile"
+
+
+_APP_ON_EVENT = {
+    AppKind.ON: ResultEvent.APP_SWITCHED_ON,
+    AppKind.START_AGAIN: ResultEvent.APP_STARTED_AGAIN,
+    AppKind.UPDATE: ResultEvent.APP_UPDATED,
+}
 
 
 class UnreadNoun(Noun):
@@ -75,6 +98,36 @@ def partial_error(result: StepResult) -> str | None:
             )
         case _:
             return None
+
+
+def app_row(result: AppResult) -> Row:
+    """The row of one app's run; every cause is escaped."""
+    match result:
+        case AppOn(plan, seconds):
+            facts = (plan.release.tag, "running", format_duration(seconds))
+            event = _APP_ON_EVENT[plan.kind]
+            return Row(Glyph.DONE, plan.app.key, event, _SEPARATOR.join(facts))
+        case AppFailed(subject, cause):
+            return Row(Glyph.FAILED, subject.app.key, _failed_event(subject), printable(cause))
+        case AppHeldOff(plan, cause):
+            return Row(Glyph.FAILED, plan.app.key, ResultEvent.APP_HELD_OFF, printable(cause))
+
+
+def app_partial(result: AppFailed | AppHeldOff) -> tuple[str, str]:
+    """The run's `partial, ...` text for a failed app and the command that ends it: a stop that
+    won is ended only by start."""
+    match result:
+        case AppFailed(subject):
+            return f"partial, {subject.app.key} {_failed_event(subject)}", command(Verb.APPLY)
+        case AppHeldOff(plan):
+            key = plan.app.key
+            return f"partial, {key} {ResultEvent.APP_HELD_OFF}", command(Verb.START, key)
+
+
+def _failed_event(subject: AppPlan | OffPlan) -> ResultEvent:
+    if isinstance(subject, OffPlan):
+        return ResultEvent.APP_SWITCH_OFF_FAILED
+    return ResultEvent.APP_FAILED
 
 
 def waiting_row(grace_seconds: float) -> Row:

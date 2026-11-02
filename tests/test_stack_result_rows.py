@@ -1,9 +1,11 @@
 """The rows of a finished step: what a typed result prints as, with no step run."""
 
 import pytest
+from support.stack_plan_rows import APP, NEW, app_plan
 
 from hal.output import Glyph
 from hal.stack import realm as realm_lines
+from hal.stack.apps import AppFailed, AppHeldOff, AppKind, AppOn, OffPlan
 from hal.stack.realm.reconcile import (
     Leftovers,
     NotRecorded,
@@ -13,7 +15,7 @@ from hal.stack.realm.reconcile import (
     RealmSkipped,
     Stage,
 )
-from hal.stack.result_rows import partial_error, result_rows, waiting_row
+from hal.stack.result_rows import app_partial, app_row, partial_error, result_rows, waiting_row
 
 SNAPSHOT = "37c2a56056d17297895e58c1ff98493754064280352422f136596266498fe056"
 REMOVAL = realm_lines.Change("hallucinai", realm_lines.Kind.REMOVAL, "group", "/console", members=0)
@@ -210,3 +212,43 @@ def test_the_waiting_line_is_a_live_row_with_the_grace() -> None:
 
     assert (row.glyph, row.subject, str(row.event)) == (Glyph.ANNOUNCE, "keycloak", "waiting")
     assert row.fact == "up to 2m00s for hal to clean up"
+
+
+@pytest.mark.parametrize(
+    ("kind", "event"),
+    [
+        (AppKind.ON, "switched on"),
+        (AppKind.START_AGAIN, "started again"),
+        (AppKind.UPDATE, "updated"),
+    ],
+)
+def test_an_app_that_is_on_is_a_done_row_with_its_tag_the_state_and_the_time(
+    kind: AppKind, event: str
+) -> None:
+    row = app_row(AppOn(app_plan(kind), 102))
+
+    assert (row.glyph, row.subject, str(row.event)) == (Glyph.DONE, "hopin", event)
+    assert row.fact == f"{NEW} · running · 1m42s"
+
+
+@pytest.mark.parametrize(
+    ("result", "event", "next_command"),
+    [
+        (AppFailed(app_plan(AppKind.ON), "x"), "failed", "hal apply"),
+        (AppFailed(OffPlan(APP), "x"), "switch off failed", "hal apply"),
+        (AppHeldOff(app_plan(AppKind.ON), "x"), "switched off meanwhile", "hal start hopin"),
+    ],
+)
+def test_a_failed_app_is_a_red_row_and_ends_partial_with_the_command_that_ends_it(
+    result: AppFailed | AppHeldOff, event: str, next_command: str
+) -> None:
+    row = app_row(result)
+
+    assert (row.glyph, row.subject, str(row.event)) == (Glyph.FAILED, "hopin", event)
+    assert app_partial(result) == (f"partial, hopin {event}", next_command)
+
+
+def test_the_cause_of_a_failed_app_is_escaped_in_the_row() -> None:
+    row = app_row(AppFailed(app_plan(AppKind.ON), "a\x1b[31m\nb"))
+
+    assert row.fact == "a\\x1b[31m\\nb"

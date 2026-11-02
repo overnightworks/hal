@@ -56,7 +56,8 @@ def test_a_first_apply_plans_tag_and_full_sha_then_runs_and_records_after_health
     [planned] = plan.plans
     assert (planned.kind, planned.release.tag, planned.sha) == (apps.AppKind.ON, FIRST, sha)
     assert world.deployed() is None
-    assert world.run(plan) == [None]
+    [result] = world.run(plan)
+    assert isinstance(result, apps.AppOn)
     assert world.deployed() == {"tag": FIRST, "sha": sha, "time": NOW.isoformat()}
     assert stat.S_IMODE((world.state / "deployed" / KEY).stat().st_mode) == 0o600
     assert head_of(world.srv) == sha
@@ -93,7 +94,8 @@ def test_a_newer_release_is_an_update_that_names_the_last_successful_deployment(
     [planned] = plan.plans
     assert (planned.kind, planned.release.tag, planned.sha) == (apps.AppKind.UPDATE, SECOND, sha)
     assert (planned.recorded_tag, planned.unfinished) == (FIRST, None)
-    assert world.run(plan) == [None]
+    [result] = world.run(plan)
+    assert isinstance(result, apps.AppOn)
     assert world.deployed()["tag"] == SECOND
 
 
@@ -137,10 +139,12 @@ def test_a_new_tag_that_fails_health_stays_partial_with_the_record_on_the_old_on
     sha = origin.release(THIRD)
     world.docker.health_after_start = "unhealthy"
 
-    [failure] = world.run()
+    [result] = world.run()
+
+    failure = result.cause
 
     assert failure == (
-        f"hopin is not healthy at {THIRD} after 300s (hopin running (unhealthy)); "
+        f"not healthy at {THIRD} after 300s (hopin running (unhealthy)); "
         "the record stays, the fix is a newer tag"
     )
     assert world.deployed()["tag"] == SECOND
@@ -173,9 +177,11 @@ def test_a_helper_without_a_healthcheck_that_does_not_run_leaves_the_app_unrecor
     docker.without_health = frozenset({"worker"})
     docker.during["start"] = lambda: docker.rows[1].update(State=helper_state)
 
-    [failure] = world.run()
+    [result] = world.run()
 
-    assert failure.startswith(f"hopin is not healthy at {FIRST} after 300s (")
+    failure = result.cause
+
+    assert failure.startswith(f"not healthy at {FIRST} after 300s (")
     assert f"worker {helper_state}" in failure
     assert world.deployed() is None
 
@@ -187,11 +193,13 @@ def test_a_build_that_fails_leaves_the_old_containers_and_the_next_plan_says_unf
     sha = origin.release(SECOND)
     world.docker.failing_verb = "build"
 
-    [failure] = world.run()
+    [result] = world.run()
+
+    failure = result.cause
     world.docker.failing_verb = None
 
     assert failure == (
-        f"hopin: could not build at {SECOND}, `docker compose build` of hopin at {SECOND} "
+        f"could not build at {SECOND}, `docker compose build` of hopin at {SECOND} "
         "exited 3; its output is withheld, run the step in the app's checkout to read it"
     )
     assert world.deployed()["tag"] == FIRST
@@ -206,7 +214,9 @@ def test_no_word_of_composes_output_reaches_a_failure_line(world, origin, verb):
     origin.release(FIRST)
     world.docker.failing_verb = verb
 
-    [failure] = world.run()
+    [result] = world.run()
+
+    failure = result.cause
 
     assert SENTINEL not in failure
     assert f"could not {verb}" in failure
@@ -324,7 +334,8 @@ def test_an_app_whose_container_name_compose_interpolates_plans_start_again_and_
     assert (update[0].kind, update[0].release.tag) == (apps.AppKind.UPDATE, SECOND)
 
     world.docker.health_after_start = "unhealthy"
-    [failure] = world.run()
+    [result] = world.run()
+    failure = result.cause
 
     assert world.docker.rows[0]["Name"] == resolved
     assert "hopin running (unhealthy)" in failure
@@ -515,7 +526,9 @@ def test_a_failing_off_is_one_line_without_composes_output_and_stops_there(world
     plan = world.plan()
     off.failing = verb
 
-    [failure] = world.run(plan)
+    [result] = world.run(plan)
+
+    failure = result.cause
 
     assert f"`docker compose {verb}` of {KEY}" in failure
     assert SENTINEL not in failure
@@ -554,7 +567,8 @@ def test_an_update_interrupted_after_part_of_the_containers_was_replaced_is_repa
     [planned] = world.plan().plans
 
     assert (planned.recorded_tag, planned.unfinished) == (FIRST, SECOND)
-    assert world.run() == [None]
+    [result] = world.run()
+    assert isinstance(result, apps.AppOn)
     assert sorted(row["Service"] for row in docker.rows) == ["web", "worker"]
     assert world.deployed()["tag"] == SECOND
 
@@ -584,9 +598,11 @@ def test_a_record_that_cannot_be_written_ends_the_run_partial_after_health(world
     (world.state / "deployed").mkdir(parents=True)
     (world.state / "deployed" / KEY / "in the way").mkdir(parents=True)
 
-    [failure] = world.run(plan)
+    [result] = world.run(plan)
 
-    assert failure == f"hopin: could not record the deployment of {FIRST} (Is a directory)"
+    failure = result.cause
+
+    assert failure == f"could not record the deployment of {FIRST} (Is a directory)"
 
 
 def test_the_default_runtime_records_with_the_clock_and_lives_under_home_srv(tmp_path):
@@ -610,7 +626,9 @@ def test_an_image_volume_no_named_volume_covers_is_partial_before_create_with_th
     origin.release(SECOND)
     world.docker.image_volumes[KEY] = ["/data"]
 
-    [failure] = world.run()
+    [result] = world.run()
+
+    failure = result.cause
 
     assert failure == (
         f"services.hopin: image of service hopin at {SECOND} declares a volume that no named "
@@ -624,14 +642,18 @@ def test_an_image_volume_a_named_volume_covers_starts(world, origin):
     world.docker.image_volumes[KEY] = ["/data"]
     origin.release(FIRST, COVERED)
 
-    assert world.run() == [None]
+    [result] = world.run()
+
+    assert isinstance(result, apps.AppOn)
     assert world.deployed()["tag"] == FIRST
 
 
 def test_a_service_with_pull_policy_always_is_started_from_the_inspected_image(world, origin):
     origin.release(FIRST, PULL_ALWAYS)
 
-    assert world.run() == [None]
+    [result] = world.run()
+
+    assert isinstance(result, apps.AppOn)
 
     verbs = world.docker.verbs
     assert "pull" not in verbs[verbs.index("image inspect") :]
@@ -661,9 +683,11 @@ def test_a_container_that_survives_even_docker_rm_ends_the_off_partial_naming_se
     plan = world.plan()
     off.removal_by_identifier_works = False
 
-    [failure] = world.run(plan)
+    [result] = world.run(plan)
 
-    assert failure == f"{KEY}: could not remove every container of {KEY}, left: stuck running"
+    failure = result.cause
+
+    assert failure == f"could not remove every container of {KEY}, left: stuck running"
 
 
 def test_a_failing_docker_rm_ends_the_off_partial_naming_service_and_state_and_withholds_output(
@@ -675,10 +699,10 @@ def test_a_failing_docker_rm_ends_the_off_partial_naming_service_and_state_and_w
     plan = world.plan()
     off.removal_by_identifier_exit = 5
 
-    [failure] = world.run(plan)
+    [result] = world.run(plan)
 
-    assert failure.startswith(
-        f"{KEY}: could not remove every container of {KEY}, left: stuck running"
-    )
+    failure = result.cause
+
+    assert failure.startswith(f"could not remove every container of {KEY}, left: stuck running")
     assert "exited 5" in failure
     assert SENTINEL not in failure
