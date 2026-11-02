@@ -1,0 +1,8 @@
+claim_id = "5f0151955cd4422e8de9bc41aa186aa5"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "1e710eff3cd53f83260e919b6ff8260ecf2839e8"
+branch = "claude/issue-784-exit-codes-of-hal-apply"
+scope = ["README.md", "docs/keycloak.md", "docs/stack.md", "src/hal/stack/apply.py", "src/hal/stack/cli.py", "src/hal/stack_commands.py", "tests/test_hal_stack_commands.py", "tests/test_stack_apply_yes.py"]
+opened_commit = "3d30e90002abf1c6f7067ee5503746b252c1e500"
+whole_reason = "The exit members, their mapping, the composer that reads them and the documents that list them are one table; a member without its row in the docs or its test would let a run end with a code nobody can read."
