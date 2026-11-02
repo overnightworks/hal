@@ -594,6 +594,30 @@ def test_a_plain_detail_line_is_indented_and_escaped(capsys: pytest.CaptureFixtu
 
 
 @pytest.mark.parametrize(
+    ("flush", "reaches_the_pipe"),
+    [(True, "    a line\n"), (False, "")],
+    ids=["flushed", "left to the buffer"],
+)
+def test_a_detail_line_is_flushed_only_when_asked(
+    monkeypatch: pytest.MonkeyPatch, flush: bool, reaches_the_pipe: str
+) -> None:
+    """A reader that follows the output as it comes asks for `flush`."""
+
+    class BufferedPipe(io.StringIO):
+        reached = ""
+
+        def flush(self) -> None:
+            self.reached = self.getvalue()
+
+    pipe = BufferedPipe()
+    monkeypatch.setattr(sys, "stdout", pipe)
+
+    write_detail("a line", flush=flush)
+
+    assert pipe.reached == reaches_the_pipe
+
+
+@pytest.mark.parametrize(
     ("tone", "style"), [(Tone.DIM, "2"), (Tone.WARNING, "33")], ids=["dim", "warning is yellow"]
 )
 def test_on_a_terminal_a_toned_detail_line_is_styled_as_a_whole_and_a_plain_one_is_not(

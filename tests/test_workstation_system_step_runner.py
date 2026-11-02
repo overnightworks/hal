@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import io
 import json
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from hal.grammar import ExitCode
+from hal.output import verbose_run
 from hal.workstation import system_step
 from hal.workstation.system_step import PlaybookFinished, PlaybookRun, PlaybookUnfinished
 from support.workstation_support import Sandbox, StubSudo, run_hal_setup
@@ -18,6 +21,8 @@ COUNTS = system_step.EVENT_MARK + json.dumps({"event": "counts", "changed": 3, "
 FAILED_COUNTS = system_step.EVENT_MARK + json.dumps({"event": "counts", "changed": 1, "failed": 1, "unreachable": 0})
 UNREACHABLE_COUNTS = system_step.EVENT_MARK + json.dumps({"event": "counts", "changed": 0, "failed": 0, "unreachable": 1})
 FAILED_RESULT = system_step.EVENT_MARK + json.dumps({"event": "result", "status": "failed", "msg": "names no `tunnel:`; nothing was written"})
+CHANGED_WRITE = system_step.EVENT_MARK + json.dumps({"event": "changed", "task": "Write edge files"})
+CHANGED_RESTART = system_step.EVENT_MARK + json.dumps({"event": "changed", "task": "Restart Docker"})
 UNREACHABLE_RESULT = system_step.EVENT_MARK + json.dumps({"event": "result", "status": "unreachable", "msg": "no route"})
 
 
@@ -39,23 +44,27 @@ MALFORMED_COUNTS = [
     ("returncode", "events", "expected"),
     [
         (0, [COUNTS], PlaybookFinished(3)),
+        (0, [CHANGED_WRITE, CHANGED_RESTART, COUNTS], PlaybookFinished(3, ("Write edge files", "Restart Docker"))),
         (2, [FAILED_RESULT, FAILED_COUNTS], PlaybookUnfinished("names no `tunnel:`; nothing was written")),
         (4, [UNREACHABLE_RESULT, UNREACHABLE_COUNTS], PlaybookUnfinished("no route")),
         (0, [FAILED_RESULT, COUNTS, COUNTS], PlaybookUnfinished()),
         (0, [], PlaybookUnfinished()),
         (0, [system_step.EVENT_MARK + json.dumps({"event": "task"}), COUNTS], PlaybookUnfinished()),
         (0, [system_step.EVENT_MARK + "not json", COUNTS], PlaybookUnfinished()),
+        (0, [system_step.EVENT_MARK + json.dumps({"event": "changed"}), COUNTS], PlaybookUnfinished()),
         (1, [COUNTS], PlaybookUnfinished()),
         (0, [FAILED_RESULT, COUNTS], PlaybookFinished(3)),
     ],
     ids=[
         "clean counts",
+        "changed tasks",
         "failed task",
         "unreachable",
         "two counts events",
         "no counts event",
         "unknown event",
         "unreadable event",
+        "changed event without a task",
         "nonzero exit",
         "rescued failure",
     ],
@@ -89,23 +98,73 @@ def test_a_counts_line_that_is_not_three_non_negative_integers_leaves_the_run_un
     assert system_step.run_playbook_as_root([str(playbook)]) == PlaybookUnfinished()
 
 
-def test_the_runner_shows_ansibles_output_and_reads_its_events(tmp_path: Path, stub_sudo: StubSudo, capfd: pytest.CaptureFixture[str]) -> None:
-    """The output reaches the terminal as it comes, the run is judged by its events, and no event line is shown."""
-    playbook = fake_ansible(tmp_path, "echo 'TASK [Write edge files]'")
+def test_without_v_the_runner_shows_no_ansible_text_and_reads_its_events(tmp_path: Path, stub_sudo: StubSudo, capfd: pytest.CaptureFixture[str]) -> None:
+    """Invariant 5 of #296: no raw tool text without `-v`, and the run is still judged by its events."""
+    playbook = fake_ansible(tmp_path, "echo 'TASK [Write edge files]'", f"{CHANGED_WRITE}\n{COUNTS}")
+
+    run = system_step.run_playbook_as_root([str(playbook)])
+
+    assert run == PlaybookFinished(3, ("Write edge files",))
+    shown = capfd.readouterr()
+    assert (shown.out, shown.err) == ("", "")
+
+
+def test_with_v_the_runner_shows_ansibles_text_indented_and_escaped_and_no_event_line(
+    tmp_path: Path, stub_sudo: StubSudo, capfd: pytest.CaptureFixture[str]
+) -> None:
+    playbook = fake_ansible(tmp_path, r"printf 'TASK [Write]\n\033[31mred\tcolumn\n'", f"{CHANGED_WRITE}\n{COUNTS}")
+
+    with verbose_run(True):
+        run = system_step.run_playbook_as_root([str(playbook)])
+
+    assert run == PlaybookFinished(3, ("Write edge files",))
+    assert capfd.readouterr().out == "    TASK [Write]\n    \\x1b[31mred\\tcolumn\n"
+
+
+class FlushRecordingStdout(io.StringIO):
+    """What the terminal has been handed by each flush."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.flushed: list[str] = []
+
+    def flush(self) -> None:
+        super().flush()
+        self.flushed.append(self.getvalue())
+
+
+def test_with_v_each_line_is_flushed_when_it_is_read_so_a_pipe_sees_it_while_the_play_runs(
+    tmp_path: Path, stub_sudo: StubSudo, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    playbook = fake_ansible(tmp_path, "echo one\necho two")
+    pipe = FlushRecordingStdout()
+    monkeypatch.setattr(sys, "stdout", pipe)
+
+    with verbose_run(True):
+        system_step.run_playbook_as_root([str(playbook)])
+
+    assert pipe.flushed == ["    one\n", "    one\n    two\n"]
+
+
+def test_without_v_a_play_that_fills_the_pipe_finishes_because_the_runner_drains_it(
+    tmp_path: Path, stub_sudo: StubSudo, capfd: pytest.CaptureFixture[str]
+) -> None:
+    playbook = fake_ansible(tmp_path, "head -c 1000000 /dev/zero | tr '\\0' 'x' | fold -w 100\necho")
 
     run = system_step.run_playbook_as_root([str(playbook)])
 
     assert run == PlaybookFinished(3)
-    assert capfd.readouterr().out == "TASK [Write edge files]\n"
+    assert capfd.readouterr().out == ""
 
 
-def test_ansibles_stderr_arrives_on_stdout_and_not_on_stderr(tmp_path: Path, stub_sudo: StubSudo, capfd: pytest.CaptureFixture[str]) -> None:
+def test_ansibles_stderr_arrives_in_the_same_stream_and_is_shown_only_with_v(tmp_path: Path, stub_sudo: StubSudo, capfd: pytest.CaptureFixture[str]) -> None:
     playbook = fake_ansible(tmp_path, "echo '[WARNING]: a warning' >&2")
 
-    system_step.run_playbook_as_root([str(playbook)])
+    with verbose_run(True):
+        system_step.run_playbook_as_root([str(playbook)])
 
     shown = capfd.readouterr()
-    assert (shown.out, shown.err) == ("[WARNING]: a warning\n", "")
+    assert (shown.out, shown.err) == ("    [WARNING]: a warning\n", "")
 
 
 def test_the_play_runs_under_sudo_in_its_own_directory_and_sudo_forgets_the_ticket_after_it(tmp_path: Path, stub_sudo: StubSudo) -> None:
@@ -226,6 +285,31 @@ def test_a_failing_sudo_k_after_another_exception_is_a_failed_step_carrying_the_
     assert str(failure.value) == TICKET_SENTENCE
 
 
+def test_a_ctrl_c_between_the_start_of_sudo_and_the_reading_still_ends_in_sudo_k(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ruled E1: `sudo -k` follows the sudo call, whatever the play did, also an interrupt that lands as the process context is entered."""
+
+    class PlayPopenInterruptedOnEnter(subprocess.Popen[str]):
+        interrupted = False
+
+        def __enter__(self) -> PlayPopenInterruptedOnEnter:
+            if self.stdout is None or type(self).interrupted:
+                return super().__enter__()
+            type(self).interrupted = True
+            self.kill()
+            self.wait()
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(subprocess, "Popen", PlayPopenInterruptedOnEnter)
+    stub = StubSudo(tmp_path, monkeypatch)
+    playbook = fake_ansible(tmp_path, "true")
+
+    with pytest.raises(system_step.SystemStepInterrupted) as interrupted:
+        system_step.run_playbook_as_root([str(playbook)])
+
+    assert str(interrupted.value) == ""
+    assert stub.calls()[-1][0] == "-k"
+
+
 def test_a_play_that_runs_on_after_a_ctrl_c_is_not_waited_for(tmp_path: Path, stub_sudo: StubSudo) -> None:
     finished = tmp_path / "finished"
     playbook = fake_ansible(tmp_path, f"kill -INT $PPID\nsleep 3\ntouch {finished}")
@@ -315,4 +399,3 @@ def test_a_missing_sudo_fails_alone_without_a_ticket_to_forget(tmp_path: Path, m
         system_step.run_playbook_as_root(["ansible-playbook"])
 
     assert refusal.value.__context__ is None
-

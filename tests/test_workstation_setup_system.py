@@ -25,7 +25,7 @@ from hal.grammar import ExitCode
 from hal.workstation import system_step
 from hal.workstation.layout import Layout
 from hal.workstation.setup import RERUN, ExecutionRole
-from hal.workstation.system_step import AGENT_USER, CheckState, SystemStep
+from hal.workstation.system_step import AGENT_USER, CheckState, SystemStep, TasksWouldChange
 
 
 NOT_CHECKED = "  ! system          not checked    needs sudo at a terminal"
@@ -212,7 +212,9 @@ def test_the_playbook_ships_inside_the_package() -> None:
             False,
             [
                 *UP_TO_DATE[:3],
-                "  ~ system          will change",
+                "  ~ system          will change    2 tasks",
+                "    Write edge files",
+                "    Restart Docker",
                 UP_TO_DATE[4],
                 "~ setup plan · 1 open, 4 unchanged · 47s · run hal setup",
             ],
@@ -257,26 +259,34 @@ def test_without_a_terminal_the_dry_run_says_not_checked_and_never_starts_ansibl
 
 @pytest.mark.parametrize(
     ("terminal", "applied_before", "expected"),
-    [(False, True, CheckState.NOT_CHECKED), (True, False, CheckState.WOULD_CHANGE), (True, True, CheckState.UNCHANGED)],
+    [(False, True, CheckState.NOT_CHECKED), (True, False, TasksWouldChange(("Write edge files", "Restart Docker"))), (True, True, CheckState.UNCHANGED)],
     ids=["no terminal", "something to change", "nothing to change"],
 )
 def test_the_system_steps_check_answers_with_one_of_the_three_states(
-    sandbox: Sandbox, capsys: pytest.CaptureFixture[str], terminal: bool, applied_before: bool, expected: CheckState
+    sandbox: Sandbox, capsys: pytest.CaptureFixture[str], terminal: bool, applied_before: bool, expected: CheckState | TasksWouldChange
 ) -> None:
-    """Rule 4: the check returns the enum itself; what a `not checked` step needs first is the presentation's text."""
+    """Rule 4: the check returns the enum itself, or the names of the tasks that would change; what a `not checked` step needs first is the presentation's text."""
     run_setup(sandbox, capsys)
     sandbox.system.playbook.applied = applied_before
     sandbox.system.terminal = terminal
 
-    assert SystemStep(sandbox.layout, sandbox.system.boundaries).check() is expected
+    assert SystemStep(sandbox.layout, sandbox.system.boundaries).check() == expected
 
 
-@pytest.mark.parametrize(("failure", "fact"), [("", "Ansible did not finish · its output above says why"), (TASK_MESSAGE, TASK_MESSAGE)], ids=["no failed task", "a failed task's message"])
-def test_a_failed_ansible_run_fails_the_system_step_alone_and_records_nothing(sandbox: Sandbox, capsys: pytest.CaptureFixture[str], failure: str, fact: str) -> None:
+@pytest.mark.parametrize(
+    ("flags", "failure", "fact"),
+    [
+        ((), "", "Ansible did not finish · hal setup -v shows why"),
+        (("-v",), "", "Ansible did not finish · its output above says why"),
+        ((), TASK_MESSAGE, TASK_MESSAGE),
+    ],
+    ids=["no failed task", "no failed task with -v", "a failed task's message"],
+)
+def test_a_failed_ansible_run_fails_the_system_step_alone_and_records_nothing(sandbox: Sandbox, capsys: pytest.CaptureFixture[str], flags: tuple[str, ...], failure: str, fact: str) -> None:
     """Rule 2, rule 7 and cells 12, 13, 17: a wrong password or a missing tunnel id fails only the last step, with exit 3; the failed task's message is the fact."""
     sandbox.system.playbook.succeeds = False
     sandbox.system.playbook.failure = failure
-    code, lines, error = run_setup(sandbox, capsys)
+    code, lines, error = run_setup(sandbox, capsys, *flags)
 
     assert (code, lines) == (
         ExitCode.FAILURE,
@@ -294,13 +304,21 @@ def test_a_failed_ansible_run_fails_the_system_step_alone_and_records_nothing(sa
     assert global_hooks_path(sandbox) == str(sandbox.layout.git_hooks_dir)
 
 
-@pytest.mark.parametrize(("failure", "fact"), [("", "Ansible's check did not finish · its output above says why"), (TASK_MESSAGE, TASK_MESSAGE)], ids=["no failed task", "a failed task's message"])
-def test_a_failed_check_fails_the_dry_run(sandbox: Sandbox, capsys: pytest.CaptureFixture[str], failure: str, fact: str) -> None:
+@pytest.mark.parametrize(
+    ("flags", "failure", "fact"),
+    [
+        ((), "", "Ansible's check did not finish · hal setup --dry-run -v shows why"),
+        (("-v",), "", "Ansible's check did not finish · its output above says why"),
+        ((), TASK_MESSAGE, TASK_MESSAGE),
+    ],
+    ids=["no failed task", "no failed task with -v", "a failed task's message"],
+)
+def test_a_failed_check_fails_the_dry_run(sandbox: Sandbox, capsys: pytest.CaptureFixture[str], flags: tuple[str, ...], failure: str, fact: str) -> None:
     """E1: a check Ansible could not finish (a wrong password) is a failure, never `unchanged`."""
     run_setup(sandbox, capsys)
     sandbox.system.playbook.succeeds = False
     sandbox.system.playbook.failure = failure
-    code, lines, error = run_setup(sandbox, capsys, "--dry-run")
+    code, lines, error = run_setup(sandbox, capsys, "--dry-run", *flags)
 
     assert (code, lines[3:]) == (
         ExitCode.FAILURE,
@@ -313,3 +331,60 @@ def test_a_failed_check_fails_the_dry_run(sandbox: Sandbox, capsys: pytest.Captu
         "error: setup stopped at system · /etc unchanged",
         f"next: {RERUN}",
     ]
+
+
+def test_a_dry_run_of_one_task_counts_one_task(sandbox: Sandbox, capsys: pytest.CaptureFixture[str]) -> None:
+    run_setup(sandbox, capsys)
+    sandbox.system.playbook.applied = False
+    sandbox.system.playbook.tasks = ("Write edge files",)
+
+    _, lines, _ = run_setup(sandbox, capsys, "--dry-run")
+
+    assert lines[3:5] == ["  ~ system          will change    1 task", "    Write edge files"]
+
+
+def test_a_dry_run_with_v_leaves_the_row_without_task_names_because_ansibles_text_names_them(
+    sandbox: Sandbox, capsys: pytest.CaptureFixture[str]
+) -> None:
+    run_setup(sandbox, capsys)
+    sandbox.system.playbook.applied = False
+
+    _, lines, _ = run_setup(sandbox, capsys, "--dry-run", "-v")
+
+    assert lines[3:5] == ["  ~ system          will change    2 tasks", UP_TO_DATE[4]]
+
+
+def test_a_task_name_with_an_escape_is_escaped_in_its_detail_line(sandbox: Sandbox, capsys: pytest.CaptureFixture[str]) -> None:
+    run_setup(sandbox, capsys)
+    sandbox.system.playbook.applied = False
+    sandbox.system.playbook.tasks = ("Write \x1b[31mred",)
+
+    _, lines, _ = run_setup(sandbox, capsys, "--dry-run")
+
+    assert lines[4] == "    Write \\x1b[31mred"
+
+
+def test_with_an_outdated_ansible_the_system_row_keeps_the_count_and_the_task_names(
+    sandbox: Sandbox, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Both steps of the row say `will change`; the row shows the one with the fact."""
+    run_setup(sandbox, capsys)
+    sandbox.system.playbook.applied = False
+    sandbox.layout.ansible_uv_receipt.write_text('[tool]\nrequirements = [{ name = "ansible-core", specifier = "==2.0.0" }]\n')
+
+    _, lines, _ = run_setup(sandbox, capsys, "--dry-run")
+
+    assert lines[3:6] == ["  ~ system          will change    2 tasks", "    Write edge files", "    Restart Docker"]
+
+
+def test_a_dry_run_under_json_logging_carries_the_task_names_under_details(
+    sandbox: Sandbox, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_setup(sandbox, capsys)
+    sandbox.system.playbook.applied = False
+    monkeypatch.setenv("LOG_FORMAT", "json")
+
+    _, lines, _ = run_setup(sandbox, capsys, "--dry-run")
+
+    system_event = next(json.loads(line.removeprefix("<6>")) for line in lines if '"subject":"system"' in line)
+    assert system_event["details"] == ["Write edge files", "Restart Docker"]

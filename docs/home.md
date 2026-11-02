@@ -528,12 +528,14 @@ come before the system step, which is the one that asks for sudo:
    restarting Docker while it does not report `journald`.
    It runs as root under one `sudo` call, which asks once; Ansible asks for nothing, and `sudo -k` follows
    the call, so `hal setup` leaves no cached sudo ticket. Ansible's stderr joins its output inside sudo; sudo's password
-   prompt stays on the terminal, and the password never passes through hal. hal's own output callback `hal_events`,
-   selected by the packaged `ansible.cfg`, writes one marker line per unreachable result and per failed result whose
-   error is not ignored, and one with the final counts. The run succeeded when Ansible exited 0 and the counts show no
+   prompt stays on the terminal, and the password never passes through hal. Without `-v` none of Ansible's text is shown;
+   with `-v` it streams indented and escaped under the current row. hal's own output callback `hal_events`,
+   selected by the packaged `ansible.cfg`, writes one marker line per changed task, per unreachable result and per
+   failed result whose error is not ignored, and one with the final counts. The run succeeded when Ansible exited 0 and the counts show no
    failed or unreachable host; hal reads no recap text. When the counts name a failed or unreachable host, the message
    of the last such result is the fact of the red `system` row; every other unfinished run, a failure a rescue caught
-   included, shows `Ansible did not finish · its output above says why`. Root executes the operator-writable
+   included, shows `Ansible did not finish · hal setup -v shows why` (`hal setup --dry-run -v` for the check; under `-v`
+   itself, `its output above says why`). Root executes the operator-writable
    `~/.local/bin/ansible-playbook` and `hal_events.py` from the operator's uv tool directory. The same account already
    controls both and the whole ansible-core tool root, so no new principal changes what root runs (#510 decision 5): the
    same trust the operator's Ansible had as the producer of root's modules until the agents get their own user.
@@ -552,7 +554,7 @@ If the running uid has more than one passwd name and one of them is `agent`, `ha
 Hook-Dateien, Aktivierung), `path` (der Link `~/.local/bin/hal`; `unchanged`, solange das `bin/hal` des Live-Checkouts fehlt), `timers` (User units), `system` (Ansible, System) and `secrets`. A row's
 event is its worst step's: failed or not started, then needs you, then changed, then unchanged,
 then skipped. After the yes a row says `changed` or `unchanged` (`stored` or `complete` for the
-secrets), `skipped` for the agent role; a dry run says `will change`, `unchanged`, `not checked`
+secrets), `skipped` for the agent role; a dry run says `will change` (for the system row with `<n> tasks` and, without `-v`, each task's name as a detail line), `unchanged`, `not checked`
 (`needs sudo at a terminal`, or `needs Ansible, …` before the Ansible step has installed it) or, for the
 secrets, `missing` with the names (`(by hand)` for an entry only a person can create, `(unknown)` for one whose
 presence `stat` cannot tell). The last line is the verdict, counted over the five rows:
@@ -624,7 +626,7 @@ below and rsyslog's conffiles are home's own and are not backed up. `/etc/docker
   directly under `/var/log`, files only) **without a copy**, not even to `/var/backups/home-setup`: a copy would outlive the
   30 days. `RSYSLOG_FILE_NAMES` in `src/hal/workstation/system_step.py` is the one owner of the six names; `hal check` reads the
   same list. The purge comes first, so a running rsyslog cannot recreate a deleted file. Both tasks work by state, so a run
-  interrupted between them is finished by the next `hal setup`, and a second one reports `changed=0`. The dry run lists the
+  interrupted between them is finished by the next `hal setup`, and a second one leaves `system` unchanged. The dry run with `-v` lists the
   purge and each file it would delete, and changes nothing. `cloud-init.log`, `dpkg.log` and `alternatives.log` stay.
   journald is not changed: it keeps forwarding to a syslog socket nobody listens on, which is harmless.
   - **Where the lines went.** The journal holds the same lines (journald forwards, it does not move them), minus what the
@@ -637,7 +639,7 @@ below and rsyslog's conffiles are home's own and are not backed up. `/etc/docker
     backup covers edge's files only): `dpkg --verify rsyslog` before the apply names each such file, and a reinstall brings
     back the packaged one.
 - **The mail packages.** After the refusals below pass, the play installs `msmtp` and `ca-certificates` with apt, without
-  Recommends, so `msmtp-mta` (which would replace the system mailer) stays out; a second `hal setup` reports `changed=0`.
+  Recommends, so `msmtp-mta` (which would replace the system mailer) stays out; a second `hal setup` leaves `system` unchanged.
   Postfix is not touched. **Rollback.** `sudo apt-get remove msmtp`; `hal check` then reports "mail failed: msmtp could not deliver via" while
   `~/.secrets/smtp/account.toml` exists.
 - **The agents' account.** The play creates `agent` and nothing runs as it yet. It has its own group only, a

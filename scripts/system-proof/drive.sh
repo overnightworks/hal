@@ -88,6 +88,18 @@ row_in_log() {  # row_in_log <log> <row> <event regex>: a row of hal setup's run
     return
 }
 
+system_row_details() {  # system_row_details <log>: the detail lines under the system row, without their indent
+    awk '/^  [^ ]+ system +/ { under = 1; next } under && /^    [^ ]/ { sub(/\r$/, ""); sub(/^    /, ""); print; next } { under = 0 }' "$EVIDENCE/$1.log"
+    return
+}
+
+system_row_names_every_counted_task() {  # system_row_names_every_counted_task <log>: the system row's count is the number of detail lines under it
+    local log=$1 count
+    count=$(sed -nE 's/^  [^ ]+ system +will change +([0-9]+) tasks?\r?$/\1/p' "$EVIDENCE/$log.log")
+    [[ -n $count && $(system_row_details "$log" | wc -l) -eq $count ]]
+    return
+}
+
 plan_row_in_log() {  # plan_row_in_log <log> <row> <event regex>: a row of the plan, before the yes prompt
     local log=$1 row=$2 event=$3
     before_the_yes "$log" | grep -qP -- "^  [^ ]+ $row +$event( |\\r?$)"
@@ -353,12 +365,16 @@ cell_10() {  # the lists are fresh as on the PC: a dry run cannot update them, a
     apt-get update >"$EVIDENCE/cell10-apt-update.log" 2>&1
     at_terminal cell10 "$HAL_BIN setup --dry-run"
     code=$?
+    at_terminal cell10-verbose "$HAL_BIN setup --dry-run -v"
     verdict 10 "a dry run at a terminal asks once for sudo" '[ $code -eq 0 ] && asked_once cell10'
     verdict T1 "the dry run shows the units in its diff and starts nothing" \
-        'in_log cell10 "hal-journal-retention.timer" && ! systemctl cat "$RETENTION_TIMER" >/dev/null 2>&1'
-    verdict 10 "it shows would change, with the diff" 'row_in_log cell10 system "will change" && grep -q "^+++ " "$EVIDENCE/cell10.log"'
+        'in_log cell10-verbose "hal-journal-retention.timer" && ! systemctl cat "$RETENTION_TIMER" >/dev/null 2>&1'
+    verdict 10 "it names each task that would change under the row, and shows no Ansible text" \
+        'row_in_log cell10 system "will change +[0-9]+ tasks?" && system_row_names_every_counted_task cell10 && ! grep -qE "TASK \[|PLAY RECAP|^\+\+\+ " "$EVIDENCE/cell10.log"'
+    verdict 10 "with -v it shows would change, with the diff indented and without task names under the row" \
+        'row_in_log cell10-verbose system "will change +[0-9]+ tasks?" && grep -qE "^    \+\+\+ " "$EVIDENCE/cell10-verbose.log" && [ -z "$(system_row_details cell10-verbose)" ]'
     verdict DK4 "the dry run on a Docker still on json-file shows the log-driver line and the restart as changes, and writes nothing" \
-        'in_log cell10 "+    \"log-driver\": \"journald\"" && grep -A2 "TASK \[Restart Docker\]" "$EVIDENCE/cell10.log" | grep -q "^changed:" && [ ! -e "$DAEMON_JSON" ]'
+        'in_log cell10-verbose "+    \"log-driver\": \"journald\"" && system_row_details cell10 | grep -qx "Restart Docker" && [ ! -e "$DAEMON_JSON" ]'
     at_coloured_terminal cell10-colour "export TERM=xterm; $HAL_BIN setup --dry-run"
     verdict C1 "a dry run at a terminal colours its rows and its verdict; the run with NO_COLOR above has no escape code" \
         'grep -qP "^  \x1b\[[0-9;]+m\S+\x1b\[0m system " "$EVIDENCE/cell10-colour.log" && grep -qP "^\x1b\[1;[0-9;]+m\S+ setup plan" "$EVIDENCE/cell10-colour.log" && ! grep -qP "\x1b" "$EVIDENCE/cell10.log"'
@@ -369,7 +385,8 @@ cell_1() {
     local code
     at_terminal cell1 "$HAL_BIN setup"
     code=$?
-    verdict 1 "apply exits 0 after one prompt" '[ $code -eq 0 ] && asked_once cell1 && row_in_log cell1 system changed'
+    verdict 1 "apply exits 0 after one prompt, with no Ansible text" \
+        '[ $code -eq 0 ] && asked_once cell1 && row_in_log cell1 system changed && ! grep -qE "TASK \[|PLAY RECAP" "$EVIDENCE/cell1.log"'
     verdict 1 "the apply announces needs sudo once, before the system's password prompt" \
         '[ "$(grep -c "^  › system  *needs sudo" "$EVIDENCE/cell1.log")" -eq 1 ] && announced_before_prompt cell1'
     verdict 1 "the six files are root-owned, mode 644" '[ "$(stat -c "%U %a" "${SYSTEM_FILES[@]}" | sort -u)" = "root 644" ]'
@@ -390,10 +407,10 @@ cell_9() {
     code=$?
     verdict DK4 "a second apply restarts nothing: Docker's start time is unchanged" \
         '[ "$(docker_started_at)" = "$(cat "$EVIDENCE/dk4-started-after-cell1.txt")" ]'
-    verdict 9 "a second apply: Ansible reports changed=0, System unchanged" \
-        '[ $code -eq 0 ] && grep -qE "changed=0 " "$EVIDENCE/cell9.log" && row_in_log cell9 system unchanged'
+    verdict 9 "a second apply: System unchanged" \
+        '[ $code -eq 0 ] && row_in_log cell9 system unchanged'
     verdict 9 "Ansible left nothing in the home" '[ ! -e /home/tester/.ansible ]'
-    verdict D2 "a second apply installs nothing: changed=0" '[ $code -eq 0 ] && grep -qE "changed=0 " "$EVIDENCE/cell9.log"'
+    verdict D2 "a second apply installs nothing: System unchanged" '[ $code -eq 0 ] && row_in_log cell9 system unchanged'
     return
 }
 
@@ -587,7 +604,7 @@ cell_t5() {
         '[ $first -eq 0 ] && [ "$(systemctl is-enabled $RETENTION_TIMER)" = enabled ] && [ "$(systemctl is-active $RETENTION_TIMER)" = active ]'
     at_terminal t5-second "$HAL_BIN setup"
     second=$?
-    verdict T5 "a second run reports changed=0" '[ $second -eq 0 ] && grep -qE "changed=0 " "$EVIDENCE/t5-second.log" && row_in_log t5-second system unchanged'
+    verdict T5 "a second run leaves System unchanged" '[ $second -eq 0 ] && row_in_log t5-second system unchanged'
     return
 }
 
@@ -602,10 +619,10 @@ cell_t5b() {  # the timer is enabled and the service unit on disk is newer than 
     at_terminal t5b-first "$HAL_BIN setup"
     first=$?
     verdict T5b "apply reloads without changing a file: systemd needs no reload and runs 28d" \
-        '[ $first -eq 0 ] && grep -qE "changed=0 " "$EVIDENCE/t5b-first.log" && [ "$(systemctl show $RETENTION_SERVICE -p NeedDaemonReload --value)" = no ] && systemctl show $RETENTION_SERVICE -p ExecStart --value | grep -qF -- "--vacuum-time=28d"'
+        '[ $first -eq 0 ] && row_in_log t5b-first system unchanged && [ "$(systemctl show $RETENTION_SERVICE -p NeedDaemonReload --value)" = no ] && systemctl show $RETENTION_SERVICE -p ExecStart --value | grep -qF -- "--vacuum-time=28d"'
     at_terminal t5b-second "$HAL_BIN setup"
     second=$?
-    verdict T5b "a repeat reports changed=0" '[ $second -eq 0 ] && grep -qE "changed=0 " "$EVIDENCE/t5b-second.log" && row_in_log t5b-second system unchanged'
+    verdict T5b "a repeat leaves System unchanged" '[ $second -eq 0 ] && row_in_log t5b-second system unchanged'
     return
 }
 
@@ -830,7 +847,7 @@ cell_a1_1() {
 
 cell_a1_2() {  # runs after the second apply of cell 9
     verdict A1-2 "a second apply changes nothing of the account" \
-        '[ "$A1_WORLD_AFTER_CREATION" = "$(agent_world)" ] && grep -qE "changed=0 " "$EVIDENCE/cell9.log"'
+        '[ "$A1_WORLD_AFTER_CREATION" = "$(agent_world)" ] && row_in_log cell9 system unchanged'
     return
 }
 
@@ -1021,8 +1038,8 @@ cell_a1_3_without_subid_files() {  # the subordinate id files do not exist: an e
     mv /etc/subgid /etc/subgid.proof
     at_terminal a1-3-no-subid-existing "$HAL_BIN setup"
     code=$?
-    verdict A1-3 "no subuid and subgid file, the account exists: exit 0, changed=0, dormant" \
-        '[ $code -eq 0 ] && in_log a1-3-no-subid-existing "changed=0 " && agent_is_dormant'
+    verdict A1-3 "no subuid and subgid file, the account exists: exit 0, System unchanged, dormant" \
+        '[ $code -eq 0 ] && row_in_log a1-3-no-subid-existing system unchanged && agent_is_dormant'
     remove_account
     at_terminal a1-3-no-subid-new "$HAL_BIN setup"
     code=$?
@@ -1419,7 +1436,7 @@ no_planted_file_exists() {
 
 cell_r0() {  # after the refused runs of cells 12 and 13 and the dry run of cell 10: nothing was deleted
     verdict R0 "the dry run says it would change, names rsyslog and a planted file" \
-        'row_in_log cell10 system "will change" && in_log cell10 "rsyslog" && in_log cell10 "/var/log/mail.err.1"'
+        'row_in_log cell10 system "will change" && in_log cell10-verbose "rsyslog" && in_log cell10-verbose "/var/log/mail.err.1"'
     verdict R0 "the refused runs and the dry run left the package and every planted file in place" \
         'dpkg -s rsyslog >/dev/null 2>&1 && all_planted_files_exist'
     return
@@ -1509,7 +1526,7 @@ cell_r4() {  # a run interrupted after the purge: the files are there again, one
     second=$?
     verdict R4 "an apply after the purge deletes the files that came back" \
         '[ $first -eq 0 ] && row_in_log r4-first system changed && no_planted_file_exists'
-    verdict R4 "the next apply changes nothing" '[ $second -eq 0 ] && grep -qE "changed=0 " "$EVIDENCE/r4-second.log" && row_in_log r4-second system unchanged'
+    verdict R4 "the next apply changes nothing" '[ $second -eq 0 ] && row_in_log r4-second system unchanged'
     return
 }
 
@@ -1709,7 +1726,8 @@ cell_dk7_case() {  # cell_dk7_case <name> <state of the file before the apply: c
     esac
     if [[ $failure = flag ]]; then install_the_conflicting_flag; else install_a_docker_that_reports_json_file; fi
     backups_before=$(backups_of_daemon_json)
-    at_terminal "dk7-$state-$failure" "$HAL_BIN setup"
+    # The failed check is a rescued task, whose message only Ansible's text carries, so this apply runs with -v.
+    at_terminal "dk7-$state-$failure" "$HAL_BIN setup -v"
     code=$?
     verdict DK7 "$name: the apply exits 3 naming the rescue" '[ $code -eq 3 ] && in_log "dk7-$state-$failure" "was written back without"'
     if [[ $failure = wrong-driver ]]; then
@@ -1765,7 +1783,8 @@ cell_r5() {  # last: the rollback puts the package back, so nothing after it may
 # (suffix c) and sudo-rs (suffix r). Each cell asserts the active sudo first.
 SUDO_CLASSIC=/usr/bin/sudo.ws
 SUDO_RS=/usr/lib/cargo/bin/sudo
-APPLY_ARGUMENTS="setup"
+# `-v` because the cells read Ansible's text: a password prompt after BECOME, the play and the first task to interrupt.
+APPLY_ARGUMENTS="setup -v"
 
 active_sudo_is() {  # active_sudo_is <alternative>
     local alternative=$1
@@ -1801,15 +1820,17 @@ no_become_prompt() {
     return
 }
 
-home_is_untouched() {  # the offenders are listed in the evidence
-    find /home/tester -xdev \( -user root -o -name .ansible \) >"$EVIDENCE/home-offenders.txt"
-    [[ ! -s "$EVIDENCE/home-offenders.txt" ]]
+home_is_untouched() {  # home_is_untouched <suffix>: the offenders are listed in the evidence
+    local offenders="$EVIDENCE/home-offenders-$1.txt"
+    find /home/tester -xdev \( -user root -o -name .ansible \) >"$offenders" || return 1
+    [[ ! -s $offenders ]]
     return
 }
 
-ansible_tool_has_no_root_bytecode() {  # the offenders are listed in the evidence
-    find /home/tester/.local/share/uv/tools/ansible-core -user root -name __pycache__ >"$EVIDENCE/ansible-bytecode-offenders.txt"
-    [[ ! -s "$EVIDENCE/ansible-bytecode-offenders.txt" ]]
+ansible_tool_has_no_root_bytecode() {  # ansible_tool_has_no_root_bytecode <suffix>: the offenders are listed in the evidence
+    local offenders="$EVIDENCE/ansible-bytecode-offenders-$1.txt"
+    find /home/tester/.local/share/uv/tools/ansible-core -user root -name __pycache__ >"$offenders" || return 1
+    [[ ! -s $offenders ]]
     return
 }
 
@@ -1848,7 +1869,7 @@ cell_p_interrupted() {  # cell_p_interrupted <cell> <log> <ticket> [<presses>]: 
 
 cell_p_dry_run() {  # cell_p_dry_run <cell> <log> <ticket> <prompts>
     local cell=$1 log=$2 ticket=$3 prompts=$4 code
-    at_sudo_terminal "$log" "$ticket" "setup --dry-run"
+    at_sudo_terminal "$log" "$ticket" "setup --dry-run -v"
     code=$?
     verdict "$cell" "a dry run asks $prompts time(s), no BECOME, the ticket is gone" \
         "[ \$code -eq 0 ] && active_sudo_is \"\$sudo_alternative\" && hal_prompts_are $log $prompts && no_become_prompt $log && ticket_is_gone $log"
@@ -1875,7 +1896,7 @@ cell_p_config_of_root() {  # cell_p_config_of_root <cell> <log>: root's own ansi
     at_sudo_terminal "$log" none "$APPLY_ARGUMENTS"
     code=$?
     rm -f /root/.ansible.cfg
-    verdict "$cell" "the recap is read although root's cfg selects json; the control shows which cfg wins where" \
+    verdict "$cell" "the callback is read although root's cfg selects json; the control shows which cfg wins where" \
         "[ \$code -eq 0 ] && active_sudo_is \"\$sudo_alternative\" && row_in_log $log system '(changed|unchanged)' && [[ \$outside == *'config file = /root/.ansible.cfg'* && \$inside == *'config file = $package/ansible.cfg'* ]]"
     return
 }
@@ -1885,8 +1906,8 @@ cells_sudo() {  # cells_sudo <suffix> <alternative>: P1-P10 under one variant of
     update-alternatives --set sudo "$sudo_alternative" >/dev/null
     verdict "P0$suffix" "the active sudo is $sudo_alternative" 'active_sudo_is "$sudo_alternative"'
     cell_p_applies "P1$suffix" "p1$suffix" none 1
-    verdict "P1$suffix" "the operator's home holds no .ansible and no root-owned file" 'home_is_untouched'
-    verdict "P1$suffix" "the ansible-core tool directory holds no root-owned __pycache__" 'ansible_tool_has_no_root_bytecode'
+    verdict "P1$suffix" "the operator's home holds no .ansible and no root-owned file" 'home_is_untouched "$suffix"'
+    verdict "P1$suffix" "the ansible-core tool directory holds no root-owned __pycache__" 'ansible_tool_has_no_root_bytecode "$suffix"'
     cell_p_applies "P2$suffix" "p2$suffix" present 0
     cell_p_fails_in_the_play "P3$suffix" "p3$suffix" none 1
     cell_p_fails_in_the_play "P4$suffix" "p4$suffix" present 0

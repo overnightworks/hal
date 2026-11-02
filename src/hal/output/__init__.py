@@ -464,13 +464,13 @@ def write_error(message: str, next_step: str | None = None, *, fresh_line: bool 
         print(f"{_styled('next:', _CYAN, stderr)} {printable(next_step)}", file=stderr)
 
 
-def write_detail(*lines: str, tone: Tone = Tone.PLAIN) -> None:
+def write_detail(*lines: str, tone: Tone = Tone.PLAIN, flush: bool = False) -> None:
     """Each line on stdout under a row, indented and escaped; on a terminal it takes the tone's
-    style."""
+    style; `flush` for a reader that follows the output as it comes."""
     stdout = sys.stdout
     for line in lines:
         text = f"{DETAIL_INDENT}{printable(line)}"
-        print(text if tone.value is None else _styled(text, tone.value, stdout))
+        print(text if tone.value is None else _styled(text, tone.value, stdout), flush=flush)
 
 
 class Stream(Enum):
