@@ -197,13 +197,6 @@ class AgentsClientCell:
     def client(self) -> Declared:
         return self.declared
 
-    def unique(self, name: str) -> str:
-        """A name proof 7 keeps apart: a repeated name would drop the earlier value it sweeps."""
-        return f"{name} {secrets.token_hex(3)}"
-
-    def browser(self, name: str) -> Any:
-        return self.probe.browser(self.unique(name))
-
     def person(self, name: str, *groups: str) -> terms_cell.User:
         password = self.probe.keep_secret(f"{name} password", secrets.token_urlsafe(16))
         user_id = self.admin.create_user(REALM, name, password)
@@ -217,9 +210,7 @@ class AgentsClientCell:
         self, opener: Any, scope: str, *, pkce: bool = True, **changes: str
     ) -> tuple[Answer, str]:
         """The authorization request with S256 (unless `changes` say otherwise); the verifier."""
-        verifier = self.probe.keep_secret(
-            f"agents PKCE verifier {secrets.token_hex(3)}", secrets.token_urlsafe(48)
-        )
+        verifier = self.probe.keep_secret("agents PKCE verifier", secrets.token_urlsafe(48))
         challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest())
         challenged = {
             "code_challenge": challenge.rstrip(b"=").decode(),
@@ -250,9 +241,7 @@ class AgentsClientCell:
             f"the answer {answer.status} to {location.partition('?')[0]!r} is no code at "
             f"{self.declared.callback}",
         )
-        return self.probe.keep_secret(
-            self.unique("agents authorization code"), query_of(answer)["code"][0]
-        )
+        return self.probe.keep_secret("agents authorization code", query_of(answer)["code"][0])
 
     def consent_button(self, page: Answer, button: str) -> str:
         found = terms_cell.TermsCell(self.probe, self.expect, self.form_with, self.client)
@@ -280,7 +269,7 @@ class AgentsClientCell:
         self, who: terms_cell.User, scope: str, **changes: str
     ) -> tuple[Any, Answer, str]:
         """A fresh browser signed in up to the page Keycloak answers with (consent or code)."""
-        opener = self.browser(f"agents {who.name}")
+        opener = self.probe.browser(f"agents {who.name}")
         login, verifier = self.start(opener, scope, **changes)
         self.expect(login.status == 200, f"the login page for {who.name} answered {login.status}")
         return opener, self.sign_in(opener, who, login), verifier
@@ -292,9 +281,7 @@ class AgentsClientCell:
         return self.exchange(self.code_of(page), verifier)
 
     def access_of(self, who: terms_cell.User, scope: str) -> dict[str, Any]:
-        tokens = self.probe.tokens_from(
-            self.unique(f"agents {who.name}"), self.token_response(who, scope)
-        )
+        tokens = self.probe.tokens_from(f"agents {who.name}", self.token_response(who, scope))
         return token_claims(tokens["access_token"])
 
     # --- D: the transition ----------------------------------------------------------------------
@@ -339,7 +326,7 @@ class AgentsClientCell:
             who = self.person(f"probe-agents-{client.client_id}-session", client.group)
             tokens = self.probe.app_client_sign_in(
                 client,
-                self.browser(f"agents {client.client_id} session"),
+                self.probe.browser(f"agents {client.client_id} session"),
                 who.name,
                 who.password,
                 self.probe.secret_values[client.secret_file],
@@ -368,7 +355,7 @@ class AgentsClientCell:
                     f.result() for f in [pool.submit(self.refresh, client, token) for _ in "ab"]
                 ]
             for answer in answers:
-                self.probe.tokens_from(self.unique(f"agents {client.client_id} refresh"), answer)
+                self.probe.tokens_from(f"agents {client.client_id} refresh", answer)
             self.probe.held(
                 "D1",
                 f"{client.client_id}: a session signed in before the apply refreshes twice in turn "
@@ -395,11 +382,9 @@ class AgentsClientCell:
             members[app] = who
             scope = f"{MCP_SCOPE_PREFIX}{app} offline_access"
             opener, page, verifier = self.first_page(who, scope, resource=audience)
-            first = app == next(iter(self.declared.apps))
-            if first:
-                self.consent_is_asked(page, app)
+            self.consent_is_asked(page, app)
             page = self.answer_consent(opener, page, "accept")
-            if first:
+            if app == next(iter(self.declared.apps)):
                 self.second_authorization_asks_nothing(opener, scope, audience)
             response = self.exchange(self.code_of(page), verifier, resource=audience)
             tokens = self.probe.tokens_from(f"agents {app} member", response)
@@ -505,6 +490,8 @@ class AgentsClientCell:
             else again
         )
         asked = 'name="accept"' in page.text
+        if page.headers.get("Location", "").startswith(f"{self.declared.callback}?"):
+            self.code_of(page)
         self.probe.say(
             f"PROOF C4 measured: after consent to {last}, the scope of {other} in the same "
             f"session meets the consent page again: {asked}"
@@ -516,7 +503,7 @@ class AgentsClientCell:
             "plain": {"code_challenge_method": "plain"},
         }
         for label, changes in wrong_methods.items():
-            answer, _ = self.start(self.browser("agents A5"), "openid", **changes)
+            answer, _ = self.start(self.probe.browser("agents A5"), "openid", **changes)
             error = query_of(answer)
             self.expect(
                 answer.status == 302 and "error" in error and "code" not in error,
@@ -533,7 +520,7 @@ class AgentsClientCell:
             callback._replace(netloc=f"127.0.0.1:{callback.port}").geturl(),
             callback._replace(netloc=f"example.invalid:{callback.port}").geturl(),
         ):
-            answer, _ = self.start(self.browser("agents A6"), "openid", redirect_uri=redirect)
+            answer, _ = self.start(self.probe.browser("agents A6"), "openid", redirect_uri=redirect)
             self.expect(
                 answer.status == 400 and "Invalid parameter: redirect_uri" in answer.text,
                 f"redirect_uri {redirect} answered {answer.status}",
@@ -568,7 +555,7 @@ class AgentsClientCell:
             device.status in (400, 401) and "device_code" not in device.text,
             f"device grant answered {device.status}",
         )
-        implicit, _ = self.start(self.browser("agents A7"), "openid", response_type="token")
+        implicit, _ = self.start(self.probe.browser("agents A7"), "openid", response_type="token")
         self.expect(
             "access_token" not in implicit.headers.get("Location", "")
             and implicit.status in (302, 400),

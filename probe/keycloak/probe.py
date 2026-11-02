@@ -1088,8 +1088,8 @@ class Probe:
         return tunnel_request_url(self.stack.edge_url, method, url, **kwargs)
 
     def keep_secret(self, name: str, value: str) -> str:
-        """Registers a credential the probe made or received, so proof 7 looks for it too."""
-        self.secret_values[name] = value
+        """Registers a credential for proof 7: the name answers the newest, every value stays."""
+        self.secret_values[name] = self.secret_values[f"{name} #{len(self.secret_values)}"] = value
         return value
 
     def tokens_from(self, holder: str, response: Response) -> dict[str, Any]:
@@ -2695,11 +2695,11 @@ class Probe:
         containers = sorted({name for name, _ in self.stack.seen_env})
         self.held(
             "7",
-            f"none of the {len(self.secret_values)} credentials (secret files, passwords, the "
-            "TOTP seed, the RP secret, access, refresh, ID and admin tokens, the admin console's "
-            "PKCE verifiers, authorization codes and session cookies) is in the Config.Env of the "
-            f"{len(containers)} containers seen ({', '.join(containers)}), in any "
-            "compose, apply or service log output, or in the probe's own output",
+            f"none of the {len(set(self.secret_values.values()))} credentials (secret files, "
+            "passwords, the TOTP seed, the RP secret, access, refresh, ID and admin tokens, the "
+            "admin console's PKCE verifiers, authorization codes and session cookies) is in the "
+            f"Config.Env of the {len(containers)} containers seen ({', '.join(containers)}), in "
+            "any compose, apply or service log output, or in the probe's own output",
         )
 
 
