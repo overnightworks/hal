@@ -15,6 +15,7 @@ from hal.grammar import ExitCode
 from hal.output import verbose_run
 from hal.workstation import system_step
 from hal.workstation.system_step import PlaybookFinished, PlaybookRun, PlaybookUnfinished
+from support.terminal_support import put_stdout_on_a_terminal
 from support.workstation_support import Sandbox, StubSudo, run_hal_setup
 
 COUNTS = system_step.EVENT_MARK + json.dumps({"event": "counts", "changed": 3, "failed": 0, "unreachable": 0})
@@ -157,7 +158,7 @@ def test_without_v_a_play_that_fills_the_pipe_finishes_because_the_runner_drains
     assert capfd.readouterr().out == ""
 
 
-def test_ansibles_stderr_arrives_in_the_same_stream_and_is_shown_only_with_v(tmp_path: Path, stub_sudo: StubSudo, capfd: pytest.CaptureFixture[str]) -> None:
+def test_ansibles_stderr_arrives_in_the_same_stream_and_is_shown_with_v(tmp_path: Path, stub_sudo: StubSudo, capfd: pytest.CaptureFixture[str]) -> None:
     playbook = fake_ansible(tmp_path, "echo '[WARNING]: a warning' >&2")
 
     with verbose_run(True):
@@ -165,6 +166,26 @@ def test_ansibles_stderr_arrives_in_the_same_stream_and_is_shown_only_with_v(tmp
 
     shown = capfd.readouterr()
     assert (shown.out, shown.err) == ("    [WARNING]: a warning\n", "")
+
+
+def test_ansibles_output_is_not_shown_without_v(tmp_path: Path, stub_sudo: StubSudo, capfd: pytest.CaptureFixture[str]) -> None:
+    playbook = fake_ansible(tmp_path, "echo '[WARNING]: a warning' >&2")
+
+    with verbose_run(False):
+        system_step.run_playbook_as_root([str(playbook)])
+
+    shown = capfd.readouterr()
+    assert (shown.out, shown.err) == ("", "")
+
+
+def test_ansibles_output_under_v_is_dim_on_a_terminal(tmp_path: Path, stub_sudo: StubSudo, monkeypatch: pytest.MonkeyPatch) -> None:
+    playbook = fake_ansible(tmp_path, "echo 'TASK [Write]'")
+    terminal = put_stdout_on_a_terminal(monkeypatch)
+
+    with verbose_run(True):
+        system_step.run_playbook_as_root([str(playbook)])
+
+    assert terminal.getvalue() == "\x1b[2m    TASK [Write]\x1b[0m\n"
 
 
 def test_the_play_runs_under_sudo_in_its_own_directory_and_sudo_forgets_the_ticket_after_it(tmp_path: Path, stub_sudo: StubSudo) -> None:

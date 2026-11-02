@@ -685,7 +685,7 @@ below and rsyslog's conffiles are home's own and are not backed up. `/etc/docker
   written root-owned, mode 644, with sorted keys, so the diff of a file that only holds the runtime is one new line, and it is
   checked with `dockerd --validate` before it replaces the old one. A file that does not parse, one that is not an object, a
   `log-opts` key, another `log-driver`, and a Docker that does not answer `docker info` are refused before anything is
-  written, edge's files included; the dry run shows the diff and the restart as changes and writes nothing.
+  written, edge's files included; the dry run names the restart as a change, shows the diff with `-v`, and writes nothing.
   Docker restarts whenever `docker info` does not say `journald`, never while it does, so a run interrupted after the write
   restarts on the next. `live-restore` is off: every container stops with Docker, and one with `unless-stopped` or `always`
   starts again, one without a restart policy or stopped by hand stays down; the apps are unreachable meanwhile and running work

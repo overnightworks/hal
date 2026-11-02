@@ -703,15 +703,16 @@ Type <span class="w">yes</span> to set up 1 open row: yes
       <figure>
         <figcaption><span class="tag new">neu S3a</span> <code>--dry-run</code>, das System würde sich ändern: ohne <code>-v</code> kein Ansible-Text, jede Aufgabe als Detailzeile; mit <code>-v</code> läuft Ansibles Text eingerückt darüber und die Zeile bleibt ohne Namen</figcaption>
 <pre class="term"><span class="p">$</span> <span class="u">hal setup --dry-run</span>
-<span class="b">  ~</span> system          will change    2 tasks
+<span class="b">  ~</span> system          will change    <span class="d">2 tasks</span>
 <span class="d">    Write edge files</span>
 <span class="d">    Restart Docker</span>
 <span class="b">~ setup plan</span> <span class="d">· 1 open, 4 unchanged · 21s · run hal setup</span>
 
 <span class="p">$</span> <span class="u">hal setup --dry-run -v</span>
 <span class="d">    TASK [Write edge files] ***</span>
-<span class="d">    changed: [localhost]</span>
-<span class="b">  ~</span> system          will change    2 tasks
+<span class="d">    --- before</span>
+<span class="d">    +++ after</span>
+<span class="b">  ~</span> system          will change    <span class="d">2 tasks</span>
 <span class="b">~ setup plan</span> <span class="d">· 1 open, 4 unchanged · 21s · run hal setup</span></pre>
       </figure>
       <figure>

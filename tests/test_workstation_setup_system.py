@@ -386,5 +386,7 @@ def test_a_dry_run_under_json_logging_carries_the_task_names_under_details(
 
     _, lines, _ = run_setup(sandbox, capsys, "--dry-run")
 
-    system_event = next(json.loads(line.removeprefix("<6>")) for line in lines if '"subject":"system"' in line)
-    assert system_event["details"] == ["Write edge files", "Restart Docker"]
+    events = [json.loads(line.removeprefix("<6>")) for line in lines]
+    system_events = [event for event in events if event.get("subject") == "system"]
+    assert len(system_events) == 1
+    assert system_events[0]["details"] == ["Write edge files", "Restart Docker"]

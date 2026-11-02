@@ -18,7 +18,7 @@ from pathlib import Path
 
 from hal.workstation import secrets_setup
 from hal.workstation.layout import Layout
-from hal.output import is_verbose, write_detail
+from hal.output import Tone, is_verbose, write_detail
 from hal.output.command import Verb, command
 
 PLAYBOOK = Path(__file__).parent / "system" / "playbook.yml"
@@ -151,12 +151,12 @@ def run_playbook_as_root(argv: Sequence[str]) -> PlaybookRun:
     """Runs `argv` under one `sudo` in the packaged `system/` directory, then makes sudo forget its ticket.
 
     The system asks for the password at the terminal, which stays stdin and stderr's; Ansible's stderr joins its stdout inside
-    sudo, which is shown line by line, and the lines the callback marks are read as events and not shown.
+    sudo, and the lines the callback marks are read as events and not shown.
     No `ANSIBLE_*` variable reaches the play, so the packaged `ansible.cfg` there decides. `sudo -k` follows whatever
     the play did, and a failing `sudo -k` fails the step;
     a Ctrl-C in the play, or between the start of sudo and the reading, is a `SystemStepInterrupted`, which a failing `sudo -k` keeps;
     it never follows a sudo that did not start.
-    The pipe is read to its end either way; a line the callback does not mark is shown only with `-v`, indented and escaped.
+    The pipe is read to its end either way; a line the callback does not mark is shown only with `-v`, indented, escaped and dim.
     Root's Python writes no bytecode, which would leave root-owned files in the operator's tool environment.
     No timeout: a person types the password; the run asks its yes at a terminal first and `--dry-run` reaches here only when `needs_first` finds one.
     """
@@ -171,7 +171,7 @@ def run_playbook_as_root(argv: Sequence[str]) -> PlaybookRun:
                     if line.startswith(EVENT_MARK):
                         event_lines.append(line)
                     elif is_verbose():
-                        write_detail(line.rstrip("\n"), flush=True)
+                        write_detail(line.rstrip("\n"), tone=Tone.DIM, flush=True)
             finally:
                 unforgotten = _forget_the_sudo_ticket()
                 forgotten = True
