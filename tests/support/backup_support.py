@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from hal.backup import host, sqlite_copy
+from hal.backup.apps import parse_apps
 from hal.backup.cli import DEFAULT_APPS
 from hal.backup.docker import (
     FILE_COUNT_LABEL,
@@ -35,6 +36,9 @@ SONGMAKER_CONTAINER = "c0ffee"
 RESTORE_SERVER_ID = "deadbeef" * 8
 RADIO_CONTAINER = "beef01"
 KEYCLOAK_CONTAINER = "kc01"
+KEYCLOAK_PROJECT = next(
+    app.compose_project for app in parse_apps(DEFAULT_APPS.read_text()) if app.name == "keycloak"
+)
 STATUS_KEYS = {
     "schema",
     "state",
@@ -99,7 +103,10 @@ class Machine:
     db_containers: list[str] = field(default_factory=lambda: [SONGMAKER_CONTAINER])
     volumes: list[str] = field(default_factory=lambda: ["songmaker_audiofiles"])
     other_db_containers: dict[str, list[str]] = field(
-        default_factory=lambda: {"radio": [RADIO_CONTAINER], "edge": [KEYCLOAK_CONTAINER]}
+        default_factory=lambda: {
+            "radio": [RADIO_CONTAINER],
+            KEYCLOAK_PROJECT: [KEYCLOAK_CONTAINER],
+        }
     )
     """The database containers of every project but songmaker, by compose project."""
     other_volumes: dict[str, list[str]] = field(
@@ -229,6 +236,10 @@ class Machine:
 
     def argv_of(self, label: str) -> list[str]:
         return next(argv for called, argv in self.calls if called == label)
+
+    def lose_keycloak_database(self) -> None:
+        """The shipped keycloak app's project has no database container."""
+        self.other_db_containers[KEYCLOAK_PROJECT] = []
 
     def _host_lock_is_free(self) -> bool:
         lock = self.status_file.with_name("backup.lock")
