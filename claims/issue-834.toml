@@ -1,0 +1,7 @@
+claim_id = "245710b1832c4ef4bcc49ba0bb9f68fd"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "8d02d769729eb72e3964ca56852fb0b367a63386"
+branch = "claude/issue-834-apps-probe-loopback"
+scope = ["probe/apps/probe.py"]
+opened_commit = "26c6ce609102a87dfaf558f9829751d18c67806b"
