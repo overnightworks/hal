@@ -567,6 +567,33 @@ def test_an_unexpected_setting_of_any_shape_fails_b11s_comparison(
     assert retention_probe.settings_of(text, section) != retention_probe.SETTINGS_SECTIONS[section]
 
 
+def test_the_shipped_deployments_hold_only_the_keys_b11_allows(
+    retention_probe: ModuleType,
+) -> None:
+    text = LITELLM_CONFIG.read_text(encoding="utf-8")
+
+    assert retention_probe.deployment_strays(text) == set()
+
+
+@pytest.mark.parametrize(
+    ("where", "key", "value"),
+    [
+        ("litellm_params", "success_callback", ["s3"]),
+        ("litellm_params", "callbacks", ["probe.Logger"]),
+        ("litellm_params", "cache", True),
+        ("deployment", "model_info", {"id": "x"}),
+    ],
+)
+def test_an_unexpected_key_of_a_deployment_is_found_by_b11(
+    retention_probe: ModuleType, shipped_config: dict, where: str, key: str, value: object
+) -> None:
+    deployment = shipped_config["model_list"][0]
+    (deployment["litellm_params"] if where == "litellm_params" else deployment)[key] = value
+    text = yaml.safe_dump(shipped_config, default_flow_style=False)
+
+    assert retention_probe.deployment_strays(text) == {key}
+
+
 def test_the_environment_name_of_litellms_payload_print_is_a_forbidden_store(
     retention_probe: ModuleType,
 ) -> None:

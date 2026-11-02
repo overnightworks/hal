@@ -74,6 +74,8 @@ SETTINGS_SECTIONS = {
     "general_settings": {"custom_auth": "auth.user_api_key_auth"},
     "router_settings": {"num_retries": 0},
 }
+DEPLOYMENT_KEYS = {"model_name", "litellm_params"}
+DEPLOYMENT_PARAMS = {"model", "api_key", "max_retries"}
 STORE_NAMES = re.compile(
     r"DATABASE|REDIS|CALLBACK|LANGFUSE|VERBOSE|SPEND|S3_|LITELLM_PRINT_STANDARD_LOGGING_PAYLOAD",
     re.I,
@@ -95,6 +97,15 @@ def canary(label: str) -> str:
 def settings_of(text: str, section: str) -> object:
     """The whole top-level `section` of a YAML file, so a nested list or block compares as one."""
     return yaml.safe_load(text).get(section)
+
+
+def deployment_strays(text: str) -> set[str]:
+    """The keys of model_list[] outside the allowlists; a per-model callback lives there."""
+    strays: set[str] = set()
+    for deployment in yaml.safe_load(text)["model_list"]:
+        strays |= set(deployment) - DEPLOYMENT_KEYS
+        strays |= set(deployment.get("litellm_params", {})) - DEPLOYMENT_PARAMS
+    return strays
 
 
 class RetentionProbe(FailureProbe):
@@ -400,6 +411,8 @@ class RetentionProbe(FailureProbe):
             expect(found == wanted, f"B11: {section} holds {found}, not {wanted}")
         top = set(yaml.safe_load(config))
         expect(top == {"model_list", *SETTINGS_SECTIONS}, f"B11: LiteLLM's sections {sorted(top)}")
+        strays = deployment_strays(config)
+        expect(not strays, f"B11: model_list[] holds the keys {sorted(strays)}")
         names = self.run(["docker", "exec", litellm, "env"]).stdout
         stores = sorted({n.split("=")[0] for n in names.splitlines() if STORE_NAMES.search(n)})
         expect(not stores, f"B11: LiteLLM's environment names {stores}")
