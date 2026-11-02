@@ -29,7 +29,7 @@ from support.stack_apply import (
 )
 from support.stack_plan_rows import find_row
 
-from hal.stack import appkit_step
+from hal.stack import appkit_step, apply
 from hal.stack.plan_rows import PlanEvent
 
 VERSION = metadata.version("overnightworks-appkit")
@@ -74,7 +74,7 @@ def test_a_fresh_checkout_names_the_new_directory_and_writes_every_target_after_
 
     declined_exit, declined_out, _ = world.switch(answer="no")
 
-    assert declined_exit == 1
+    assert declined_exit == apply.ApplyExit.DECLINED
     assert find_row(declined_out, "appkit", PlanEvent.NEW_FILES, VERSION)
     assert "only" not in declined_out
     assert not any(target.exists() for target in world.targets)
