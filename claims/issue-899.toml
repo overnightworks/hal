@@ -1,8 +1,0 @@
-claim_id = "eed5b01e702d47858672bfed4000a424"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "1e540e83f4a0108cc137d4759905c12d73ae8277"
-branch = "claude/issue-899-s3a-2c-2-ansible-text-only-with-v"
-scope = ["docs/design/hal-output.html", "docs/home.md", "scripts/system-proof/drive.sh", "src/hal/output/__init__.py", "src/hal/workstation/setup.py", "src/hal/workstation/system/callback_plugins/hal_events.py", "src/hal/workstation/system_step.py", "tests/support/workstation_support.py", "tests/test_hal_output.py", "tests/test_workstation_setup_system.py", "tests/test_workstation_system_callback.py", "tests/test_workstation_system_step_runner.py"]
-opened_commit = "2b8af6456ed55447be822e12ba75d09341829287"
-whole_reason = "One printed contract and the event that feeds it: the callback, the reader, the row, the proof pins and the picture must move in one commit, because a half of them leaves the proof reading text that is gone."
