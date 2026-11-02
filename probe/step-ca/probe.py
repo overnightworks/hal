@@ -131,8 +131,9 @@ class Probe(McpNetworks, TraefikMcpFollows):
         self.environment.pop("DOCKER_STEPCA_INIT_PASSWORD", None)
         self.scratch = scratch
         self.compose_file = scratch / COMPOSE_FILE
-        compose_text = (REPO / COMPOSE_FILE).read_text()
-        self.compose_file.write_text(edge_copy.namespaced_compose(compose_text, PROJECT))
+        self.compose_file.write_text(
+            edge_copy.namespaced_compose((REPO / COMPOSE_FILE).read_text(), PROJECT)
+        )
         self.compose_files = [self.compose_file, STAND_IN_OVERLAY]
         self.guard = edge_copy.NetworkGuard(PROJECT, lambda command: self.run(command).stdout)
         self.listeners_before: set[str] = set()
@@ -175,8 +176,9 @@ class Probe(McpNetworks, TraefikMcpFollows):
         return json.loads(self.compose("config", "--format", "json").stdout)
 
     def image_and_volume(self) -> tuple[str, str]:
-        composed = self.composed
-        return composed["services"]["step-ca"]["image"], composed["volumes"]["step-ca"]["name"]
+        return self.composed["services"]["step-ca"]["image"], self.composed["volumes"]["step-ca"][
+            "name"
+        ]
 
     def in_volume(self, *tool: str, writable: bool = False) -> bytes:
         image, volume = self.image_and_volume()
@@ -771,8 +773,8 @@ class Probe(McpNetworks, TraefikMcpFollows):
         expect(not self.containers_of_unit(running_only=False), "a container exists after a no")
 
         out = self.hal(copy, "apply", "--local", terminal=True, typed=b"yes\nyes\n")  # (ii)
-        expect("is not set up" in out and "the plan" in out, f"yes, yes said: {out[-200:]}")
-        expect(out.index("is not set up") < out.index("the plan"), "the plan came first")
+        expect("is not set up" in out and "Type yes to apply" in out, f"yes, yes: {out[-200:]}")
+        expect(out.index("is not set up") < out.index("Type yes to apply"), "the plan came first")
         expect((self.secrets_dir / "root_ca_key").is_file(), "the setup made no root key")
         self.run([str(REPO / "step-ca" / "init"), "--check"])
         self.wait_until_answering()

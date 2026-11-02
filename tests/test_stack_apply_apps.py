@@ -189,7 +189,7 @@ def test_an_app_without_a_release_is_cannot_plan_and_nothing_is_asked(app_world)
 
     assert exit_code == 2
     assert "cannot plan, services.hopin: no vYYYY.MM.DD.N release on origin master" in err
-    assert "the plan" not in out
+    assert "Type yes" not in plain(out)
     assert app_world.docker.verbs == []
 
 
@@ -203,6 +203,19 @@ def test_a_disabled_app_is_neither_fetched_nor_run(app_world):
     assert exit_code == 0
     assert "nothing to change" in out
     assert app_world.docker.verbs == ["ps"]
+
+
+def test_an_app_disabled_while_running_prints_its_switched_off_row_and_ends_clean(app_world):
+    deployed(app_world)
+    write_fleet(
+        app_world.repository, f"cloudflare:\n  zone: {ZONE}\n" + FLEET.replace("true", "false")
+    )
+
+    exit_code, out, err = app_world.apply()
+
+    assert exit_code == 0
+    assert "✓ hopin           switched off   volumes and ~/srv/hopin kept" in plain(out)
+    assert "error:" not in err
 
 
 @dataclass

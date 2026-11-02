@@ -427,6 +427,8 @@ services:
       PYTHONPATH: /etc/litellm
       LITELLM_LOCAL_MODEL_COST_MAP: "True"
       LITELLM_TELEMETRY: "False"
+      # LiteLLM logs a provider's error text at ERROR, which can echo request content (E13).
+      LITELLM_LOG: CRITICAL
     tmpfs:
       - /tmp:uid=1000,gid=1000,mode=0700,size=64m,nosuid,nodev
     secrets: [litellm_anthropic_key, litellm_master_key, agent_service_api_credential]
@@ -521,6 +523,29 @@ services:
       - /opt/smoke/smoke.py
     volumes:
       - ./agent-service/smoke.py:/opt/smoke/smoke.py:ro
+
+  # The canary of the API route (agent-service/api_canary.py, run by live_canary.py; docs/
+  # agent-service.md, "Proofs"): one run of a person on the API route, only verdict lines out. Run
+  # as `compose run -T --rm agent-canary --marker TEXT` with the tokens on stdin, one per line.
+  # Declared like agent-smoke, whose smoke.py it imports; -B and not -I because it imports the
+  # script beside it.
+  agent-canary:
+    image: *agent-service-image
+    pull_policy: never
+    profiles: [apply]
+    logging: *one-off-logging
+    user: "65534:65534"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    networks: [agent-songmaker]
+    entrypoint:
+      - python
+      - -B
+      - /opt/canary/api_canary.py
+    volumes:
+      - ./agent-service/smoke.py:/opt/canary/smoke.py:ro
+      - ./agent-service/api_canary.py:/opt/canary/api_canary.py:ro
 
   # The probe's stand-in for the agent service (probe/agent-service/egress.py): the same
   # attachments, hardened like the service, listening on nothing.

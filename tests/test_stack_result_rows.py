@@ -5,7 +5,7 @@ from support.stack_plan_rows import APP, NEW, app_plan
 
 from hal.output import Glyph
 from hal.stack import realm as realm_lines
-from hal.stack.apps import AppFailed, AppHeldOff, AppKind, AppOn, OffPlan
+from hal.stack.apps import AppFailed, AppHeldOff, AppKind, AppOn, AppSwitchedOff, OffPlan
 from hal.stack.realm.reconcile import (
     Leftovers,
     NotRecorded,
@@ -15,7 +15,15 @@ from hal.stack.realm.reconcile import (
     RealmSkipped,
     Stage,
 )
-from hal.stack.result_rows import app_partial, app_row, partial_error, result_rows, waiting_row
+from hal.stack.result_rows import (
+    app_partial,
+    app_row,
+    partial_error,
+    recreated_row,
+    result_rows,
+    waiting_row,
+)
+from hal.stack.service_recreate import Recreated
 
 SNAPSHOT = "37c2a56056d17297895e58c1ff98493754064280352422f136596266498fe056"
 REMOVAL = realm_lines.Change("hallucinai", realm_lines.Kind.REMOVAL, "group", "/console", members=0)
@@ -231,6 +239,13 @@ def test_an_app_that_is_on_is_a_done_row_with_its_tag_the_state_and_the_time(
     assert row.fact == f"{NEW} · running · 1m42s"
 
 
+def test_an_app_switched_off_is_a_done_row_that_restates_what_the_off_never_touches() -> None:
+    row = app_row(AppSwitchedOff(OffPlan(APP)))
+
+    assert (row.glyph, row.subject, str(row.event)) == (Glyph.DONE, "hopin", "switched off")
+    assert row.fact == "volumes and ~/srv/hopin kept"
+
+
 @pytest.mark.parametrize(
     ("result", "event", "next_command"),
     [
@@ -252,3 +267,16 @@ def test_the_cause_of_a_failed_app_is_escaped_in_the_row() -> None:
     row = app_row(AppFailed(app_plan(AppKind.ON), "a\x1b[31m\nb"))
 
     assert row.fact == "a\\x1b[31m\\nb"
+
+
+def test_a_recreated_service_is_a_done_row_with_the_time_it_took() -> None:
+    row = recreated_row(Recreated("traefik-mcp", 3.4))
+
+    assert (row.glyph, row.subject, str(row.event)) == (Glyph.DONE, "traefik-mcp", "recreated")
+    assert row.fact == "3s"
+
+
+def test_a_core_service_whose_barriers_were_proven_says_so_before_the_time() -> None:
+    row = recreated_row(Recreated("traefik", 3.4, barriers_proven=True))
+
+    assert row.fact == "barriers proven · 3s"

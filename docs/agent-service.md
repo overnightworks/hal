@@ -3,7 +3,7 @@
 Reference and runbook for the operator and for an engineer changing the agent service. The code is
 the truth: `compose.yaml` (the `agent-service` service, its `agent-songmaker`, `agent-presentator`, `agent-hopin`, `egress` and `mcp` networks),
 `agent-service/service.toml`, `agent-service/image/` (the image recipe), `agent-service/live_smoke.py`,
-`agent-service/live_signer.py` and the probes under `probe/agent-service/`. The egress gateway it leaves through is in
+`agent-service/live_signer.py`, `agent-service/live_canary.py` and the probes under `probe/agent-service/`. The egress gateway it leaves through is in
 [internal-ca.md](internal-ca.md); the platform picture is [architecture.md](architecture.md).
 
 ## The image
@@ -225,14 +225,40 @@ stated in agent-runtime's section
 The content of
 a turn leaves this PC for Anthropic, which generates the answer.
 
+**The API route keeps no content, as evidence for the paths exercised only.** LiteLLM logs no
+message and redacts the `Messages:` suffix of its exceptions, and neither it nor the front
+configures a callback, cache, database or spend log; the front logs at INFO without an access log.
+The retention census (`agent-service/retention_census.py`, driven by
+`probe/agent-service/litellm_retention.py` on the fake-only stack) searches a request and an answer canary in every writable mount and every log of
+the front, the gateway, LiteLLM and the service. After a success, an upstream 500, an upstream error
+body that echoes the request, a refused model, a cancel and a hook refusal it finds none, and each
+search is proven by a control that plants a canary where it must be found. LiteLLM runs at log level
+`CRITICAL`: its own logging sites and uvicorn's write no error line that could carry a provider's
+text, and a provider failure shows at the caller. One channel stays open: `logging.lastResort` and
+`warnings.warn` reach LiteLLM's standard error, and whether a real path sends a provider's text
+through them is not measured. Not measured either: whether LiteLLM's own start-up failures still
+reach its log at that level; a failed start shows as the container's exit. Memory holds the content
+while a run is in flight, and tmpfs may be paged to swap. The Docker log driver's retention is the daemon's
+(edge#167); the census proves that no content reaches the logs, not how long they live. Any other
+path is not covered by this.
+
+**The metadata lines are apart from the content.** The service writes its access line per request, the
+shipped LiteLLM writes no line per request, and neither the front nor the gateway keeps an access log.
+Their retention is the Docker daemon's (edge#167). How long Anthropic keeps the content is stated in the
+privacy section, which owns it.
+
 **Whose account.** Only the operator and his own test accounts are members of `/services/agent-service/subscription`, so his
 Claude subscription serves only his own use. Every other person reaches the service only through the
 API route (`/services/agent-service/api`), under Anthropic's commercial API terms. That route is not
 enabled yet (`api_groups` and `[api]` are unset in `service.toml`), so a member of the api group
-gets 403 `not_enabled`. An app's privacy text therefore describes only the API route. Which groups
-may use an AI feature is decided by the service's subscription and api groups only, the same in
-every app; an app adds no AI group of its own. Membership in the app (`/apps/<name>`) stays separate
-access to the app.
+gets 403 `not_enabled`. The operator ruled on 28.10.2026
+([#299 comment](https://github.com/overnightworks/hal/issues/299#issuecomment-6464712955)) that the
+agent service writes its own privacy section, `agent-dienst` in `legal/sections/agent-service/datenschutz.html`,
+and describes only the API route; it does not speak of the subscription, which no user can ever use, and no
+text a person reads speaks of the subscription. Every other app or service links
+`/datenschutz#agent-dienst` and says in its own text only what it sends. Which groups may use an AI
+feature is decided by the service's subscription and api groups only, the same in every app; an app
+adds no AI group of its own. Membership in the app (`/apps/<name>`) stays separate access to the app.
 
 ## An app's side
 
@@ -282,9 +308,10 @@ has no `[api]` table.
   529, timeout, reset or broken answer, an untrusted certificate, a refused credential and
   Anthropic's refusal of a used-up balance (a 402 `billing_error`, or a 400 saying the credit
   balance is too low) all end the run as `failed: provider_unavailable` on route `api`;
-  the run never falls back to the subscription. A used-up balance therefore looks like an outage
-  until the operator checks his credit. A cancelled run ends `cancelled` and starts no further provider
-  request; the cancel does not close the request in flight, which may finish and is billed.
+  the run never falls back to the subscription. A bad key, a used-up balance and an outage
+  therefore look the same, and no log tells them apart, because LiteLLM logs at `CRITICAL`, so
+  the operator checks his credit and his key. A cancelled run ends `cancelled` and starts no
+  further provider request; the cancel does not close the request in flight, which may finish and is billed.
 - **Rotating a key is a recreate.** A replaced provider key file reaches LiteLLM only through its
   recreate, until then it keeps sending the old key. A replaced service credential reaches each
   reader only through its own recreate, LiteLLM first, then `agent-service`; in between every run
@@ -295,7 +322,7 @@ has no `[api]` table.
   docstring gives the command line): the fake Anthropic and a fake issuer sit on `internet`, made
   internal, and the probe refuses to start otherwise. Re-run it for every LiteLLM, Traefik or Docker
   bump. `probe/agent-service/litellm_failures.py` drives the failure, key and rotation
-  cases on the same stack. The CI job `front` runs the front's table of requests (`tests/test_litellm_front.py`) for
+  cases on the same stack, and `litellm_retention.py` the retention census of the route. The CI job `front` runs the front's table of requests (`tests/test_litellm_front.py`) for
   every Traefik bump; a LiteLLM bump still needs the probe.
 
 ## Proofs
@@ -331,6 +358,19 @@ capability it receives verifies against `public.pem` (signature, `kid`, `aud`, t
 `songmaker.mcp.internal`); the stand-in is removed afterwards. Only the verdict is printed, never the
 capability. It needs `[apps.songmaker] mcp_origin` in `service.toml`. It also refuses once anything but traefik-mcp is on songmaker's MCP network; from then on
 songmaker's own call is the proof.
+
+**The live canary** is `cd ~/srv/hal && python3 agent-service/live_canary.py`, for the operator at the go
+to let people in; it has not been run. It makes a paid call, so it runs only when the operator says so, as a
+person of the API group outside the subscription group: you sign in as for the live smoke, but the
+prompt is the only thing on standard error and no browser starts, you open its link yourself. It
+checks that the route's four containers run and that the running service's `[api]` names
+`litellm-front` as its gateway and that the service started after that file last changed (C0), runs `agent-canary` once with a random value as both the request
+and the answer it asks for (C1; any route but `api` fails), waits a few seconds, and runs the retention census
+over the four containers for that value (C2). Nothing is recreated; a failed canary ends the run, and a
+new run uses a new value. It prints only verdict lines of a closed grammar and a last line,
+`canary and census held` or `canary and census FAILED`, matching the exit code; no exception text, token or
+container output reaches the terminal. The probe `probe/agent-service/litellm_live_canary.py` runs it
+against the fake-only stack.
 
 **The login command** is `python3 probe/agent-service/cells_12b.py --login-directory DIR`; its docstring gives the
 full command line (the probe-stack lock and a timeout). It starts the service in a throwaway project with `DIR` bound read-only as the

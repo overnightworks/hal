@@ -13,6 +13,7 @@ from hal.stack.apps import (
     AppOn,
     AppPlan,
     AppResult,
+    AppSwitchedOff,
     OffPlan,
 )
 from hal.stack.plan_rows import ChangeNoun, PlanEvent
@@ -27,6 +28,7 @@ from hal.stack.realm.reconcile import (
     Stage,
     StepResult,
 )
+from hal.stack.service_recreate import Recreated
 
 # restic's short ID, which `hal restore --snapshot` takes as a prefix (`hal.backup.runner`'s
 # MIN_SNAPSHOT_PREFIX); `hal.stack` may not import `hal.backup`, so the length is repeated.
@@ -49,8 +51,10 @@ class ResultEvent(StrEnum):
     APP_STARTED_AGAIN = "started again"
     APP_UPDATED = "updated"
     APP_FAILED = "failed"
+    APP_SWITCHED_OFF = "switched off"
     APP_SWITCH_OFF_FAILED = "switch off failed"
     APP_HELD_OFF = "switched off meanwhile"
+    RECREATED = "recreated"
 
 
 _APP_ON_EVENT = {
@@ -107,6 +111,11 @@ def app_row(result: AppResult) -> Row:
             facts = (plan.release.tag, "running", format_duration(seconds))
             event = _APP_ON_EVENT[plan.kind]
             return Row(Glyph.DONE, plan.app.key, event, _SEPARATOR.join(facts))
+        case AppSwitchedOff(off):
+            key = off.app.key
+            return Row(
+                Glyph.DONE, key, ResultEvent.APP_SWITCHED_OFF, f"volumes and ~/srv/{key} kept"
+            )
         case AppFailed(subject, cause):
             return Row(Glyph.FAILED, subject.app.key, _failed_event(subject), printable(cause))
         case AppHeldOff(plan, cause):
@@ -128,6 +137,14 @@ def _failed_event(subject: AppPlan | OffPlan) -> ResultEvent:
     if isinstance(subject, OffPlan):
         return ResultEvent.APP_SWITCH_OFF_FAILED
     return ResultEvent.APP_FAILED
+
+
+def recreated_row(recreated: Recreated) -> Row:
+    """A service recreated and observed running, with the time it took; a core service whose
+    barriers were proven says so."""
+    took = format_duration(recreated.seconds)
+    fact = _SEPARATOR.join(("barriers proven", took)) if recreated.barriers_proven else took
+    return Row(Glyph.DONE, recreated.service, ResultEvent.RECREATED, fact)
 
 
 def waiting_row(grace_seconds: float) -> Row:
