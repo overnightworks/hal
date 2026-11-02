@@ -1,0 +1,8 @@
+claim_id = "7027a76efc5c4653b67ce6752244cb65"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "d7b850999820612a040643ba26926faabbc14bf1"
+branch = "claude/issue-893-apply-refuses-missing-secret"
+scope = ["docs/agent-service.md", "docs/stack.md", "probe/switches/built_image.py", "src/hal/stack/apply.py", "src/hal/stack/plan.py", "src/hal/stack/setup.py", "tests/support/stack_apply.py", "tests/test_stack_apply_secret_files.py"]
+opened_commit = "3ed8bca755ade935f193c14000b56942986a9ead"
+whole_reason = "The first start's preflight: the plan names the services it creates, the setup owner finds their missing secret files, and apply refuses before its yes."
