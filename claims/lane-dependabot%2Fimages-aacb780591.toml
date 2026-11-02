@@ -1,0 +1,8 @@
+claim_id = "15e2952c30724aa289cdbeef4711ece0"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "549fea0d7f54b80be0ef9e1d1443d770a4ed3b78"
+branch = "dependabot/images-aacb780591"
+scope = ["compose.yaml", "probe/agent-service/compose.probe.yaml", "probe/keycloak/compose.probe.yaml", "src/hal/backup/images/Dockerfile"]
+opened_commit = "c38f3d34dd1d06f02862dd70172342451f8e9427"
+whole_reason = "One dependency group: the same two image pins in every file that names them"
