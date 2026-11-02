@@ -66,13 +66,13 @@ from signing_key import PRIVATE_FILE, PUBLIC_FILE, SIGNING_DIRECTORY
 from smoke import Tokens
 
 PUBLIC_KEY = SECRETS_DIRECTORY / SERVICE / SIGNING_DIRECTORY / PUBLIC_FILE
-SIGNING_KEY_SECRET = "agent_service_signing_key"
-CA_ROOT_SECRET = "step_ca_root_certificate"
+SIGNING_KEY_SECRET = "agent_service_signing_key"  # noqa: S105 - the name of a docker secret and no credential
+CA_ROOT_SECRET = "step_ca_root_certificate"  # noqa: S105 - the name of a docker secret and no credential
 SECRET_SOURCES = {
     SIGNING_KEY_SECRET: SECRETS_DIRECTORY / SERVICE / SIGNING_DIRECTORY / PRIVATE_FILE,
     CA_ROOT_SECRET: SECRETS_DIRECTORY / "step-ca/root_ca.crt",
 }
-SECRET_TARGET_DIRECTORY = "/run/secrets"
+SECRET_TARGET_DIRECTORY = "/run/secrets"  # noqa: S105 - a mount directory and no credential
 GATEWAY_MODE_OPTION = "com.docker.network.bridge.gateway_mode_ipv4"
 SHARED_NETWORK_KEY = "agent"
 STANDIN_SCRIPT = Path(__file__).resolve().with_name("mcp_signer.py")
@@ -351,13 +351,13 @@ def main(
         known = Secrets(sign_in_with(client_secret), login_token, client_secret)
         return live_signer(stack, known, Report(known.values()), origin)
     except (LiveSmokeFailed, SignInFailed) as failure:
-        print(f"live signer: {failure}", file=sys.stderr)
+        print(f"live signer: {failure}", file=sys.stderr)  # noqa: T201 - the failure line of the live run on standard error
         return 1
     except subprocess.TimeoutExpired:
-        print("live signer: a docker command ran out of time", file=sys.stderr)
+        print("live signer: a docker command ran out of time", file=sys.stderr)  # noqa: T201 - the failure line of the live run on standard error
         return 1
     except KeyboardInterrupt:
-        print("live signer: interrupted", file=sys.stderr)
+        print("live signer: interrupted", file=sys.stderr)  # noqa: T201 - the failure line of the live run on standard error
         return 130
 
 

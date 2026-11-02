@@ -70,6 +70,7 @@ from hal.output import (
     counted,
     write_error,
     write_groups,
+    write_line,
     write_row,
     write_verdict,
 )
@@ -469,7 +470,7 @@ def _ask_and_run_setups(
 ) -> int | None:
     """Ask for every setup first, then run them in turn; an exit code when the run ends here."""
     for item in missing:
-        print(f"{item.unit.key} is not set up: {item.check_line}")
+        write_line(f"{item.unit.key} is not set up: {item.check_line}")
         if not confirmed(f"run `{item.unit.setup}` now"):
             write_error(f"aborted, nothing changed; run `{item.unit.setup}` yourself or answer yes")
             return ApplyExit.DECLINED
@@ -685,5 +686,5 @@ def _report_switched(
     if mismatched or withheld or later_steps_failed:
         return ApplyExit.REFUSED
     for plan in changes:
-        print(f"{plan.unit.key} is {plan.action}")
+        write_line(f"{plan.unit.key} is {plan.action}")
     return ApplyExit.APPLIED_OR_NOTHING

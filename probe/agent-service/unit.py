@@ -2,7 +2,7 @@
 compose.yaml, with its real `service.toml`, in a throwaway compose project of its own and a
 scratch HOME that holds a dummy login of each CLI (never a real token).
 
-    flock -o -w 1200 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 50 1780 \\
+    flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 50 1780 \\
         python3 probe/agent-service/unit.py --scratch DIR
 
 Measured teardown: 1 s (K 50 s, CAP 1780 s).

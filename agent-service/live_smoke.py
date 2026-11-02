@@ -145,7 +145,7 @@ class Stack:
     def run(
         self, command: Sequence[str], stdin: str | None = None, timeout: int = 300
     ) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
+        return subprocess.run(  # noqa: S603 - argv is built by the program itself and no shell parses it on the host
             command, input=stdin, capture_output=True, text=True, check=False, timeout=timeout,
             env=self.environment, cwd=self.directory,
         )  # fmt: skip
@@ -156,7 +156,7 @@ class Stack:
         return self.run([*self.compose_prefix, *arguments], stdin, timeout)
 
     def start(self, command: Sequence[str]) -> subprocess.Popen[str]:
-        return subprocess.Popen(
+        return subprocess.Popen(  # noqa: S603 - argv is built by the program itself and no shell runs
             command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT, text=True, env=self.environment, cwd=self.directory,
         )  # fmt: skip
@@ -781,13 +781,13 @@ def main(argv: Sequence[str]) -> int:
         known = Secrets(sign_in(client_secret), login_token, client_secret)
         return live_smoke(Stack(), known, Report(known.values()))
     except (LiveSmokeFailed, SignInFailed) as failure:
-        print(f"live smoke: {failure}", file=sys.stderr)
+        print(f"live smoke: {failure}", file=sys.stderr)  # noqa: T201 - the failure line of the live run on standard error
         return 1
     except subprocess.TimeoutExpired:
-        print("live smoke: a docker command ran out of time", file=sys.stderr)
+        print("live smoke: a docker command ran out of time", file=sys.stderr)  # noqa: T201 - the failure line of the live run on standard error
         return 1
     except KeyboardInterrupt:
-        print("live smoke: interrupted", file=sys.stderr)
+        print("live smoke: interrupted", file=sys.stderr)  # noqa: T201 - the failure line of the live run on standard error
         return 130
 
 

@@ -702,7 +702,7 @@ below and rsyslog's conffiles are home's own and are not backed up. `/etc/docker
   with it, when the rescue's restart fails too; and a run interrupted between the write and the rescue with Docker down
   (a hanging restart skips the rescue on Ctrl-C) makes the next apply refuse, because Docker does not answer. Then remove
   `log-driver` from `/etc/docker/daemon.json` by hand; the backup holds the old bytes.
-- **Proof.** `flock -o -w 1200 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 scripts/system-proof/run.sh <edge checkout> <evidence dir> <part>`, once per part, each into its own evidence dir (`<evidence dir>/fresh`, `<evidence dir>/prepared`, `<evidence dir>/shapes`, since each run truncates `cells.txt`), drives
+- **Proof.** `flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 scripts/system-proof/run.sh <edge checkout> <evidence dir> <part>`, once per part, each into its own evidence dir (`<evidence dir>/fresh`, `<evidence dir>/prepared`, `<evidence dir>/shapes`, since each run truncates `cells.txt`), drives
   the step in a throwaway systemd container, never on this PC. `fresh` is the first install with both reboots, `prepared` the
   second install under both sudos, and `shapes` a third one that converges once and then refuses the foreign account shapes (A1-3);
   each part is one container, and a part that nears the lock's 1800 s cap is cut, not given more time; the measured times per part are in the header of `scripts/system-proof/run.sh`. Its cells D1-D8 also drive the mail of `hal check` there:

@@ -3,7 +3,7 @@
 fake Anthropic) with the fake holding requests until the probe releases them. Nothing live and
 nothing paid: the probe refuses to start unless `internet` is internal and holds only the fakes.
 
-    flock -o -w 1200 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \\
+    flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \\
         python3 probe/agent-service/litellm_admission.py --scratch DIR
 
 Evidence: F is the fake provider's request log, R the canary's verdict lines, C the exit lines of

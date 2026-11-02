@@ -307,7 +307,10 @@ def ipv6(next_header: int, body: bytes) -> bytes:
 
 
 def ipv4_header(
-    protocol: int, body: bytes, fragment: int = 0, destination: str = "0.0.0.0"
+    protocol: int,
+    body: bytes,
+    fragment: int = 0,
+    destination: str = "0.0.0.0",  # noqa: S104 - the default destination of a scenario packet and no listener
 ) -> bytes:
     address = socket.inet_aton(destination)
     fields = (0x45, 0, 20 + len(body), 0, fragment, 64, protocol, 0, bytes(4), address)
