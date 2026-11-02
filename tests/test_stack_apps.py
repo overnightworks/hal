@@ -508,7 +508,7 @@ def test_off_stops_then_removes_every_container_of_the_project_and_nothing_else(
     plan = world.plan()
     off.commands.clear()
 
-    assert world.run(plan) == []
+    assert world.run(plan) == [apps.AppSwitchedOff(plan.offs[0])]
 
     assert off.commands == [
         ["docker", "compose", "-p", KEY, "stop"],
@@ -527,7 +527,7 @@ def test_off_never_fetches_and_leaves_the_checkout_and_the_record(world, origin)
         world.runtime, git=lambda *call: pytest.fail("git was asked")
     )
 
-    assert world.run() == []
+    assert [type(result) for result in world.run()] == [apps.AppSwitchedOff]
 
     assert [call[0] for call in off.compose_calls()[-3:]] == ["stop", "rm", "ps"]
     assert head_of(world.srv) == sha
@@ -682,7 +682,7 @@ def test_off_removes_a_one_off_container_that_rm_leaves_by_its_identifier_and_ne
     plan = world.plan()
     off.commands.clear()
 
-    assert world.run(plan) == []
+    assert world.run(plan) == [apps.AppSwitchedOff(plan.offs[0])]
 
     assert ["docker", "rm", "-f", "id3"] in off.commands
     assert world.docker.rows == []
