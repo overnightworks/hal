@@ -10,6 +10,7 @@ import json
 import os
 import pwd
 import subprocess
+import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import Enum
@@ -122,12 +123,16 @@ def read_events(returncode: int, event_lines: Sequence[str]) -> PlaybookRun:
     return PlaybookFinished(changed) if returncode == 0 else PlaybookUnfinished()
 
 
-def _forget_the_sudo_ticket(interrupted: bool) -> None:
+def _forget_the_sudo_ticket() -> subprocess.CalledProcessError | None:
     try:
         subprocess.run(["sudo", "-k"], check=True)  # noqa: S607 - sudo is found on PATH by design
     except subprocess.CalledProcessError as failure:
-        sentence = f"sudo could not forget its ticket (exit {failure.returncode}) · it may still be valid"
-        raise (SystemStepInterrupted if interrupted else StepFailed)(sentence) from failure
+        return failure
+    return None
+
+
+def _ticket_sentence(failure: subprocess.CalledProcessError | None) -> str:
+    return "" if failure is None else f"sudo could not forget its ticket (exit {failure.returncode}) · it may still be valid"
 
 
 def run_playbook_as_root(argv: Sequence[str]) -> PlaybookRun:
@@ -143,19 +148,21 @@ def run_playbook_as_root(argv: Sequence[str]) -> PlaybookRun:
     """
     environment = {name: value for name, value in os.environ.items() if not name.startswith("ANSIBLE_")}
     event_lines: list[str] = []
-    interrupted = False
-    with subprocess.Popen(["sudo", "env", "PYTHONDONTWRITEBYTECODE=1", "sh", "-c", 'exec "$@" 2>&1', "sh", *argv], stdout=subprocess.PIPE, text=True, cwd=PLAYBOOK.parent, env=environment) as playbook:  # noqa: S603, S607 - argv is the packaged playbook and sudo is found on PATH by design
-        try:
-            for line in playbook.stdout:
-                if line.startswith(EVENT_MARK):
-                    event_lines.append(line)
-                else:
-                    write_line(line, end="", flush=True)
-        except KeyboardInterrupt as ctrl_c:
-            interrupted = True
-            raise SystemStepInterrupted from ctrl_c
-        finally:
-            _forget_the_sudo_ticket(interrupted)
+    unforgotten: subprocess.CalledProcessError | None = None
+    try:
+        with subprocess.Popen(["sudo", "env", "PYTHONDONTWRITEBYTECODE=1", "sh", "-c", 'exec "$@" 2>&1', "sh", *argv], stdout=subprocess.PIPE, text=True, cwd=PLAYBOOK.parent, env=environment) as playbook:  # noqa: S603, S607 - argv is the packaged playbook and sudo is found on PATH by design
+            try:
+                for line in playbook.stdout:
+                    if line.startswith(EVENT_MARK):
+                        event_lines.append(line)
+                    else:
+                        write_line(line, end="", flush=True)
+            finally:
+                unforgotten = _forget_the_sudo_ticket()
+                if unforgotten and not isinstance(sys.exception(), KeyboardInterrupt):
+                    raise StepFailed(_ticket_sentence(unforgotten)) from unforgotten
+    except KeyboardInterrupt as ctrl_c:
+        raise SystemStepInterrupted(_ticket_sentence(unforgotten)) from ctrl_c
     return read_events(playbook.returncode, event_lines)
 
 

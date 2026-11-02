@@ -181,6 +181,38 @@ def test_a_failing_sudo_k_after_a_ctrl_c_is_the_same_interrupted_step_carrying_t
     assert stub.calls()[-1][0] == "-k"
 
 
+def test_a_second_ctrl_c_while_the_play_stops_is_still_the_interrupted_step_carrying_the_ticket_sentence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stub = StubSudo(tmp_path, monkeypatch, forgetting_exit_code=1)
+    playbook = fake_ansible(tmp_path, f"kill -INT $PPID\nuntil grep -q '^-k' {stub.log}; do sleep 0.05; done\nkill -INT $PPID\nsleep 3")
+
+    with pytest.raises(system_step.SystemStepInterrupted) as interrupted:
+        system_step.run_playbook_as_root([str(playbook)])
+
+    assert str(interrupted.value) == TICKET_SENTENCE
+    assert stub.calls()[-1][0] == "-k"
+
+
+def test_a_play_that_runs_on_after_a_ctrl_c_is_not_waited_for(tmp_path: Path, stub_sudo: StubSudo) -> None:
+    finished = tmp_path / "finished"
+    playbook = fake_ansible(tmp_path, f"kill -INT $PPID\nsleep 3\ntouch {finished}")
+
+    with pytest.raises(system_step.SystemStepInterrupted):
+        system_step.run_playbook_as_root([str(playbook)])
+
+    assert not finished.exists()
+
+
+def test_another_exception_in_the_output_loop_is_no_interrupt_and_sudo_k_still_runs_last(tmp_path: Path, stub_sudo: StubSudo) -> None:
+    playbook = fake_ansible(tmp_path, r"printf '\377\n'")
+
+    with pytest.raises(UnicodeDecodeError):
+        system_step.run_playbook_as_root([str(playbook)])
+
+    assert stub_sudo.calls()[-1][0] == "-k"
+
+
 def a_play_under_stub_sudo(
     sandbox: Sandbox, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, script: str, forgetting_exit_code: int = 0
 ) -> StubSudo:

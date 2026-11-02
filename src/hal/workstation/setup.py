@@ -656,6 +656,8 @@ def _stop_after_failure(rows: list[SetupRow], position: int, stopped: _RowStoppe
     for later in rows[position + 1 :]:
         write_row(Outcome(SetupEvent.NOT_RUN).row(later))
     _stopped(rows[position], step, detail)
+    if outcome.event is SetupEvent.INTERRUPTED:
+        raise KeyboardInterrupt from stopped
 
 
 def _go_through(steps: tuple[Step, ...], role: ExecutionRole, mode: Pass) -> list[Outcome] | None:
@@ -669,8 +671,6 @@ def _go_through(steps: tuple[Step, ...], role: ExecutionRole, mode: Pass) -> lis
             outcome = _run_row(row, steps, role, mode)
         except _RowStopped as stopped:
             _stop_after_failure(rows, position, stopped, mode)
-            if isinstance(stopped.error, SystemStepInterrupted):
-                raise KeyboardInterrupt from stopped
             return None
         write_row(outcome.row(row))
         outcomes.append(outcome)
