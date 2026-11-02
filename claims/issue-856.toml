@@ -1,7 +1,0 @@
-claim_id = "bbbb719c4dab41e5ba0f43b1593a1bbe"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "35f2b52c910ed3cc62b8f23704cf928c45e5ece8"
-branch = "claude/issue-856-system-proof-stub-hal"
-scope = ["scripts/system-proof/drive.sh"]
-opened_commit = "3288757471e5ad3de084428393d2281e81ac5d93"
