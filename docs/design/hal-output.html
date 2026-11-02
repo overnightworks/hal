@@ -739,7 +739,7 @@ Type <span class="w">yes</span> to set up 1 open row: yes
     [ ] Generate token, copy the value
     Enter opens the page in your browser:
 <span class="d">    opened github.com/settings/personal-access-tokens/new?…</span>
-    paste the token (hidden, empty skips):
+    paste the token, then an empty line (hidden, empty skips):
 <span class="g">  ✓</span> github/fleet-admin  verified   <span class="d">~/.secrets/github/fleet-admin (600)</span>
 <span class="g">  ✓</span> opentofu/passphrase  generated  <span class="d">~/.secrets/opentofu/passphrase (600) · never shown</span>
 <span class="g">  ✓</span> secrets         stored
@@ -749,9 +749,9 @@ Type <span class="w">yes</span> to set up 1 open row: yes
       </figure>
       <figure>
         <figcaption><span class="tag new">neu S2g</span> falsch eingefügt, dann leer gelassen</figcaption>
-<pre class="term">    paste the token (hidden, empty skips):
+<pre class="term">    paste the token, then an empty line (hidden, empty skips):
 <span class="r">  ✗</span> cloudflare/fleet-write  rejected  <span class="d">Cloudflare answers 403 · paste again or leave empty</span>
-    paste the token (hidden, empty skips):
+    paste the token, then an empty line (hidden, empty skips):
 <span class="d">  · cloudflare/fleet-write  skipped    nothing stored</span>
 <span class="y">  !</span> secrets         1 open         <span class="d">cloudflare/fleet-write</span>
 <span class="rw">error:</span> setup stopped at secrets · 1 secret still open
@@ -765,7 +765,7 @@ Type <span class="w">yes</span> to set up 1 open row: yes
     create: Calls › TURN keys › Create, copy the key id
     Enter opens the page in your browser:
 <span class="y">    no browser opened · open it yourself: https://dash.cloudflare.com/</span>
-    paste the token (hidden, empty skips):
+    paste the token, then an empty line (hidden, empty skips):
 <span class="g">  ✓</span> turn/key        stored         <span class="d">not verified · ~/.secrets/turn/key (644)</span></pre>
       </figure>
       <figure>
@@ -799,7 +799,7 @@ Type <span class="w">yes</span> to set up 1 open row: yes
       </figure>
       <figure>
         <figcaption><span class="tag fail">neu S2g, kaputt</span> Ctrl-C beim Einfügen</figcaption>
-<pre class="term">    paste the token (hidden, empty skips): ^C
+<pre class="term">    paste the token, then an empty line (hidden, empty skips): ^C
 <span class="rw">error:</span> interrupted at cloudflare/fleet-write · no file half written
 <span class="c">next:</span> hal setup</pre>
         <p class="was">heute: <code>abgebrochen; keine Datei halb geschrieben. Weiter mit: hal setup --apply</code></p>
@@ -1050,7 +1050,7 @@ Type <span class="w">yes</span> to apply 8 changes: yes
 <span class="y">  !</span> keycloak        realm skipped  <span class="d">the realm observer failed (…)</span>
 <span class="hd">apps</span>
 <span class="live">  <span class="spin"></span> hopin           build at v2026.10.27.1 · 48s</span>  <span class="n">← nur live</span>
-<span class="g">  ✓</span> hopin           updated        <span class="d">v2026.10.27.1 · healthy · 1m42s</span>
+<span class="g">  ✓</span> hopin           updated        <span class="d">v2026.10.27.1 · running · 1m42s</span>
 <span class="rw">error:</span> 1 of 8 failed, 1 skipped · Cloudflare not touched
 <span class="c">next:</span> docker logs --tail 50 hal-agent-service-1</pre>
       </figure>
@@ -1064,6 +1064,27 @@ Type <span class="w">yes</span> to apply 1 change: yes
 <span class="d">    only in Keycloak: hallucinai group /console-made</span>
 <span class="d">    only in Keycloak: 1 found · 12 kinds not read</span>
 <span class="d">…</span></pre>
+      </figure>
+      <figure>
+        <figcaption><span class="tag new">neu A5-2c</span> nach dem yes: config-cli scheitert, der Realm ist vielleicht halb angewendet; Snapshot und Rückweg stehen unter der roten Zeile</figcaption>
+<pre class="term"><span class="p">$</span> <span class="u">hal apply</span>
+<span class="d">…</span>
+Type <span class="w">yes</span> to apply 1 change: yes
+<span class="r">  ✗</span> keycloak        realm failed   <span class="d">`docker compose run` exited 1: … · may be partly applied</span>
+<span class="d">    pre-apply snapshot 37c2a560 · proven</span>
+<span class="d">    way back: docs/backup.md "Restore Keycloak" · the next apply repeats the step</span>
+<span class="rw">error:</span> partial, keycloak realm failed
+<span class="c">next:</span> hal apply</pre>
+      </figure>
+      <figure>
+        <figcaption><span class="tag new">neu A5-2c</span> das Backup braucht zu lange: die Wartezeile ist eine Zeile, danach die rote; vor dem Snapshot steht kein Detail</figcaption>
+<pre class="term"><span class="p">$</span> <span class="u">hal apply</span>
+<span class="d">…</span>
+Type <span class="w">yes</span> to apply 1 change: yes
+<span class="c">  ›</span> keycloak        waiting        <span class="d">up to 2m00s for hal to clean up</span>
+<span class="r">  ✗</span> keycloak        realm failed   <span class="d">the Keycloak backup failed (`…/.venv/bin/hal backup keycloak` took longer than 1800s) · nothing applied</span>
+<span class="rw">error:</span> partial, keycloak realm failed
+<span class="c">next:</span> hal apply</pre>
       </figure>
       <figure>
         <figcaption><span class="tag new">neu</span> der häufigste Fall: nichts zu tun</figcaption>
@@ -1109,6 +1130,16 @@ Type <span class="w">yes</span> to update the checkout to 4f0e7b1: yes
 <span class="r">  ✗</span> cloudflare      not planned    <span class="d">failed to make http request</span>
 <span class="d">    403 Forbidden · Authentication error (10000) · a missing token right</span></pre>
       </figure>
+      <figure>
+        <figcaption><span class="tag new">neu A5-2d</span> nach dem yes: jede App als eine Zeile; scheitert sie, steht die Ursache in der roten Zeile, dann das Paar <code>error:</code> und <code>next:</code></figcaption>
+<pre class="term"><span class="p">$</span> <span class="u">hal apply</span>
+<span class="d">…</span>
+Type <span class="w">yes</span> to apply 2 changes: yes
+<span class="g">  ✓</span> hopin           updated        <span class="d">v2026.10.27.1 · running · 1m42s</span>
+<span class="r">  ✗</span> relay           failed         <span class="d">not healthy at v2026.10.27.1 after 300s (relay restarting); the record stays, the fix is a newer tag</span>
+<span class="rw">error:</span> partial, relay failed
+<span class="c">next:</span> hal apply</pre>
+      </figure>
     </div>
   </div>
   <ul class="why">
@@ -1118,8 +1149,8 @@ Type <span class="w">yes</span> to update the checkout to 4f0e7b1: yes
     <li><b>Alte Images:</b> eine Zeile mit beiden Versionen, ohne „block 6“ und „K11b“. Wie man hochzieht, steht in der Doku, nicht in jeder Ausgabe.</li>
     <li><b>Rechtsseiten:</b> eine Zeile je Art; die Abschnitte geänderter Seiten stehen eingerückt darunter, die einer neuen zeigt <code>-v</code>.</li>
     <li><b>Wartende Commits</b> sind für <code>hal apply</code> eine gelbe Zeile mit der Zahl und origins Hash, dann <code>error: N commits wait on origin main; nothing changed</code> und <code>next: hal update</code>; der Apply plant nichts mit altem Code. <code>hal update</code> zeigt jeden Commit eingerückt unter der Zeile und die geänderten Dateien nach Wirkung (jede Zeile nur bedingt: sie sagt nie, was ein laufender Container eingehängt hat), fragt ein <code>yes</code> auf den genauen Hash und endet mit <code>next: hal apply</code>.</li>
-    <li><b>Welche Gruppen schon Zeilen sind:</b> Die Core-Dienste und ihre Follower (<code>~</code> und <code>·</code> unter <code>core</code>), Recreates, Ein- und Ausschalten und „bleibt gestoppt“, die alten Images und der Realm (<code>~ + - · !</code> unter <code>units</code>), die Apps (<code>+ ~ -</code> und <code>·</code> unter <code>apps</code>) sowie appkit (<code>+ -</code>, nur wenn sich etwas ändert) und die Rechtsseiten (<code>+ ~</code>), beide ohne Überschrift, über <code>core</code>. Vor den Zeilen steht kein Plan-Text mehr; „the plan“ und die Ergebniszeilen bleiben Text, bis auf das Ergebnis des Realms (eine gelbe Zeile „realm skipped“ mit dem Grund des Plans, wenn Keycloak nicht lesbar war): eine Zeile, darunter seine Änderungen, die Objekte nur in Keycloak und die Zahl der Arten, die hal nicht liest (ihre Namen stehen in <code>docs/keycloak.md</code>).</li>
-    <li><b>Das yes zählt die gedruckten <code>+ ~ -</code>-Zeilen</b> (gebaut mit #620): <code>Type yes to apply 8 changes:</code>; nur das genaue <code>yes</code> gilt, bei Setup, start, online und extern fragt derselbe Besitzer. Jede Weigerung endet in einer <code>error:</code>-Zeile mit <code>next:</code>, wo ein Befehl hilft; „nothing to change“ endet im ✓-Urteil mit der Laufzeit, ohne cloudflare, bis A5-3 es dazunimmt. Die Zeilen nach dem yes behalten ihre Worte, ohne Absender, bis A5-2 und A5-3.</li>
+    <li><b>Welche Gruppen schon Zeilen sind:</b> Die Core-Dienste und ihre Follower (<code>~</code> und <code>·</code> unter <code>core</code>), Recreates, Ein- und Ausschalten und „bleibt gestoppt“, die alten Images und der Realm (<code>~ + - · !</code> unter <code>units</code>), die Apps (<code>+ ~ -</code> und <code>·</code> unter <code>apps</code>) sowie appkit (<code>+ -</code>, nur wenn sich etwas ändert) und die Rechtsseiten (<code>+ ~</code>), beide ohne Überschrift, über <code>core</code>. Vor den Zeilen steht kein Plan-Text mehr; „the plan“ und die Ergebniszeilen bleiben Text, bis auf das Ergebnis des Realms (eine gelbe Zeile „realm skipped“ mit dem Grund des Plans, wenn Keycloak nicht lesbar war): eine Zeile, darunter seine Änderungen, die Objekte nur in Keycloak und die Zahl der Arten, die hal nicht liest (ihre Namen stehen in <code>docs/keycloak.md</code>). Scheitert der Realm-Schritt, ist es eine rote Zeile „realm failed“ mit Snapshot und Rückweg gedimmt darunter, und das Warten auf ein gestopptes hal ist die Zeile <code>› keycloak  waiting</code>.</li>
+    <li><b>Das yes zählt die gedruckten <code>+ ~ -</code>-Zeilen</b> (gebaut mit #620): <code>Type yes to apply 8 changes:</code>; nur das genaue <code>yes</code> gilt, bei Setup, start, online und extern fragt derselbe Besitzer. Jede Weigerung endet in einer <code>error:</code>-Zeile mit <code>next:</code>, wo ein Befehl hilft; „nothing to change“ endet im ✓-Urteil mit der Laufzeit, ohne cloudflare, bis A5-3 es dazunimmt. Der Realm und jede App sind nach dem yes Zeilen; eine App steht als <code>switched on</code>, <code>started again</code> oder <code>updated</code> mit Tag, <code>running</code> und Zeit (<code>running</code> statt <code>healthy</code>, weil eine App ohne Healthcheck als aufgesetzt zählt und hal nicht behaupten darf, was es nicht beobachtet hat), sonst rot als <code>failed</code>, <code>switch off failed</code> oder <code>switched off meanwhile</code> mit der Ursache, dann <code>error: partial, &lt;app&gt; &lt;event&gt;</code> und <code>next: hal apply</code> (nach einem Stopp, der gewann, <code>hal start &lt;app&gt;</code>). Die übrigen Zeilen nach dem yes behalten ihre Worte, ohne Absender, bis A5-3.</li>
     <li><b>Cloudflare</b> kommt heute nach einem sauberen lokalen Lauf, mit eigenem Plan und yes.</li>
     <li><b>Der Cloudflare-Plan ist eine Zeile:</b> ohne Änderung <code>current  nothing to publish</code> statt rund 30 Zeilen Lese- und Refresh-Text; eine Warnung oder ein Fehler von tofu steht als Zeile mit tofus Grund, die Erklärung gedimmt darunter. Mit Änderungen zeigt <code>tofu show</code> genau die geschriebene Plan-Datei vor dem yes.</li>
   </ul>
@@ -1405,7 +1436,7 @@ Type <span class="w">yes</span> to reopen the tunnel: yes
     [ ] Continue to summary › Create Token, copy the value
     Enter opens the page in your browser:
 <span class="d">    opened dash.cloudflare.com/profile/api-tokens</span>
-    paste the token (hidden, empty skips):
+    paste the token, then an empty line (hidden, empty skips):
 <span class="g">  ✓</span> cloudflare/fleet-write  verified   <span class="d">~/.secrets/cloudflare/fleet-write (600)</span></pre>
       <p class="was">heute: <code>== cloudflare/fleet-write (Token, fehlt)</code> … <code>Token einfügen (unsichtbar; leer überspringt):</code></p>
     </figure>

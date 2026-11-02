@@ -70,9 +70,13 @@ The service runs the Claude CLI under the operator's subscription, with the one 
 
 `agent-service/setup` makes it, in the operator's terminal and after `hal apply` has asked: it creates
 the directories with 0700, narrows a too-open token file to 0600, and when the token is missing or
-refused it asks the operator to run `claude setup-token` in another terminal and paste the line, which
-is read without echo, judged by the reader's rules as the exact bytes to write, and only then written
-to `token.new` (created 0600) before the rename over `token`. A refused paste leaves the old token
+refused it asks the operator to run `claude setup-token` in another terminal and paste its token, then
+an empty line. `claude setup-token` prints the token across line breaks, so the paste runs up to that
+empty line and its lines are joined (`hal.output.hidden_paste`, the reader the secrets wizard uses
+too); text after the empty line, a line at the terminal's 4095-byte limit or lines that cannot be one
+token are refused. Text that arrives only after the paste was read is not part of it and stays in the
+input for the shell. The paste is read without echo, judged by the reader's rules as the exact bytes
+to write, and only then written to `token.new` (created 0600) before the rename over `token`. A refused paste leaves the old token
 as it was; the folders are opened without following a link and locked for the swap.
 `agent-service/setup --check` changes nothing and says the first gap. The token is pasted only
 there, never on a command line or in an issue. The file is a regular file of at most 16 KiB with one line, the token: no JSON,
@@ -104,7 +108,7 @@ container user must own the directory and the file. 1000 is the operator's uid o
 own `claude setup-token` writes a file the container can read. Another uid needs its own renewal
 procedure, which is not covered here. It is a deployment choice, not the reader's requirement.
 
-**Renewal.** `agent-service/setup --renew` takes a new pasted line, writes it to `token.new` beside the
+**Renewal.** `agent-service/setup --renew` takes a new paste, writes it to `token.new` beside the
 old one and swaps the name (an atomic rename); the next run opens the file anew, without a restart. The bind
 is the directory, never the file: a file bind (or a compose `secrets:` file) would keep the old
 inode, and the rename would never reach the running container. A missing directory fails the start

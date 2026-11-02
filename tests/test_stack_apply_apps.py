@@ -135,7 +135,9 @@ def test_an_app_is_planned_and_started_after_one_yes_and_the_next_apply_changes_
     assert exit_code == 0, err
     assert "switch on      " in out
     assert "v2026.10.22.1 · into ~/srv/hopin" in out
-    assert "\nhopin is on at v2026.10.22.1\n" in out
+    assert "hopin           switched on    " in out
+    assert "v2026.10.22.1 · running · " in out
+    assert "is on at" not in out
     again = app_world.apply()
     assert again[0] == 0
     assert "nothing to change" in again[1]
@@ -158,10 +160,13 @@ def test_an_app_that_is_not_healthy_ends_partial_with_exit_1_and_no_record(app_w
     app_world.origin.release("v2026.10.22.1")
     app_world.docker.health_after_start = "unhealthy"
 
-    exit_code, _, err = app_world.apply()
+    exit_code, out, err = app_world.apply()
 
     assert exit_code == 1
-    assert "partial, hopin is not healthy at v2026.10.22.1 after 300s" in err
+    assert "hopin           failed  " in out
+    assert "not healthy at v2026.10.22.1 after 300s" in out
+    assert "partial, hopin failed" in err
+    assert err.splitlines()[-1] == "next: hal apply"
     assert not (app_world.state / "deployed").exists()
 
 
@@ -487,10 +492,14 @@ def test_a_stop_while_apply_waits_at_the_yes_prompt_checks_out_and_builds_nothin
         assert stop == 0
         written.append(barrier_file.read_bytes())
 
-    exit_code, _, err = app_world.run("yes", hal_stop_at_the_prompt, app_runtime=app_world.runtime)
+    exit_code, out, err = app_world.run(
+        "yes", hal_stop_at_the_prompt, app_runtime=app_world.runtime
+    )
 
     assert exit_code == 1
-    assert "hopin was switched off meanwhile (since 18.10. 08:00); not started" in err
+    assert "hopin           switched off meanwhile " in out
+    assert "since 18.10. 08:00; not started" in out
+    assert "partial, hopin switched off meanwhile" in err
     assert "build" not in app_world.docker.verbs
     assert [path.name for path in app_world.srv.iterdir()] == [".git"]
     assert marks.mark(KEY) is not None
@@ -623,7 +632,7 @@ def test_a_stop_that_comes_in_while_apply_holds_the_lock_waits_for_it_then_stops
 
     app_world.docker.during["start"] = hal_stop_while_start_holds_the_lock
 
-    exit_code, _, err = app_world.apply()
+    exit_code, out, err = app_world.apply()
     stop.join(JOIN_SECONDS)
 
     assert not stop.is_alive()
@@ -633,7 +642,8 @@ def test_a_stop_that_comes_in_while_apply_holds_the_lock_waits_for_it_then_stops
     assert "running" not in states
     assert app_world.runtime.health.clock() < apps.HEALTH_SECONDS  # the wait ended early
     assert exit_code == 1
-    assert "hopin was switched off meanwhile (since 18.10. 08:00); not started" in err
+    assert "since 18.10. 08:00; not started" in out
+    assert "partial, hopin switched off meanwhile" in err
     assert err.splitlines()[-1] == "next: hal start hopin"
     assert not any(row["State"] == "running" for row in app_world.docker.rows)
     assert not (app_world.state / "deployed").exists()

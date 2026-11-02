@@ -61,7 +61,7 @@ def in_the_first_look_after_the_start(world: World, happening: Callable[[], None
     world.docker.during["start"] = lambda: world.docker.during.update(ps=once)
 
 
-STOPPED_LINE = f"{KEY} was switched off meanwhile (since 22.10. 12:00); not started"
+STOPPED_LINE = "since 22.10. 12:00; not started"
 
 
 def test_a_stopped_app_stays_stopped_and_is_neither_fetched_nor_built(world, origin):  # noqa: F811
@@ -101,7 +101,7 @@ def test_a_stop_during_the_build_runs_no_create_and_keeps_the_record_and_the_bar
     hosted.docker.calls.clear()
     hosted.docker.during["build"] = lambda: switch_off_meanwhile(hosted)
 
-    assert hosted.run(plan) == [STOPPED_LINE]
+    assert hosted.held_off_causes(plan) == [STOPPED_LINE]
 
     assert "create" not in hosted.docker.verbs
     assert hosted.deployed()["tag"] == FIRST
@@ -117,7 +117,7 @@ def test_a_stop_during_the_health_wait_ends_it_early_and_removes_what_started_un
     origin.release(FIRST)
     in_the_first_look_after_the_start(hosted, lambda: switch_off_meanwhile(hosted))
 
-    assert hosted.run() == [STOPPED_LINE]
+    assert hosted.held_off_causes() == [STOPPED_LINE]
 
     assert hosted.runtime.health.clock() < apps.HEALTH_SECONDS  # the wait ended early
     first_look = hosted.docker.calls[hosted.docker.verbs.index("start") + 1]
@@ -137,7 +137,7 @@ def test_a_stop_in_the_look_that_finds_the_app_healthy_is_seen_under_the_lock_be
     origin.release(FIRST)
     in_the_first_look_after_the_start(hosted, lambda: switch_off_meanwhile(hosted))
 
-    assert hosted.run() == [STOPPED_LINE]
+    assert hosted.held_off_causes() == [STOPPED_LINE]
 
     assert hosted.deployed() is None
     assert hosted.docker.rows == []
@@ -154,9 +154,11 @@ def test_an_off_step_that_fails_after_a_stop_won_adds_its_failure_to_the_stop_li
     origin.release(FIRST)
     in_the_first_look_after_the_start(hosted, lambda: switch_off_meanwhile(hosted))
 
-    [failure] = hosted.run()
+    [result] = hosted.run()
 
-    assert failure.startswith(f"{STOPPED_LINE}; {KEY}: could not stop the containers of {KEY}, ")
+    failure = result.cause
+
+    assert failure.startswith(f"{STOPPED_LINE}; could not stop the containers of {KEY}, ")
     assert SENTINEL not in failure
     assert hosted.deployed() is None
 
@@ -181,9 +183,9 @@ def test_a_start_that_ends_the_switch_before_apply_looks_again_is_not_undone_by_
 
     monkeypatch.setattr(switches.Switches, "lock", lock)
 
-    assert hosted.run() == [
-        f"{KEY} was switched off and on again during the health wait; not recorded"
-    ]
+    [result] = hosted.run()
+    assert isinstance(result, apps.AppFailed)
+    assert result.cause == "was switched off and on again during the health wait; not recorded"
 
     assert hosted.deployed() is None
     assert {row["State"] for row in hosted.docker.rows} == {"running"}
@@ -199,7 +201,7 @@ def test_a_barrier_that_appears_meanwhile_stops_the_run_like_a_marker(world, ori
 
     world.docker.during["build"] = barrier_stands
 
-    assert world.run() == [f"{KEY} was switched off meanwhile; not started"]
+    assert world.held_off_causes() == ["not started"]
     assert "create" not in world.docker.verbs
 
 
@@ -208,7 +210,9 @@ def test_a_stop_is_reported_in_place_of_a_start_that_failed(world, origin):  # n
     world.docker.failing_verb = "start"
     world.docker.during["create"] = lambda: switch_off_meanwhile(world)
 
-    [failure] = world.run()
+    [result] = world.run()
+
+    failure = result.cause
 
     assert failure == STOPPED_LINE
 

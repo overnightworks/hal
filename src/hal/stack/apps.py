@@ -39,7 +39,6 @@ from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 
-from hal.output.command import Verb, command
 from hal.stack import (
     app_compose,
     app_contract,
@@ -159,6 +158,31 @@ class SkippedNote:
 
 
 @dataclass(frozen=True)
+class AppOn:
+    """The app is on and recorded; `seconds` is the run, from checkout to record."""
+
+    plan: AppPlan
+    seconds: float
+
+
+@dataclass(frozen=True)
+class AppFailed:
+    subject: AppPlan | OffPlan
+    cause: str
+
+
+@dataclass(frozen=True)
+class AppHeldOff:
+    """A stop won: running apply again would change nothing, only `hal start` ends it."""
+
+    plan: AppPlan
+    cause: str
+
+
+type AppResult = AppOn | AppFailed | AppHeldOff
+
+
+@dataclass(frozen=True)
 class AppsPlan:
     runtime: AppRuntime
     plans: tuple[AppPlan, ...] = ()
@@ -171,16 +195,14 @@ class AppsPlan:
     def changes_nothing(self) -> bool:
         return not self.plans and not self.offs
 
-    def run(
-        self, marks: switches.Switches, progress: Progress
-    ) -> Iterator[tuple[AppPlan | OffPlan, str | None]]:
-        """Each app in turn, the ones switched off first, with the failure line of its run. An
-        app that is on and recorded yields None; one switched off yields only a failure."""
+    def run(self, marks: switches.Switches, progress: Progress) -> Iterator[AppResult]:
+        """Each app in turn, the ones switched off first, with the result of its run. An app
+        switched off yields only a failure."""
         for off in self.offs:
             if failure := _switch_off(off.app.key, self.runtime, progress):
-                yield off, failure
+                yield AppFailed(off, failure)
         for plan in self.plans:
-            yield plan, _run(plan, self.runtime, marks, progress)
+            yield _run(plan, self.runtime, marks, progress)
 
 
 def plan_apps(
@@ -341,18 +363,6 @@ def _contract_services(app: catalog.App, tag: str, text: str | None) -> tuple[st
         raise AppError(str(error)) from error
 
 
-class SwitchedOffLine(str):
-    """The failure line of a run that a stop won: running apply again would change nothing."""
-
-
-def retry_command(key: str, failure: str) -> str:
-    """The command to run after a run that failed: apply again, unless a stop won, which only
-    start ends."""
-    if isinstance(failure, SwitchedOffLine):
-        return command(Verb.START, key)
-    return command(Verb.APPLY)
-
-
 class _SwitchedOffMeanwhile(Exception):
     """A stop, or a barrier, came in after the plan; the message is the line to report."""
 
@@ -361,17 +371,15 @@ def _require_on(plan: AppPlan, marks: switches.Switches) -> None:
     """Raises _SwitchedOffMeanwhile when the app's marker or its barrier stands now ."""
     mark = marks.mark(plan.app.key)
     if barrier.switched_off(mark, plan.ingress):
-        since = f" (since {switches.describe_since(mark.since)})" if mark else ""
-        raise _SwitchedOffMeanwhile(
-            f"{plan.app.key} was switched off meanwhile{since}; not started"
-        )
+        since = f"since {switches.describe_since(mark.since)}; " if mark else ""
+        raise _SwitchedOffMeanwhile(f"{since}not started")
 
 
 def _run(
     plan: AppPlan, runtime: AppRuntime, marks: switches.Switches, progress: Progress
-) -> str | None:
+) -> AppResult:
     """Check out the release, build, create and start under the switch lock, wait for health
-    outside it, record: the failure line of the first step that fails, None when the app is on and
+    outside it, record: the failure of the first step that fails, AppOn when the app is on and
     recorded. A stop that comes in meanwhile wins, wherever it comes in: the marker and the
     barrier are looked at before the checkout, under the lock around `create` and `start`, and
     under it again after the health wait; from `create` on, the off step removes what started,
@@ -379,6 +387,7 @@ def _run(
     names the step, so an interrupt can say where the containers may be partly replaced."""
     key, tag = plan.app.key, plan.release.tag
     progress.unit = key
+    started = runtime.health.clock()
     engine = app_compose.AppCompose(key, runtime.srv / key, runtime.docker)
     try:
         progress.step = f"look whether {key} was switched off"
@@ -397,15 +406,17 @@ def _run(
                 runtime.record.write(
                     key, Deployment(tag, plan.sha, runtime.now().isoformat(timespec="seconds"))
                 )
-        return failure
+        if failure:
+            return AppFailed(plan, failure)
+        return AppOn(plan, runtime.health.clock() - started)
     except _SwitchedOffMeanwhile as meanwhile:
-        return SwitchedOffLine(str(meanwhile))
+        return AppHeldOff(plan, str(meanwhile))
     except app_contract.ContractError as error:
-        return str(error)
+        return AppFailed(plan, str(error))
     except (checkout.GitError, compose.ComposeError, switches.SwitchError) as error:
-        return f"{key}: could not {progress.step}, {error}"
+        return AppFailed(plan, f"could not {progress.step}, {error}")
     except OSError as error:
-        return f"{key}: could not {progress.step} ({error.strerror})"
+        return AppFailed(plan, f"could not {progress.step} ({error.strerror})")
 
 
 def _build(
@@ -463,12 +474,12 @@ def _wait_until_healthy(
             engine, plan.services, runtime.health, lambda: _require_on(plan, marks)
         )
     except _SwitchedOffMeanwhile:
-        return f"{key} was switched off and on again during the health wait; not recorded"
+        return "was switched off and on again during the health wait; not recorded"
     except compose.ComposeError as error:
-        return f"{key}: could not {progress.step}, {error}"
+        return f"could not {progress.step}, {error}"
     if unhealthy:
         return (
-            f"{key} is not healthy at {tag} after {runtime.health.seconds:g}s ({unhealthy}); "
+            f"not healthy at {tag} after {runtime.health.seconds:g}s ({unhealthy}); "
             "the record stays, the fix is a newer tag"
         )
     return None
@@ -506,11 +517,11 @@ def _switch_off(key: str, runtime: AppRuntime, progress: Progress) -> str | None
                 removal_failure = error
             left = engine.containers()
     except compose.ComposeError as error:
-        return f"{key}: could not {progress.step}, {error}"
+        return f"could not {progress.step}, {error}"
     if left:
         shown = ", ".join(container.describe() for container in left)
         reason = f" ({removal_failure})" if removal_failure else ""
-        return f"{key}: could not remove every container of {key}, left: {shown}{reason}"
+        return f"could not remove every container of {key}, left: {shown}{reason}"
     return None
 
 

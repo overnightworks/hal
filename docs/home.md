@@ -337,7 +337,12 @@ Mensch, alles andere der Assistent. Je Token:
    setzen und steht als Haken in der Liste. Cloudflare füllt nichts vor; die
    Liste nennt jede Permission, die Zone und das TTL-Enddatum; das Startdatum
    bleibt leer.
-3. Er nimmt den Wert unsichtbar entgegen. Leer lassen überspringt den Eintrag.
+3. Er nimmt den Wert unsichtbar entgegen, bis zu einer leeren Zeile: ein Token, das über
+   Zeilenumbrüche kopiert wurde, kommt ganz an, seine Zeilen werden ohne Leerraum verbunden,
+   und eine Notiz sagt, wie viele Zeilen es waren. Text nach der leeren Zeile, eine Zeile an der
+   Grenze des Terminals (4095 Bytes) oder Zeilen, die kein Token sein können, weist er ab, ohne
+   einen Teil zu zeigen. Eine leere erste Zeile überspringt den Eintrag. Was erst nach dem
+   Einlesen ankommt, bleibt in der Eingabe für den nächsten Leser.
 4. Er fragt den Anbieter, bevor er speichert: Cloudflare
    `GET /user/tokens/verify` muss `active` melden und darf kein Startdatum
    (`not_before`) in der Zukunft haben, GitHub muss
@@ -382,9 +387,9 @@ Beispiel (gekürzt, ein abgelehnter Versuch):
     [ ] Generate token, copy the value
     Enter opens the page in your browser:
     opened github.com/settings/personal-access-tokens/new?…
-    paste the token (hidden, empty skips):
+    paste the token, then an empty line (hidden, empty skips):
   ✗ github/fleet-read  rejected  GitHub answers 401 · paste again or leave empty
-    paste the token (hidden, empty skips):
+    paste the token, then an empty line (hidden, empty skips):
   ✓ github/fleet-read  verified  ~/.secrets/github/fleet-read (600)
   ✓ opentofu/state-passphrase  generated  ~/.secrets/opentofu/state-passphrase (600) · never shown
 ```

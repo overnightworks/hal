@@ -103,7 +103,8 @@ def test_an_app_that_fails_its_health_ends_the_local_part_partial_and_publishes_
     result = world.run("yes")
 
     assert result.exit_code == ExitCode.FAILURE
-    assert "partial, hopin is not healthy at v2026.10.22.1" in result.err
+    assert "partial, hopin failed" in result.err
+    assert "not healthy at v2026.10.22.1" in result.out
     assert NOTHING_PUBLISHED in result.err
     assert world.publish_never_began()
 
