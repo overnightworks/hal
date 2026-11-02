@@ -258,10 +258,14 @@ realm's 300 seconds (the operator's ruling of 01.11.2026): an agent signs in aga
 
 The realm grants no right with it: any account can get such a token, and an app admits it only for a member of
 its group `/apps/<app>/mcp`, which webauth checks. The three groups are empty; who joins one is decided in the
-console, after the app's privacy notice names the agent. The Keycloak probe (cells A1 to E1) measured on the pinned
-version: the consent page lists `offline_access` beside the app, and the scope of another app meets it again; discovery through the edge answers only in the
-appended form `/realms/hallucinai/.well-known/openid-configuration`, the two inserted forms are 404; client
-registration is refused for anonymous callers.
+console, after the app's privacy notice names the agent.
+
+The Keycloak probe (cells A1 to E1) measured on the pinned version:
+
+- The consent page lists `offline_access` beside the app, and the scope of another app meets it again.
+- Discovery through the edge answers only in the appended form
+  `/realms/hallucinai/.well-known/openid-configuration`; the two inserted forms are 404.
+- Client registration is refused for anonymous callers.
 
 ## Secrets
 

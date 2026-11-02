@@ -89,17 +89,3 @@ def test_the_client_is_public_with_the_rulings_settings() -> None:
     assert attributes["use.refresh.tokens"] == "false"
     assert attributes["pkce.code.challenge.method"] == "S256"
     assert client["consentRequired"] is True
-
-
-def test_each_mcp_scope_reaches_the_token_scope_and_the_consent_page() -> None:
-    realm = read("keycloak/realm.yaml")
-    shown = {
-        scope["name"]: scope["attributes"]
-        for scope in realm["clientScopes"]
-        if scope["name"].startswith("mcp-")
-    }
-
-    assert shown
-    for attributes in shown.values():
-        assert attributes["include.in.token.scope"] == "true"
-        assert attributes["display.on.consent.screen"] == "true"

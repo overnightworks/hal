@@ -22,6 +22,8 @@ import yaml
 from service_audience_cell import audience_of
 from test_rp import token_claims
 
+from hal.stack.realm.observe import CLIENT, CONFIG_CLI_STATE, canonical, without_volatile
+
 REALM = "hallucinai"
 AUTH_PATH = f"/realms/{REALM}/protocol/openid-connect/auth"
 TOKEN_PATH = f"/realms/{REALM}/protocol/openid-connect/token"
@@ -34,8 +36,6 @@ INSERTED_DISCOVERY = (
 )
 INTERNAL_HOST = "songmaker.mcp.internal"
 REALM_FILE = Path(__file__).resolve().parents[2] / "keycloak" / "realm.yaml"
-CONFIG_CLI_STATE = "de.adorsys.keycloak.config"
-VOLATILE = frozenset({"id", "containerId", "parentId", "flowId", "internalId", "access"})
 MCP_SCOPE_PREFIX = "mcp-"
 APPS_GROUP = "/apps"
 
@@ -111,6 +111,7 @@ class Declared:
     client_id: str
     callback: str
     apps: dict[str, str]  # app -> the audience its scope names
+    consent_texts: dict[str, str]  # app -> the words its scope shows on the consent page
 
     @classmethod
     def read(cls) -> Declared:
@@ -124,14 +125,12 @@ class Declared:
             for name, scope in scopes.items()
             if name.startswith(MCP_SCOPE_PREFIX)
         }
-        return cls(client["clientId"], client["redirectUris"][0], audiences)
-
-
-@dataclass(frozen=True)
-class Person:
-    id: str
-    name: str
-    password: str
+        texts = {
+            name.removeprefix(MCP_SCOPE_PREFIX): scope["attributes"]["consent.screen.text"]
+            for name, scope in scopes.items()
+            if name.startswith(MCP_SCOPE_PREFIX)
+        }
+        return cls(client["clientId"], client["redirectUris"][0], audiences, texts)
 
 
 def header_of(jwt: str) -> dict[str, Any]:
@@ -139,19 +138,23 @@ def header_of(jwt: str) -> dict[str, Any]:
     return token_claims(f"x.{jwt.split('.')[0]}")
 
 
-def settings(value: Any) -> Any:
-    """A representation without ids and config-cli's bookkeeping attributes, which change on
-    every import, and with lists of names in order, which Keycloak answers in any."""
+def without_state(value: Any) -> Any:
+    """Drops config-cli's bookkeeping attributes, which change on every import, and the keys that
+    never leave (a client's secret), so a difference never prints them."""
     if isinstance(value, dict):
         return {
-            key: settings(item)
+            key: without_state(item)
             for key, item in value.items()
-            if key not in VOLATILE and not key.startswith(CONFIG_CLI_STATE)
+            if key not in CLIENT.secret and not key.startswith(CONFIG_CLI_STATE)
         }
     if isinstance(value, list):
-        items = [settings(item) for item in value]
-        return sorted(items) if all(isinstance(item, str) for item in items) else items
+        return [without_state(item) for item in value]
     return value
+
+
+def settings(value: Any) -> Any:
+    """A representation the observe's way (no ids, sets in order) and without the import's state."""
+    return canonical(without_volatile(without_state(value)))
 
 
 def differences(before: Any, after: Any, path: str = "") -> list[str]:
@@ -194,12 +197,19 @@ class AgentsClientCell:
     def client(self) -> Declared:
         return self.declared
 
-    def person(self, name: str, *groups: str) -> Person:
+    def unique(self, name: str) -> str:
+        """A name proof 7 keeps apart: a repeated name would drop the earlier value it sweeps."""
+        return f"{name} {secrets.token_hex(3)}"
+
+    def browser(self, name: str) -> Any:
+        return self.probe.browser(self.unique(name))
+
+    def person(self, name: str, *groups: str) -> terms_cell.User:
         password = self.probe.keep_secret(f"{name} password", secrets.token_urlsafe(16))
         user_id = self.admin.create_user(REALM, name, password)
         for group in groups:
             self.admin.join_group(user_id, group)
-        return Person(user_id, name, password)
+        return terms_cell.User(user_id, name, password)
 
     # --- the authorization code flow ------------------------------------------------------------
 
@@ -220,7 +230,7 @@ class AgentsClientCell:
         )
         return self.probe.through_tunnel("GET", f"{AUTH_PATH}?{query}", opener=opener), verifier
 
-    def sign_in(self, opener: Any, who: Person, page: Answer) -> Answer:
+    def sign_in(self, opener: Any, who: terms_cell.User, page: Answer) -> Answer:
         action, fields = self.form_with(page, "username")
         answer = self.probe.through_tunnel_url(
             "POST",
@@ -240,7 +250,9 @@ class AgentsClientCell:
             f"the answer {answer.status} to {location.partition('?')[0]!r} is no code at "
             f"{self.declared.callback}",
         )
-        return self.probe.keep_secret("agents authorization code", query_of(answer)["code"][0])
+        return self.probe.keep_secret(
+            self.unique("agents authorization code"), query_of(answer)["code"][0]
+        )
 
     def consent_button(self, page: Answer, button: str) -> str:
         found = terms_cell.TermsCell(self.probe, self.expect, self.form_with, self.client)
@@ -264,23 +276,25 @@ class AgentsClientCell:
             },
         )
 
-    def first_page(self, who: Person, scope: str, **changes: str) -> tuple[Any, Answer, str]:
+    def first_page(
+        self, who: terms_cell.User, scope: str, **changes: str
+    ) -> tuple[Any, Answer, str]:
         """A fresh browser signed in up to the page Keycloak answers with (consent or code)."""
-        opener = self.probe.browser(f"agents {who.name}")
+        opener = self.browser(f"agents {who.name}")
         login, verifier = self.start(opener, scope, **changes)
         self.expect(login.status == 200, f"the login page for {who.name} answered {login.status}")
         return opener, self.sign_in(opener, who, login), verifier
 
-    def token_response(self, who: Person, scope: str, **changes: str) -> Answer:
-        opener, page, verifier = self.first_page(who, scope, **changes)
+    def token_response(self, who: terms_cell.User, scope: str) -> Answer:
+        opener, page, verifier = self.first_page(who, scope)
         if page.status == 200:
             page = self.answer_consent(opener, page, "accept")
-        return self.exchange(
-            self.code_of(page), verifier, **{k: v for k, v in changes.items() if k == "resource"}
-        )
+        return self.exchange(self.code_of(page), verifier)
 
-    def access_of(self, who: Person, scope: str) -> dict[str, Any]:
-        tokens = self.probe.tokens_from(f"agents {who.name}", self.token_response(who, scope))
+    def access_of(self, who: terms_cell.User, scope: str) -> dict[str, Any]:
+        tokens = self.probe.tokens_from(
+            self.unique(f"agents {who.name}"), self.token_response(who, scope)
+        )
         return token_claims(tokens["access_token"])
 
     # --- D: the transition ----------------------------------------------------------------------
@@ -325,7 +339,7 @@ class AgentsClientCell:
             who = self.person(f"probe-agents-{client.client_id}-session", client.group)
             tokens = self.probe.app_client_sign_in(
                 client,
-                self.probe.browser(f"agents {client.client_id} session"),
+                self.browser(f"agents {client.client_id} session"),
                 who.name,
                 who.password,
                 self.probe.secret_values[client.secret_file],
@@ -354,7 +368,7 @@ class AgentsClientCell:
                     f.result() for f in [pool.submit(self.refresh, client, token) for _ in "ab"]
                 ]
             for answer in answers:
-                self.probe.tokens_from(f"agents {client.client_id} refresh", answer)
+                self.probe.tokens_from(self.unique(f"agents {client.client_id} refresh"), answer)
             self.probe.held(
                 "D1",
                 f"{client.client_id}: a session signed in before the apply refreshes twice in turn "
@@ -373,7 +387,7 @@ class AgentsClientCell:
             "B1", f"{sorted(self.declared.apps)}: each /apps/<app>/mcp exists with no member"
         )
 
-    def tokens_per_app(self) -> dict[str, Person]:
+    def tokens_per_app(self) -> dict[str, terms_cell.User]:
         lifespan = self.admin.get(f"/{REALM}")["accessTokenLifespan"]
         members = {}
         for app, audience in self.declared.apps.items():
@@ -408,18 +422,30 @@ class AgentsClientCell:
                 "A1",
                 f"{app}: {decoded(access)}, typ at+jwt, lifespan {lifespan} s, no refresh token",
             )
+            self.no_offline_session()
             self.probe.held(
                 "B2", f"{app}: a member of {APPS_GROUP}/{app}/mcp alone: groups {access['groups']}"
             )
         return members
 
+    def no_offline_session(self) -> None:
+        client_id = self.admin.client(self.declared.client_id)["id"]
+        count = self.admin.get(f"/{REALM}/clients/{client_id}/offline-session-count")["count"]
+        self.expect(count == 0, f"asking offline_access left {count} offline sessions on agents")
+        self.probe.held("A2", "offline_access asked and consented: no offline session is stored")
+
     def consent_is_asked(self, page: Answer, app: str) -> None:
+        text, scope = self.declared.consent_texts[app], f"{MCP_SCOPE_PREFIX}{app}"
         self.expect(
-            page.status == 200 and app in page.text,
-            f"the first sign-in answered {page.status} and the page does not name {app}",
+            page.status == 200 and text in page.text and scope not in page.text,
+            f"the first sign-in answered {page.status}; the page shows {text!r}: "
+            f"{text in page.text}, the scope name instead: {scope in page.text}",
         )
         offline = "ffline" in page.text
-        self.probe.held("C1", f"the consent page names {app}; it lists offline_access: {offline}")
+        self.probe.held(
+            "C1",
+            f"the consent page shows {text!r}, not {scope!r}; it lists offline_access: {offline}",
+        )
 
     def second_authorization_asks_nothing(self, opener: Any, scope: str, audience: str) -> None:
         answer, _verifier = self.start(opener, scope, resource=audience)
@@ -428,7 +454,7 @@ class AgentsClientCell:
             "C2", "a second authorization in the same SSO session answers a code, no consent page"
         )
 
-    def tokens_without_the_scope_or_with_two(self, members: dict[str, Person]) -> None:
+    def tokens_without_the_scope_or_with_two(self, members: dict[str, terms_cell.User]) -> None:
         first, second, *_ = self.declared.apps
         both = self.access_of(
             members[first], f"{MCP_SCOPE_PREFIX}{first} {MCP_SCOPE_PREFIX}{second}"
@@ -462,15 +488,16 @@ class AgentsClientCell:
             and error.get("error") == ["access_denied"]
             and "code" not in error
             and not consents,
-            f"decline answered {answer.status} with {error}, consents {len(consents)}",
+            f"decline answered {answer.status} with error {error.get('error')}, code issued "
+            f"{'code' in error}, consents {len(consents)}",
         )
         self.probe.held("C3", "decline: access_denied, no code, no stored consent")
 
-    def another_apps_scope_asks_again(self, members: dict[str, Person]) -> None:
+    def another_apps_scope_asks_again(self, members: dict[str, terms_cell.User]) -> None:
         """Measured on the last app's member, who consented to that app's scope alone."""
         (other, *_), last = list(self.declared.apps), list(self.declared.apps)[-1]
         opener, page, _verifier = self.first_page(members[last], f"{MCP_SCOPE_PREFIX}{last}")
-        self.expect(page.status == 302, f"a consented scope answered {page.status}, not a code")
+        self.code_of(page)
         again, _ = self.start(opener, f"{MCP_SCOPE_PREFIX}{other}")
         page = (
             self.probe.through_tunnel_url("GET", again.headers["Location"], opener=opener)
@@ -489,11 +516,12 @@ class AgentsClientCell:
             "plain": {"code_challenge_method": "plain"},
         }
         for label, changes in wrong_methods.items():
-            answer, _ = self.start(self.probe.browser("agents A5"), "openid", **changes)
+            answer, _ = self.start(self.browser("agents A5"), "openid", **changes)
             error = query_of(answer)
             self.expect(
                 answer.status == 302 and "error" in error and "code" not in error,
-                f"PKCE {label} answered {answer.status} with {error}",
+                f"PKCE {label} answered {answer.status} with error "
+                f"{error.get('error')}, code issued {'code' in error}",
             )
         self.probe.held(
             "A5", "an authorization request without PKCE or with plain is refused, no code"
@@ -505,7 +533,7 @@ class AgentsClientCell:
             callback._replace(netloc=f"127.0.0.1:{callback.port}").geturl(),
             callback._replace(netloc=f"example.invalid:{callback.port}").geturl(),
         ):
-            answer, _ = self.start(self.probe.browser("agents A6"), "openid", redirect_uri=redirect)
+            answer, _ = self.start(self.browser("agents A6"), "openid", redirect_uri=redirect)
             self.expect(
                 answer.status == 400 and "Invalid parameter: redirect_uri" in answer.text,
                 f"redirect_uri {redirect} answered {answer.status}",
@@ -517,24 +545,30 @@ class AgentsClientCell:
 
     def other_grants_are_refused(self) -> None:
         name = self.declared.client_id
+        member = self.person("probe-agents-grant")
         grants = {
-            "password": {"grant_type": "password", "username": "x", "password": "x"},
+            "password": {
+                "grant_type": "password",
+                "username": member.name,
+                "password": member.password,
+            },
             "client_credentials": {"grant_type": "client_credentials"},
         }
         for label, form in grants.items():
             refused = self.probe.through_tunnel(
                 "POST", TOKEN_PATH, form={"client_id": name, **form}
             )
+            error = refused.json().get("error") if refused.status in (400, 401) else None
             self.expect(
-                refused.status in (400, 401) and "access_token" not in refused.text,
-                f"{label} on {name} answered {refused.status}",
+                error == "unauthorized_client" and "access_token" not in refused.text,
+                f"{label} on {name} answered {refused.status} with error {error}",
             )
         device = self.probe.through_tunnel("POST", DEVICE_PATH, form={"client_id": name})
         self.expect(
             device.status in (400, 401) and "device_code" not in device.text,
             f"device grant answered {device.status}",
         )
-        implicit, _ = self.start(self.probe.browser("agents A7"), "openid", response_type="token")
+        implicit, _ = self.start(self.browser("agents A7"), "openid", response_type="token")
         self.expect(
             "access_token" not in implicit.headers.get("Location", "")
             and implicit.status in (302, 400),
@@ -571,7 +605,8 @@ class AgentsClientCell:
             answer = self.probe.through_tunnel("GET", f"{AUTH_PATH}?{query}")
             self.expect(
                 answer.status == 302 and query_of(answer).get("error") == ["invalid_scope"],
-                f"{client_id} asking {scope!r} answered {answer.status} with {query_of(answer)}",
+                f"{client_id} asking {scope!r} answered {answer.status} with error "
+                f"{query_of(answer).get('error')}",
             )
         self.probe.held(
             "A9",
