@@ -721,7 +721,8 @@ marker_off() {
 
 this_boot_journal() {  # the journal is shared across `docker restart` (one boot id), so a boot is told by PID 1's start
     local booted_at
-    booted_at=$(date -d "$(systemctl show --value --property UserspaceTimestamp)" '+%F %T')
+    # To the microsecond: a start of the previous boot in the same second would otherwise count for this one.
+    booted_at=$(date -d "$(systemctl show --timestamp=us+utc --value --property UserspaceTimestamp)" '+%F %T.%6N')
     journalctl --unit cloudflared --since "$booted_at" --no-pager
     return
 }
