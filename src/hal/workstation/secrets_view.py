@@ -33,7 +33,7 @@ from pathlib import Path, PurePosixPath
 
 from hal.output.command import Verb, command
 from hal.workstation.layout import Layout
-from hal.workstation.manifest_fields import ManifestError, fail, https_link, require_key_of_kind, string, strings
+from hal.workstation.manifest_fields import ManifestError, fail, flag, https_link, require_key_of_kind, string, strings, value_prefix
 from hal.workstation.report import findings_count, markdown_table
 from hal.workstation.secrets_create import CreateCommand, is_renewal_sibling, parse_create
 from hal.workstation.tunnel_config import as_wildcard, with_tunnel_id
@@ -151,6 +151,7 @@ class SecretEntry:
     loosest_mode: int = LOOSEST_FILE_MODE
     loosest_mode_reason: str = ""
     create: CreateCommand | None = None
+    value_prefix: str = ""
 
     @property
     def retired(self) -> bool:
@@ -189,7 +190,7 @@ REQUIRED_KEYS = frozenset({"name", "kind", "paths", "read_by"})
 SOURCE_KEYS = frozenset({"provider", "resource", "scope", "expires_in_days"})
 RETIREMENT_KEYS = frozenset({"retired_on", "revoke_url", "revocation_confirmed"})
 MODE_KEYS = frozenset({"loosest_mode", "loosest_mode_reason"})
-OPTIONAL_KEYS = frozenset({"recreate", "create", "verify", "mirror_of", "purpose", "optional", "elsewhere", "page"}) | RETIREMENT_KEYS | SOURCE_KEYS | MODE_KEYS
+OPTIONAL_KEYS = frozenset({"recreate", "create", "verify", "mirror_of", "purpose", "optional", "elsewhere", "page", "value_prefix"}) | RETIREMENT_KEYS | SOURCE_KEYS | MODE_KEYS
 GITHUB_ACCESS_LEVELS = frozenset({"read", "write", "admin"})
 LONGEST_EXPIRY_DAYS = 366  # GitHub's ceiling for a fine-grained token's expires_in
 
@@ -246,13 +247,6 @@ def _retirement(path: Path, where: str, raw: Mapping[str, object]) -> Retirement
     revoke_url = https_link(path, where, raw, "revoke_url")
     confirmed = _date(path, where, raw, "revocation_confirmed") if "revocation_confirmed" in raw else None
     return Retirement(_date(path, where, raw, "retired_on"), revoke_url, confirmed)
-
-
-def _flag(path: Path, where: str, raw: Mapping[str, object], key: str) -> bool:
-    value = raw.get(key, False)
-    if not isinstance(value, bool):
-        raise fail(path, where, f"{key} must be true or false")
-    return value
 
 
 def _declared_mode(path: Path, where: str, raw: Mapping[str, object]) -> tuple[int, str]:
@@ -321,12 +315,13 @@ def _entry(path: Path, index: int, raw: object) -> SecretEntry:
         mirror_of=string(path, where, raw, "mirror_of") if "mirror_of" in raw else "",
         purpose=string(path, where, raw, "purpose") if "purpose" in raw else "",
         source=source,
-        optional=_flag(path, where, raw, "optional"),
+        optional=flag(path, where, raw, "optional"),
         elsewhere=string(path, where, raw, "elsewhere") if "elsewhere" in raw else "",
         page=https_link(path, where, raw, "page") if "page" in raw else "",
         loosest_mode=loosest_mode,
         loosest_mode_reason=loosest_mode_reason,
         create=create,
+        value_prefix=value_prefix(path, where, raw, kind, SecretKind.SERVICE_PASSWORD),
     )
     if entry.written_by_setup and (len(patterns) != 1 or _has_wildcard(patterns[0].name)):
         raise fail(path, where, "paths of an entry the wizard writes must be exactly one place without a wildcard")

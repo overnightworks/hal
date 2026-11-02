@@ -368,6 +368,13 @@ class Unproven:
     failure: str
 
 
+@dataclass(frozen=True)
+class BarriersUnproven:
+    """Every barrier that was active and not proven after a core recreate, in the order tried."""
+
+    proofs: tuple[Unproven, ...]
+
+
 type ActiveProof = Proven | NoHost | Unproven
 
 
