@@ -262,6 +262,20 @@ def test_an_interrupt_names_the_app_and_step_and_leaves_the_record_and_the_next_
     assert head_of(world.srv) == sha
 
 
+def test_an_app_that_came_up_reports_the_seconds_the_run_took(world, origin, docker):
+    origin.release(FIRST)
+    clock = Clock()
+    world.runtime = dataclasses.replace(
+        world.runtime, health=compose.Watch(clock.read, clock.sleep, 300)
+    )
+    docker.during["start"] = lambda: clock.sleep(42)
+
+    [result] = world.run()
+
+    assert isinstance(result, apps.AppOn)
+    assert result.seconds == 42
+
+
 def test_an_interrupt_during_the_health_wait_names_it_and_records_nothing(
     world, origin, docker, home, state
 ):
