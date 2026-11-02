@@ -37,6 +37,7 @@ from support.stack_apply import (
     OLD_IMAGE,
     PROBE_ENABLED,
     RECREATE_FOLLOWER,
+    RECREATE_SOCKET_PROXY,
     RECREATE_TRAEFIK,
     REPOSITORY,
     STEP_CA_BUMP,
@@ -44,6 +45,7 @@ from support.stack_apply import (
     STEP_CA_SERVICES,
     SWITCHED_OFF_AT,
     TWO_SETUPS,
+    UNFINISHED,
     ZONE,
     applied,
     apply_lock,
@@ -67,6 +69,7 @@ from support.stack_apply_fakes import (
     LABELLED_IMAGE_ID,
     NOT_FOUND,
     OTHER_LABELS,
+    PLAIN_NOT_FOUND,
     STEP_CA_IMAGE,
     InterruptedWaitForLock,
     ScriptedGit,
@@ -2183,10 +2186,8 @@ def test_start_from_a_runs_no_setup_check(start, scripted, repository, state, se
 
 
 PROBE_STOPPED = DISABLED + "  probe:\n    run: {enabled: true}\n"
-RECREATE_SOCKET_PROXY = [*RECREATE_TRAEFIK[:-1], "socket-proxy"]
 TRAEFIK_RECREATED = ("traefik", ResultEvent.RECREATED)
 SOCKET_PROXY_RECREATED = ("socket-proxy", ResultEvent.RECREATED)
-UNFINISHED = {"traefik": {}}
 
 
 def record_traefik(state: Path, digest: str) -> None:
@@ -2406,50 +2407,20 @@ def test_a_traefik_that_dies_right_after_the_recreate_is_partial_and_the_next_ru
 def test_an_unproven_barrier_after_the_recreate_is_partial_and_the_next_run_recreates_again(
     core_files, switch, scripted, repository, state, ingress
 ):
-    """#85 rule 5, S9, cell U9: partial naming the unit, that it may be reachable, and the
-    emergency stop; record unfinished, the next run plans again."""
+    """#85 rule 5, S9, cell U9: the run ends partial, the record stays unfinished, the next run
+    plans again."""
     probe_switched_off(scripted, repository, state)
     ingress.rejecting = True
 
-    exit_code, out, err = switch()
+    exit_code, out, _ = switch()
 
     assert exit_code == 1
-    assert "partial, the barrier of probe is not proven after the traefik recreate (" in err
-    assert (
-        "): probe may be reachable through Traefik; to close the tunnel now: hal offline; "
-        "no unit switched" in err
-    )
     assert applied(state) == UNFINISHED
     assert not find_row(out, *TRAEFIK_RECREATED)
     ingress.rejecting = False
     exit_code, out, _ = switch()
     assert exit_code == 0
     assert find_row(out, "traefik", PlanEvent.RECREATE, "the last recreate did not finish")
-
-
-def test_every_unproven_barrier_after_the_recreate_is_named_in_the_partial_line(
-    core_files, switch, scripted, repository, state, ingress
-):
-    """#85 rule 5, S9, P15: a failure two switched-off units share names both, because every
-    active barrier is tried, not only up to the first that fails."""
-    probe_switched_off(scripted, repository, state)
-    scripted.config["services"]["echo"] = {
-        "profiles": ["echo"],
-        "labels": {"traefik.enable": "true", "edge.name": "echo"},
-    }
-    write_fleet(repository, PROBE_STOPPED + "  echo:\n    run: {enabled: true}\n")
-    scripted.containers["echo"] = "exited"
-    switch_off(state, unit="echo")
-    ingress.rejecting = True
-
-    exit_code, _, err = switch()
-
-    assert exit_code == 1
-    assert "partial, the barriers of probe, echo are not proven after the traefik recreate (" in err
-    assert "(probe: " in err
-    assert "; echo: " in err
-    assert "): probe, echo may be reachable through Traefik; to close the tunnel now: " in err
-    assert applied(state) == UNFINISHED
 
 
 @pytest.mark.parametrize("failure", ["unproven barrier", "traefik not running"])
@@ -2771,24 +2742,6 @@ def test_every_core_recreate_proves_the_barriers_before_its_success_line(
     assert row_at(out, *SOCKET_PROXY_RECREATED, "barriers proven") < row_at(
         out, *TRAEFIK_RECREATED, "barriers proven"
     )
-
-
-def test_an_unproven_barrier_after_the_socket_proxy_recreate_names_the_unit_and_the_stop(
-    applied_core, switch, scripted, repository, state, ingress
-):
-    """#87 rule 4, S9, cell D9 (#85 rule 5): partial, traefik not recreated, no success line."""
-    probe_switched_off(scripted, repository, state)
-    scripted.change_definition("socket-proxy")
-    ingress.rejecting = True
-
-    exit_code, out, err = switch()
-
-    assert exit_code == 1
-    assert "the barrier of probe is not proven after the socket-proxy recreate (" in err
-    assert "probe may be reachable through Traefik; to close the tunnel now: hal offline" in err
-    assert up_calls(scripted) == [RECREATE_SOCKET_PROXY]
-    assert not find_row(out, *SOCKET_PROXY_RECREATED)
-    assert applied(state) == UNFINISHED
 
 
 HASH_FAILURES = {
@@ -3322,10 +3275,7 @@ def test_a_core_change_a_follower_change_and_a_unit_switch_share_one_yes_in_orde
     """#89 rules 1, 3, cell F13: socket-proxy, traefik, traefik-mcp, then the unit; the barriers
     are proven after each core recreate only."""
     scripted.config["services"]["echo"] = {"profiles": ["echo"]}
-    write_fleet(
-        repository,
-        ENABLED + "  probe:\n    run: {enabled: true}\n  echo:\n    run: {enabled: true}\n",
-    )
+    write_fleet(repository, PROBE_ENABLED + "  echo:\n    run: {enabled: true}\n")
     scripted.containers["hello"] = "exited"
     switch_off(state, unit="probe")
     scripted.change_definition("socket-proxy")
@@ -3776,3 +3726,48 @@ def test_keycloak_that_starts_in_this_run_is_not_checked_and_one_line_says_so(
     assert exit_code == 0
     assert PlanEvent.REALM_LATER in out
     assert (realm_backup.asked, scripted.realm_applies) == ([], 0)
+
+
+def test_a_core_recreate_with_an_unproven_barrier_runs_no_follower_unit_or_switch(
+    step_ca_applied, switch, scripted, repository, state, ingress, monkeypatch
+):
+    """D7: the planned follower, unit service and switch-on wait for a proof that failed."""
+    scripted.config["services"]["echo"] = {
+        "profiles": ["echo"],
+        "labels": {"traefik.enable": "true", "edge.name": "echo"},
+    }
+    write_fleet(repository, PROBE_ENABLED + "  echo:\n    run: {enabled: true}\n")
+    scripted.put_containers({"hello": "exited", "echo": "exited"})
+    switch_off(state, unit="probe")
+    for service in ("traefik", "traefik-mcp", "step-ca"):
+        scripted.change_definition(service)
+    monkeypatch.setattr(ingress, "fetch", lambda *_: PLAIN_NOT_FOUND)
+
+    exit_code, out, _ = switch()
+
+    assert exit_code == 1
+    assert find_row(out, "barriers", ResultEvent.NOT_PROVEN, "probe ·")
+    assert up_calls(scripted) == [RECREATE_TRAEFIK]
+
+
+def test_an_app_key_stands_in_the_barrier_proof_of_a_core_recreate(
+    core_files, switch, scripted, repository, state, ingress, monkeypatch
+):
+    """D10: a catalogued app is proven by its key like a unit."""
+    write_fleet(
+        repository,
+        "cloudflare: {zone: probe.test}\ngithub: {org: overnightworks}\n"
+        "services:\n  probe:\n    run: {enabled: true}\n"
+        "  kapp:\n    repo: {default_branch: main}\n    run: {enabled: true}\n"
+        "    hosts: [{name: kapp, exposure: public, reason: a public page, ready: /}]\n",
+    )
+    switch_off(state, unit="kapp")
+    switch_off(state, unit="probe")
+    scripted.containers["hello"] = "exited"
+    scripted.change_definition("traefik")
+    monkeypatch.setattr(ingress, "fetch", lambda *_: PLAIN_NOT_FOUND)
+
+    exit_code, out, _ = switch()
+
+    assert exit_code == 1
+    assert find_row(out, "barriers", ResultEvent.NOT_PROVEN, "kapp · may be reachable")

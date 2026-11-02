@@ -17,6 +17,7 @@ from hal.stack.apps import (
     AppSwitchedOff,
     OffPlan,
 )
+from hal.stack.barrier import BarriersUnproven
 from hal.stack.legal_step import LEGAL_UNIT, LegalPlan, PageChange
 from hal.stack.plan_rows import ChangeNoun, PlanEvent, appkit_row
 from hal.stack.realm import Kind
@@ -58,6 +59,7 @@ class ResultEvent(StrEnum):
     APP_SWITCH_OFF_FAILED = "switch off failed"
     APP_HELD_OFF = "switched off meanwhile"
     RECREATED = "recreated"
+    NOT_PROVEN = "not proven"
     FILES_WRITTEN = "files written"
     FILES_REMOVED = "files removed"
     PAGES_WRITTEN = "pages written"
@@ -153,6 +155,34 @@ def recreated_row(recreated: Recreated) -> Row:
     took = format_duration(recreated.seconds)
     fact = _SEPARATOR.join(("barriers proven", took)) if recreated.barriers_proven else took
     return Row(Glyph.DONE, recreated.service, ResultEvent.RECREATED, fact)
+
+
+def unproven_row(failure: BarriersUnproven) -> Row:
+    """The barriers that are not proven after a core recreate: each key, its cause dim under the
+    row, and the way on last."""
+    keys = ", ".join(printable(proof.unit) for proof in failure.proofs)
+    causes = tuple(
+        f"{printable(proof.unit)}: {printable(proof.failure)}" for proof in failure.proofs
+    )
+    then = (
+        f"then: {command(Verb.APPLY)} repeats the proof{_SEPARATOR}"
+        f"{command(Verb.ONLINE)} reopens only once every barrier is proven"
+    )
+    return Row(
+        Glyph.FAILED,
+        "barriers",
+        ResultEvent.NOT_PROVEN,
+        f"{keys}{_SEPARATOR}may be reachable through Traefik",
+        details=(*causes, then),
+    )
+
+
+def unproven_partial() -> tuple[str, str]:
+    """The run's `partial, ...` text for unproven barriers and the command that closes the
+    tunnel."""
+    return f"partial, barriers {ResultEvent.NOT_PROVEN}{_SEPARATOR}no unit switched", command(
+        Verb.OFFLINE
+    )
 
 
 def appkit_rows(plan: AppkitPlan) -> tuple[Row, ...]:
