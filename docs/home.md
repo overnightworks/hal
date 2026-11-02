@@ -355,6 +355,7 @@ Mensch, alles andere der Assistent. Je Token:
    Rechte.
 
 Die State-Passphrase erzeugt er zufällig und schreibt sie, ohne sie zu zeigen.
+Ebenso erzeugt er den LiteLLM-Schlüssel jeder App (`~/.secrets/litellm/apps/songmaker`, `hopin`, `presentator`) mit dem Präfix `sk-` (Manifest-Schlüssel `value_prefix`), Modus 0644 im 0700-Ordner, und nur, wenn die Datei fehlt.
 Key-ID und API-Token des TURN-Keys, den nur HopIn nutzt (`cloudflare/turn-hopin/key-id` und
 `…/api-token`, Art „token, unverified“), nimmt er ebenso unsichtbar entgegen, nennt vorher, wo
 der Key entsteht (Cloudflare › Realtime › TURN, beide Werte zeigt Cloudflare nur einmal), und
