@@ -45,10 +45,10 @@ leaves the barrier unproven after the recreate, and the next apply proves it. It
 live stack (#592): its Traefik listens on `edge_copy.PROBE_HOST` and routes only its project,
 behind a network guard. Residual: the live Traefik also routes the probe's `hello` until teardown.
 
-    flock -o -w 1200 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 900 \\
+    flock -o -w 1200 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \\
         python3 probe/switches/probe.py --scratch DIR
 
-Measured teardown: 2.8 s after a SIGTERM at 120 s (K 30 s, CAP 900 s; the full run took under
+Measured teardown: 2.8 s after a SIGTERM at 120 s (K 30 s, CAP 1800 s; the full run took under
 643 s with the lock wait). Needs an existing, empty --scratch directory, and `uv`: it runs
 `uv sync` in the copy. It leaves --scratch empty, passed or failed (`edge_copy`).
 """

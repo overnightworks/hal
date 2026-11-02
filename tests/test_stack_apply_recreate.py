@@ -13,10 +13,12 @@ from support.stack_apply import (
     ENABLED,
     OLD_IMAGE,
     RECREATE_FOLLOWER,
+    RECREATE_SOCKET_PROXY,
     RECREATE_TRAEFIK,
     STEP_CA_BUMP,
     STEP_CA_ON,
     STEP_CA_SERVICES,
+    UNFINISHED,
     applied,
     applied_core,  # noqa: F401 the fixture, requested by name below
     at_terminal,  # noqa: F401 the fixture, requested by name below
@@ -39,10 +41,7 @@ from support.stack_apply import (
     up_calls,
     write_fleet,
 )
-from support.stack_apply_fakes import (
-    IMAGE,
-    PLAIN_NOT_FOUND,
-)
+from support.stack_apply_fakes import IMAGE, PLAIN_NOT_FOUND
 from support.stack_core import bind, sha256
 from support.stack_plan_rows import detail_lines, find_row, plain, row_at
 
@@ -54,8 +53,6 @@ HOST_UNITS = {"hello": "probe", "echo": "echo"}  # the first label of a host, th
 RECREATE_STEP_CA = [*RECREATE_TRAEFIK[:-1], "step-ca"]
 RECREATE_KEYCLOAK_DB = [*RECREATE_TRAEFIK[:-1], "keycloak-db"]
 RECREATE_KEYCLOAK = [*RECREATE_TRAEFIK[:-1], "keycloak"]
-RECREATE_SOCKET_PROXY = [*RECREATE_TRAEFIK[:-1], "socket-proxy"]
-UNFINISHED = {"traefik": {}}
 THEN = "then: hal apply repeats the proof · hal online reopens only once every barrier is proven"
 STOPPED_BY_BARRIERS = [
     "error: partial, barriers not proven · no unit switched",
@@ -312,6 +309,7 @@ def test_a_marker_that_appears_after_the_yes_wins_and_the_run_is_partial(
     assert not find_row(out, "step-ca", ResultEvent.RECREATED)
     assert "partial, step-ca was switched off meanwhile" in err
     assert "step-ca is not recreated" in err
+    assert err.splitlines()[-1] == "next: hal apply"
     assert scripted.container_ids == ids
 
 
@@ -602,7 +600,7 @@ def test_a_core_recreate_that_proved_every_active_barrier_says_so(
 
 @pytest.mark.parametrize(
     ("unproven", "keys"),
-    [({"echo"}, ["echo"]), ({"probe", "echo"}, ["probe", "echo"])],
+    [({"probe"}, ["probe"]), ({"probe", "echo"}, ["probe", "echo"])],
     ids=["one beside a proven one", "every one"],
 )
 def test_a_core_recreate_with_an_unproven_barrier_prints_one_red_row_after_trying_every_barrier(
@@ -616,8 +614,8 @@ def test_a_core_recreate_with_an_unproven_barrier_prints_one_red_row_after_tryin
     ingress,  # noqa: F811
     monkeypatch,
 ):
-    """D1 to D4, D7: only the unproven keys stand, each with its cause, the way on last; the pair
-    ends the run with hal offline; the record stays unfinished and nothing after the proof ran."""
+    """D1 to D4: only the unproven keys stand, each with its cause, the way on last; the pair
+    ends the run with hal offline; the record stays unfinished."""
     _two_switched_off_units(scripted, repository, state)
     scripted.change_definition("traefik")
     asked = _barrier_answers(ingress, monkeypatch, unproven)

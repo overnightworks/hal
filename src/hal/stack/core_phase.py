@@ -39,8 +39,8 @@ class CorePhase:
         progress: Progress,
     ) -> CoreFailure | None:
         """The core, the followers, then the services to recreate (a live service of a unit that
-        runs on, the built service in any container state); the failure line of the first step
-        that fails."""
+        runs on, the built service in any container state); the failure of the first step
+        that fails (a line, or the unproven barriers)."""
         return self._recreate_core(engine, planned, marks, progress) or self._recreate_services(
             engine, planned, marks, progress
         )
@@ -74,7 +74,8 @@ class CorePhase:
         set's first recreate mark every recorded service of the set unfinished, whatever its
         liveness then; recreate each, observe it running with the core services it depends on,
         prove every active barrier, and only then record it with its plan-time digests (#85 rule
-        3, #87 rule 4). The failure line of the first step that fails, whose set is left marked
+        3, #87 rule 4). The failure of the first step that fails (a line, or the unproven
+        barriers), whose set is left marked
         unfinished once its first recreate began, so the next run recreates it (#85 rule 5). One
         stopped since the plan is not started; where it is the set's first, no recreate began
         and no entry changes (C3, #93 rule 2)."""
@@ -95,7 +96,7 @@ class CorePhase:
 
     def _stopped_meanwhile(
         self, engine: compose.Compose, plan: core.CorePlan, progress: Progress
-    ) -> CoreFailure | None:
+    ) -> str | None:
         """The failure line when the service has no live container now (#93 rules 1, 2)."""
         progress.step = f"look whether {plan.service} still runs"
         if _stopped_since_the_plan(engine.states(), plan):
@@ -122,8 +123,8 @@ class CorePhase:
         progress: Progress,
     ) -> CoreFailure | None:
         """Recreate the service, observe it running with the core services it depends on, prove
-        every active barrier, and only then record it; the failure line of the first step that
-        fails."""
+        every active barrier, and only then record it; the failure of the first step that fails (a
+        line, or the unproven barriers)."""
         config = planned.fleet.config
         started = self.watch.clock()
         progress.step = f"recreate {plan.service}"

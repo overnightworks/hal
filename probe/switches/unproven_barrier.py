@@ -41,8 +41,8 @@ def cell(probe: Probe) -> None:
     original = stat.S_IMODE(dynamic.stat().st_mode)
     # Traefik reads `dynamic/` as another user than the owner: only the write bits go, or it
     # could not read the directory at all, in this apply or after the mode is restored.
-    dynamic.chmod(original & ~(stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH))
     try:
+        dynamic.chmod(original & ~(stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH))
         out = probe.hal("apply", "--local", terminal=True, exit_code=HAL_FAILURE)
     finally:
         dynamic.chmod(original)
