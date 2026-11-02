@@ -579,7 +579,6 @@ def _confirm_and_switch(
     completed_setups: Sequence[str],
     realm_backup: reconcile.Backup,
 ) -> int:
-    print("the plan")
     _write_plan(planned)
     if not confirmed(f"apply {counted(changes_in(planned), ChangeNoun.CHANGE)}"):
         _say_aborted(completed_setups)

@@ -15,7 +15,15 @@ from hal.stack.realm.reconcile import (
     RealmSkipped,
     Stage,
 )
-from hal.stack.result_rows import app_partial, app_row, partial_error, result_rows, waiting_row
+from hal.stack.result_rows import (
+    app_partial,
+    app_row,
+    partial_error,
+    recreated_row,
+    result_rows,
+    waiting_row,
+)
+from hal.stack.service_recreate import Recreated
 
 SNAPSHOT = "37c2a56056d17297895e58c1ff98493754064280352422f136596266498fe056"
 REMOVAL = realm_lines.Change("hallucinai", realm_lines.Kind.REMOVAL, "group", "/console", members=0)
@@ -259,3 +267,10 @@ def test_the_cause_of_a_failed_app_is_escaped_in_the_row() -> None:
     row = app_row(AppFailed(app_plan(AppKind.ON), "a\x1b[31m\nb"))
 
     assert row.fact == "a\\x1b[31m\\nb"
+
+
+def test_a_recreated_service_is_a_done_row_with_the_time_it_took() -> None:
+    row = recreated_row(Recreated("traefik-mcp", 3.4))
+
+    assert (row.glyph, row.subject, str(row.event)) == (Glyph.DONE, "traefik-mcp", "recreated")
+    assert row.fact == "3s"

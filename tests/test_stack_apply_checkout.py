@@ -43,7 +43,7 @@ def test_an_equal_main_is_one_current_row_before_the_plan(switch, real_main, ori
 
     assert exit_code == 0
     assert find_row(out, CHECKOUT, CheckoutEvent.CURRENT, f"{short(real_main)} · origin/main")
-    assert plain(out).index("  ✓ checkout") < plain(out).index("the plan")
+    assert plain(out).index("  ✓ checkout") < plain(out).index("Type yes to apply")
     assert not [text for text in OLD_TEXT if text in out]
 
 
@@ -80,7 +80,7 @@ def test_a_behind_checkout_is_refused_naming_hal_update_and_writes_nothing(
     assert f"{waiting} behind" in plain(out)
     assert err.splitlines() == [refusal, "next: hal update"]
     assert not detail_lines(out)
-    assert "the plan" not in out
+    assert "Type yes" not in out
     assert ".env" not in out
     assert scripted.calls == []
     assert checkout_state(real_main, (*FETCH_WRITES, ".env")) == before
