@@ -29,11 +29,12 @@ import tomllib
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 from typing import TextIO
 from urllib.parse import urlsplit
 
-from api_canary import EXCEPTION_NAME, verdicts
+from api_canary import CLOSED_WORD, EXCEPTION_NAME, crashed_line, verdicts
 from device_sign_in import SignInFailed, sign_in
 from live_smoke import (
     CLIENT_SECRET_FILE,
@@ -62,6 +63,8 @@ CANARY_SERVICE = "agent-canary"
 MOUNTED_SERVICE_TOML = "/etc/agent-service/service.toml"
 API_ROUTE = "api"
 INSPECT_NAME = "{{.Name}}"
+STARTED_AT = "{{.State.StartedAt}}"
+MODIFIED_SECONDS = "%.9Y"
 
 
 class Reason(StrEnum):
@@ -70,6 +73,7 @@ class Reason(StrEnum):
     CONFIGURATION_UNREADABLE = "the configuration could not be read"
     NO_API_TABLE = "the service has no api table"
     OTHER_GATEWAY = "the service names another gateway"
+    FILE_NOT_LOADED = "the service has not loaded this file"
     ANSWER_HELD_MARKER = "route api, the answer held the marker"
     SIGN_IN_FAILED = "the sign-in failed"
     TURN_TIMED_OUT = "the turn timed out"
@@ -84,11 +88,11 @@ class Held(StrEnum):
 
 
 C0, C1, C2, CLEANUP = "C0 gateway", "C1 canary", "C2 census", "cleanup"
-WORD, NAME = r"[a-z_]{1,40}", EXCEPTION_NAME.pattern
+WORD, NAME = CLOSED_WORD.pattern, EXCEPTION_NAME.pattern
 SINK = r"[\w.-]+ (?:log|/[\w./-]*)"
 GATEWAY_FAILURES = (
     Reason.CONTAINER_MISSING, Reason.CONFIGURATION_UNREADABLE, Reason.NO_API_TABLE,
-    Reason.OTHER_GATEWAY,
+    Reason.OTHER_GATEWAY, Reason.FILE_NOT_LOADED,
 )  # fmt: skip
 CANARY_FAILURES = (
     Reason.SIGN_IN_FAILED, Reason.TURN_TIMED_OUT, Reason.TURN_NOT_STARTED,
@@ -168,10 +172,23 @@ def route_targets(stack: Stack) -> list[Target] | None:
     return targets
 
 
+def file_is_newer_than_the_service(stack: Stack) -> bool:
+    """Whether the mounted file changed after the service container started, so the running
+    service cannot have loaded it. ValueError when either time cannot be read."""
+    container = stack.compose("ps", "-q", AGENT_SERVICE).stdout.strip()
+    started = stack.run(["docker", "inspect", "--format", STARTED_AT, container])
+    modified = stack.compose(
+        "exec", "-T", AGENT_SERVICE, "stat", "-c", MODIFIED_SECONDS, MOUNTED_SERVICE_TOML
+    )
+    if started.returncode != 0 or modified.returncode != 0:
+        raise ValueError("a time could not be read")
+    return float(modified.stdout) > datetime.fromisoformat(started.stdout.strip()).timestamp()
+
+
 def gateway_reason(stack: Stack) -> Reason | None:
     """Why the running service does not name the front as its gateway, or None when it does."""
-    read = stack.compose("exec", "-T", AGENT_SERVICE, "cat", MOUNTED_SERVICE_TOML)
     try:
+        read = stack.compose("exec", "-T", AGENT_SERVICE, "cat", MOUNTED_SERVICE_TOML)
         if read.returncode != 0:
             return Reason.CONFIGURATION_UNREADABLE
         api = tomllib.loads(read.stdout).get("api")
@@ -179,9 +196,11 @@ def gateway_reason(stack: Stack) -> Reason | None:
             return Reason.NO_API_TABLE
         url = api.get("completion_url")
         host = urlsplit(url).hostname if isinstance(url, str) else None
-    except (tomllib.TOMLDecodeError, ValueError):
+        if host != FRONT:
+            return Reason.OTHER_GATEWAY
+        return Reason.FILE_NOT_LOADED if file_is_newer_than_the_service(stack) else None
+    except ValueError:
         return Reason.CONFIGURATION_UNREADABLE
-    return None if host == FRONT else Reason.OTHER_GATEWAY
 
 
 def bind_to_front(stack: Stack, say: Verdicts) -> list[Target] | None:
@@ -223,11 +242,6 @@ def canary_reason(process: subprocess.CompletedProcess[str]) -> str | None:
     return None if held else Reason.ANSWER_LACKED_MARKER
 
 
-def crashed(failure: Exception) -> str:
-    name = type(failure).__name__
-    return f"crashed {name if EXCEPTION_NAME.fullmatch(name) else 'Exception'}"
-
-
 def canary_turn(
     stack: Stack, say: Verdicts, obtain_tokens: Callable[[], Tokens], marker: str
 ) -> bool:
@@ -237,13 +251,16 @@ def canary_turn(
     except (LiveSmokeFailed, SignInFailed):
         say.refuse(C1, Reason.SIGN_IN_FAILED)
         return False
+    except Exception as failure:
+        say.refuse(C1, crashed_line(failure))
+        return False
     try:
         turn = paid_turn(
             stack, tokens, service=CANARY_SERVICE,
             smoke_arguments=("--marker", marker, "--request-marker", marker),
         )  # fmt: skip
     except Exception as failure:
-        say.refuse(C1, crashed(failure))
+        say.refuse(C1, crashed_line(failure))
         return False
     reason = canary_reason(turn.process)
     if reason is None:
@@ -274,7 +291,7 @@ def run_census(targets: list[Target], marker: str, census_run: Run, say: Verdict
         sweep = Census(census_run, secrets.token_bytes(16)).sweep(targets, {"canary": marker})
         census_cells(sweep, say)
     except Exception as failure:
-        say.refuse(C2, crashed(failure))
+        say.refuse(C2, crashed_line(failure))
 
 
 def live_canary(
@@ -309,10 +326,16 @@ def main(
         # the person opens the printed link by hand: no opener may write outside this boundary
         return sign_in(read_client_secret(), urlopen, pause, lambda _link: None, clock)
 
+    say = Verdicts(out)
     try:
-        return live_canary(stack_of(), Verdicts(out), obtain_tokens, census_run, pause)
+        return live_canary(stack_of(), say, obtain_tokens, census_run, pause)
     except KeyboardInterrupt:
-        return 130
+        interrupted = True
+    except Exception:  # no text may leave: the last line is the whole report
+        interrupted = False
+    say.failed = True
+    say.last()
+    return 130 if interrupted else 1
 
 
 if __name__ == "__main__":

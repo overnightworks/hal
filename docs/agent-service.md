@@ -364,7 +364,7 @@ to let people in; it has not been run. It makes a paid call, so it runs only whe
 person of the API group outside the subscription group: you sign in as for the live smoke, but the
 prompt is the only thing on standard error and no browser starts, you open its link yourself. It
 checks that the route's four containers run and that the running service's `[api]` names
-`litellm-front` as its gateway (C0), runs `agent-canary` once with a random value as both the request
+`litellm-front` as its gateway and that the service started after that file last changed (C0), runs `agent-canary` once with a random value as both the request
 and the answer it asks for (C1; any route but `api` fails), waits a few seconds, and runs the retention census
 over the four containers for that value (C2). Nothing is recreated; a failed canary ends the run, and a
 new run uses a new value. It prints only verdict lines of a closed grammar and a last line,

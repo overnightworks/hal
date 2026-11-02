@@ -8,6 +8,7 @@ import subprocess
 import sys
 import webbrowser
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -27,12 +28,15 @@ with probe_imports():
 
 SENTINEL = "sentinel-0f8e7d6c5b4a3921"
 FRONT, LITELLM = "litellm-front", "litellm"
+UNREADABLE = "the configuration could not be read"
 GOOD_TOML = '[api]\ncompletion_url = "http://litellm-front:4000/v1/chat/completions"\n'
 GOOD_TURN = "answer 200\nevent run_started\nroute api\nevent succeeded\nmarker yes\n"
 INSPECTED = {
     "Mounts": [],
     "HostConfig": {"Tmpfs": None, "MaskedPaths": [], "LogConfig": {"Type": "json-file"}},
 }
+STARTED = "2026-11-02T08:00:00.123456789Z"
+STARTED_EPOCH = datetime(2026, 11, 2, 8, 0, 0, tzinfo=UTC).timestamp()
 HOST_TABLE = b"20 1 0:18 / / ro - overlay overlay ro"
 PYTHON_REPORT = {"table": [["/", "overlay", False]], "mounts": []}
 
@@ -52,7 +56,10 @@ class Route:
     turn_code: int = 0
     toml: str | Exception = GOOD_TOML
     toml_code: int = 0
+    file_age: float = 60.0  # seconds the mounted file is older than the service container
+    stat_code: int = 0
     missing: str | None = None
+    doubled: str | None = None
     leftover_removal: int = 0
     log_dirty_in: str | None = None
     unreadable_log_of: str | None = None
@@ -69,9 +76,15 @@ class Route:
             return completed(json.dumps(resolved_configuration()))
         if "ps" in command and "-q" in command and "compose" in command:
             service = command[-1]
-            return completed("" if service == self.missing else f"id-{service}\n", stderr=SENTINEL)
+            listed = "" if service == self.missing else f"id-{service}\n"
+            listed += f"other-{service}\n" if service == self.doubled else ""
+            return completed(listed, stderr=SENTINEL)
         if command[:2] == ["docker", "inspect"]:
+            if live_canary.STARTED_AT in command:
+                return completed(STARTED, 0, SENTINEL)
             return completed(f"/{container_of(command[-1].removeprefix('id-'))}\n")
+        if "exec" in command and "stat" in command:
+            return completed(f"{STARTED_EPOCH - self.file_age:.9f}\n", self.stat_code, SENTINEL)
         if "exec" in command and "cat" in command:
             if isinstance(self.toml, Exception):
                 raise self.toml
@@ -241,6 +254,12 @@ def test_a_missing_container_stops_the_run_before_any_secret_or_sign_in(capsys, 
     assert_only_verdicts(run)
 
 
+def test_two_containers_for_one_service_are_a_missing_container(capsys):
+    run = drive(Route(doubled=FRONT), capsys)
+
+    assert run.stdout[0] == "C0 gateway FAILED: a container is missing"
+
+
 @pytest.mark.parametrize(
     ("route", "reason"),
     [
@@ -252,12 +271,25 @@ def test_a_missing_container_stops_the_run_before_any_secret_or_sign_in(capsys, 
             "the service names another gateway",
         ),
         (Route(toml="[api]\n"), "the service names another gateway"),
+        (Route(toml=UnicodeDecodeError("utf-8", b"\xff", 0, 1, "x")), UNREADABLE),
+        (Route(file_age=-1.0), "the service has not loaded this file"),
+        (Route(stat_code=1), UNREADABLE),
         (
             Route(toml='[api]\ncompletion_url = "http://litellm-front.evil.test:4000/v1"\n'),
             "the service names another gateway",
         ),
     ],
-    ids=["unreadable", "malformed", "no api", "other host", "no url", "host that only starts so"],
+    ids=[
+        "unreadable",
+        "malformed",
+        "no api",
+        "other host",
+        "no url",
+        "host that only starts so",
+        "not utf-8",
+        "file newer than the service",
+        "age unreadable",
+    ],
 )
 def test_a_service_that_does_not_name_the_front_stops_the_run_before_any_sign_in(
     capsys, route, reason
@@ -269,8 +301,9 @@ def test_a_service_that_does_not_name_the_front_stops_the_run_before_any_sign_in
     assert_only_verdicts(run)
 
 
-def test_a_docker_that_cannot_be_asked_is_a_missing_container(capsys):
-    run = drive(Route(toml=subprocess.TimeoutExpired("docker", 1)), capsys)
+@pytest.mark.parametrize("failure", [subprocess.TimeoutExpired("docker", 1), OSError("no docker")])
+def test_a_docker_that_cannot_be_asked_is_a_missing_container(capsys, failure):
+    run = drive(Route(toml=failure), capsys)
 
     assert run.stdout[0] == "C0 gateway FAILED: a container is missing"
     assert run.code == 1
@@ -287,6 +320,11 @@ API_START = ("answer 200", "event run_started", "route api")
 C1_FAILURES = {
     "sign-in": ({}, {"issuer": Issuer(fails=True)}, "the sign-in failed"),
     "secret": ({}, {"secret": LiveSmokeFailed("cannot read")}, "the sign-in failed"),
+    "secret not utf-8": (
+        {}, {"secret": UnicodeDecodeError("utf-8", b"\xff", 0, 1, "x")},
+        "crashed UnicodeDecodeError",
+    ),
+    "sign-in cannot start": ({}, {"secret": RuntimeError(SENTINEL)}, "crashed RuntimeError"),
     "timeout": (
         {"turn_raises": subprocess.TimeoutExpired("docker", 1)}, {}, "the turn timed out",
     ),
@@ -301,6 +339,9 @@ C1_FAILURES = {
         {"turn": turn_of(*API_START, "event failed", "code provider_error", "marker no"),
          "turn_code": 1},
         {}, "code provider_error",
+    ),
+    "exit code 1 though the marker is there": (
+        {"turn": GOOD_TURN, "turn_code": 1}, {}, "the answer lacked the marker"
     ),
     "marker": (
         {"turn": turn_of(*API_START, "event succeeded", "marker no"), "turn_code": 1},
@@ -334,6 +375,21 @@ def test_a_canary_that_fails_prints_its_closed_reason_and_runs_no_census(
     assert_only_verdicts(run)
 
 
+def test_one_random_value_is_the_marker_and_the_request_marker_of_a_run_and_a_new_run_has_a_new_one(
+    capsys,
+):
+    markers = []
+    for _ in range(2):
+        route = Route()
+        drive(route, capsys)
+        argv = next(command for command in route.asked if "agent-canary" in command)
+        marker = argv[argv.index("--marker") + 1]
+        assert argv[argv.index("--request-marker") + 1] == marker
+        markers.append(marker)
+
+    assert markers[0] != markers[1]
+
+
 # --- the cleanup ---------------------------------------------------------------------------
 
 
@@ -361,7 +417,10 @@ def test_a_container_that_cannot_be_removed_fails_the_run_without_its_diagnostic
 def test_a_canary_found_in_a_log_names_the_container_and_the_log_only(capsys):
     run = drive(Route(log_dirty_in=container_of(LITELLM)), capsys)
 
-    assert f"C2 census FAILED: found in {container_of(LITELLM)} log" in run.stdout
+    assert run.stdout[2:] == [
+        f"C2 census FAILED: found in {container_of(LITELLM)} log",
+        "canary and census FAILED",
+    ]
     assert run.code == 1
     assert_only_verdicts(run)
 
@@ -411,14 +470,50 @@ def test_a_missing_container_during_the_census_is_an_unexamined_sink_and_no_cras
     assert_only_verdicts(run)
 
 
-def test_an_interrupt_ends_the_run_with_130_and_no_last_line(capsys):
-    route = Route(turn_raises=KeyboardInterrupt())
+def test_an_interrupt_ends_the_run_with_130_and_the_failed_last_line(capsys):
+    run = drive(Route(turn_raises=KeyboardInterrupt()), capsys)
+
+    assert run.code == 130
+    assert run.stdout[-1] == "canary and census FAILED"
+    assert_only_verdicts(run)
+
+
+def test_an_interrupt_at_the_sign_in_ends_the_run_with_130_and_the_failed_last_line(capsys):
+    run = drive(Route(), capsys, secret=KeyboardInterrupt())
+
+    assert (run.code, run.stdout[-1]) == (130, "canary and census FAILED")
+    assert run.route.census_calls == []
+
+
+def test_an_exception_nothing_foresaw_ends_with_the_failed_last_line_and_no_text(capsys):
+    route = Route()
+    route.stack = lambda: (_ for _ in ()).throw(RuntimeError(SENTINEL))  # type: ignore[method-assign]
 
     run = drive(route, capsys)
 
-    assert run.code == 130
-    assert [line for line in run.stdout if not fits_grammar(line)] == []
-    assert not set(run.stdout) & FINAL
+    assert (run.code, run.stdout) == (1, ["canary and census FAILED"])
+    assert run.stderr == []
+
+
+def test_a_label_outside_the_grammar_is_never_printed_and_fails_the_census(capsys):
+    label = f"/{SENTINEL} with spaces"
+    route = Route()
+    census = route.census
+
+    def census_with_odd_mount(command, stdin=None):
+        if command[-3:] == ["python", "-I", "-"]:
+            odd = {"mount": label, "found": {"canary": 1}, "skips": {}}
+            report = {"table": [[label, "overlay", True]], "mounts": [odd]}
+            return Completed(0, json.dumps(report).encode(), b"")
+        return census(command, stdin)
+
+    route.census = census_with_odd_mount  # type: ignore[method-assign]
+
+    run = drive(route, capsys)
+
+    assert "C2 census FAILED: crashed GrammarBroken" in run.stdout
+    assert SENTINEL not in "\n".join(run.stdout)
+    assert run.code == 1
 
 
 # --- the table of the grammar itself ---------------------------------------------------------

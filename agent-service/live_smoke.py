@@ -50,6 +50,8 @@ from typing import Final
 import egress_observe
 from device_sign_in import CLIENT, SignInFailed, sign_in
 from egress_observe import PUBLIC_RESOLVER, UNREACHABLE, lan_address
+from retention_census import AGENT_SERVICE as SERVICE
+from retention_census import GATEWAY as EGRESS_SERVICE
 from smoke import EVENT_PREFIX, HOLDING_MESSAGE, SERVED_AFTER_RUN_STARTED, SERVED_BY, Tokens
 
 SECRETS_DIRECTORY = Path.home() / ".secrets"
@@ -64,9 +66,7 @@ LIVE_COMPOSE = (
 GATEWAY_ADDRESS_KEY = "x-egress-address"
 # compose.yaml's anchors of the gateway's entrypoint addresses, one per network it serves.
 ENTRYPOINT_ADDRESS_KEYS = (GATEWAY_ADDRESS_KEY, "x-litellm-egress-address")
-SERVICE = "agent-service"
 SMOKE_SERVICE = "agent-smoke"
-EGRESS_SERVICE = "agent-egress"
 LISTENING = "Uvicorn running"
 LISTEN_ATTEMPTS = 120
 SETTLE_SECONDS = 5

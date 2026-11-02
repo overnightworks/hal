@@ -127,12 +127,17 @@ def read_answer(
     return 0 if ended == "succeeded" and seen else 1
 
 
+def crashed_line(failure: Exception) -> str:
+    """The one line a crash prints: the type's name only, never its text."""
+    name = type(failure).__name__
+    return f"crashed {name if EXCEPTION_NAME.fullmatch(name) else 'Exception'}"
+
+
 def main(argv: list[str], stdin=sys.stdin, out=sys.stdout) -> int:
     try:
         return run(argv, stdin, out)
     except Exception as failure:
-        name = type(failure).__name__
-        print(f"crashed {name if EXCEPTION_NAME.fullmatch(name) else 'Exception'}", file=out)
+        print(crashed_line(failure), file=out)
         return 1
 
 

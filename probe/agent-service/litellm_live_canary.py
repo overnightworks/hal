@@ -1,6 +1,7 @@
-"""Probe of the live canary (#870, S4a of #299): `live_canary()` of agent-service/live_canary.py
-against the fake-only stack of litellm_retention.py, five runs: dirty, clean, a wrong answer, a
-missing container and a gateway that is not the front. Nothing live and nothing paid: the stack
+"""Probe of the live canary: `live_canary()` of agent-service/live_canary.py
+against the fake-only stack of litellm_retention.py, six runs: dirty, clean, a wrong answer, a
+missing container, a gateway that is not the front and a configuration file the service has not
+loaded. Nothing live and nothing paid: the stack
 refuses to start unless `internet` is internal and holds only the two fake hosts, the tokens are the
 stand-in issuer's and the sign-in is never reached (`main` is not called).
 
@@ -9,8 +10,8 @@ stand-in issuer's and the sign-in is never reached (`main` is not called).
 
 The wrapper runs through a `Stack` built from `compose_command(guard=True)` and the guard's own
 environment, so the guard and the execution resolve the same inputs; before the first call the
-stack's project is the probe's and every container name starts with it. Over all five outputs,
-stdout and stderr, every line fits the grammar of the issue's table and none holds a canary, a
+stack's project is the probe's and every container name starts with it. Over all six outputs,
+stdout and stderr, every line fits the grammar of the grammar table and none holds a canary, a
 token, a JWT-shaped or a UUID-shaped string. Exit 0: every cell held.
 """
 
@@ -45,7 +46,7 @@ from live_smoke import Stack  # noqa: E402
 from retention_census import run_docker  # noqa: E402
 from smoke import Tokens  # noqa: E402
 
-# The grammar of the issue's table, written from it and not from the program: a (cell, verdict)
+# The grammar of the grammar table, written from it and not from the program: a (cell, verdict)
 # and the figures that may follow.
 WORD, NAME = r"[a-z_]{1,40}", r"[A-Za-z]{1,60}"
 SINK = r"[\w.-]+ (?:log|/[\w./-]*)"
@@ -56,6 +57,7 @@ GRAMMAR = {
         "the configuration could not be read",
         "the service has no api table",
         "the service names another gateway",
+        "the service has not loaded this file",
     ],
     ("C1 canary", "held"): [r"route api, the answer held the marker"],
     ("C1 canary", "FAILED"): [
@@ -74,9 +76,8 @@ GRAMMAR = {
     ("cleanup", "FAILED"): ["a container was left"],
 }
 LAST_LINES = {"canary and census held", "canary and census FAILED"}
-SECRET_SHAPES = re.compile(
-    r"eyJ[\w-]+\.[\w-]+\.[\w-]+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
-)
+JWT_SHAPE = re.compile(r"eyJ[\w-]+\.[\w-]+\.[\w-]+")
+UUID_SHAPE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
 
 def fits_grammar(line: str) -> bool:
@@ -121,6 +122,7 @@ class LiveCanaryProbe(RetentionProbe):
         self.cell_wrong_answer()
         self.cell_missing_container()
         self.cell_wrong_gateway()
+        self.cell_file_not_loaded()
         self.cell_output()
 
     def stack(self, answered: Callable[[str], dict] | None = None) -> SteeredStack:
@@ -202,7 +204,7 @@ class LiveCanaryProbe(RetentionProbe):
         before = len(self.provider_requests())
         shipped = self.configuration.read_text(encoding="utf-8")
         self.configuration.write_text(
-            shipped.replace("http://litellm-front:4000", f"http://{LITELLM}:4000"), encoding="utf-8"
+            shipped.replace(f"{FRONT}:4000", f"{LITELLM}:4000"), encoding="utf-8"
         )
         try:
             code, lines = self.run_wrapper()
@@ -213,13 +215,30 @@ class LiveCanaryProbe(RetentionProbe):
         expect(len(self.provider_requests()) == before, "wrong gateway: the fake was reached")
         self.hold("wrong gateway", "[api] naming another host: exit 1 at C0 and no request")
 
+    def cell_file_not_loaded(self) -> None:
+        before = len(self.provider_requests())
+        self.configuration.write_text(
+            self.configuration.read_text(encoding="utf-8"), encoding="utf-8"
+        )
+        code, lines = self.run_wrapper()
+        expect(code == 1, f"file not loaded: {code} {lines}")
+        expect(lines[0] == "C0 gateway FAILED: the service has not loaded this file", f"{lines}")
+        expect(len(self.provider_requests()) == before, "file not loaded: the fake was reached")
+        self.hold(
+            "file not loaded",
+            "the file rewritten with the same content: exit 1 at C0 and no request",
+        )
+
     def cell_output(self) -> None:
         stray = [line for line in self.printed if not fits_grammar(line)]
         expect(not stray, f"lines outside the grammar: {len(stray)}")
         printed = "\n".join(self.printed)
         leaked = [value for value in self.forbidden if value in printed]
-        expect(not leaked and not SECRET_SHAPES.search(printed), "a secret shape was printed")
-        self.hold("output", f"{len(self.printed)} lines over five runs, all in the grammar, "
+        expect(
+            not leaked and not any(shape.search(printed) for shape in (JWT_SHAPE, UUID_SHAPE)),
+            "a secret shape was printed",
+        )
+        self.hold("output", f"{len(self.printed)} lines over six runs, all in the grammar, "
                   "no canary, token, JWT or UUID")  # fmt: skip
 
 
