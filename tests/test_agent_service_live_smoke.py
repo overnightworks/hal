@@ -654,25 +654,33 @@ def test_the_listeners_probe_container_logs_to_none():
 
 
 @pytest.mark.parametrize(
-    ("failure", "code", "printed"),
+    ("raising_name", "failure", "code", "printed"),
     [
-        (LiveSmokeFailed("the stack did not come up"), 1, "live smoke: the stack did not come up"),
-        (SignInFailed("the realm refused"), 1, "live smoke: the realm refused"),
         (
+            "read_secret",
+            LiveSmokeFailed("the stack did not come up"),
+            1,
+            "live smoke: the stack did not come up",
+        ),
+        ("sign_in", SignInFailed("the realm refused"), 1, "live smoke: the realm refused"),
+        (
+            "live_smoke",
             subprocess.TimeoutExpired("docker", 1),
             1,
             "live smoke: a docker command ran out of time",
         ),
-        (KeyboardInterrupt(), 130, "live smoke: interrupted"),
+        ("live_smoke", KeyboardInterrupt(), 130, "live smoke: interrupted"),
     ],
 )
 def test_a_failed_live_run_ends_with_its_exit_code_and_its_line_on_standard_error(
-    monkeypatch, capsys, failure, code, printed
+    monkeypatch, capsys, raising_name, failure, code, printed
 ):
     def failing(*_):
         raise failure
 
-    monkeypatch.setattr(live_smoke, "read_secret", failing)
+    monkeypatch.setattr(live_smoke, "read_secret", lambda *_: "a-secret-value")
+    monkeypatch.setattr(live_smoke, "sign_in", lambda _: TOKENS)
+    monkeypatch.setattr(live_smoke, raising_name, failing)
 
     assert live_smoke.main([]) == code
     captured = capsys.readouterr()

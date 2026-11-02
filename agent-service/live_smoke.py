@@ -145,7 +145,7 @@ class Stack:
     def run(
         self, command: Sequence[str], stdin: str | None = None, timeout: int = 300
     ) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(  # noqa: S603 - argv is built by the program itself and no shell runs
+        return subprocess.run(  # noqa: S603 - argv is built by the program itself and no shell parses it on the host
             command, input=stdin, capture_output=True, text=True, check=False, timeout=timeout,
             env=self.environment, cwd=self.directory,
         )  # fmt: skip
