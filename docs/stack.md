@@ -187,7 +187,8 @@ und importiert nach dem Merge nichts mehr. Steht der Checkout schon auf `origin/
 `checkout current`, `nothing to update` und `next: hal apply` und endet mit 0, ohne Frage.
 
 **Exit.** Die Codes der Grammatik: 0 aktualisiert oder nichts zu tun, 1 abgelehnt, 4 verweigert (ein
-Waechter oder die Pruefung nach dem `yes`), 3 Fehlschlag, 130 Ctrl-C. Ab dem Merge endet jeder behandelte
+Waechter oder die Pruefung nach dem `yes`; ein git, das nicht antworten kann, ist
+keine Verweigerung), 3 Fehlschlag (dieses git eingeschlossen), 130 Ctrl-C. Ab dem Merge endet jeder behandelte
 Fehler mit 3 und einer `error:`-Zeile mit `partial`, dem vollen Hash und dem Schritt (`merge`,
 `check HEAD after the merge`, `sync the dependencies`, `check HEAD after the sync`,
 `write the closing verdict`), dazu `next: hal apply`. Ab kurz vor dem Merge bis zum Ende wird ein Ctrl-C

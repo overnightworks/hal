@@ -77,6 +77,19 @@ def test_off_a_clean_main_it_refuses_naming_the_branch_or_every_dirty_path(world
     assert ("next: git -C ~/srv/hal status" in err) == (trouble == "dirty")
 
 
+def test_a_git_that_cannot_be_asked_about_the_checkout_ends_failed_not_refused(world, capsys):
+    """#50: a refusal is hal's no after looking; a git that gave no answer is a failed run."""
+    world.wait(*subjects("waiting"))
+
+    end = world.run(
+        git=Tamper(world, "symbolic-ref", answered(128, b"", b"fatal: boom\n"), merged=True)
+    )
+
+    assert end is UpdateEnd.FAILED
+    assert errors(capsys).startswith("error: cannot read the live checkout")
+    assert "Type yes" not in world.stdout()
+
+
 def test_while_an_apply_holds_the_lock_it_refuses_and_touches_nothing(world, capsys):
     """U3: the lock held by another process."""
     with (world.state / apply.APPLY_LOCK).open("w") as held:
