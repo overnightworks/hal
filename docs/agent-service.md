@@ -3,7 +3,7 @@
 Reference and runbook for the operator and for an engineer changing the agent service. The code is
 the truth: `compose.yaml` (the `agent-service` service, its `agent-songmaker`, `agent-presentator`, `agent-hopin`, `egress` and `mcp` networks),
 `agent-service/service.toml`, `agent-service/image/` (the image recipe), `agent-service/live_smoke.py`,
-`agent-service/live_signer.py` and the probes under `probe/agent-service/`. The egress gateway it leaves through is in
+`agent-service/live_signer.py`, `agent-service/live_canary.py` and the probes under `probe/agent-service/`. The egress gateway it leaves through is in
 [internal-ca.md](internal-ca.md); the platform picture is [architecture.md](architecture.md).
 
 ## The image
@@ -358,6 +358,19 @@ capability it receives verifies against `public.pem` (signature, `kid`, `aud`, t
 `songmaker.mcp.internal`); the stand-in is removed afterwards. Only the verdict is printed, never the
 capability. It needs `[apps.songmaker] mcp_origin` in `service.toml`. It also refuses once anything but traefik-mcp is on songmaker's MCP network; from then on
 songmaker's own call is the proof.
+
+**The live canary** is `cd ~/srv/hal && python3 agent-service/live_canary.py`, for the operator at the go
+to let people in; it has not been run. It makes a paid call, so it runs only when the operator says so, as a
+person of the API group outside the subscription group: you sign in as for the live smoke, but the
+prompt is the only thing on standard error and no browser starts, you open its link yourself. It
+checks that the route's four containers run and that the running service's `[api]` names
+`litellm-front` as its gateway and that the service started after that file last changed (C0), runs `agent-canary` once with a random value as both the request
+and the answer it asks for (C1; any route but `api` fails), waits a few seconds, and runs the retention census
+over the four containers for that value (C2). Nothing is recreated; a failed canary ends the run, and a
+new run uses a new value. It prints only verdict lines of a closed grammar and a last line,
+`canary and census held` or `canary and census FAILED`, matching the exit code; no exception text, token or
+container output reaches the terminal. The probe `probe/agent-service/litellm_live_canary.py` runs it
+against the fake-only stack.
 
 **The login command** is `python3 probe/agent-service/cells_12b.py --login-directory DIR`; its docstring gives the
 full command line (the probe-stack lock and a timeout). It starts the service in a throwaway project with `DIR` bound read-only as the

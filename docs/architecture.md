@@ -862,7 +862,7 @@ The rules are labelled "§10 rule n", because [edge#50](https://github.com/overn
 - "Never an IP" is about reaching a peer. A trust list such as webauth's `trusted_proxies` names a network that the compose file owns. Hopin pins `172.31.255.0/24` in its own `compose.yaml` (hopin#175), which owns that allocation.
 
 **§10 rule 3: each app owns its stores.**
-- No volume, database or Redis is shared across compose projects. The edge networks are the exception.
+- No volume, database or Redis is shared across compose projects. The stack's named networks are the exception.
 - Integration goes through the owning app's API.
 - A call between apps carries a signed, short-lived token whose audience is the callee: an issuer token, or the agent-service capability (agent-runtime decision record 0001). Never a static secret shared between apps.
 

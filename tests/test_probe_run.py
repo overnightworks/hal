@@ -406,7 +406,7 @@ def test_the_real_copy_venv_remote_and_work_clone_are_removed(tmp_path, scratch)
 
     def create(directory: Path) -> FakeProbe:
         home.mkdir()
-        edge_copy.repository_copy(repository, home, directory)
+        edge_copy.repository_copy(repository, home, directory, "edge-some-probe")
         edge_copy.advance_origin(directory, "advance", {"fleet.yaml": "# more\n"})
         assert (directory / edge_copy.WORK_CLONE).is_dir()
         return FakeProbe([], scratch=directory)

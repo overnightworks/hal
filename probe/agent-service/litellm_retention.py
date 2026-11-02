@@ -32,7 +32,7 @@ import secrets
 import subprocess
 import sys
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from pathlib import Path
 
 import yaml
@@ -41,6 +41,7 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(REPO / "agent-service"))
 
+from api_canary import verdicts  # noqa: E402
 from litellm import (  # noqa: E402
     CANARY_SECONDS,
     DEFAULT_APP,
@@ -59,7 +60,7 @@ from litellm import (  # noqa: E402
     run_scratch_probe,
 )
 from litellm_failures import FailureProbe  # noqa: E402
-from retention_census import Census, Completed, Sweep, Target  # noqa: E402
+from retention_census import ROUTE_SERVICES, Census, Sweep, Target, run_docker  # noqa: E402
 
 from hal.output import write_line  # noqa: E402
 
@@ -80,14 +81,6 @@ STORE_NAMES = re.compile(
     r"DATABASE|REDIS|CALLBACK|LANGFUSE|VERBOSE|SPEND|S3_|LITELLM_PRINT_STANDARD_LOGGING_PAYLOAD",
     re.I,
 )
-PYTHON_CONTAINERS = frozenset({LITELLM, SERVICE})
-
-
-def run_docker(command: Sequence[str], stdin: bytes | None = None) -> Completed:
-    result = subprocess.run(  # noqa: S603 - argv is built by the program itself and no shell runs
-        list(command), input=stdin, capture_output=True, timeout=300, check=False
-    )
-    return Completed(result.returncode, result.stdout, result.stderr)
 
 
 def canary(label: str) -> str:
@@ -146,8 +139,8 @@ class RetentionProbe(FailureProbe):
 
     def targets(self) -> list[Target]:
         return [
-            Target(self.container_name(service), service in PYTHON_CONTAINERS)
-            for service in (FRONT, GATEWAY, LITELLM, SERVICE)
+            Target(self.container_name(service), has_python)
+            for service, has_python in ROUTE_SERVICES.items()
         ]
 
     def sweep(self, tokens: Mapping[str, str]) -> Sweep:
@@ -331,7 +324,7 @@ class RetentionProbe(FailureProbe):
         during = self.sweep(tokens).found
         expect(len(self.hold_ends()) == already, "B4: the hold ended before the scan did")
         out, _ = process.communicate(timeout=CANARY_SECONDS)
-        run = self.verdicts(out, process.returncode)
+        run = verdicts(out, process.returncode)
         expect(run["exit"] == "0" and run.get("marker") == "yes", f"B4: {run}")
         expect(self.request_canary_hits(before) >= 1, "B4: the request canary never reached F")
         self.steer()
