@@ -16,8 +16,8 @@ or in which the control did not show, is NOT DRIVEN and fails the run. The servi
 image of the pull request's compose.yaml with a dummy login in the scratch HOME (never a real
 token) and adds E11 and E14. The probe always removes its containers and networks, and never
 touches the live stack: the project name is its own and is set on every command, its copy of
-compose.yaml names its fixed networks and volumes `<project>_...` (edge_copy.py), and every call
-that starts or removes something resolves only the project's names first (P26). Needs an existing,
+compose.yaml names the fixed `hal_*` networks `<project>_...` (edge_copy.py), and every call that
+starts or removes something resolves only the project's networks first (P26). Needs an existing,
 empty, writable --scratch directory. Exit 0: every cell held, 1: a cell failed or was not driven.
 
 The subject runs the `Client` class below: the driver sends its source to `python -I -` inside
@@ -279,8 +279,7 @@ class Probe:
     profiles: tuple[str, ...] = ("agent-service", "agent-probe")
 
     def __init__(self, scratch: Path, target: Target = Target.STAND_IN) -> None:
-        live_project = edge_copy.compose_project_name(COMPOSE_FILE.read_text())
-        expect(live_project != PROJECT, "the probe must never run in the live project")
+        expect(PROJECT != "edge", "the probe must never run in the live project")
         expect(not any(scratch.iterdir()), f"{scratch} is not empty")
         self.target = target
         home = scratch / "home"

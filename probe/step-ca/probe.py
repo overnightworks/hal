@@ -2,11 +2,11 @@
 #60 proof 11, #69 proof 12, #89 proof 13, #346 cells P13-P27): a throwaway compose project and a
 throwaway HOME.
 
-It runs a copy of `step-ca/init` against the scratch HOME, starts the real `step-ca`, `traefik-mcp`
+It runs the real `step-ca/init` against the scratch HOME, starts the real `step-ca`, `traefik-mcp`
 and `hello-mcp` services from compose.yaml and ca.json under their own compose project name, checks
 the proofs and always removes its containers, networks and volumes. It never touches the live
 stack: the project name and HOME are set in the environment of every command, and its compose
-calls and that copy resolve only the project's networks and volumes (edge_copy.py, P26).
+calls resolve only the project's networks (edge_copy.py, P26).
 
     flock -o -w 1200 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \\
         python3 probe/step-ca/probe.py --scratch DIR  # teardown measured 1 s (K 30 s, CAP 1800 s)
@@ -61,6 +61,7 @@ from mcp_networks import McpNetworks, print_verdict  # noqa: E402
 from step_ca_names import (  # noqa: E402
     CA_URL,
     CERTIFICATE_UNVERIFIED,
+    COMPOSE_FILE,
     CONTAINER_USER,
     CONTAINER_USER_ID,
     INTERMEDIATE_CERTIFICATE,
@@ -129,8 +130,9 @@ class Probe(McpNetworks, TraefikMcpFollows):
         }
         self.environment.pop("DOCKER_STEPCA_INIT_PASSWORD", None)
         self.scratch = scratch
-        self.compose_file = edge_copy.write_namespaced_compose(REPO, scratch, PROJECT)
-        self.init_script = edge_copy.shipped_script_copy(REPO, scratch, "step-ca/init")
+        self.compose_file = scratch / COMPOSE_FILE
+        compose_text = (REPO / COMPOSE_FILE).read_text()
+        self.compose_file.write_text(edge_copy.namespaced_compose(compose_text, PROJECT))
         self.compose_files = [self.compose_file, STAND_IN_OVERLAY]
         self.guard = edge_copy.NetworkGuard(PROJECT, lambda command: self.run(command).stdout)
         self.listeners_before: set[str] = set()
@@ -163,9 +165,8 @@ class Probe(McpNetworks, TraefikMcpFollows):
     def container_id(self, service: str) -> str:
         return self.compose("ps", "--all", "-q", service).stdout.decode().strip()
 
-    def init(self, *flags: str, check: bool = True) -> str:
-        self.guard.expect([*edge_copy.copy_compose_prefix(self.scratch), "--profile", "step-ca"])
-        result = self.run([str(self.init_script), *flags], check=check)
+    def init(self, *, check: bool = True) -> str:
+        result = self.run([str(REPO / "step-ca" / "init")], check=check)
         return result.stdout.decode() + result.stderr.decode()
 
     @cached_property
@@ -174,9 +175,8 @@ class Probe(McpNetworks, TraefikMcpFollows):
         return json.loads(self.compose("config", "--format", "json").stdout)
 
     def image_and_volume(self) -> tuple[str, str]:
-        return self.composed["services"]["step-ca"]["image"], self.composed["volumes"]["step-ca"][
-            "name"
-        ]
+        composed = self.composed
+        return composed["services"]["step-ca"]["image"], composed["volumes"]["step-ca"]["name"]
 
     def in_volume(self, *tool: str, writable: bool = False) -> bytes:
         image, volume = self.image_and_volume()
@@ -774,7 +774,7 @@ class Probe(McpNetworks, TraefikMcpFollows):
         expect("is not set up" in out and "the plan" in out, f"yes, yes said: {out[-200:]}")
         expect(out.index("is not set up") < out.index("the plan"), "the plan came first")
         expect((self.secrets_dir / "root_ca_key").is_file(), "the setup made no root key")
-        self.init("--check")
+        self.run([str(REPO / "step-ca" / "init"), "--check"])
         self.wait_until_answering()
         expect(len(self.containers_of_unit(running_only=True)) == 2, "step-ca is not on")
         again = self.hal(copy, "apply", "--local", terminal=True)

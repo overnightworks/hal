@@ -347,8 +347,8 @@ first failing command and never starts Keycloak after a failed load. If the
 load fails, `pg_restore`'s messages can quote rows of the dump, so they are
 discarded and the session runs with server error logging off (`keycloak` is the
 image's superuser, which may set that); only the exit code is printed. Delete
-`~/restore-keycloak` once you are done. The block acts on the compose project `hal`;
-`HAL_COMPOSE_PROJECT` names another, which is how it was driven against a throwaway stack.
+`~/restore-keycloak` once you are done. The block acts on the compose project `edge`;
+`EDGE_COMPOSE_PROJECT` names another, which is how it was driven against a throwaway stack.
 A failed realm step of `hal apply` names its pre-apply snapshot; restore that one with
 `hal restore keycloak --snapshot <ID> --target ~/restore-keycloak`.
 
@@ -358,7 +358,7 @@ set -euo pipefail
 umask 077
 restored=~/restore-keycloak
 container() {
-  docker ps --quiet --filter label=com.docker.compose.project="${HAL_COMPOSE_PROJECT:-hal}" \
+  docker ps --quiet --filter label=com.docker.compose.project="${EDGE_COMPOSE_PROJECT:-edge}" \
     --filter label=com.docker.compose.service="$1" \
     --filter label=com.docker.compose.oneoff=False
 }
