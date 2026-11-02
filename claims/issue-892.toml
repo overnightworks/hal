@@ -1,8 +1,0 @@
-claim_id = "d49dd7ebd5f742ba94ab0a554993df8e"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "146e2b7cbb106e8551a56ab2d6cb7b955f0e384b"
-branch = "claude/issue-892-update-failed-when-git-cannot-answer"
-scope = ["docs/stack.md", "src/hal/stack/checkout.py", "src/hal/stack/update.py", "tests/test_stack_update.py"]
-opened_commit = "b05cd9b535ca5199949fddbbd5b1153ddce8f7f6"
-whole_reason = "One exit decision: the update chain, its one test module, the doc that states the exits, and the checkout docstring that names the same answer."
