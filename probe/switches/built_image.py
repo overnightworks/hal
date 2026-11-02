@@ -3,7 +3,7 @@ HOME and copy of the repository, and a unit `built-probe` with `run.build` whose
 `pull_policy: never`. Its tags are made with `docker tag` from busybox images that are already
 local; nothing is built or pulled, and the core is never started.
 
-D2 (#893): the service names a file secret whose file is missing: one apply refuses before its yes
+D2: the service names a file secret whose file is missing: one apply refuses before its yes
 with the error pair and exit 4, and no container exists; with the file written the unit starts.
 
 D1a: a bumped tag is recreated under one yes, with a new id and the new image; a second apply

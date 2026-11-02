@@ -1,10 +1,11 @@
 """`hal apply` refuses before any plan and any yes when a service it would create names a secret
-whose file is missing (#893, C1-C10), on the scripted boundaries of the support module."""
+whose file is missing (C1-C10), on the scripted boundaries of the support module."""
 
 from pathlib import Path
 
 import support.stack_apply as base
-from support.stack_apply import FOLLOWER_FILE, switch_off, up_calls
+import yaml
+from support.stack_apply import FOLLOWER_FILE, switch_off, up_calls, write_fleet
 
 from hal.stack import apply
 
@@ -72,17 +73,16 @@ def test_a_unit_switched_on_whose_service_lacks_its_secret_file_is_refused_befor
 
 
 def test_a_live_service_with_a_changed_definition_whose_file_is_missing_is_refused(
-    agent_service_unit, switch, scripted
+    step_ca_applied, switch, scripted, tmp_path
 ):
-    """C2."""
-    assert switch()[0] == 0
-    scripted.calls.clear()
-    scripted.change_definition("agent-service")
-    path = lose(scripted, SIGNING_KEY)
+    """C2, a recreate of a service that is not the unit's built one."""
+    path = needs(scripted, "step-ca", "ca_secret", tmp_path)
+    scripted.change_definition("step-ca")
 
     exit_code, out, err = switch()
 
     refused_before_the_yes(exit_code, out, err, scripted, path)
+    assert f"step-ca needs {path}" in err
 
 
 def test_a_built_service_recreated_onto_a_new_image_whose_file_is_missing_is_refused(
@@ -193,6 +193,51 @@ def test_a_unit_that_is_switched_off_is_not_refused_for_a_missing_file(
 
     assert exit_code == 0
     assert "nothing to change" in out
+    assert "needs" not in err
+
+
+def test_a_unit_disabled_in_the_fleet_with_live_containers_is_not_refused_for_a_missing_file(
+    agent_service_unit, switch, scripted, repository
+):
+    """C9, a unit switched off in the fleet file."""
+    assert switch()[0] == 0
+    scripted.calls.clear()
+    lose(scripted, SIGNING_KEY)
+    fleet = yaml.safe_load((repository / "fleet.yaml").read_text())
+    fleet["services"]["agent-service"]["run"]["enabled"] = False
+    write_fleet(repository, yaml.safe_dump(fleet))
+
+    exit_code, _, err = switch()
+
+    assert exit_code == 0
+    assert "needs" not in err
+
+
+def test_a_changed_follower_of_a_stopped_unit_is_not_refused_for_a_missing_file(
+    step_ca_applied, switch, scripted, repository, state, tmp_path
+):
+    """C9, a follower held back by its stopped unit."""
+    switch_off(state, unit="step-ca")
+    needs(scripted, "traefik-mcp", "follower_secret", tmp_path)
+    with (repository / FOLLOWER_FILE).open("a") as file:
+        file.write("# a harmless edit\n")
+
+    _, _, err = switch()
+
+    assert "needs" not in err
+
+
+def test_a_changed_core_service_that_is_not_running_is_not_refused_for_a_missing_file(
+    applied_core, switch, scripted, repository, tmp_path
+):
+    """C9, a core service that is not started."""
+    needs(scripted, "traefik", "core_secret", tmp_path)
+    base.edit_traefik_yml(repository)
+    scripted.put_containers({"socket-proxy": "exited", "traefik": "exited"})
+
+    exit_code, _, err = switch()
+
+    assert exit_code == 0
     assert "needs" not in err
 
 

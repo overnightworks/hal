@@ -30,7 +30,8 @@ class Plan:
 
     @property
     def created_services(self) -> tuple[str, ...]:
-        """Every service this run creates a container for, once each."""
+        """Every service this run creates a container for or names to start (a running one is left
+        alone by `--no-recreate`), once each."""
         services = (
             *(
                 service

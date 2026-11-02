@@ -37,8 +37,9 @@ the working root `/run/agent-service/cli` are size-bounded tmpfs mounts owned by
 (the service refuses to start on a working root that is not owned by its user with exactly that
 mode), all `nosuid,nodev,noexec`. The unit `agent-service` of `fleet.yaml` starts it with
 `agent-egress`: `hal apply` brings both up. A missing image or login directory stops the start
-(`pull_policy: never`, `create_host_path: false`), so apply reports the unit partial and never on. A missing signing key or CA root file
-refuses `hal apply` before its `yes`, naming the path and `next: hal setup`, with nothing switched.
+(`pull_policy: never`, `create_host_path: false`), so apply reports the unit partial and never on. A missing CA root file
+refuses `hal apply` before its `yes`, naming the path and `next: hal setup`, with nothing switched;
+a missing signing key is `agent-service/setup`'s and is asked for first.
 
 It signs for songmaker's origin, `https://songmaker.mcp.internal`, the name `traefik-mcp` answers to on `mcp`, which it joins
 beside the per-app agent networks and `egress` (never `mcp-songmaker`). The key reaches it as the compose secret
