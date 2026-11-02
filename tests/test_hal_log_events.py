@@ -556,19 +556,20 @@ def test_a_restore_that_proves_nothing_and_a_failing_check_each_carry_a_reason(
 
 @pytest.mark.usefixtures("json_log")
 @pytest.mark.parametrize(
-    ("fields", "raw_in_json", "text_ending"),
+    ("fields", "raw_bytes", "raw_seconds", "text_ending"),
     [
         (
             ((Field.BYTES, 2_254_857_830), (Field.SECONDS, 192.44)),
-            (2_254_857_830, 192.4),
+            2_254_857_830,
+            192.4,
             "2.1 GiB · 3m12s\n",
         ),
-        (((Field.BYTES, 0), (Field.SECONDS, 0)), (0, 0), "0 B · <1s\n"),
+        (((Field.BYTES, 0), (Field.SECONDS, 0)), 0, 0, "0 B · <1s\n"),
     ],
     ids=["K6", "K7"],
 )
 def test_a_size_and_a_span_stay_raw_in_json_and_read_as_units_in_text_even_at_zero(
-    capsys, monkeypatch, fields, raw_in_json, text_ending
+    capsys, monkeypatch, fields, raw_bytes, raw_seconds, text_ending
 ):
     write_row(row(fields=fields))
     in_json = capsys.readouterr().out
@@ -577,7 +578,7 @@ def test_a_size_and_a_span_stay_raw_in_json_and_read_as_units_in_text_even_at_ze
     in_text = capsys.readouterr().out
 
     _, event = the_one_event(in_json)
-    assert (event["bytes"], event["seconds"]) == raw_in_json
+    assert (event["bytes"], event["seconds"]) == (raw_bytes, raw_seconds)
     assert in_text.endswith(text_ending)
 
 
