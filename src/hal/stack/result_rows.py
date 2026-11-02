@@ -143,7 +143,7 @@ def recreated_row(recreated: Recreated) -> Row:
     """A service recreated and observed running, with the time it took; a core service whose
     barriers were proven says so."""
     took = format_duration(recreated.seconds)
-    fact = f"barriers proven · {took}" if recreated.barriers_proven else took
+    fact = _SEPARATOR.join(("barriers proven", took)) if recreated.barriers_proven else took
     return Row(Glyph.DONE, recreated.service, ResultEvent.RECREATED, fact)
 
 

@@ -2934,11 +2934,11 @@ def test_the_config_hashes_are_read_from_a_real_config_hash_answer():
         (False, "socket-proxy is recreated"),
     ],
 )
-def test_the_core_is_not_current_while_a_changed_core_service_is_not_started(
+def test_a_changed_core_service_that_is_not_started_is_named_and_prints_no_row(
     traefik_yml_changed, why, applied_core, switch, scripted, repository
 ):
     """#87 rules 3, 5, cell D12 (scenario R3e): socket-proxy is recreated; a stopped traefik it
-    pulls in is only named, with or without a change of its own, and the core is not current."""
+    pulls in is only named, with or without a change of its own, and prints no row."""
     scripted.change_definition("socket-proxy")
     scripted.containers["traefik"] = "exited"
     if traefik_yml_changed:

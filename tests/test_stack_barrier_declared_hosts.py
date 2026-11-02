@@ -36,8 +36,10 @@ from support.stack_external import (
     live_checkout,  # noqa: F401 the fixture, requested by name below
 )
 from support.stack_global_stop import hosts_asked  # noqa: F401 the fixture, requested by `fakes`
+from support.stack_plan_rows import find_row
 
 from hal.grammar import ExitCode
+from hal.stack.result_rows import ResultEvent
 
 APEX_HOST = "probe.test"  # EDGE_DOMAIN as the scripted Compose gives traefik
 APEX = "    hosts: [{name: '@', exposure: public, reason: a public page}]\n"
@@ -128,5 +130,5 @@ def test_apply_local_proves_the_apex_barrier_of_a_switched_off_unit_again(local_
 
     result = apply_local()
 
-    assert "the barrier of probe is proven" in result.out
+    assert find_row(result.out, "traefik", ResultEvent.RECREATED, "barriers proven")
     assert barred_at_the_apex(checkout)

@@ -13,9 +13,9 @@ from hal.stack.unit_plans import Progress, Recreate, since_of
 
 @dataclass(frozen=True)
 class Recreated:
-    """A service recreated and observed running, after `seconds` of the lock, the recreate and
-    the watch; `barriers_proven` says a core recreate proved at least one barrier and none
-    failed."""
+    """A service recreated and observed running, after `seconds` of the recreate and the watch
+    (for a core service also the proof and the record); `barriers_proven` says a core recreate
+    proved at least one barrier and none failed."""
 
     service: str
     seconds: float

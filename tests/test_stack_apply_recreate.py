@@ -1,6 +1,8 @@
 """Apply recreates a running unit service whose compose definition changed, never its image
 (#376), on the scripted boundaries of `tests/support/stack_apply.py`."""
 
+import dataclasses
+
 import pytest
 from support.stack_apply import (
     APP_EXITED,
@@ -40,12 +42,10 @@ from support.stack_apply_fakes import (
 )
 from support.stack_plan_rows import find_row, plain
 
-from hal.stack import barrier
 from hal.stack.plan_rows import PlanEvent
 from hal.stack.result_rows import ResultEvent
 
 HOST_UNITS = {"hello": "probe", "echo": "echo"}  # the first label of a host, the unit behind it
-NO_ROUTE = b"404 page not found\n"
 RECREATE_STEP_CA = [*RECREATE_TRAEFIK[:-1], "step-ca"]
 RECREATE_KEYCLOAK_DB = [*RECREATE_TRAEFIK[:-1], "keycloak-db"]
 RECREATE_KEYCLOAK = [*RECREATE_TRAEFIK[:-1], "keycloak"]
@@ -146,6 +146,7 @@ def test_each_recreated_service_row_shows_its_own_wait(
     assert exit_code == 0
     assert find_row(out, "step-ca", ResultEvent.RECREATED, "25s")
     assert find_row(out, "keycloak-db", ResultEvent.RECREATED, "45s")
+    assert not find_row(out, "step-ca", ResultEvent.RECREATED, "barriers proven")
 
 
 def test_a_follower_whose_record_cannot_be_written_is_partial_and_has_no_recreated_row(
@@ -477,7 +478,8 @@ def test_a_follower_row_shows_the_wait_after_the_core_recreate_before_it(
     scripted,  # noqa: F811
     ingress,  # noqa: F811
 ):
-    """The follower's clock starts at its own recreate: the core's 20 seconds are not in its row."""
+    """The follower's clock starts at its own recreate: the core's 20 seconds are not in its row
+    (the clocks of the core set are told apart by the proof test below)."""
     scripted.change_definition("traefik")
     scripted.change_definition("traefik-mcp")
     waits = iter([20, 40])
@@ -514,7 +516,9 @@ def _barrier_answers(traefik, monkeypatch, unproven=frozenset()) -> list[str]:
     def answering(_address, host, _seconds, _clock):
         unit = HOST_UNITS[host.split(".")[0]]
         asked.append(unit)
-        return PLAIN_NOT_FOUND if unit in unproven else barrier.Answer(404, NO_ROUTE, unit)
+        return (
+            PLAIN_NOT_FOUND if unit in unproven else dataclasses.replace(PLAIN_NOT_FOUND, mark=unit)
+        )
 
     monkeypatch.setattr(traefik, "fetch", answering)
     return asked
@@ -579,3 +583,58 @@ def test_a_core_recreate_with_an_unproven_barrier_prints_no_row_after_trying_eve
     assert {"probe", "echo"} <= set(asked)
     assert not find_row(out, "traefik", ResultEvent.RECREATED)
     assert applied(state) == {"traefik": {}}
+
+
+@pytest.mark.parametrize("proven_unit", [False, True], ids=["hostless only", "hostless and proven"])
+def test_a_hostless_unit_has_no_barrier_so_only_a_proven_one_makes_the_row_say_so(
+    proven_unit,
+    core_files,  # noqa: F811
+    switch,  # noqa: F811
+    scripted,  # noqa: F811
+    repository,  # noqa: F811
+    state,  # noqa: F811
+):
+    """C3, C4: a switched-off unit that declares no host proves nothing and fails nothing."""
+    scripted.config["services"]["echo"] = {"profiles": ["echo"]}
+    units = ["echo", "probe"] if proven_unit else ["echo"]
+    write_fleet(
+        repository, DISABLED + "".join(f"  {unit}:\n    run: {{enabled: true}}\n" for unit in units)
+    )
+    scripted.put_containers({"echo": "exited", "hello": "exited"})
+    for unit in units:
+        switch_off(state, unit=unit)
+    scripted.change_definition("traefik")
+
+    exit_code, out, err = switch()
+
+    assert (exit_code, err) == (0, "")
+    assert (
+        bool(find_row(out, "traefik", ResultEvent.RECREATED, "barriers proven · 5s")) is proven_unit
+    )
+    assert bool(find_row(out, "traefik", ResultEvent.RECREATED, "5s")) is True
+
+
+def test_every_core_recreate_proves_the_barriers_after_itself_and_shows_its_own_wait(
+    applied_core,  # noqa: F811
+    switch,  # noqa: F811
+    scripted,  # noqa: F811
+    repository,  # noqa: F811
+    state,  # noqa: F811
+    ingress,  # noqa: F811
+):
+    """C8: the proof follows each `up` of the set, and each row times its own recreate."""
+    write_fleet(repository, DISABLED + "  probe:\n    run: {enabled: true}\n")
+    scripted.put_containers({"hello": "exited"})
+    switch_off(state, unit="probe")
+    scripted.change_definition("socket-proxy")
+    seen = []
+    ingress.on_fetch = lambda: seen.append(len(up_calls(scripted)))
+    waits = iter([20, 40])
+    scripted.after_up = lambda: ingress.sleep(next(waits))
+
+    exit_code, out, _ = switch()
+
+    assert exit_code == 0
+    assert find_row(out, "socket-proxy", ResultEvent.RECREATED, "barriers proven · 25s")
+    assert find_row(out, "traefik", ResultEvent.RECREATED, "barriers proven · 45s")
+    assert {1, 2} <= set(seen)

@@ -115,7 +115,7 @@ OLD_IMAGE = str(PlanEvent.OLD_IMAGE)
 def result_row(out: str, service: str) -> re.Match[str] | None:
     """The `recreated` result row of a service in the output of `hal apply`, whose whitespace
     `run_hal` has collapsed; group 1 is its fact."""
-    return re.search(rf"✓ {re.escape(service)} recreated ((?:{BARRIERS_PROVEN} · )?\d+s)", out)
+    return re.search(rf"✓ {re.escape(service)} recreated ((?:{BARRIERS_PROVEN} · )?\S+)", out)
 
 
 class Probe:
@@ -466,7 +466,7 @@ class Probe:
         before, after, out = self.apply_core_change()
         expect(
             "socket-proxy recreate definition changed" in out
-            and "traefik recreate" in out
+            and "traefik recreate socket-proxy is recreated" in out
             and out.count("socket-proxy is recreated") == 1  # the fact of traefik's plan row
             and result_row(out, "socket-proxy")
             and result_row(out, "traefik")
