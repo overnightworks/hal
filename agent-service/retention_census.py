@@ -32,7 +32,7 @@ MAXIMUM_ARCHIVED_FILE = 1 << 26  # a larger file is not read, so it is an unexam
 # Docker's per-container writable mounts: the three files it binds in, /dev and /dev/shm.
 DOCKER_OWN = frozenset({
     "/etc/hosts", "/etc/hostname", "/etc/resolv.conf", "/dev",
-    "/dev/shm",  # NOSONAR(S5443) inspected, never written; a split literal would only hide it
+    "/dev/shm",  # NOSONAR(S5443) inspected, never written; a split literal would only hide it  # noqa: S108 - docker mounts it in every container and it is only compared
 })  # fmt: skip
 HANDED_OVER = frozenset({Skip.NESTED_MOUNT.value, Skip.FILE_MOUNT.value})
 COMMAND_NOT_FOUND = frozenset({126, 127})
