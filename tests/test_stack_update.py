@@ -78,7 +78,7 @@ def test_off_a_clean_main_it_refuses_naming_the_branch_or_every_dirty_path(world
 
 
 def test_a_git_that_cannot_be_asked_about_the_checkout_ends_failed_not_refused(world, capsys):
-    """#50: a refusal is hal's no after looking; a git that gave no answer is a failed run."""
+    """A refusal is hal's no after looking; a git that gave no answer is a failed run."""
     world.wait(*subjects("waiting"))
 
     end = world.run(
@@ -309,21 +309,30 @@ def test_a_pinned_sha_that_is_no_commit_any_more_is_refused(world, capsys):
     assert "nothing changed" in err
 
 
-@pytest.mark.parametrize(
-    ("answer", "said"),
-    [
-        pytest.param(answered(1), "no fast-forward", id="git says it does not descend from HEAD"),
-        pytest.param(answered(128, b"", b"fatal: boom\n"), "cannot read", id="git cannot tell"),
-    ],
-)
-def test_a_pinned_sha_git_cannot_confirm_as_a_fast_forward_is_refused(world, capsys, answer, said):
+def test_a_pinned_sha_that_does_not_descend_from_head_is_refused(world, capsys):
     """R3."""
     world.wait(*subjects("waiting"))
 
-    end = world.run(git=Tamper(world, "merge-base", answer, merged=True))
+    end = world.run(git=Tamper(world, "merge-base", answered(1), merged=True))
 
     assert end is UpdateEnd.REFUSED
-    assert said in errors(capsys)
+    assert "no fast-forward" in errors(capsys)
+
+
+@pytest.mark.parametrize("verb", ["merge-base", "symbolic-ref"])
+def test_a_git_that_cannot_answer_at_the_recheck_after_the_yes_ends_failed_not_refused(
+    world, capsys, verb
+):
+    """R3: the guard before the question passed; only the recheck after the `yes` finds git mute."""
+    world.wait(*subjects("waiting"))
+    git = Tamper(world, verb, answered(128, b"", b"fatal: boom\n"))
+
+    end = world.run(git=git, at_the_question=lambda: setattr(git, "merged", True))
+
+    assert end is UpdateEnd.FAILED
+    err = errors(capsys)
+    assert "cannot read the live checkout" in err
+    assert "nothing changed" in err
 
 
 def test_waiting_commits_git_cannot_list_end_the_run_before_the_question(world, capsys):

@@ -461,7 +461,7 @@ class Refusal:
 
 def not_clean_main(git: Git) -> Refusal | None:
     """Why `git` is not a born `main` with nothing changed; None when it is (#95 rules 5, 6). A
-    git that fails is a refusal too, so the caller refuses rather than guesses."""
+    git that fails gives a refusal with `cannot_tell`, which the caller ends as a failure."""
     try:
         if reason := not_on_main(git):
             return Refusal(f"runs only on {MAIN} ({reason})")
