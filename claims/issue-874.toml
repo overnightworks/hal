@@ -1,8 +1,0 @@
-claim_id = "f3e45d70f86744b7a82c8b0d1cf0cb87"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "44fe0f619412a1a24832bf103f9804f11084ca78"
-branch = "claude/issue-874-s3b-1-system-interrupt"
-scope = ["docs/design/hal-output.html", "docs/home.md", "scripts/system-proof/drive.sh", "scripts/system-proof/terminal.exp", "src/hal/output/__init__.py", "src/hal/workstation/setup.py", "src/hal/workstation/system_step.py", "tests/test_hal_output.py", "tests/test_workstation_system_step_runner.py"]
-opened_commit = "ac18c3220776970f51bfe8a44bcec654346f0de1"
-whole_reason = "One printed stop and the one exception that carries it: the three production files, their pins, the proof cell and the docs move in one commit."
