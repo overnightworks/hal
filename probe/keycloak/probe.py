@@ -55,6 +55,7 @@ from urllib.request import (
 REPO = Path(__file__).resolve().parents[2]
 # The probe runs from a bare checkout with system python; hal.stack.realm is standard library only.
 sys.path[:0] = [str(REPO / "src"), str(REPO / "probe/keycloak")]
+import agents_client_cell  # noqa: E402
 import backchannel_cell  # noqa: E402
 import device_grant_cell  # noqa: E402
 import logout_actions_cell  # noqa: E402
@@ -85,9 +86,8 @@ THEME = "hallucinai"
 REALM_FILE = "realm.yaml"
 CONFIG_FILES = ("master.yaml", REALM_FILE)
 ENTRYPOINT_FILE = "entrypoint.sh"
-UNDEFINED_VARIABLE_LINE = (
-    "displayName: $(env:PROBE_UNDEFINED_VARIABLE)\n"  # a realm.yaml line config-cli cannot resolve
-)
+# a realm.yaml line config-cli cannot resolve
+UNDEFINED_VARIABLE_LINE = "displayName: $(env:PROBE_UNDEFINED_VARIABLE)\n"
 PUBLIC_HOST = f"auth.{DOMAIN}"
 REALM_PATH = f"/realms/{REALM}"
 PUBLIC_TOKEN_PATH = f"{REALM_PATH}/protocol/openid-connect/token"
@@ -2116,6 +2116,7 @@ class Probe:
         self.workload_token_carries_the_role(admin, client_secret, client)
         terms_cell.prove(self, expect, form_with, client)
         service_audience_cell.prove(self, expect, client, tokens["access_token"])
+        agents_client_cell.prove(self, expect, form_with, client, APP_CLIENTS)
         self.held(
             "10",
             f"a member of {client.group} signs in to {name} with PKCE and gets a code "
@@ -2290,8 +2291,7 @@ class Probe:
             client, scope="openid offline_access", **device_grant_cell.PKCE
         )
         refused = self.through_tunnel("GET", f"{PUBLIC_AUTH_PATH}?{query}")
-        location = refused.headers.get("Location", "")
-        error = parse_qs(urlsplit(location).query)
+        error = parse_qs(urlsplit(refused.headers.get("Location", "")).query)
         expect(
             refused.status == 302
             and error.get("error") == ["invalid_scope"]
