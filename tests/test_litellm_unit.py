@@ -27,6 +27,7 @@ ISOLATED_MODE = {"com.docker.network.bridge.gateway_mode_ipv4": "isolated"}
 DIGEST_PINNED = re.compile(r"^[^@\s]+:[^@\s]+@sha256:[0-9a-f]{64}$")
 KEY_SECRET, CREDENTIAL_SECRET = "litellm_anthropic_key", "agent_service_api_credential"
 MASTER_SECRET = "litellm_master_key"
+API_ROUTE_BOUND = "API_ROUTE_MAX_PARALLEL_REQUESTS"
 START_SCRIPT = (LITELLM_DIRECTORY / "start.sh").read_text()
 START_LISTENER = re.compile(r"--port (?P<port>\d+)")
 
@@ -99,6 +100,12 @@ def test_litellm_keeps_telemetry_off_and_uses_the_local_cost_map(compose):
     assert environment["LITELLM_LOCAL_MODEL_COST_MAP"] == "True"
     assert environment["LITELLM_TELEMETRY"] == "False"
     assert "LITELLM_DISABLE_LAZY_ROUTES" not in environment
+
+
+def test_the_api_route_bound_is_a_whole_number_of_at_least_one_written_out_in_compose(compose):
+    declared = compose["services"][LITELLM]["environment"][API_ROUTE_BOUND]
+
+    assert re.fullmatch(r"[1-9]\d*", str(declared))
 
 
 def test_the_front_shares_the_public_traefiks_image_and_hardening_and_reads_no_secret(compose):
