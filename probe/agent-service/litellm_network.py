@@ -6,7 +6,7 @@ gateway's second entrypoint against a fake Anthropic. Nothing live and nothing p
 refuses to start unless the resolved copy marks `internet` internal and holds only the two fake
 hosts, and it never calls `egress.py`'s live cells.
 
-    flock -o -w 1200 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \\
+    flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \\
         python3 probe/agent-service/litellm_network.py --scratch DIR
 
 Measured: a run takes about six minutes and its teardown a few seconds (K 30 s, CAP 1800 s).

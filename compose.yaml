@@ -104,7 +104,7 @@ services:
 
   keycloak:
     profiles: [keycloak]
-    image: quay.io/keycloak/keycloak:26.8.1@sha256:a78d6b79572168cb25886b80a8b5b8d4ed4390743e3eecb810538683e209dd6b
+    image: quay.io/keycloak/keycloak:26.8.1@sha256:3f3c5f8e03c614774b4bd9173b88391fefa4153bfc010d8012d59ad825377332
     restart: unless-stopped
     depends_on:
       keycloak-db:
@@ -262,7 +262,7 @@ services:
   realm-observer:
     # The probe's python pin (probe/keycloak/compose.probe.yaml); ci.yml checks the two are equal.
     # agent-probe below carries the same pin; Dependabot moves all of them in one pull.
-    image: python:3.14.8-alpine@sha256:f6a589d43c42b9e7f7dc67a12d37132491f362859a5d750607710cc56da3bc72
+    image: python:3.14.10-alpine@sha256:eb2c62658b8d51bff0acc408504b76521d02030de56a8a3c1e830083e89b89d2
     profiles: [apply]
     logging: *one-off-logging
     user: "65534:65534"
@@ -554,7 +554,7 @@ services:
   # attachments, hardened like the service, listening on nothing.
   agent-probe:
     <<: *agent-attachments
-    image: python:3.14.8-alpine@sha256:f6a589d43c42b9e7f7dc67a12d37132491f362859a5d750607710cc56da3bc72
+    image: python:3.14.10-alpine@sha256:eb2c62658b8d51bff0acc408504b76521d02030de56a8a3c1e830083e89b89d2
     profiles: [agent-probe]
     user: "65534:65534"
     read_only: true
