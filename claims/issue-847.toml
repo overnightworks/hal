@@ -1,0 +1,8 @@
+claim_id = "ff20d474fc0344e393da7a022d248353"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "6c17d580b36def4e3c680f9c09fb75d4eafcf958"
+branch = "claude/issue-847-litellm-bound-per-key"
+scope = ["agent-service/litellm/auth.py", "compose.yaml", "docs/agent-service.md", "docs/architecture.md", "probe/agent-service/fake_anthropic.py", "probe/agent-service/litellm_admission.py", "tests/test_litellm_unit.py"]
+opened_commit = "ef3a98dac12a7697f9d1a9a24f07eab4cc9c74fd"
+whole_reason = "The bound, its probe cells and its docs land together: a bound without its cells is unproven, and the docs' no-cap line is false the moment it lands."
