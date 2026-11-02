@@ -33,7 +33,7 @@ from pathlib import Path, PurePosixPath
 
 from hal.output.command import Verb, command
 from hal.workstation.layout import Layout
-from hal.workstation.manifest_fields import ManifestError, fail, https_link, require_key_of_kind, string, strings
+from hal.workstation.manifest_fields import ManifestError, fail, flag, https_link, require_key_of_kind, string, strings, value_prefix
 from hal.workstation.report import findings_count, markdown_table
 from hal.workstation.secrets_create import CreateCommand, is_renewal_sibling, parse_create
 from hal.workstation.tunnel_config import as_wildcard, with_tunnel_id
@@ -249,13 +249,6 @@ def _retirement(path: Path, where: str, raw: Mapping[str, object]) -> Retirement
     return Retirement(_date(path, where, raw, "retired_on"), revoke_url, confirmed)
 
 
-def _flag(path: Path, where: str, raw: Mapping[str, object], key: str) -> bool:
-    value = raw.get(key, False)
-    if not isinstance(value, bool):
-        raise fail(path, where, f"{key} must be true or false")
-    return value
-
-
 def _declared_mode(path: Path, where: str, raw: Mapping[str, object]) -> tuple[int, str]:
     """The loosest mode a file of the entry may have and why; both keys together, never looser than a container user needs."""
     if set(raw) & MODE_KEYS and not set(raw) >= MODE_KEYS:
@@ -266,15 +259,6 @@ def _declared_mode(path: Path, where: str, raw: Mapping[str, object]) -> tuple[i
     if not isinstance(mode, int) or isinstance(mode, bool) or mode <= 0 or mode & ~LOOSEST_DECLARABLE_FILE_MODE:
         raise fail(path, where, f"loosest_mode must be a file mode within {LOOSEST_DECLARABLE_FILE_MODE:04o}, e.g. 0o644")
     return mode, string(path, where, raw, "loosest_mode_reason")
-
-
-def _value_prefix(path: Path, where: str, raw: Mapping[str, object], kind: SecretKind) -> str:
-    """The text `hal setup` puts before a value it generates; a service password only."""
-    if "value_prefix" not in raw:
-        return ""
-    if kind is not SecretKind.SERVICE_PASSWORD:
-        raise fail(path, where, "value_prefix belongs to a service-password entry only")
-    return string(path, where, raw, "value_prefix")
 
 
 def _is_github_right(right: str) -> bool:
@@ -331,13 +315,13 @@ def _entry(path: Path, index: int, raw: object) -> SecretEntry:
         mirror_of=string(path, where, raw, "mirror_of") if "mirror_of" in raw else "",
         purpose=string(path, where, raw, "purpose") if "purpose" in raw else "",
         source=source,
-        optional=_flag(path, where, raw, "optional"),
+        optional=flag(path, where, raw, "optional"),
         elsewhere=string(path, where, raw, "elsewhere") if "elsewhere" in raw else "",
         page=https_link(path, where, raw, "page") if "page" in raw else "",
         loosest_mode=loosest_mode,
         loosest_mode_reason=loosest_mode_reason,
         create=create,
-        value_prefix=_value_prefix(path, where, raw, kind),
+        value_prefix=value_prefix(path, where, raw, kind, SecretKind.SERVICE_PASSWORD),
     )
     if entry.written_by_setup and (len(patterns) != 1 or _has_wildcard(patterns[0].name)):
         raise fail(path, where, "paths of an entry the wizard writes must be exactly one place without a wildcard")
