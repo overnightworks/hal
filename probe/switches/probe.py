@@ -40,9 +40,10 @@ unpublished `traefik.yml` edit and requires exit 3 naming it, with traefik's con
 `hal update` and `hal apply --local` through the copy's `bin/hal`: apply refuses behind origin and
 names `hal update`, the update syncs the new lock and the next apply runs the merged code, and a
 lock that does not sync or code that fails at import is repaired by a hand pull. Every transcript
-line names its item. It runs beside the live stack (#592): its Traefik listens on
-`edge_copy.PROBE_HOST` and routes only its project, behind a network guard. Residual: the live
-Traefik also routes the probe's `hello` until teardown.
+line names its item. The cell of #884 (`unproven_barrier.py`) follows P4: a read-only `dynamic/`
+leaves the barrier unproven after the recreate, and the next apply proves it. It runs beside the
+live stack (#592): its Traefik listens on `edge_copy.PROBE_HOST` and routes only its project,
+behind a network guard. Residual: the live Traefik also routes the probe's `hello` until teardown.
 
     flock -o -w 1200 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 900 \\
         python3 probe/switches/probe.py --scratch DIR
@@ -73,6 +74,7 @@ sys.path.insert(0, str(REPO / "src"))  # edge's own modules; hal.stack imports P
 
 import checkout_update  # noqa: E402
 import edge_copy  # noqa: E402
+import unproven_barrier  # noqa: E402
 from edge_copy import NOTHING_TO_CHANGE, ProbeFailed, expect  # noqa: E402
 
 from hal.output import write_line  # noqa: E402
@@ -750,6 +752,7 @@ def prove(probe: Probe) -> int:
         probe.cell_8_global_stop()
         probe.cell_p3_edited_traefik_yml()
         probe.cell_p4_barrier_proven_after_the_recreate()
+        unproven_barrier.cell(probe)
         probe.cell_p5_stopped_traefik()
         probe.cell_p6_what_survives()
         probe.cell_q2_socket_proxy_definition()
@@ -777,7 +780,7 @@ def main(argv: list[str] | None = None) -> int:
         Probe,
         prove,
         "PROBE PASSED: #61 proofs 1-7, #70 proof 8, #85 P1-P7, #87 Q1-Q6, #91 Z1-Z3, "
-        "#95 P1-P2, #592 V1, V4, V6-V8, #783 P1-P4 hold",
+        "#95 P1-P2, #592 V1, V4, V6-V8, #783 P1-P4, #884 D19 hold",
     )
 
 

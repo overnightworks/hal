@@ -75,7 +75,7 @@ from hal.output.command import Verb, command
 from hal.stack import barrier, catalog, checkout, compose, core, environment, setup, switches
 from hal.stack.appkit_step import AppkitError, Rename, plan_appkit
 from hal.stack.apps import AppError, AppFailed, AppHeldOff, AppRuntime, plan_apps
-from hal.stack.core_phase import CorePhase
+from hal.stack.core_phase import CoreFailure, CorePhase
 from hal.stack.legal_section import LegalError
 from hal.stack.legal_step import RECORD_FILE, plan_legal
 from hal.stack.plan import Plan
@@ -90,7 +90,15 @@ from hal.stack.plan_rows import (
     waiting_text,
 )
 from hal.stack.realm import reconcile
-from hal.stack.result_rows import app_partial, app_row, partial_error, result_rows, waiting_row
+from hal.stack.result_rows import (
+    app_partial,
+    app_row,
+    partial_error,
+    result_rows,
+    unproven_partial,
+    unproven_row,
+    waiting_row,
+)
 from hal.stack.terminal import NEEDS_TERMINAL, at_terminal
 from hal.stack.unit_plans import (
     Action,
@@ -551,6 +559,16 @@ def _say_aborted(completed_setups: Sequence[str]) -> None:
     )
 
 
+def _say_stopped(failure: CoreFailure) -> None:
+    """The row and pair of a run stopped before any unit was switched; barriers that are not
+    proven are the one failure whose way on is `hal offline`."""
+    if isinstance(failure, barrier.BarriersUnproven):
+        write_row(unproven_row(failure))
+        write_error(*unproven_partial(failure))
+    else:
+        write_error(f"partial, {failure}; no unit switched", command(Verb.APPLY))
+
+
 def _say_interrupted(progress: Progress, interruption: KeyboardInterrupt) -> None:
     notes = getattr(interruption, "__notes__", ())
     write_error(
@@ -592,7 +610,7 @@ def _confirm_and_switch(
             or planned.legal.write(progress)
             or core_phase.run(engine, planned, marks, progress)
         ):
-            write_error(f"partial, {failure}; no unit switched", command(Verb.APPLY))
+            _say_stopped(failure)
             return ApplyExit.REFUSED
         for plan in changes:
             if since := switch(engine, plan, progress, marks, planned.read):

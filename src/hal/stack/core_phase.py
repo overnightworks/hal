@@ -8,12 +8,13 @@ from pathlib import Path
 from typing import Any
 
 from hal.output import write_row
-from hal.output.command import Verb, command
 from hal.stack import barrier, compose, core, switches
 from hal.stack.plan import Plan
 from hal.stack.result_rows import recreated_row
 from hal.stack.service_recreate import Recreated, ServiceRecreator
 from hal.stack.unit_plans import Progress, UnitPlan
+
+type CoreFailure = str | barrier.BarriersUnproven
 
 
 def _say_recreated(recreated: Recreated) -> None:
@@ -36,7 +37,7 @@ class CorePhase:
         planned: Plan,
         marks: switches.Switches,
         progress: Progress,
-    ) -> str | None:
+    ) -> CoreFailure | None:
         """The core, the followers, then the services to recreate (a live service of a unit that
         runs on, the built service in any container state); the failure line of the first step
         that fails."""
@@ -68,7 +69,7 @@ class CorePhase:
         planned: Plan,
         marks: switches.Switches,
         progress: Progress,
-    ) -> str | None:
+    ) -> CoreFailure | None:
         """In start order, look again whether each still has a live container; before the
         set's first recreate mark every recorded service of the set unfinished, whatever its
         liveness then; recreate each, observe it running with the core services it depends on,
@@ -94,7 +95,7 @@ class CorePhase:
 
     def _stopped_meanwhile(
         self, engine: compose.Compose, plan: core.CorePlan, progress: Progress
-    ) -> str | None:
+    ) -> CoreFailure | None:
         """The failure line when the service has no live container now (#93 rules 1, 2)."""
         progress.step = f"look whether {plan.service} still runs"
         if _stopped_since_the_plan(engine.states(), plan):
@@ -119,7 +120,7 @@ class CorePhase:
         plan: core.CorePlan,
         followed: frozenset[str],
         progress: Progress,
-    ) -> str | None:
+    ) -> CoreFailure | None:
         """Recreate the service, observe it running with the core services it depends on, prove
         every active barrier, and only then record it; the failure line of the first step that
         fails."""
@@ -133,8 +134,8 @@ class CorePhase:
             verb = "is" if len(down) == 1 else "are"
             return f"{' and '.join(down)} {verb} not running after the {plan.service} recreate"
         progress.step = "prove the barriers"
-        proven = self._prove_barriers(planned, marks, plan.service)
-        if isinstance(proven, str):
+        proven = self._prove_barriers(planned, marks)
+        if isinstance(proven, barrier.BarriersUnproven):
             return proven
         if plan.service in followed:
             progress.step = f"record {plan.service} in {core.APPLIED_FILE}"
@@ -165,9 +166,11 @@ class CorePhase:
         progress.step = "find the services edge follows"
         return core.followed_services(planned.fleet.config, planned.checkout)
 
-    def _prove_barriers(self, planned: Plan, marks: switches.Switches, service: str) -> bool | str:
+    def _prove_barriers(
+        self, planned: Plan, marks: switches.Switches
+    ) -> bool | barrier.BarriersUnproven:
         """Whether at least one barrier was proven, once all active barriers were tried and none
-        is unproven (S9); else the failure line naming every one that is not."""
+        is unproven (S9); else every one that is not."""
         proven = False
         unproven: list[barrier.Unproven] = []
         for proof in barrier.prove_active(
@@ -179,18 +182,7 @@ class CorePhase:
                     proven = True
                 case barrier.Unproven():
                     unproven.append(proof)
-        if not unproven:
-            return proven
-        units = ", ".join(proof.unit for proof in unproven)
-        if len(unproven) == 1:
-            barriers, failures = f"the barrier of {units} is", unproven[0].failure
-        else:
-            barriers = f"the barriers of {units} are"
-            failures = "; ".join(f"{proof.unit}: {proof.failure}" for proof in unproven)
-        return (
-            f"{barriers} not proven after the {service} recreate ({failures}): {units} may be "
-            f"reachable through Traefik; to close the tunnel now: {command(Verb.OFFLINE)}"
-        )
+        return barrier.BarriersUnproven(tuple(unproven)) if unproven else proven
 
 
 def _stopped_since_the_plan(states: Mapping[str, set[str]], plan: core.CorePlan) -> bool:

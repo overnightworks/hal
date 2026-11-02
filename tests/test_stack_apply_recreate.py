@@ -1,7 +1,10 @@
 """Apply recreates a running unit service whose compose definition changed, never its image
 (#376), on the scripted boundaries of `tests/support/stack_apply.py`."""
 
+import copy
 import dataclasses
+import json
+import stat
 
 import pytest
 from support.stack_apply import (
@@ -40,7 +43,8 @@ from support.stack_apply_fakes import (
     IMAGE,
     PLAIN_NOT_FOUND,
 )
-from support.stack_plan_rows import find_row, plain
+from support.stack_core import bind, sha256
+from support.stack_plan_rows import detail_lines, find_row, plain, row_at
 
 from hal.stack.plan_rows import PlanEvent
 from hal.stack.result_rows import ResultEvent
@@ -49,6 +53,14 @@ HOST_UNITS = {"hello": "probe", "echo": "echo"}  # the first label of a host, th
 RECREATE_STEP_CA = [*RECREATE_TRAEFIK[:-1], "step-ca"]
 RECREATE_KEYCLOAK_DB = [*RECREATE_TRAEFIK[:-1], "keycloak-db"]
 RECREATE_KEYCLOAK = [*RECREATE_TRAEFIK[:-1], "keycloak"]
+RECREATE_SOCKET_PROXY = [*RECREATE_TRAEFIK[:-1], "socket-proxy"]
+UNFINISHED = {"traefik": {}}
+THEN = "then: hal apply repeats the proof · hal online reopens only once every barrier is proven"
+STOPPED_BY_BARRIERS = [
+    "error: partial, barriers not proven · no unit switched",
+    "next: hal offline",
+]
+SECOND_FOLLOWER_FILE = "traefik-mcp-second.yml"
 LOCAL_TAG = "edge-local:1"
 REBUILT_IMAGE_ID = f"sha256:{'f' * 64}"
 KEYCLOAK_DB_IMAGE = f"postgres:18@sha256:{'5' * 64}"
@@ -492,6 +504,35 @@ def test_a_follower_row_shows_the_wait_after_the_core_recreate_before_it(
     assert find_row(out, "traefik-mcp", ResultEvent.RECREATED, "45s")
 
 
+def test_each_of_two_followers_shows_its_own_wait(
+    step_ca_applied,  # noqa: F811
+    switch,  # noqa: F811
+    scripted,  # noqa: F811
+    repository,  # noqa: F811
+    state,  # noqa: F811
+    ingress,  # noqa: F811
+):
+    """Each follower's clock starts at its own recreate, not at the first one's."""
+    services = scripted.config["services"]
+    second_file = repository / SECOND_FOLLOWER_FILE
+    second_file.write_text("entryPoints: {}\n")
+    services["traefik-mcp-second"] = copy.deepcopy(services["traefik-mcp"])
+    services["traefik-mcp-second"]["volumes"][-2] = bind(second_file, "/etc/traefik/traefik.yml")
+    scripted.put_containers({"traefik-mcp-second": "running"})
+    second = {"traefik-mcp-second": {SECOND_FOLLOWER_FILE: sha256(second_file)}}
+    (state / "applied.json").write_text(json.dumps(applied(state) | second))
+    scripted.change_definition("traefik-mcp")
+    scripted.change_definition("traefik-mcp-second")
+    waits = iter([20, 40])
+    scripted.after_up = lambda: ingress.sleep(next(waits))
+
+    exit_code, out, _ = switch()
+
+    assert exit_code == 0
+    assert find_row(out, "traefik-mcp", ResultEvent.RECREATED, "25s")
+    assert find_row(out, "traefik-mcp-second", ResultEvent.RECREATED, "45s")
+
+
 def _two_switched_off_units(scripted, repository, state):  # noqa: F811
     """`probe` and `echo` are switched off with their services stopped, so both barriers are
     active."""
@@ -559,9 +600,14 @@ def test_a_core_recreate_that_proved_every_active_barrier_says_so(
     assert find_row(out, "traefik", ResultEvent.RECREATED, "barriers proven · 5s")
 
 
-@pytest.mark.parametrize("unproven", [{"echo"}, {"probe", "echo"}], ids=["one", "every one"])
-def test_a_core_recreate_with_an_unproven_barrier_prints_no_row_after_trying_every_barrier(
+@pytest.mark.parametrize(
+    ("unproven", "keys"),
+    [({"echo"}, ["echo"]), ({"probe", "echo"}, ["probe", "echo"])],
+    ids=["one beside a proven one", "every one"],
+)
+def test_a_core_recreate_with_an_unproven_barrier_prints_one_red_row_after_trying_every_barrier(
     unproven,
+    keys,
     core_files,  # noqa: F811
     switch,  # noqa: F811
     scripted,  # noqa: F811
@@ -570,8 +616,8 @@ def test_a_core_recreate_with_an_unproven_barrier_prints_no_row_after_trying_eve
     ingress,  # noqa: F811
     monkeypatch,
 ):
-    """C5, C6: a proven barrier beside an unproven one proves nothing for the service; the
-    partial line and the record stay as they are."""
+    """D1 to D4, D7: only the unproven keys stand, each with its cause, the way on last; the pair
+    ends the run with hal offline; the record stays unfinished and nothing after the proof ran."""
     _two_switched_off_units(scripted, repository, state)
     scripted.change_definition("traefik")
     asked = _barrier_answers(ingress, monkeypatch, unproven)
@@ -579,10 +625,122 @@ def test_a_core_recreate_with_an_unproven_barrier_prints_no_row_after_trying_eve
     exit_code, out, err = switch()
 
     assert exit_code == 1
-    assert "not proven after the traefik recreate" in err
+    assert err.splitlines() == STOPPED_BY_BARRIERS
+    assert find_row(
+        out,
+        "barriers",
+        ResultEvent.NOT_PROVEN,
+        f"{', '.join(keys)} · may be reachable through Traefik",
+    )
+    details = detail_lines(out)[-(len(keys) + 1) :]
+    assert [detail.split(":")[0] for detail in details] == [*keys, "then"]
+    assert details[-1] == THEN
     assert {"probe", "echo"} <= set(asked)
+    assert "barriers proven" not in plain(out)
     assert not find_row(out, "traefik", ResultEvent.RECREATED)
-    assert applied(state) == {"traefik": {}}
+    assert applied(state) == UNFINISHED
+    assert up_calls(scripted) == [RECREATE_TRAEFIK]
+
+
+def test_an_unproven_barrier_after_the_socket_proxy_recreate_stops_before_traefik_is_recreated(
+    applied_core,  # noqa: F811
+    switch,  # noqa: F811
+    scripted,  # noqa: F811
+    repository,  # noqa: F811
+    state,  # noqa: F811
+    ingress,  # noqa: F811
+    monkeypatch,
+):
+    """D5: the same row and pair; traefik, pulled in by the recreate, is not recreated."""
+    _two_switched_off_units(scripted, repository, state)
+    scripted.change_definition("socket-proxy")
+    _barrier_answers(ingress, monkeypatch, {"probe"})
+
+    exit_code, out, err = switch()
+
+    assert exit_code == 1
+    assert err.splitlines() == STOPPED_BY_BARRIERS
+    assert find_row(out, "barriers", ResultEvent.NOT_PROVEN, "probe · may be reachable")
+    assert up_calls(scripted) == [RECREATE_SOCKET_PROXY]
+    assert not find_row(out, "socket-proxy", ResultEvent.RECREATED)
+    assert applied(state) == UNFINISHED
+
+
+def test_a_proof_that_held_for_an_earlier_service_keeps_its_row_before_the_red_one(
+    applied_core,  # noqa: F811
+    switch,  # noqa: F811
+    scripted,  # noqa: F811
+    repository,  # noqa: F811
+    state,  # noqa: F811
+    ingress,  # noqa: F811
+    monkeypatch,
+):
+    """D8: socket-proxy's proof held and keeps its row; traefik's did not."""
+    _two_switched_off_units(scripted, repository, state)
+    scripted.change_definition("socket-proxy")
+    _barrier_answers(ingress, monkeypatch)
+    answering = ingress.fetch
+
+    def failing_after_traefik(address, host, seconds, clock):
+        if len(up_calls(scripted)) == 2:
+            return PLAIN_NOT_FOUND
+        return answering(address, host, seconds, clock)
+
+    monkeypatch.setattr(ingress, "fetch", failing_after_traefik)
+
+    exit_code, out, _ = switch()
+
+    assert exit_code == 1
+    assert row_at(out, "socket-proxy", ResultEvent.RECREATED, "barriers proven") < row_at(
+        out, "barriers", ResultEvent.NOT_PROVEN
+    )
+    assert not find_row(out, "traefik", ResultEvent.RECREATED)
+
+
+def test_the_next_apply_after_an_unproven_barrier_recreates_and_proves_again(
+    core_files,  # noqa: F811
+    switch,  # noqa: F811
+    scripted,  # noqa: F811
+    repository,  # noqa: F811
+    state,  # noqa: F811
+    ingress,  # noqa: F811
+    monkeypatch,
+):
+    """D6: the unfinished entry plans the recreate again; the proof holds, the record is written."""
+    _two_switched_off_units(scripted, repository, state)
+    scripted.change_definition("traefik")
+    _barrier_answers(ingress, monkeypatch, {"probe"})
+    assert switch()[0] == 1
+    _barrier_answers(ingress, monkeypatch)
+
+    exit_code, out, err = switch()
+
+    assert (exit_code, err) == (0, "")
+    assert find_row(out, "traefik", PlanEvent.RECREATE, "the last recreate did not finish")
+    assert find_row(out, "traefik", ResultEvent.RECREATED, "barriers proven")
+    assert applied(state) != UNFINISHED
+
+
+def test_a_barrier_that_cannot_be_written_is_unproven_with_its_cause_as_the_detail(
+    core_files,  # noqa: F811
+    switch,  # noqa: F811
+    scripted,  # noqa: F811
+    repository,  # noqa: F811
+    state,  # noqa: F811
+):
+    """D9: a barrier that could not be put up is unproven with its cause."""
+    _two_switched_off_units(scripted, repository, state)
+    scripted.change_definition("traefik")
+    dynamic = repository / "dynamic"
+    dynamic.chmod(stat.S_IRUSR | stat.S_IXUSR)
+    try:
+        exit_code, out, err = switch()
+    finally:
+        dynamic.chmod(stat.S_IRWXU)
+
+    assert exit_code == 1
+    assert err.splitlines() == STOPPED_BY_BARRIERS
+    assert "probe: cannot write switch-probe.yml" in detail_lines(out)[-3]
 
 
 @pytest.mark.parametrize("proven_unit", [False, True], ids=["hostless only", "hostless and proven"])
@@ -596,7 +754,7 @@ def test_a_hostless_unit_has_no_barrier_so_only_a_proven_one_makes_the_row_say_s
 ):
     """C3, C4: a switched-off unit that declares no host proves nothing and fails nothing."""
     scripted.config["services"]["echo"] = {"profiles": ["echo"]}
-    units = ["echo", "probe"] if proven_unit else ["echo"]
+    units = ["probe", "echo"] if proven_unit else ["echo"]
     write_fleet(
         repository, DISABLED + "".join(f"  {unit}:\n    run: {{enabled: true}}\n" for unit in units)
     )
@@ -608,6 +766,7 @@ def test_a_hostless_unit_has_no_barrier_so_only_a_proven_one_makes_the_row_say_s
     exit_code, out, err = switch()
 
     assert (exit_code, err) == (0, "")
+    assert "no host" not in plain(out)
     assert (
         bool(find_row(out, "traefik", ResultEvent.RECREATED, "barriers proven · 5s")) is proven_unit
     )
