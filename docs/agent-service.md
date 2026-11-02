@@ -18,7 +18,7 @@ name could be anyone's on a public one (`pull_policy: never`), so it is built on
 switches the unit on. The build line it runs, from the repository root:
 
 ```sh
-docker build -f agent-service/image/Dockerfile -t edge-agent-service:0.12.0-claude-2.1.302-codex-0.163.0 agent-service/image
+docker build -f agent-service/image/Dockerfile -t edge-agent-service:0.16.0-claude-2.1.302-codex-0.163.0 agent-service/image
 ```
 
 A release bump runs `python3 scripts/agent_service_lock.py <tag>` (it needs `git` and `uv`), the
@@ -44,9 +44,9 @@ beside the per-app agent networks and `egress` (never `mcp-songmaker`). The key 
 `agent_service_signing_key`, the one file `~/.secrets/agent-service/signing/private.pem` and never its folder, read through
 `[signing] key_file`; the step-ca root reaches it as `step_ca_root_certificate` through `[mcp] ca_file`, because the service
 trusts that file alone and ignores `SSL_CERT_FILE`. A file secret binds the inode, so a new key reaches the service only
-through a recreate. The service alone decides an agent's model: `[defaults] model` (`anthropic/opus`), which
-an app or an agent entry of `service.toml` may override, and the request names none (a body with `model`
-answers 422). `run_started` names the model and the route the service chose.
+through a recreate. The service decides an agent's model: `[defaults] model` (`anthropic/opus`), which
+an app or an agent entry of `service.toml` may override. A run may name a model that a `[cli.<provider>] models`
+list offers; one it does not offer is refused with `model_not_offered`. `run_started` names the model and the route the service chose.
 
 The service admits no background run, and which identity runs an app's background agents is agent-runtime#479's question.
 

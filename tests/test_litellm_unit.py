@@ -313,8 +313,10 @@ def canary():
 class StreamedResponse:
     def __init__(self, status: int, frames: list[tuple[str, dict]]) -> None:
         self.status = status
+        version = importlib.import_module("smoke").PROTOCOL_VERSION
         body = "".join(
-            f"event: {event}\ndata: {json.dumps({'v': 4, **data})}\n\n" for event, data in frames
+            f"event: {event}\ndata: {json.dumps({'v': version, **data})}\n\n"
+            for event, data in frames
         )
         self.readline = io.BytesIO(body.encode()).readline
 

@@ -29,7 +29,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import IO, NamedTuple, NoReturn
 
-PROTOCOL_VERSION = 4
+PROTOCOL_VERSION = 6
 AGENT = "chat"
 EVENT_PREFIX = "event: "
 SERVED_BY = "served by"

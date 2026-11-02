@@ -1,4 +1,4 @@
-# agent-runtime v0.12.0, commit 9176b471d11c5090eb701689ead0224837ce5981
+# agent-runtime v0.16.0, commit c22e1c2f15c892dfddcefb4079787ecd3bf9a6cd
 # uv export --no-header --frozen --no-dev --no-emit-workspace --package overnightworks-agent-runtime-service, then the release's wheels.
 # Written only by scripts/agent_service_lock.py; do not edit.
 annotated-doc==0.0.5 \
@@ -196,8 +196,8 @@ opentelemetry-api==1.45.1 \
     --hash=sha256:aa38ed19bcc084ba42782a73255b3582283eced7ad6dddbd6695189e69adfb75 \
     --hash=sha256:b31553efa588ae44bc306f863c785c5333a9ecc091248c6ee68b4b6c87fdedfb
     # via fastapi
-overnightworks-webauth @ https://github.com/overnightworks/webauth/releases/download/v0.25.0/overnightworks_webauth-0.25.0-py3-none-any.whl \
-    --hash=sha256:4728daeeb31eef7c563db4c8f2f8893fd4373f32a7b552a4b1cef8042e3b982d
+overnightworks-webauth @ https://github.com/overnightworks/webauth/releases/download/v0.26.0/overnightworks_webauth-0.26.0-py3-none-any.whl \
+    --hash=sha256:85191c4f41d1c287682f55625a4ad12f574dcc53c523376b48b419a2a469582f
     # via overnightworks-agent-runtime-service
 pycparser==3.11 ; implementation_name != 'PyPy' and platform_python_implementation != 'PyPy' \
     --hash=sha256:51d5a8ba2be0bbe440b99d2112604c95bbbc3c2748a64260186c541e1729cd80 \
@@ -352,9 +352,9 @@ uvicorn==0.54.0 \
     --hash=sha256:505bdb0f318731d45f1f712071fc781a8981f6847a31c902c9f5e652d4f67faf \
     --hash=sha256:a2e33cbfaa0306f8e6b0c13e0cb89d7d7a2da3e62b90c66e18c33d9807b28620
     # via overnightworks-agent-runtime-service
-overnightworks-agent-runtime @ https://github.com/overnightworks/agent-runtime/releases/download/v0.12.0/overnightworks_agent_runtime-0.12.0-py3-none-any.whl \
-    --hash=sha256:73a54b3e1d25871cc091e8ad4bc4eb4b6cca63e876674b5dc41190ad90430597
-overnightworks-agent-runtime-client @ https://github.com/overnightworks/agent-runtime/releases/download/v0.12.0/overnightworks_agent_runtime_client-0.12.0-py3-none-any.whl \
-    --hash=sha256:b4652a8b64ece25136663ce7719f8cb540905148efec896a9eecc841c2380e28
-overnightworks-agent-runtime-service @ https://github.com/overnightworks/agent-runtime/releases/download/v0.12.0/overnightworks_agent_runtime_service-0.12.0-py3-none-any.whl \
-    --hash=sha256:b833dd0963cb5cbaa82c81532ae07371d9406f5216df60ed9921df2cff983325
+overnightworks-agent-runtime @ https://github.com/overnightworks/agent-runtime/releases/download/v0.16.0/overnightworks_agent_runtime-0.16.0-py3-none-any.whl \
+    --hash=sha256:f1f46c260c9768ff866046289dcae5653d2d123c6627aa4b7efd7fc731a23585
+overnightworks-agent-runtime-client @ https://github.com/overnightworks/agent-runtime/releases/download/v0.16.0/overnightworks_agent_runtime_client-0.16.0-py3-none-any.whl \
+    --hash=sha256:9dc841c87da315dc678bbfd8439a38d6352a7e1ad765632593cea36fedf65e86
+overnightworks-agent-runtime-service @ https://github.com/overnightworks/agent-runtime/releases/download/v0.16.0/overnightworks_agent_runtime_service-0.16.0-py3-none-any.whl \
+    --hash=sha256:ee1d4fb22500a383536f6ef9d79dc97cf9432239821ae741ce599638f85e3e4e
