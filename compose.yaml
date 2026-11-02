@@ -429,6 +429,9 @@ services:
       LITELLM_TELEMETRY: "False"
       # LiteLLM logs a provider's error text at ERROR, which can echo request content (E13).
       LITELLM_LOG: CRITICAL
+      # The API route's bound on parallel requests, per key and per process. A literal, not an
+      # interpolation: nothing outside this file may set the bound of a paid route.
+      API_ROUTE_MAX_PARALLEL_REQUESTS: "5"
     tmpfs:
       - /tmp:uid=1000,gid=1000,mode=0700,size=64m,nosuid,nodev
     secrets: [litellm_anthropic_key, litellm_master_key, agent_service_api_credential]

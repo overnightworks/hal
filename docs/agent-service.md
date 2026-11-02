@@ -294,15 +294,24 @@ has no `[api]` table.
   parses form bodies), no `x-litellm-` header (LiteLLM reads per-request retries and timeouts from
   them), no `anthropic-` header (LiteLLM forwards `anthropic-version` and `anthropic-beta` to the
   provider) and exactly the body keys `model`, `messages` and `tools`, which agent-runtime's one posting
-  function sends. LiteLLM has no database and no limiter and
+  function sends. LiteLLM has no database and
   messages are not logged; it needs a master key to boot, a third file secret that `hal setup`
   generates and no client holds, so its admin routes stay closed.
 - **What stays reachable.** The front sees every message and the service credential in memory; a
-  compromised front could spend credit through LiteLLM, bounded by the prepaid credit. The API
-  route has no concurrency cap until agent-runtime#634. LiteLLM reaches only the front and, through
+  compromised front could spend credit through LiteLLM, bounded by the prepaid credit and, for the
+  burn rate, by the route's concurrency bound. LiteLLM reaches only the front and, through
   the gateway's `litellm` entrypoint, the provider's name.
+- **The bound.** LiteLLM refuses the next request over a bound on the API route at once with 429
+  and `Retry-After`, before the provider; nothing waits, and the run ends
+  `failed: provider_unavailable` on route `api`. The bound is the fixed number
+  `API_ROUTE_MAX_PARALLEL_REQUESTS` in `compose.yaml`, which `auth.py` reads once at start and sets on
+  the service key; a missing or malformed value stops the hook from loading, and the route then
+  refuses everything. It counts HTTP requests, not runs (a later tool round of an admitted run can
+  be refused), per LiteLLM process in memory (a second worker or replica would multiply it), and
+  all apps share the one key. `probe/agent-service/litellm_admission.py` proves it on the
+  fake-only stack.
 - **A change reaches LiteLLM only through a recreate** of its container: `config.yaml` (model
-  remapping included), `auth.py`, `gate.py` and `start.sh` are read once at start, and the three
+  remapping included), `auth.py`, `gate.py`, `start.sh` and the bound are read once at start, and the three
   secrets (provider key, master key and service credential) are files mounted at create time.
 - **A failure ends the run by name.** LiteLLM, the front or the gateway stopped, an upstream 500,
   529, timeout, reset or broken answer, an untrusted certificate, a refused credential and
@@ -322,7 +331,7 @@ has no `[api]` table.
   docstring gives the command line): the fake Anthropic and a fake issuer sit on `internet`, made
   internal, and the probe refuses to start otherwise. Re-run it for every LiteLLM, Traefik or Docker
   bump. `probe/agent-service/litellm_failures.py` drives the failure, key and rotation
-  cases on the same stack, and `litellm_retention.py` the retention census of the route. The CI job `front` runs the front's table of requests (`tests/test_litellm_front.py`) for
+  cases on the same stack, `litellm_admission.py` the bound, and `litellm_retention.py` the retention census of the route. The CI job `front` runs the front's table of requests (`tests/test_litellm_front.py`) for
   every Traefik bump; a LiteLLM bump still needs the probe.
 
 ## Proofs
