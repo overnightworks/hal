@@ -1,0 +1,8 @@
+claim_id = "6c658a05c580457297360a247f8efba5"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "b60f09e906b089fbdfc559b30440a9e607d9e0ca"
+branch = "claude/issue-902-appkit-0-12-0"
+scope = ["keycloak/themes/hallucinai/account/theme.properties", "keycloak/themes/hallucinai/login/theme.properties", "legal/frame/datenschutz.html", "legal/frame/impressum.html", "legal/frame/nutzungsbedingungen.html", "pyproject.toml", "uv.lock"]
+opened_commit = "38f6ce175e01b4755d7c8a47dcc924809103b979"
+whole_reason = "One pin bump: the wheel pin and every link that names the served version move together, or the pages lose their stylesheet."
