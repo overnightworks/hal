@@ -282,6 +282,28 @@ def test_start_never_prints_a_key_it_refuses(stub_path, tmp_path):
 
 
 @pytest.fixture(scope="module")
+def fake_provider():
+    path = ROOT / "probe" / "agent-service" / "fake_anthropic.py"
+    yield from loaded_script("fake_anthropic", path)
+
+
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [(b'{"prompt": "before CANARY after"}', "CANARY"), (b'{"prompt": "other"}', "probe")],
+)
+def test_the_fake_quotes_the_canary_a_request_holds_and_nothing_else_of_it(
+    fake_provider, body, expected
+):
+    steering = {"mode": "echo", "status": 400, "request_canary": "CANARY"}
+
+    handler = fake_provider.handler("provider", {})
+
+    status, reply = handler.provider_answer(None, steering, body)
+
+    assert (status, json.loads(reply)["error"]["message"]) == (400, expected)
+
+
+@pytest.fixture(scope="module")
 def canary():
     with pytest.MonkeyPatch.context() as patch:
         patch.syspath_prepend(str(ROOT / "agent-service"))  # the canary imports smoke.py
@@ -331,6 +353,37 @@ def test_the_canary_prints_only_verdict_lines_for_a_succeeded_run_that_holds_the
         0,
         ["answer 200", "event run_started", "route api", "event succeeded", "marker yes"],
     )
+
+
+class RequestRecordingConnection(StreamedConnection):
+    def __init__(self) -> None:
+        super().__init__(StreamedResponse(403, []))
+        self.bodies: list[bytes] = []
+
+    def request(self, _method: str, _path: str, body: bytes, _headers: dict) -> None:
+        self.bodies.append(body)
+
+
+def prompt_sent_by(canary, monkeypatch, options: list[str]) -> str:
+    connection = RequestRecordingConnection()
+    monkeypatch.setattr(canary.http.client, "HTTPConnection", lambda *_, **__: connection)
+    canary.main(
+        ["--marker", "m4rker", *options], stdin=io.StringIO("person\nworkload\n"), out=io.StringIO()
+    )
+    (body,) = connection.bodies
+    return json.loads(body)["turn"]["messages"][0]["text"]
+
+
+def test_the_canary_adds_the_request_marker_to_the_prompt_it_sends(canary, monkeypatch):
+    prompt = prompt_sent_by(canary, monkeypatch, ["--request-marker", "r3quest-9c1"])
+
+    assert "r3quest-9c1" in prompt
+
+
+def test_the_canary_sends_the_plain_prompt_without_a_request_marker(canary, monkeypatch):
+    prompt = prompt_sent_by(canary, monkeypatch, [])
+
+    assert prompt == canary.ANSWER_PROMPT
 
 
 def test_the_canary_prints_the_route_as_other_when_run_started_names_none_in_a_closed_word(
