@@ -200,7 +200,7 @@ def _changed_since_planned(git: checkout.Git, origin: checkout.Origin) -> checko
         if not git.is_ancestor(head, origin.sha):
             return checkout.Refusal(f"{origin.sha} is no fast-forward of HEAD {head}")
     except checkout.GitError as error:
-        return checkout.Refusal(f"cannot read the live checkout, {error}", cannot_tell=True)
+        return checkout.Refusal.cannot_read(error)
     return None
 
 

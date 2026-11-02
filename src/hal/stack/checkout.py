@@ -458,6 +458,10 @@ class Refusal:
     paths: tuple[str, ...] = ()
     cannot_tell: bool = False
 
+    @classmethod
+    def cannot_read(cls, error: GitError) -> "Refusal":
+        return cls(f"cannot read the live checkout, {error}", cannot_tell=True)
+
 
 def not_clean_main(git: Git) -> Refusal | None:
     """Why `git` is not a born `main` with nothing changed; None when it is (#95 rules 5, 6). A
@@ -467,7 +471,7 @@ def not_clean_main(git: Git) -> Refusal | None:
             return Refusal(f"runs only on {MAIN} ({reason})")
         changed = git.changed_paths()
     except GitError as error:
-        return Refusal(f"cannot read the live checkout, {error}", cannot_tell=True)
+        return Refusal.cannot_read(error)
     if not changed:
         return None
     return Refusal(DIRTY_TREE, tuple(changed))

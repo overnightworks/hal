@@ -323,7 +323,7 @@ def test_a_pinned_sha_that_does_not_descend_from_head_is_refused(world, capsys):
 def test_a_git_that_cannot_answer_at_the_recheck_after_the_yes_ends_failed_not_refused(
     world, capsys, verb
 ):
-    """R3: the guard before the question passed; only the recheck after the `yes` finds git mute."""
+    """The guard before the question passed; only the recheck after the `yes` finds git mute."""
     world.wait(*subjects("waiting"))
     git = Tamper(world, verb, answered(128, b"", b"fatal: boom\n"))
 
