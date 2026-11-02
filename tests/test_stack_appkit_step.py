@@ -31,6 +31,7 @@ from support.stack_plan_rows import find_row
 
 from hal.stack import appkit_step, apply
 from hal.stack.plan_rows import PlanEvent
+from hal.stack.result_rows import ResultEvent
 
 VERSION = metadata.version("overnightworks-appkit")
 
@@ -83,6 +84,7 @@ def test_a_fresh_checkout_names_the_new_directory_and_writes_every_target_after_
 
     assert exit_code == 0, err
     assert find_row(out, "appkit", PlanEvent.NEW_FILES, VERSION)
+    assert find_row(out, "appkit", ResultEvent.FILES_WRITTEN, VERSION)
     assert [files_of(target) for target in world.targets] == seeded
 
 
@@ -160,9 +162,11 @@ def test_only_the_steps_own_stale_directories_are_removed_in_every_target(world)
     assert "appkit-0.4.0, appkit-0.4.0" not in out
     assert all((world.repository / path).is_dir() for path in stale)
 
-    exit_code, _, err = world.switch()
+    exit_code, out, err = world.switch()
 
     assert exit_code == 0, err
+    assert find_row(out, "appkit", ResultEvent.FILES_REMOVED, "appkit-0.4.0")
+    assert not find_row(out, "appkit", ResultEvent.FILES_WRITTEN)
     assert not any((world.repository / path).exists() for path in stale)
     assert all((target.parent / "other").is_dir() and target.is_dir() for target in world.targets)
 
@@ -187,13 +191,51 @@ def test_a_failing_target_is_named_and_stops_the_writes_there(world):
             raise OSError(5, "interrupted")
         os.rename(source, destination)
 
-    exit_code, _, err = world.switch(rename=rename)
+    exit_code, out, err = world.switch(rename=rename)
 
     assert exit_code == 1
-    assert f"appkit: could not write {failing} (interrupted)" in err
+    assert find_row(
+        out, "appkit", ResultEvent.NOT_WRITTEN, f"could not write {failing} (interrupted)"
+    )
+    assert not find_row(out, "appkit", ResultEvent.FILES_WRITTEN)
+    assert err.splitlines() == [
+        "error: partial, appkit not written · no unit switched",
+        "next: hal apply",
+    ]
     assert files_of(world.legal) == files_of(appkit_step.installed_static())
     assert not failing.exists()
     assert not world.targets[2].exists()
+
+
+def test_a_failed_removal_of_a_stale_directory_names_that_directory(world):
+    stale = world.targets[0].parent / "appkit-0.4.0"
+    stale.mkdir()
+    (stale / "appkit.css").write_text("old")
+    stale.parent.chmod(0o500)
+    try:
+        exit_code, out, err = world.switch()
+    finally:
+        stale.parent.chmod(0o700)
+
+    assert exit_code == 1
+    assert find_row(out, "appkit", ResultEvent.NOT_WRITTEN, f"could not write {stale} (")
+    assert "no unit switched" in err
+
+
+def test_a_failed_copy_without_an_error_text_has_a_reason_on_one_line(world, monkeypatch):
+    for target in world.targets:
+        shutil.rmtree(target)
+    monkeypatch.setattr(appkit_step.shutil, "copytree", _failing_copy)
+
+    exit_code, out, _ = world.switch()
+
+    assert exit_code == 1
+    assert find_row(out, "appkit", ResultEvent.NOT_WRITTEN, "No space left on device")
+    assert "(None)" not in out
+
+
+def _failing_copy(*_arguments, **_keywords):
+    raise shutil.Error([("source", "destination", "No space left on device")])
 
 
 def test_a_missing_appkit_is_one_cannot_plan_error(repository):  # noqa: F811
