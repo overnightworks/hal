@@ -466,7 +466,7 @@ class Probe:
         before, after, out = self.apply_core_change()
         expect(
             "socket-proxy recreate definition changed" in out
-            and "traefik recreate socket-proxy is recreated" in out
+            and "traefik recreate traefik.yml changed · socket-proxy is recreated" in out
             and out.count("socket-proxy is recreated") == 1  # the fact of traefik's plan row
             and result_row(out, "socket-proxy")
             and result_row(out, "traefik")
