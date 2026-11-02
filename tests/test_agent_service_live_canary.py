@@ -58,6 +58,9 @@ class Route:
     toml_code: int = 0
     file_age: float = 60.0  # seconds the mounted file is older than the service container
     stat_code: int = 0
+    started_code: int = 0
+    started: str = STARTED
+    modified: str | None = None  # the whole answer of stat, when not derived from file_age
     missing: str | None = None
     doubled: str | None = None
     leftover_removal: int = 0
@@ -81,7 +84,7 @@ class Route:
             return completed(listed, stderr=SENTINEL)
         if command[:2] == ["docker", "inspect"]:
             if live_canary.STARTED_AT in command:
-                return completed(STARTED, 0, SENTINEL)
+                return completed(self.started, self.started_code, SENTINEL)
             return completed(f"/{container_of(command[-1].removeprefix('id-'))}\n")
         if "exec" in command:
             return self.service_file(command)
@@ -99,7 +102,10 @@ class Route:
 
     def service_file(self, command: list[str]) -> subprocess.CompletedProcess:
         if "stat" in command:
-            return completed(f"{STARTED_EPOCH - self.file_age:.9f}\n", self.stat_code, SENTINEL)
+            answer = (
+                f"{STARTED_EPOCH - self.file_age:.9f}\n" if self.modified is None else self.modified
+            )
+            return completed(answer, self.stat_code, SENTINEL)
         if isinstance(self.toml, Exception):
             raise self.toml
         return completed(self.toml, self.toml_code, SENTINEL)
@@ -277,6 +283,9 @@ def test_two_containers_for_one_service_are_a_missing_container(capsys):
         (Route(toml=UnicodeDecodeError("utf-8", b"\xff", 0, 1, "x")), UNREADABLE),
         (Route(file_age=-1.0), "the service has not loaded this file"),
         (Route(stat_code=1), UNREADABLE),
+        (Route(started_code=1), UNREADABLE),
+        (Route(started=""), UNREADABLE),
+        (Route(modified=""), UNREADABLE),
         (
             Route(toml='[api]\ncompletion_url = "http://litellm-front.evil.test:4000/v1"\n'),
             "the service names another gateway",
@@ -292,6 +301,9 @@ def test_two_containers_for_one_service_are_a_missing_container(capsys):
         "not utf-8",
         "file newer than the service",
         "age unreadable",
+        "start unreadable",
+        "start empty",
+        "age empty",
     ],
 )
 def test_a_service_that_does_not_name_the_front_stops_the_run_before_any_sign_in(
