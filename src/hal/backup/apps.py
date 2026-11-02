@@ -114,19 +114,25 @@ def parse_apps(text: str) -> tuple[App, ...]:
     try:
         document = tomllib.loads(text)
     except tomllib.TOMLDecodeError as error:
-        raise AppsError(f"apps.toml is not valid TOML: {error}") from error
-    if unknown := set(document) - {"app"}:
-        raise AppsError(f"apps.toml: unknown key {sorted(unknown)}")
+        raise AppsError(f"apps.toml is not valid TOML{_position(error)}") from error
+    if set(document) - {"app"}:
+        raise AppsError("apps.toml: unknown key; only ['app'] is allowed")
     apps = document.get("app", {})
     if not isinstance(apps, dict) or not apps:
         raise AppsError("apps.toml declares no app ([app.<name>])")
     return tuple(_parse_app(name, record) for name, record in apps.items())
 
 
+def _position(error: tomllib.TOMLDecodeError) -> str:
+    """Only where the parser stopped: its message may quote what it refused."""
+    found = re.search(r"\(at (line \d+, column \d+|end of document)\)$", str(error))
+    return f" at {found.group(1)}" if found else ""
+
+
 def _parse_app(name: str, record: object) -> App:
-    label = f"apps.toml [app.{name}]"
     if not _PLAIN_NAME.fullmatch(name):
-        raise AppsError(f"{label}: the app name is not plain enough")
+        raise AppsError(f"apps.toml: an app name must match {_PLAIN_NAME.pattern}")
+    label = f"apps.toml [app.{name}]"
     if name == PRE_APPLY_TAG:
         raise AppsError(f"{label}: the app name is taken by the restic tag {PRE_APPLY_TAG}")
     if not isinstance(record, dict):
@@ -176,7 +182,7 @@ def _dump_kind(label: str, record: dict) -> DumpKind:
     dump = record.get("dump")
     if not isinstance(dump, str) or dump not in {kind.value for kind in DumpKind}:
         allowed = sorted(kind.value for kind in DumpKind)
-        raise AppsError(f"{label}: dump must be one of {allowed}, not {dump!r}")
+        raise AppsError(f"{label}: dump must be one of {allowed}")
     return DumpKind(dump)
 
 
@@ -184,8 +190,7 @@ def _postgres_major(label: str, record: dict) -> PostgresMajor:
     value = record["postgres_major"]
     if type(value) is not int or value not in {major.value for major in PostgresMajor}:
         raise AppsError(
-            f"{label}: postgres_major must be one of {[m.value for m in PostgresMajor]}, "
-            f"not {value!r}"
+            f"{label}: postgres_major must be one of {[m.value for m in PostgresMajor]}"
         )
     return PostgresMajor(value)
 
@@ -202,7 +207,7 @@ def _parse_restore_test(label: str, record: dict, audio_keys: frozenset[str]) ->
     )
     require_rows = record.get(_REQUIRE_ROWS_KEY, False)
     if not isinstance(require_rows, bool):
-        raise AppsError(f"{label}: {_REQUIRE_ROWS_KEY} must be true or false, not {require_rows!r}")
+        raise AppsError(f"{label}: {_REQUIRE_ROWS_KEY} must be true or false")
     return RestoreTest(
         count_table=_identifier(label, record, "count_table"), require_rows=require_rows
     )
@@ -248,8 +253,8 @@ def _parse_audio(label: str, record: dict, restore_test_record: dict) -> Audio |
 def _require_exact_keys(
     label: str, record: dict, keys: frozenset[str], optional: frozenset[str] = frozenset()
 ) -> None:
-    if unknown := set(record) - keys - optional:
-        raise AppsError(f"{label}: unknown key {sorted(unknown)}")
+    if set(record) - keys - optional:
+        raise AppsError(f"{label}: unknown key; only {sorted(keys | optional)} are allowed")
     if missing := keys - set(record):
         raise AppsError(f"{label}: missing {sorted(missing)}")
 
@@ -265,5 +270,5 @@ def _identifier(label: str, record: dict, key: str) -> str:
 def _matching(label: str, record: dict, key: str, pattern: re.Pattern[str]) -> str:
     value = record[key]
     if not isinstance(value, str) or not pattern.fullmatch(value):
-        raise AppsError(f"{label}: {key} must match {pattern.pattern}, not {value!r}")
+        raise AppsError(f"{label}: {key} must match {pattern.pattern}")
     return value
