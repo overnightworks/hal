@@ -37,6 +37,7 @@ import yaml
 
 from hal.backup.docker import PROJECT_LABEL
 from hal.grammar import ExitCode
+from hal.output import write_line
 from hal.stack import catalog, checkout, compose, deploy_checkout
 
 APPLY_SECONDS = 600
@@ -70,7 +71,7 @@ PINNED_PREFIX = re.compile(r"subnet:\s+(\d+\.\d+\.\d+\.)0/24")
 # 127.0.0.0/8, and the live listeners are bound to 127.0.0.1 only.
 PROBE_HOST = "127.0.0.2"
 # The hosts of an entrypoint that listens on every address, the probe host's included.
-WILDCARD_HOSTS = {"", "0.0.0.0", "[::]"}
+WILDCARD_HOSTS = {"", "0.0.0.0", "[::]"}  # noqa: S104 - names the addresses to refuse and binds none
 
 
 class ProbeFailed(Exception):
@@ -294,6 +295,24 @@ def copy_compose_prefix(copy: Path) -> list[str]:
     return ["docker", "compose", "--project-directory", str(copy), "--file", str(compose_file)]
 
 
+def run_command(
+    command: Sequence[str],
+    *,
+    check: bool = False,
+    text: bool = False,
+    input: bytes | None = None,
+    stdin: int | None = None,
+    cwd: Path | None = None,
+    env: Mapping[str, str] | None = None,
+    timeout: int | None = None,
+) -> subprocess.CompletedProcess[Any]:
+    """`command` run with its output captured."""
+    return subprocess.run(  # noqa: S603 - the probe builds argv and finds each program on PATH by design
+        command, capture_output=True, check=check, text=text, input=input, stdin=stdin,
+        cwd=cwd, env=env, timeout=timeout,
+    )  # fmt: skip
+
+
 def copy_compose_command(copy: Path) -> list[str]:
     """`copy_compose_prefix` with every profile."""
     return [*copy_compose_prefix(copy), "--profile", "*"]
@@ -301,13 +320,11 @@ def copy_compose_command(copy: Path) -> list[str]:
 
 def daemon_subnets() -> list[str]:
     """The subnets of every network the daemon has."""
-    listing = subprocess.run(
-        ["docker", "network", "ls", "-q"], capture_output=True, text=True, check=True
-    ).stdout.split()
+    listing = run_command(["docker", "network", "ls", "-q"], text=True, check=True).stdout.split()
     if not listing:
         return []
-    inspected = subprocess.run(
-        ["docker", "network", "inspect", *listing], capture_output=True, text=True, check=True
+    inspected = run_command(
+        ["docker", "network", "inspect", *listing], text=True, check=True
     ).stdout
     return [
         config["Subnet"]
@@ -357,9 +374,9 @@ class NetworkGuard:
     def expect_clean_teardown(self) -> None:
         """No network of the project is left, and the live `hal_*` networks are the same as when
         the guard was made."""
-        left = subprocess.run(
+        left = run_command(
             ["docker", "network", "ls", "-q", "--filter", f"name={self.project}_"],
-            capture_output=True, check=True, text=True, timeout=APPLY_SECONDS,
+            check=True, text=True, timeout=APPLY_SECONDS,
         ).stdout.split()  # fmt: skip
         expect(not left, f"the teardown left networks {left}")
         after = live_networks()
@@ -377,9 +394,9 @@ def guarded_compose(copy: Path, guard: NetworkGuard | None, arguments: Sequence[
 
 def live_networks() -> set[str]:
     """The names of the fixed `hal_*` networks the daemon has now."""
-    listing = subprocess.run(
+    listing = run_command(
         ["docker", "network", "ls", "--format", "{{.Name}}"],
-        capture_output=True, check=True, text=True, timeout=APPLY_SECONDS,
+        check=True, text=True, timeout=APPLY_SECONDS,
     )  # fmt: skip
     return {name for name in listing.stdout.split() if name.startswith(LIVE_NETWORK_PREFIX)}
 
@@ -415,10 +432,9 @@ def live_project(repository: Path) -> LiveProject:
     every one compose.yaml resolves, whatever its label."""
 
     def docker(*arguments: str) -> list[str]:
-        return subprocess.run(
-            ["docker", *arguments], capture_output=True, check=True, text=True,
-            timeout=APPLY_SECONDS,
-        ).stdout.splitlines()  # fmt: skip
+        return run_command(
+            ["docker", *arguments], check=True, text=True, timeout=APPLY_SECONDS
+        ).stdout.splitlines()
 
     text = (repository / deploy_checkout.COMPOSE_FILE).read_text()
     name = compose_project_name(text)
@@ -457,9 +473,9 @@ def repository_copy(repository: Path, home: Path, scratch: Path, project: str) -
     reaches a live one. Its fleet.yaml has no app entry (without_inherited_apps): a probe adds its
     own fixture apps. Copying again over an existing copy publishes what differs."""
     copy = checkout.live_checkout(home)
-    listing = subprocess.run(
+    listing = run_command(
         ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
-        capture_output=True, cwd=repository, check=True, timeout=APPLY_SECONDS,
+        cwd=repository, check=True, timeout=APPLY_SECONDS,
     )  # fmt: skip
     for name in filter(None, listing.stdout.decode().split("\0")):
         if name != deploy_checkout.COMPOSE_FILE and (repository / name).is_file():
@@ -475,10 +491,7 @@ def repository_copy(repository: Path, home: Path, scratch: Path, project: str) -
         git(copy, "remote", "add", "origin", str(remote))
         for key, value in PROBE_IDENTITY.items():
             git(copy, "config", key, value)
-    synced = subprocess.run(
-        ["uv", "sync", "--quiet"], capture_output=True, cwd=copy, check=False,
-        timeout=APPLY_SECONDS,
-    )  # fmt: skip
+    synced = run_command(["uv", "sync", "--quiet"], cwd=copy, timeout=APPLY_SECONDS)
     if synced.returncode != 0:
         tail = synced.stderr.decode(errors="replace").strip().splitlines()
         raise ProbeFailed(f"uv sync exited {synced.returncode}: {tail[-1] if tail else ''}")
@@ -547,16 +560,17 @@ def run_hal(
     program = copy / "bin" / "hal" if launcher else copy / ".venv" / "bin" / "hal"
     command = [str(program), *arguments]
     if terminal:
-        result = subprocess.run(
+        result = run_command(
             ["script", "-qec", shlex.join(command), DISCARD_OUTPUT],
-            input=typed, capture_output=True, env=environment, cwd=copy, check=False,
+            input=typed,
+            env=environment,
+            cwd=copy,
             timeout=APPLY_SECONDS,
-        )  # fmt: skip
+        )
     else:
-        result = subprocess.run(
-            command, stdin=subprocess.DEVNULL, capture_output=True, env=environment,
-            cwd=copy, check=False, timeout=APPLY_SECONDS,
-        )  # fmt: skip
+        result = run_command(
+            command, stdin=subprocess.DEVNULL, env=environment, cwd=copy, timeout=APPLY_SECONDS
+        )
     text = (result.stdout + result.stderr).decode(errors="replace")
     output = " ".join(ANSI_ESCAPE.sub("", text).split())
     expect(
@@ -580,10 +594,7 @@ def compose_engine(environment: Mapping[str, str], copy: Path) -> compose.Compos
     """edge's own Compose reader, over the copy and the probe's environment."""
 
     def run(command: list[str], timeout: int) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            command, capture_output=True, text=True, env=environment, cwd=copy,
-            check=False, timeout=timeout,
-        )  # fmt: skip
+        return run_command(command, text=True, env=environment, cwd=copy, timeout=timeout)
 
     return compose.Compose(run, copy)
 
@@ -634,16 +645,16 @@ def _tear_down_and_empty(
             try:
                 probe.teardown()
             except (ProbeFailed, subprocess.TimeoutExpired) as failure:
-                print(f"PROBE FAILED: teardown, {failure}")
+                write_line(f"PROBE FAILED: teardown, {failure}")
                 exit_code = 1
             except Exception as failure:  # the caller raises it unless another one propagates
-                print(f"PROBE FAILED: teardown, {failure!r}")
+                write_line(f"PROBE FAILED: teardown, {failure!r}")
                 unforeseen = failure
     finally:
         try:
             _empty_directory(descriptor)
         except OSError as failure:
-            print(f"PROBE FAILED: --scratch not emptied, {scratch}: {failure}")
+            write_line(f"PROBE FAILED: --scratch not emptied, {scratch}: {failure}")
             exit_code = 1
     return exit_code, unforeseen
 
@@ -674,7 +685,7 @@ def _run_and_clean_up(
 
 def passed_line(line: str) -> int:
     """What the verdict of a probe that only passes calls: print its line, exit code 0."""
-    print(line)
+    write_line(line)
     return 0
 
 
@@ -697,13 +708,13 @@ def run_probe(
             scratch, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
         )
     except OSError as failure:
-        print(f"PROBE FAILED: --scratch cannot be opened, {failure}")
+        write_line(f"PROBE FAILED: --scratch cannot be opened, {failure}")
         return NOT_RUNNABLE
     handlers = {number: signal.getsignal(number) for number in (signal.SIGTERM, signal.SIGINT)}
     try:
         with os.scandir(descriptor) as entries:
             if any(True for _ in entries):
-                print("PROBE FAILED: --scratch is not empty")
+                write_line("PROBE FAILED: --scratch is not empty")
                 return NOT_RUNNABLE
         exit_code, probe = _run_and_clean_up(scratch, descriptor, create, prove)
     finally:

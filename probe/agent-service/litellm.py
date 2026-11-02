@@ -58,7 +58,7 @@ LISTENING = "Uvicorn running"
 FRONT_STATIC = "/etc/traefik/traefik.yml"
 ENTRYPOINT_ADDRESS = re.compile(r'address:\s*"([^"]+)"')
 START_LISTENER = re.compile(r"--host (\S+) --port (\d+)")
-WILDCARD_SOCKETS = ("0.0.0.0", "[::]")
+WILDCARD_SOCKETS = ("0.0.0.0", "[::]")  # noqa: S104 - names the listener addresses the probe accepts and binds none
 # The secret files under the scratch HOME, where compose.yaml's `secrets` read them.
 PROVIDER_KEY_FILE = Path(".secrets/litellm/anthropic")
 MASTER_KEY_FILE = Path(".secrets/litellm/master-key")
