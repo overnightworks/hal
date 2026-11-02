@@ -1,8 +1,0 @@
-claim_id = "4ee97e5c779c481bb46240aff7a63dc1"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "4dfcbb05f37849458d9e8165a534783bbf15c8a8"
-branch = "claude/issue-927-probe-layer-quality-rules"
-scope = ["probe/agent-service/litellm.py", "probe/edge_copy.py", "probe/switches/built_image.py", "probe/switches/checkout_update.py", "tests/test_probe_isolation.py", "tests/test_probe_run.py"]
-opened_commit = "111c973d6513e1e64263ee7a93de0b029b3e93f6"
-whole_reason = "One finding class across one layer: edge_copy holds nearly all of it, and the remaining lines are single reasoned markers in its probes."
