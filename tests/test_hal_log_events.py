@@ -263,7 +263,7 @@ def test_a_good_restore_test_is_events_of_hal_restore(edge_backup):
 
 @pytest.mark.usefixtures("json_log")
 def test_a_failed_app_is_an_error_row_beside_an_info_row_and_the_error_event(edge_backup, machine):
-    machine.other_db_containers["edge"] = []
+    machine.lose_keycloak_database()
 
     outcome = edge_backup(*declare_shipped_apps(), "backup")
 

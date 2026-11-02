@@ -36,19 +36,20 @@ sys.path.insert(0, str(REPO / "src"))
 sys.path.insert(0, str(REPO / "agent-service"))
 
 from agent_networks import gateway_listeners, listeners_of  # noqa: E402
+from api_canary import verdicts  # noqa: E402
 from egress import LABEL, PROJECT, ProbeFailed, expect, run_scratch_probe  # noqa: E402
 from issuer import ISSUER_ORIGIN, ISSUER_SERVICE, SERVICE, IssuerProbe  # noqa: E402
 from refusals import API_GROUP  # noqa: E402
+from retention_census import FRONT, GATEWAY, LITELLM  # noqa: E402
 from scratch_secrets import issue_certificate, write_new  # noqa: E402
 
-FRONT, LITELLM, GATEWAY = "litellm-front", "litellm", "agent-egress"
 FAKE_PROVIDER, FAKE_ISSUER, CANARY = "fake-anthropic", "fake-issuer", "agent-canary"
 PROVIDER_HOST, ISSUER_HOST = "api.anthropic.com", "auth.hallucinai.de"
 NEW_NETWORKS = ("litellm-api", "litellm-backend", "litellm-egress")
 ISOLATED = "isolated"
 LISTEN_SECONDS = 60
 CANARY_SECONDS = 240
-FAKE_DIRECTORY, CANARY_DIRECTORY = "/fake", "/opt/canary"
+FAKE_DIRECTORY = "/fake"
 DEFAULT_APP, REMAPPED_APP, REMAPPED_MODEL = "songmaker", "hopin", "nonesuch"
 ACCESS_LINE = re.compile(r'"(?:GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS) \S+ HTTP/\d(?:\.\d)?"')
 ADMITTED_LINE = re.compile(r'"POST /v1/chat/completions HTTP/\d(?:\.\d)?" 200')
@@ -213,7 +214,6 @@ class LitellmProbe(IssuerProbe):
                 ],
             }  # fmt: skip
 
-        agent_directory = REPO / "agent-service"
         level = self.LITELLM_LOG_LEVEL
         log_level = {"LITELLM_LOG": level} if level else {}
         overlay = scratch / "compose.litellm.yaml"
@@ -235,16 +235,6 @@ class LitellmProbe(IssuerProbe):
                     },
                     FAKE_PROVIDER: fake("provider", PROVIDER_HOST),
                     FAKE_ISSUER: fake("issuer", ISSUER_HOST),
-                    CANARY: {
-                        **hardened, "profiles": ["agent-service"], "image": self.image,
-                        "networks": ["agent-songmaker"],
-                        "entrypoint": ["python", "-B", f"{CANARY_DIRECTORY}/api_canary.py"],
-                        "volumes": [
-                            {"type": "bind", "source": str(agent_directory / name),
-                             "target": f"{CANARY_DIRECTORY}/{name}", "read_only": True}
-                            for name in ("smoke.py", "api_canary.py")
-                        ],
-                    },
                 },
                 "networks": {"internet": {"internal": True}},
             }),
@@ -313,19 +303,13 @@ class LitellmProbe(IssuerProbe):
             "--marker", self.marker, *options,
         )  # fmt: skip
 
-    @staticmethod
-    def verdicts(stdout: str, exit_code: int) -> dict[str, str]:
-        """R: the canary's verdict lines by name (the last of a repeated name) and its exit code."""
-        lines = (line.partition(" ") for line in stdout.splitlines())
-        return {**{name: value for name, space, value in lines if space}, "exit": str(exit_code)}
-
     def canary(self, app: str, options: tuple[str, ...] = ()) -> dict[str, str]:
         """R: the canary's verdict lines of one run of `app` by a person of the API group alone."""
         result = self.run(
             self.canary_command(options), stdin=self.canary_input(app), check=False,
             timeout=CANARY_SECONDS,
         )  # fmt: skip
-        return self.verdicts(result.stdout, result.returncode)
+        return verdicts(result.stdout, result.returncode)
 
     def steer_fake(self, **steering: object) -> None:
         """Writes the provider fake's control file; the fake re-reads it on every request."""

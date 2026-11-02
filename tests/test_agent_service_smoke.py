@@ -379,49 +379,60 @@ def services() -> dict:
     return yaml.safe_load((ROOT / "compose.yaml").read_text())["services"]
 
 
-def test_agent_smoke_is_a_one_off_so_its_tokens_on_stdin_reach_no_journal(services):
+ONE_OFFS = pytest.mark.parametrize("name", ["agent-smoke", "agent-canary"])
+
+
+@ONE_OFFS
+def test_a_one_off_is_in_the_apply_profile_so_its_tokens_on_stdin_reach_no_journal(services, name):
     """The one-offs are the services of the `apply` profile, which test_stack_compose_one_offs.py
     shows log to none."""
-    assert services["agent-smoke"]["profiles"] == services["realm-observer"]["profiles"]
+    assert services[name]["profiles"] == services["realm-observer"]["profiles"]
 
 
-def test_agent_smoke_is_hardened_like_the_realm_observer(services):
-    smoke_service, observer = services["agent-smoke"], services["realm-observer"]
+@ONE_OFFS
+def test_a_one_off_is_hardened_like_the_realm_observer(services, name):
+    one_off, observer = services[name], services["realm-observer"]
 
     for key in ("user", "read_only", "cap_drop", "security_opt"):
-        assert smoke_service[key] == observer[key]
+        assert one_off[key] == observer[key]
 
 
-def test_agent_smoke_runs_the_service_image_that_is_never_pulled(services):
-    assert services["agent-smoke"]["image"] == services["agent-service"]["image"]
-    assert services["agent-smoke"]["pull_policy"] == "never"
+@ONE_OFFS
+def test_a_one_off_runs_the_service_image_that_is_never_pulled(services, name):
+    assert services[name]["image"] == services["agent-service"]["image"]
+    assert services[name]["pull_policy"] == "never"
 
 
-def test_agent_smoke_has_no_port_secret_or_address(services):
-    smoke_service = services["agent-smoke"]
+@ONE_OFFS
+def test_a_one_off_has_no_port_secret_or_address(services, name):
+    one_off = services[name]
 
     assert not {"ports", "expose", "secrets", "extra_hosts", "network_mode", "depends_on"} & (
-        smoke_service.keys()
+        one_off.keys()
     )
-    assert all(
-        volume.endswith(":ro") and volume.startswith("./agent-service/smoke.py:")
-        for volume in smoke_service["volumes"]
-    )
-    assert "environment" not in smoke_service
+    assert all(volume.endswith(":ro") for volume in one_off["volumes"])
+    assert "environment" not in one_off
 
 
-def test_agent_smoke_starts_the_mounted_script_in_isolated_mode(services):
-    smoke_service = services["agent-smoke"]
+@ONE_OFFS
+def test_a_one_off_starts_its_mounted_script_without_writing_bytecode(services, name):
+    one_off = services[name]
+    mounted = {volume.split(":")[1] for volume in one_off["volumes"]}
 
-    assert smoke_service["entrypoint"][:3] == ["python", "-I", "-B"]
-    (volume,) = smoke_service["volumes"]
-    assert smoke_service["entrypoint"][3] == volume.split(":")[1]
+    assert one_off["entrypoint"][0] == "python"
+    assert "-B" in one_off["entrypoint"]
+    assert one_off["entrypoint"][-1] in mounted
 
 
-def test_agent_smoke_reaches_the_service_by_the_name_it_connects_to(services):
+def test_agent_smoke_starts_in_isolated_mode(services):
+    assert "-I" in services["agent-smoke"]["entrypoint"]
+
+
+@ONE_OFFS
+def test_a_one_off_reaches_the_service_by_the_name_it_connects_to(services, name):
     assert smoke.SERVICE_HOST in services
-    assert set(services["agent-smoke"]["networks"]) <= set(services["agent-service"]["networks"])
-    assert len(services["agent-smoke"]["networks"]) == 1
+    assert set(services[name]["networks"]) <= set(services["agent-service"]["networks"])
+    assert len(services[name]["networks"]) == 1
 
 
 @pytest.mark.parametrize("key", ["agent-songmaker", "agent-presentator", "agent-hopin"])
