@@ -118,6 +118,7 @@ def test_an_unreachable_host_is_an_unfinished_run_with_the_connection_message(tm
 
     assert isinstance(run, PlaybookUnfinished)
     assert "hal-test: connection refused by fixture" in run.reason
+    assert run.changed == 0
 
 
 def test_without_v_none_of_ansibles_text_shows(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]) -> None:

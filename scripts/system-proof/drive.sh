@@ -68,6 +68,16 @@ in_log() {
     return
 }
 
+says_or_no_etc_line() {  # says_or_no_etc_line <log> <text>: the log has <text>; an empty <text> means the log prints no /etc line at all
+    local log=$1 text=$2
+    if [[ -z $text ]]; then
+        ! in_log "$log" "/etc "
+    else
+        in_log "$log" "$text"
+    fi
+    return
+}
+
 YES_PROMPT_PATTERN='Type .*yes.* to .*: '
 
 after_the_yes() {  # after_the_yes <log>: the output after the yes prompt; all of it when no yes was asked
@@ -877,10 +887,10 @@ refuses_foreign_shape() {  # refuses_foreign_shape <name> <make> <undo> [reason]
     fi
     eval "$undo"
     verdict A1-3 "$name: the apply refuses with exit 3 and nothing was written" \
-        '[ $code -eq 3 ] && in_log "a1-3-$name" "$reason" && in_log "a1-3-$name" "$says" && ! in_log "a1-3-$name" "$OPERATORS_SKIP" && [ "$before" = "$after" ]'
+        '[ $code -eq 3 ] && in_log "a1-3-$name" "$reason" && says_or_no_etc_line "a1-3-$name" "$says" && ! in_log "a1-3-$name" "$OPERATORS_SKIP" && [ "$before" = "$after" ]'
     if [[ ${5:-} == dry ]]; then
         verdict A1-3 "$name: the dry run refuses with exit 3 and nothing was written" \
-            '[ $dry_code -eq 3 ] && in_log "a1-3-$name-dry" "$reason" && in_log "a1-3-$name-dry" "$says" && [ "$before" = "$dry_after" ]'
+            '[ $dry_code -eq 3 ] && in_log "a1-3-$name-dry" "$reason" && says_or_no_etc_line "a1-3-$name-dry" "$says" && [ "$before" = "$dry_after" ]'
     fi
     verdict A1-3 "$name: undone, the account is dormant again" agent_is_dormant
     return

@@ -637,7 +637,7 @@ def _run_row(row: SetupRow, steps: tuple[Step, ...], role: ExecutionRole, mode: 
 
 
 def _failure_detail(row: SetupRow, error: OSError | StepFailed, step: Step, mode: Pass) -> str:
-    """What the failed row left behind, for the rows that say: the system step is unchanged only where the play's final counts report no change."""
+    """What the failed row left behind, for the rows that say: the system step is unchanged only where the play stopped with no change counted or named, or ran as a dry run or plan."""
     match row:
         case SetupRow.SYSTEM:
             partial = step.may_leave_system_partial and mode is Pass.RUN and not isinstance(error, PlayChangedNothing)

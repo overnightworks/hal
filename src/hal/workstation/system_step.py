@@ -98,7 +98,7 @@ class TasksWouldChange:
 class PlaybookUnfinished:
     """A run that did not finish; `reason` is empty unless the play itself failed, then it is the message of its last failed result.
 
-    `changed` is the play's final count of changes, `None` when no final counts could be read.
+    `changed` is the higher of the play's final count and the number of changed tasks named, `None` when no final counts could be read.
     """
 
     reason: str = ""
@@ -141,7 +141,7 @@ def read_events(returncode: int, event_lines: Sequence[str]) -> PlaybookRun:
     An event that is no known event, a task's name that is no string, or a count that is no non-negative integer, is a run that did not finish
     and carries no counts; so is a run with other than one counts event.
     A run that did not finish after its counts carries them, with `changed` the higher of the count and the number of changed tasks named,
-    because Ansible counts no failed task as a change and the callback names a failed task that changed.
+    because Ansible's count leaves out a failed task, even one that changed, while the callback names it; an ignored failure is counted.
     """
     message = ""
     tasks: list[str] = []

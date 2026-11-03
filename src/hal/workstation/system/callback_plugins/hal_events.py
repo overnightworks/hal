@@ -48,7 +48,7 @@ class CallbackModule(DefaultCallbackModule):
 
     def v2_runner_on_failed(self, result, ignore_errors=False):
         super().v2_runner_on_failed(result, ignore_errors)
-        # Ansible counts a failed task as no change, yet a loop can fail after its first item wrote.
+        # Ansible's count leaves out a failed task, yet a loop can fail after its first item wrote; an ignored failure is counted.
         if result.is_changed():
             self._write_event({"event": "changed", "task": result.task_name})
         if not ignore_errors:
