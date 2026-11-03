@@ -335,6 +335,37 @@ def test_a_file_in_both_places_keeps_the_target_and_the_plan_names_the_source_re
     assert not source.exists()
 
 
+def test_a_name_in_both_old_directories_moves_the_first_copy_and_removes_the_second(home, migrate):
+    first = plant(home / state_move.OLD_STATE / "applied.json", "first\n")
+    second = plant(home / state_move.OLD_HOME_STATE / "applied.json", "second\n")
+
+    code, out, _ = migrate()
+
+    assert code == ExitCode.OK
+    assert plan_rows(out)[(shown(home, home / state_move.OLD_HOME_STATE), "remove")] == {
+        "applied.json"
+    }
+    assert (hal_state(home) / "applied.json").read_text() == "first\n"
+    assert not first.exists()
+    assert not second.exists()
+    assert old_directories_left(home) == []
+
+
+def test_a_stop_names_the_entry_that_failed(home, migrate, monkeypatch):
+    source = plant(home / state_move.OLD_STATE / "applied.json", "old\n")
+
+    def refuse(path, *_arguments, **_options):
+        raise OSError(errno.EIO, "injected failure", path)
+
+    monkeypatch.setattr(os, "link", refuse)
+
+    code, _, err = migrate()
+
+    assert code == ExitCode.FAILURE
+    assert shown(home, source) in err
+    assert err.splitlines()[-1] == AGAIN
+
+
 def test_directories_in_both_places_are_merged_entry_by_entry(home, migrate):
     old_stopped = home / state_move.OLD_STATE / switches.STOPPED_DIRECTORY
     plant(old_stopped / "hopin", "old hopin\n")

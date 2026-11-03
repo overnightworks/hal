@@ -38,7 +38,17 @@ class Refusal(Exception):
 
 
 class Stopped(Exception):
-    """The move stopped part way; a rerun finishes it. The message is one line."""
+    """The move stopped part way at `entry`; a rerun finishes it."""
+
+    def __init__(self, entry: Path, reason: str, stays: bool = False) -> None:
+        super().__init__(entry, reason, stays)
+        self.entry = entry
+        self.reason = reason
+        self.stays = stays
+
+    def describe(self, shown: str) -> str:
+        what = f"{shown} stays" if self.stays else f"cannot move {shown}"
+        return f"{what} ({self.reason})"
 
 
 @dataclass(frozen=True)
@@ -75,22 +85,29 @@ def make_plan(home: Path, targets: Targets) -> tuple[SourcePlan, ...]:
         (home / OLD_HOME_STATE, targets.state, frozenset()),
         (home / OLD_CACHE, targets.cache, frozenset()),
     )
-    return tuple(
-        _plan(source, target, locks) for source, target, locks in sources if os.path.lexists(source)
-    )
+    plans: list[SourcePlan] = []
+    claimed: set[Path] = set()
+    for source, target, locks in sources:
+        if os.path.lexists(source):
+            plan = _plan(source, target, locks, claimed)
+            claimed.update(plan.target_of(path) for action, path in plan.entries if action is Action.MOVE)
+            plans.append(plan)
+    return tuple(plans)
 
 
-def _plan(source: Path, target: Path, lock_names: frozenset[str]) -> SourcePlan:
+def _plan(source: Path, target: Path, lock_names: frozenset[str], claimed: set[Path]) -> SourcePlan:
     directories: list[tuple[Path, int]] = []
     entries: list[tuple[Action, Path]] = []
-    _walk(source, target, directories, entries)
+    _walk(source, target, directories, entries, claimed)
     is_lock = {path: path.parent == source and path.name in lock_names for _, path in entries}
     moved = [(action, path) for action, path in entries if not is_lock[path]]
     closed = [(Action.CLOSE, path) for _, path in entries if is_lock[path]]
     return SourcePlan(source, target, tuple(directories), (*moved, *closed))
 
 
-def _walk(source: Path, target: Path, directories: list, entries: list) -> None:
+def _walk(
+    source: Path, target: Path, directories: list, entries: list, claimed: set[Path]
+) -> None:
     status = source.lstat()
     if not stat.S_ISDIR(status.st_mode):
         raise Refusal(f"{source} is no directory")
@@ -101,9 +118,10 @@ def _walk(source: Path, target: Path, directories: list, entries: list) -> None:
         if os.path.lexists(counterpart) and entry_is_directory != _is_directory(counterpart):
             raise Refusal(f"{entry} and {counterpart} are not both directories")
         if entry_is_directory:
-            _walk(entry, counterpart, directories, entries)
+            _walk(entry, counterpart, directories, entries, claimed)
         else:
-            action = Action.REMOVE if os.path.lexists(counterpart) else Action.MOVE
+            taken = os.path.lexists(counterpart) or counterpart in claimed
+            action = Action.REMOVE if taken else Action.MOVE
             entries.append((action, entry))
 
 
@@ -152,7 +170,8 @@ def move(plan: SourcePlan) -> None:
         for directory, _ in reversed(plan.directories):
             _remove_directory(directory)
     except OSError as error:
-        raise Stopped(f"cannot move {plan.source} ({error.strerror})") from error
+        entry = Path(os.fsdecode(error.filename)) if error.filename else plan.source
+        raise Stopped(entry, error.strerror) from error
 
 
 def _make_directory(path: Path, mode: int) -> None:
@@ -177,4 +196,4 @@ def _remove_directory(path: Path) -> None:
     except FileNotFoundError:
         return
     except OSError as error:
-        raise Stopped(f"{path} stays ({error.strerror})") from error
+        raise Stopped(path, error.strerror, stays=True) from error

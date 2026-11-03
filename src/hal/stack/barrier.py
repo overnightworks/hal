@@ -24,6 +24,7 @@ from typing import Any, Self
 import yaml
 
 from hal.exposure.docker import EDGE_ALIAS_LABEL, EDGE_NAME_LABEL, TRAEFIK_NAME, is_routed
+from hal.output.command import Verb, command
 from hal.stack import catalog, switches
 
 DYNAMIC_DIRECTORY = "dynamic"
@@ -38,8 +39,8 @@ VERIFY_SECONDS = 15.0
 _POLL_SECONDS = 0.5
 _REQUEST_SECONDS = 3.0
 _TEMPLATE = (
-    "# Written by `hal stop {unit}` from ~/.local/state/hal/stopped/{unit}; "
-    "removed by `hal start {unit}`. Generated, git-ignored.\n"
+    f"# Written by `{command(Verb.STOP, '{unit}')}` from ~/.local/state/hal/stopped/{{unit}}; "
+    f"removed by `{command(Verb.START, '{unit}')}`. Generated, git-ignored.\n"
     """\
 http:
   routers:

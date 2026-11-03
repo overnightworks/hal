@@ -167,8 +167,9 @@ eine Zeile `checkout current`, und der Plan wendet HEAD an.
 auf ihren Stand; `hal apply` plant danach die Einheiten. Es laeuft nur an einem Terminal.
 
 Nach dem `hal update`, das hals Zustand nach `~/.local/state/hal` und `~/.cache/hal-backup` verlegt,
-kommt `hal migrate state` vor dem naechsten `hal apply`: es holt den Zustand aus den Verzeichnissen der
-alten Namen (Plan, ein `yes`, `--dry-run` zeigt nur).
+kommt `hal migrate state` vor dem naechsten `hal apply` und `hal setup` (Setup loescht die alte Drop-in-Datei,
+die einzige Leserin einer nicht verlegten Marke des globalen Stopps): es holt den Zustand aus den
+Verzeichnissen der alten Namen (Plan, ein `yes`, `--dry-run` zeigt nur).
 
 **Ablauf.** Die Waechter wie beim Apply, jeweils mit nur der ersten verweigernden Zeile (Terminal,
 Live-Checkout, `apply.lock`, sauberes `main`); `.env` prueft nur der Apply. Es haelt `apply.lock` vom

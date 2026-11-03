@@ -173,7 +173,11 @@ def _move_state(home: Path, targets: state_move.Targets, plans: tuple[SourcePlan
         write_error(f"cannot migrate state, {refusal} · nothing moved", _again(STATE))
         return ExitCode.REFUSED
     except (state_move.Stopped, OSError) as error:
-        why = error.strerror if isinstance(error, OSError) else error
+        why = (
+            error.describe(_shown(home, error.entry))
+            if isinstance(error, state_move.Stopped)
+            else error.strerror
+        )
         write_error(f"migrate state stopped, {why} · rerun finishes what is left", _again(STATE))
         return ExitCode.FAILURE
     summary = "hal's state is in its new directories"
