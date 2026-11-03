@@ -3,7 +3,7 @@ entry read through the folder's descriptor, what the operator must fix about it,
 and the steps every such file takes (the preflight, the check, acting under the folder's lock and
 the confirmed replacement).
 
-signing_key.py and api_credential.py judge, make and replace their own files on top of this. The
+signing_key.py judges, makes and replaces the signing key's files on top of this. The
 module also owns what the steps of `setup` raise (StepFailure, CannotTell) and the bounded read of
 agent-runtime's secret-file reader, because `setup` is a script that its modules cannot import back.
 """

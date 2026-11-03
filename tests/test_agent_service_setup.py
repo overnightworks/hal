@@ -18,8 +18,6 @@ from support.agent_service_setup import (
     DUMMY_TOKEN,
     IMAGE,
     SECOND_TOKEN,
-    api_directory,
-    credential_path,
     login_directory,
     make_login_directory,
     mode_of,
@@ -185,7 +183,6 @@ def refuse_opening(monkeypatch) -> Callable[[Path], None]:
 
 
 SECRET_FILES = {
-    "credential": (credential_path, "api_credential"),
     "private key": (lambda home: signing_directory(home) / "private.pem", "signing"),
 }
 READABILITY = {"readable": (0o600, False), "mode 0000": (0o000, False), "refused": (0o600, True)}
@@ -225,8 +222,6 @@ def test_a_secret_file_of_the_right_owner_that_cannot_be_opened_makes_the_check_
 def test_a_host_with_every_gap_at_once_is_set_up_in_one_run(make_setup, home, docker, terminal):
     docker.images.clear()
     write_token(home, "a refused token with spaces", mode=0o644)
-    credential_path(home).unlink()
-    api_directory(home).rmdir()
     for directory in (
         home / ".secrets",
         home / ".secrets" / "agent-service",
@@ -238,6 +233,30 @@ def test_a_host_with_every_gap_at_once_is_set_up_in_one_run(make_setup, home, do
     assert make_setup().run(renew=False) == 0
     assert terminal.said[-1] == "agent-service/setup: set up"
     assert make_setup().check() == 0
+    assert not (home / ".secrets" / "agent-service" / "api").exists()
+
+
+def test_a_leftover_api_folder_is_neither_judged_nor_touched_by_a_run_or_the_check(
+    make_setup, home
+):
+    write_token(home, DUMMY_TOKEN)
+    leftover = home / ".secrets" / "agent-service" / "api"
+    leftover.mkdir(mode=0o755, exist_ok=True)
+    for name, contents in (("credential.json", b'{"leftover": 1}'), ("credential.next.json", b"x")):
+        (leftover / name).write_bytes(contents)
+        (leftover / name).chmod(0o644)
+
+    def state() -> list[tuple[str, int, bytes]]:
+        files = sorted(leftover.iterdir())
+        return [(leftover.name, mode_of(leftover), b"")] + [
+            (path.name, mode_of(path), path.read_bytes()) for path in files
+        ]
+
+    before = state()
+
+    assert make_setup().check() == 0
+    assert make_setup().run(renew=False) == 0
+    assert state() == before
 
 
 def test_a_fix_that_leaves_its_gap_stops_the_run_after_one_try(make_setup, home, docker, terminal):

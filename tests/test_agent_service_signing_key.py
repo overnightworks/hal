@@ -13,6 +13,7 @@ from support.agent_service_setup import (
     DUMMY_TOKEN,
     SECOND_TOKEN,
     generate_key,
+    make_login_directory,
     mode_of,
     sample_pair,
     signing_directory,
@@ -495,6 +496,15 @@ def test_p33_without_a_terminal_or_a_typed_yes_nothing_changes(make_setup, home,
 
     assert setup.replace_signing_key() == 1
     assert snapshot(home) == before
+
+
+def test_p33_a_replacement_before_setup_has_made_the_signing_folder_says_to_run_setup_first(
+    make_setup, home, terminal
+):
+    make_login_directory(home)
+
+    assert make_setup().replace_signing_key() == 1
+    assert "run agent-service/setup first" in terminal.said[-1]
 
 
 @pytest.mark.parametrize("fault", ["is rejected", "fails check"])
