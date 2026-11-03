@@ -142,8 +142,9 @@ def test_a_running_uid_without_a_passwd_name_is_unresolvable(monkeypatch: pytest
 def test_as_the_agent_the_operators_steps_are_skipped_without_sudo_and_the_exit_is_0(
     sandbox: Sandbox, capsys: pytest.CaptureFixture[str], flags: tuple[str, ...]
 ) -> None:
-    """Cells 4 and 5: the per-user steps behave as for anyone, the operator's are skipped, and neither Ansible nor sudo is started."""
+    """Cells 4 and 5, D6: the per-user steps behave as for anyone, the operator's are skipped, and neither Ansible, sudo nor Docker's answer is asked for, even when Docker does not answer."""
     sandbox.system.user = AGENT_USER
+    sandbox.system.docker_driver = None
     code, lines, _ = run_setup(sandbox, capsys, *flags)
 
     hook = "  ~ commit hook     will change" if flags else "  ✓ commit hook     changed"
@@ -280,10 +281,11 @@ def test_the_system_steps_check_answers_with_one_of_the_three_states(
         (("-v",), "", None, "Ansible did not finish · its output above says why", "/etc may be partial"),
         ((), TASK_MESSAGE, None, TASK_MESSAGE, "/etc may be partial"),
         ((), TASK_MESSAGE, 0, TASK_MESSAGE, "/etc unchanged"),
+        ((), system_step.DOCKER_DOES_NOT_ANSWER, 0, system_step.DOCKER_DOES_NOT_ANSWER, "/etc unchanged"),
         ((), TASK_MESSAGE, 2, TASK_MESSAGE, "/etc may be partial"),
         ((), "", 0, "Ansible did not finish · hal setup -v shows why", "/etc unchanged"),
     ],
-    ids=["no failed task", "no failed task with -v", "a failed task's message without counts", "a refusal that changed nothing", "a failure after a change", "no failed host and no change"],
+    ids=["no failed task", "no failed task with -v", "a failed task's message without counts", "a refusal that changed nothing", "the play's own Docker refusal", "a failure after a change", "no failed host and no change"],
 )
 def test_a_failed_ansible_run_fails_the_system_step_alone_and_records_nothing(
     sandbox: Sandbox, capsys: pytest.CaptureFixture[str], flags: tuple[str, ...], failure: str, changed: int | None, fact: str, leaves: str

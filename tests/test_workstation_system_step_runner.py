@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 from hal.grammar import ExitCode
 import hal.output
@@ -597,7 +598,7 @@ def test_a_marked_line_that_cannot_be_read_shows_nothing_and_leaves_the_run_unfi
 
 @pytest.mark.parametrize(
     ("script", "driver"),
-    [("echo journald", "journald\n"), ("exit 1", None)],
+    [("echo journald", "journald"), ("exit 1", None)],
     ids=["answers", "exits 1"],
 )
 def test_the_terminal_boundary_reads_the_drivers_name_from_docker_and_none_when_docker_does_not_answer(
@@ -618,3 +619,19 @@ def test_the_terminal_boundary_reads_none_without_a_docker_binary(tmp_path: Path
     monkeypatch.setenv("PATH", str(tmp_path))
 
     assert system_step.TERMINAL_BOUNDARIES.docker_driver() is None
+
+
+def test_the_terminal_boundary_reads_none_from_a_docker_that_cannot_be_executed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    docker = tmp_path / "docker"
+    docker.write_text("#!/bin/sh\necho journald\n")
+    docker.chmod(0o644)
+    monkeypatch.setenv("PATH", str(tmp_path))
+
+    assert system_step.TERMINAL_BOUNDARIES.docker_driver() is None
+
+
+def test_the_plays_docker_refusal_says_what_the_step_prints_before_the_password() -> None:
+    plays = yaml.safe_load(system_step.PLAYBOOK.read_text())
+    refusals = [task["ansible.builtin.assert"]["fail_msg"] for task in plays[0]["tasks"] if "Docker does not answer" in task.get("name", "")]
+
+    assert refusals == [system_step.DOCKER_DOES_NOT_ANSWER]

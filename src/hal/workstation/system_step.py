@@ -29,7 +29,6 @@ LOG_RETENTION_DAYS = 30
 # The default log driver of Docker, which the play merges into daemon.json and `hal check` expects.
 DOCKER_LOG_DRIVER = "journald"
 DOCKER_DEFAULT_DRIVER = ["docker", "info", "--format", "{{.LoggingDriver}}"]
-# The play asserts the same sentence as root; it cannot import hal, as with EVENT_MARK.
 DOCKER_DOES_NOT_ANSWER = "Docker does not answer `docker info`"
 DOCKER_STATUS = "systemctl status docker"
 # journalctl deletes whole archive files by the age of their oldest entry: one day for a file's span
@@ -296,9 +295,17 @@ class Boundaries:
     docker_driver: Callable[[], str | None]
 
 
+def _docker_driver() -> str | None:
+    """The log driver `docker info` tells the operator; None for a Docker that cannot be run or does not answer (a `docker` that is not executable raises `PermissionError`)."""
+    try:
+        output = run_command(DOCKER_DEFAULT_DRIVER)
+    except OSError:
+        return None
+    return None if output is None else output.strip()
+
+
 # The terminal fact is the one the wizard asks: both ends are a terminal.
-TERMINAL_BOUNDARIES = Boundaries(secrets_setup.TERMINAL_BOUNDARIES.terminal.is_interactive, run_playbook_as_root, _running_user, lambda: run_command(DOCKER_DEFAULT_DRIVER)
-)
+TERMINAL_BOUNDARIES = Boundaries(secrets_setup.TERMINAL_BOUNDARIES.terminal.is_interactive, run_playbook_as_root, _running_user, _docker_driver)
 
 
 @dataclass(frozen=True)
