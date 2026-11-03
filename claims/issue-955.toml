@@ -1,8 +1,0 @@
-claim_id = "b88f9b61153c447882cd607ff03765ec"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "a4c403d80511f1ae36d62882d37616fcec137e75"
-branch = "claude/issue-955-s3b-4-docker-before-password"
-scope = ["docs/design/hal-output.html", "docs/home.md", "scripts/system-proof/Dockerfile", "scripts/system-proof/drive.sh", "src/hal/workstation/logs_check.py", "src/hal/workstation/setup.py", "src/hal/workstation/system_step.py", "tests/support/workstation_support.py", "tests/test_workstation_setup_system.py", "tests/test_workstation_system_step_runner.py"]
-opened_commit = "af7e13efc721a188f3a9c1a77a00c79e7f716670"
-whole_reason = "The read before the password, its refusal, its next command, the proof's operator who must reach Docker for the read to answer, and the picture row that names the result are one sentence of picture A; a part alone either breaks every proof run or leaves a pin naming the old order."
