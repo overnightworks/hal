@@ -54,23 +54,37 @@ def run_packaged_setup(sandbox: Sandbox, capsys: pytest.CaptureFixture[str], *fl
     return captured.out + captured.err
 
 
-def test_the_dry_run_lists_hopins_session_secret_as_missing_and_writes_nothing(
-    packaged_home: Sandbox, capsys: pytest.CaptureFixture[str]
+APP_SECRETS = ["hopin/session-secret", "presentator/secret-key"]
+
+
+@pytest.fixture(params=APP_SECRETS)
+def app_secret(request: pytest.FixtureRequest, packaged_home: Sandbox) -> tuple[str, Path]:
+    """The generated app secret under test and its place in the home, absent."""
+    (place,) = packaged_entry(request.param).paths
+    secret = packaged_home.home / place
+    secret.unlink(missing_ok=True)
+    return request.param, secret
+
+
+def test_the_dry_run_lists_the_app_secret_as_missing_and_writes_nothing(
+    packaged_home: Sandbox, app_secret: tuple[str, Path], capsys: pytest.CaptureFixture[str]
 ) -> None:
+    name, secret = app_secret
+
     output = run_packaged_setup(packaged_home, capsys, "--dry-run")
 
-    assert ["!", "secrets", "missing", "hopin/session-secret"] in [
-        line.split() for line in output.splitlines()
-    ]
-    assert not (packaged_home.home / HOPIN_SESSION_SECRET).exists()
+    missing_lines = [line.replace(",", " ").split() for line in output.splitlines() if line.split()[:3] == ["!", "secrets", "missing"]]
+    assert any(name in words for words in missing_lines)
+    assert not secret.exists()
 
 
-def test_apply_generates_hopins_session_secret_unseen_at_0644_in_a_0700_folder_and_a_rerun_keeps_it(
-    packaged_home: Sandbox, capsys: pytest.CaptureFixture[str]
+def test_apply_generates_the_app_secret_unseen_at_0644_in_a_0700_folder_and_a_rerun_keeps_it(
+    packaged_home: Sandbox, app_secret: tuple[str, Path], capsys: pytest.CaptureFixture[str]
 ) -> None:
+    _, secret = app_secret
+
     output = run_packaged_setup(packaged_home, capsys)
 
-    secret = packaged_home.home / HOPIN_SESSION_SECRET
     value = secret.read_text()
     assert URL_SAFE_48_BYTES.fullmatch(value)
     assert (stat.S_IMODE(secret.stat().st_mode), stat.S_IMODE(secret.parent.stat().st_mode)) == (
@@ -83,21 +97,18 @@ def test_apply_generates_hopins_session_secret_unseen_at_0644_in_a_0700_folder_a
     assert secret.read_text() == value
 
 
-@pytest.mark.parametrize(
-    ("mode", "loose_subjects"),
-    [(0o644, set()), (0o666, {f"~/{HOPIN_SESSION_SECRET}"})],
-    ids=["0644 is the declared loosest mode", "0666 is loose"],
-)
-def test_hopins_session_secret_is_loose_only_beyond_0644(
-    packaged_home: Sandbox, probe: FakeProbe, capsys: pytest.CaptureFixture[str], mode: int, loose_subjects: set[str]
+@pytest.mark.parametrize(("mode", "is_loose"), [(0o644, False), (0o666, True)], ids=["0644 is the declared loosest mode", "0666 is loose"])
+def test_the_app_secret_is_loose_only_beyond_0644(
+    packaged_home: Sandbox, app_secret: tuple[str, Path], probe: FakeProbe, mode: int, is_loose: bool
 ) -> None:
-    secret = packaged_home.home / HOPIN_SESSION_SECRET
+    name, secret = app_secret
+    (place,) = packaged_entry(name).paths
     secret.write_text("planted")
     secret.chmod(mode)
 
     run_hal_secrets(packaged_home.home, probe, now=NOW)
 
-    assert set(findings_of(report_of(packaged_home.home), "loose-mode")) == loose_subjects
+    assert (f"~/{place}" in findings_of(report_of(packaged_home.home), "loose-mode")) is is_loose
 
 
 def test_the_packaged_manifest_holds_no_value_of_hopins_session_secret() -> None:
