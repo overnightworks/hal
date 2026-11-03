@@ -452,7 +452,7 @@ hal setup: Schritt „System“ ist fehlgeschlagen; die späteren Schritte sind 
 <span class="g">  ✓</span> timers          changed        <span class="d">3 timers · systemd reloaded</span>
 <span class="r">  ✗</span> system          failed         <span class="d">Docker does not answer `docker info`</span>
 <span class="d">  · secrets         not run</span>
-<span class="rw">error:</span> setup stopped at system · /etc may be partial
+<span class="rw">error:</span> setup stopped at system · /etc unchanged
 <span class="c">next:</span> systemctl status docker</pre>
       </figure>
     </div>
@@ -728,7 +728,7 @@ Type <span class="w">yes</span> to set up 1 open row: yes
   </div>
   <ul class="why">
     <li><b>Probelauf (Vorschlag des Kopfs):</b> <code>hal setup --dry-run</code> ändert nichts und fragt nicht. <code>~</code> heißt „würde sich ändern“, <code>!</code> heißt „nicht geprüft, du musst an ein Terminal“. Das Urteil zählt offene und unveränderte Zeilen und nennt den nächsten Befehl. Ohne <code>-v</code> steht kein Text von Ansible da; <code>will change  2 tasks</code> nennt die Aufgaben als Detailzeilen, mit <code>-v</code> nennt Ansibles eigener Text sie.</li>
-    <li><b>Gescheitert:</b> „failed“ heißt, ein Schritt brach ab; in einem gescheiterten Plan oder bei <code>--dry-run</code> steht <code>/etc unchanged</code>, nach dem yes steht <code>/etc unchanged</code>, wenn die Zähler des Plays <code>changed=0</code> melden (der Play stoppte vor seiner ersten Änderung) oder sudo den Play nie gestartet hat (falsches Passwort), sonst <code>/etc may be partial</code>, auch ohne Zähler (Ctrl-C). Ohne Terminal kommt es nicht so weit, das zeigt „setup: Plan, yes, Lauf“. <code>next:</code> ist der verschluckte Befehl oder <code>hal setup</code>.</li>
+    <li><b>Gescheitert:</b> „failed“ heißt, ein Schritt brach ab; in einem gescheiterten Plan oder bei <code>--dry-run</code> steht <code>/etc unchanged</code>, nach dem yes steht <code>/etc unchanged</code>, wenn die Zähler des Plays <code>changed=0</code> melden (der Play stoppte vor seiner ersten Änderung) oder sudo den Play nie gestartet hat (falsches Passwort, Docker antwortet nicht vor dem Passwort), sonst <code>/etc may be partial</code>, auch ohne Zähler (Ctrl-C). Ohne Terminal kommt es nicht so weit, das zeigt „setup: Plan, yes, Lauf“. <code>next:</code> ist der verschluckte Befehl, <code>systemctl status docker</code> oder <code>hal setup</code>.</li>
     <li><b>Agent-Lauf:</b> der Schritt, der einen Menschen braucht, wird übersprungen und gezählt, nicht als Fehler gemeldet.</li>
   </ul>
 </section>

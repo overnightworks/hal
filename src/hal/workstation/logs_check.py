@@ -13,7 +13,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from hal.workstation.report import Finding, render_findings_report
-from hal.workstation.system_step import DOCKER_LOG_DRIVER, LOG_RETENTION_DAYS, RSYSLOG_FILE_NAMES
+from hal.workstation.system_step import DOCKER_DEFAULT_DRIVER, DOCKER_LOG_DRIVER, LOG_RETENTION_DAYS, RSYSLOG_FILE_NAMES
 from hal.workstation.layout import CommandRunner
 
 LOG_DIRECTORY = Path("/var/log")
@@ -21,7 +21,6 @@ JSON_FILE_DRIVER = "json-file"
 MICROSECONDS_PER_SECOND = 1_000_000
 
 DOCKER_CONTAINER_IDS = ["docker", "ps", "-aq"]
-DOCKER_DEFAULT_DRIVER = ["docker", "info", "--format", "{{.LoggingDriver}}"]
 INSPECT_FORMAT = '{{.Name}}\t{{.HostConfig.LogConfig.Type}}\t{{index .Config.Labels "com.docker.compose.project"}}'
 JOURNAL_BOOTS = ["journalctl", "--list-boots", "-o", "json"]
 SYSTEM_JOURNAL_BOOTS = ["journalctl", "--system", "--list-boots", "-o", "json"]

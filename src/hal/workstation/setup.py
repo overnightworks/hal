@@ -29,8 +29,10 @@ from hal.workstation.secrets_view import ManifestError, Presence, SecretEntry
 from hal.workstation.system_step import (
     AGENT_USER,
     SYSTEM_ROW,
+    DOCKER_STATUS,
     Applied,
     CheckState,
+    DockerDoesNotAnswer,
     PlayChangedNothing,
     StepFailed,
     SystemStep,
@@ -238,7 +240,7 @@ class Step:
     `open_fact` names what a dry run that found something to change shows on its row.
     `check` may return `TasksWouldChange`, which adds the count and, without `-v`, the names the row of a step that would change shows.
     `apply` may return `UnitsApplied`, which adds the fact the row of a changed step shows.
-    `before_apply` is the row printed before an apply that waits on the operator (the wizard, sudo's password), or nothing.
+    `before_apply` is the row printed before an apply that waits on the operator (the wizard, sudo's password), or nothing; it may refuse, which prints no row.
     `operators_only` marks a step the agents' account skips: it needs sudo, the operator's units or the operator's secrets.
     `may_leave_system_partial` marks the step that runs as root, whose failed apply leaves /etc half written unless sudo never started the play or its counts show no change.
     """
@@ -585,11 +587,16 @@ def _system_steps(layout: Layout, ports: Ports) -> tuple[Step, ...]:
             SYSTEM_WHY,
             "the system step did not finish",
             needs_first=system.needs_first,
-            before_apply=lambda: Outcome(SetupEvent.NEEDS_SUDO, SUDO_WILL_BE_ASKED_FOR),
+            before_apply=lambda: _announce_sudo(system),
             operators_only=True,
             may_leave_system_partial=True,
         ),
     )
+
+
+def _announce_sudo(system: SystemStep) -> Outcome:
+    system.refuse_unless_docker_answers()
+    return Outcome(SetupEvent.NEEDS_SUDO, SUDO_WILL_BE_ASKED_FOR)
 
 
 def _steps(layout: Layout, ports: Ports) -> tuple[Step, ...]:
@@ -606,9 +613,9 @@ def _failure_sentence(step: Step, error: OSError | StepFailed) -> str:
     return f"{step.failure}: {error.strerror or type(error).__name__}"
 
 
-def _stopped(row: SetupRow, step: Step, detail: str) -> None:
+def _stopped(row: SetupRow, next_command: str, detail: str) -> None:
     """The error pair after a failed row: what stopped, what it left behind, and the command that goes on."""
-    write_error(f"setup stopped at {row}{detail}", step.next_step)
+    write_error(f"setup stopped at {row}{detail}", next_command)
 
 
 class _RowStopped(Exception):
@@ -667,7 +674,7 @@ def _stop_after_failure(rows: list[SetupRow], position: int, stopped: _RowStoppe
     write_row(outcome.row(rows[position]), fresh_line=outcome.event is SetupEvent.INTERRUPTED)
     for later in rows[position + 1 :]:
         write_row(Outcome(SetupEvent.NOT_RUN).row(later))
-    _stopped(rows[position], step, detail)
+    _stopped(rows[position], DOCKER_STATUS if isinstance(stopped.error, DockerDoesNotAnswer) else step.next_step, detail)
     if outcome.event is SetupEvent.INTERRUPTED:
         raise KeyboardInterrupt from stopped
 

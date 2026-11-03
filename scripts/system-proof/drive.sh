@@ -835,8 +835,7 @@ agent_is_dormant() {  # one account, one regular id for uid and gid, its own gro
     return
 }
 
-put_operator_in_docker_group() {  # the engine ships docker.socket as root:docker 660; the operator is in the group, the agents' account is not
-    usermod --append --groups docker tester
+start_docker_socket() {  # the engine ships docker.socket as root:docker 660; the image put the operator in the group, the agents' account is not
     systemctl start docker.socket
     return
 }
@@ -1401,7 +1400,7 @@ SHIM
 }
 
 cells_agent() {
-    put_operator_in_docker_group
+    start_docker_socket
     cell_a1_4_and_5
     cell_a1_6
     cell_a1_7
@@ -1639,6 +1638,18 @@ cell_dk3_before_the_first_apply() {  # the play would still write everything, an
     return
 }
 
+cell_dk3_play_refusal() {  # the operator's Docker answers (a stub) while the root one is down: the play's own assert refuses, after the password
+    local code stub_dir=/home/tester/.local/bin
+    printf '%s\n' '#!/bin/sh' 'echo journald' >"$stub_dir/docker"
+    chmod 755 "$stub_dir/docker"
+    at_terminal dk3-play "env PATH=$stub_dir:\$PATH $HAL_BIN setup"
+    code=$?
+    rm -f "$stub_dir/docker"
+    verdict DK3 "Docker down under root only: the play's own refusal after one password, exit 3, nothing written" \
+        '[ $code -eq 3 ] && yes_asked_once dk3-play && grep -qx "PROMPTS=1" "$EVIDENCE/dk3-play.log" && row_in_log dk3-play system "failed +Docker does not answer" && in_log dk3-play "/etc unchanged" && in_log dk3-play "next: hal setup" && [ ! -e "$DAEMON_JSON" ] && [ "$(snapshot)" = "$(cat "$EVIDENCE/dk3-before.txt")" ]'
+    return
+}
+
 cell_dk3() {  # after cell 1, so Docker and edge's files are in place and a write would be seen
     local code started
     cell_dk3_case "log-opts" '{"log-opts": {"max-size": "10m"}}' '`log-opts`' dry
@@ -1650,10 +1661,15 @@ cell_dk3() {  # after cell 1, so Docker and edge's files are in place and a writ
     systemctl stop docker.socket docker.service
     at_terminal dk3-down "$HAL_BIN setup"
     code=$?
+    at_terminal dk3-down-dry "$HAL_BIN setup --dry-run"
+    dry=$?
+    cell_dk3_play_refusal
     systemctl start docker.socket
     wait_for_engine
-    verdict DK3 "Docker does not answer: refused with exit 3, naming Docker, nothing written" \
-        '[ $code -eq 3 ] && in_log dk3-down "Docker does not answer" && in_log dk3-down "/etc unchanged" && [ ! -e "$DAEMON_JSON" ] && [ "$(snapshot)" = "$(cat "$EVIDENCE/dk3-before.txt")" ]'
+    verdict DK3 "Docker does not answer: refused before the password with exit 3, naming Docker and systemctl status docker, nothing written" \
+        '[ $code -eq 3 ] && grep -qx "PROMPTS=0" "$EVIDENCE/dk3-down.log" && ! grep -q "^  › system  *needs sudo" "$EVIDENCE/dk3-down.log" && row_in_log dk3-down system "failed +Docker does not answer" && in_log dk3-down "/etc unchanged" && in_log dk3-down "next: systemctl status docker" && [ ! -e "$DAEMON_JSON" ] && [ "$(snapshot)" = "$(cat "$EVIDENCE/dk3-before.txt")" ]'
+    verdict DK3 "Docker does not answer: the dry run is refused the same way without a password" \
+        '[ $dry -eq 3 ] && grep -qx "PROMPTS=0" "$EVIDENCE/dk3-down-dry.log" && row_in_log dk3-down-dry system "failed +Docker does not answer" && in_log dk3-down-dry "/etc unchanged" && in_log dk3-down-dry "next: systemctl status docker"'
     return
 }
 
