@@ -464,7 +464,7 @@ hal setup: Schritt „System“ ist fehlgeschlagen; die späteren Schritte sind 
     <li><b>Docker-Neustart</b> wird nur angesagt, wenn er kommt: <code>docker info</code> zeigt den Log-Treiber ohne sudo. Dann steht vor dem Passwort <code>! docker  restarts  all containers stop · 2 stay down</code> (die zwei ohne Restart-Policy). Antwortet Docker gar nicht, endet der Schritt dort, ohne Passwort.</li>
     <li><b>Scheitert der Play selbst,</b> ist sein Grund der Fakt der roten Zeile. Die <code>fail_msg</code> im Playbook sind kurz und sagen nicht, was geschrieben wurde: das sagt die <code>error:</code>-Zeile, aus den Zählern des Plays.</li>
     <li><b>Fünf Zeilen statt acht Schritten:</b> quality, Engines, Hook-Dateien und Aktivierung sind für dich ein Ding, der Commit-Hook; der Link <code>~/.local/bin/hal</code> ist <code>path</code>; Ansible gehört zu system. Scheitert einer, nennt die rote Zeile ihn.</li>
-    <li><b>Falsches Passwort:</b> sudo sagt es selbst, in seinen Worten. Gibt es auf, folgt <code>✗ system  failed  sudo refused</code> und <code>error:</code> mit <code>/etc may be partial</code>.</li>
+    <li><b>Falsches Passwort:</b> sudo sagt es selbst, in seinen Worten. Gibt es auf, folgt <code>✗ system  failed  sudo refused</code> und <code>error:</code> mit <code>/etc unchanged</code>.</li>
     <li><b>Ctrl-C im Play:</b> auf einer frischen Zeile folgt <code>✗ system  interrupted</code>, die späteren Zeilen als <code>not run</code>, <code>error: setup stopped at system · /etc may be partial</code> und <code>next: hal setup</code>; Exit 130. Scheitert danach <code>sudo -k</code>, steht der Satz über das Ticket als Fakt der Zeile.</li>
   </ul>
 </section>
@@ -728,7 +728,7 @@ Type <span class="w">yes</span> to set up 1 open row: yes
   </div>
   <ul class="why">
     <li><b>Probelauf (Vorschlag des Kopfs):</b> <code>hal setup --dry-run</code> ändert nichts und fragt nicht. <code>~</code> heißt „würde sich ändern“, <code>!</code> heißt „nicht geprüft, du musst an ein Terminal“. Das Urteil zählt offene und unveränderte Zeilen und nennt den nächsten Befehl. Ohne <code>-v</code> steht kein Text von Ansible da; <code>will change  2 tasks</code> nennt die Aufgaben als Detailzeilen, mit <code>-v</code> nennt Ansibles eigener Text sie.</li>
-    <li><b>Gescheitert:</b> „failed“ heißt, ein Schritt brach ab; in einem gescheiterten Plan oder bei <code>--dry-run</code> steht <code>/etc unchanged</code>, nach dem yes steht <code>/etc unchanged</code>, wenn die Zähler des Plays <code>changed=0</code> melden (der Play stoppte vor seiner ersten Änderung), sonst <code>/etc may be partial</code>, auch ohne Zähler (Ctrl-C, falsches Passwort). Ohne Terminal kommt es nicht so weit, das zeigt „setup: Plan, yes, Lauf“. <code>next:</code> ist der verschluckte Befehl oder <code>hal setup</code>.</li>
+    <li><b>Gescheitert:</b> „failed“ heißt, ein Schritt brach ab; in einem gescheiterten Plan oder bei <code>--dry-run</code> steht <code>/etc unchanged</code>, nach dem yes steht <code>/etc unchanged</code>, wenn die Zähler des Plays <code>changed=0</code> melden (der Play stoppte vor seiner ersten Änderung) oder sudo den Play nie gestartet hat (falsches Passwort), sonst <code>/etc may be partial</code>, auch ohne Zähler (Ctrl-C). Ohne Terminal kommt es nicht so weit, das zeigt „setup: Plan, yes, Lauf“. <code>next:</code> ist der verschluckte Befehl oder <code>hal setup</code>.</li>
     <li><b>Agent-Lauf:</b> der Schritt, der einen Menschen braucht, wird übersprungen und gezählt, nicht als Fehler gemeldet.</li>
   </ul>
 </section>
