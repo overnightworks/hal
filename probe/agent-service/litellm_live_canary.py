@@ -104,7 +104,6 @@ class LiveCanaryProbe(RetentionProbe):
         self.ran: list[str] = []
 
     def drive(self) -> None:
-        self.wait_until(LITELLM, LISTENING)
         self.wait_until_listening()
         self.cell_k0()
         self.steer()
@@ -202,18 +201,20 @@ class LiveCanaryProbe(RetentionProbe):
     def cell_r_key(self) -> None:
         before = len(self.provider_requests())
         self.admin("POST", "/key/delete", {"keys": [hashed(self.key)]})
-        code, lines = self.run_wrapper()
-        expect(code == 1 and re.fullmatch(r"C1 canary FAILED: answer \d+", lines[1]), f"{lines}")
+        code, deleted = self.run_wrapper()
+        expect(
+            code == 1 and re.fullmatch(r"C1 canary FAILED: answer \d+", deleted[1]), f"{deleted}"
+        )
         expect(len(self.provider_requests()) == before, "R-key: the fake was reached")
         self.run_step(self.read_plan("R-key"))
         code, lines = self.run_wrapper()
         expect(code == 0, f"R-key: after the step {lines}")
-        self.hold("R-key", f"deleted: {lines and lines[1]}... exit 1 and F 0; remade by the "
-                  "step: exit 0")  # fmt: skip
+        self.hold("R-key", f"deleted: `{deleted[1]}`, exit 1 and F 0; remade by the step: "
+                  "exit 0")  # fmt: skip
 
     def cell_k_rest(self) -> None:
         tokens = {"hopin's key": self.key}
-        config = self.compose("--profile", "apply", "config", CANARY).stdout
+        config = self.compose("config", CANARY).stdout
         places = {
             "the stack's argv and input": "\n".join(self.ran), "the step": self.seen.text(),
             "the canary's compose config": config, "the printed lines": "\n".join(self.printed),

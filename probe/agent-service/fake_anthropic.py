@@ -180,6 +180,21 @@ def asks_for_stream(body: bytes) -> bool:
     return isinstance(document, dict) and document.get("stream") is True
 
 
+def stream(request: http.server.BaseHTTPRequestHandler, answer: dict) -> None:
+    """The event stream; the first delta goes out before a `stream_hold` holds the rest."""
+    request.send_response(200)
+    request.send_header("Content-Type", "text/event-stream")
+    request.end_headers()
+    events = stream_events(answer)
+    request.wfile.write(b"".join(events[:FIRST_DELTA]))
+    if answer.get("mode") == STREAM_HOLD:
+        seconds = answer.get("hold_seconds", HOLD_SECONDS)
+        held = wait_for_disconnect(request.connection, seconds, STREAM_HOLD)
+        print(f"held {held}", flush=True)  # noqa: T201 - this in-container program prints its own request log
+    with contextlib.suppress(OSError):  # a client that left gets no rest
+        request.wfile.write(b"".join(events[FIRST_DELTA:]))
+
+
 def handler(role: str, expect: dict) -> type[http.server.BaseHTTPRequestHandler]:
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_POST(self) -> None:
@@ -190,7 +205,7 @@ def handler(role: str, expect: dict) -> type[http.server.BaseHTTPRequestHandler]
                 record = provider_record({**expect, **steering}, self, body)
                 print(json.dumps(record), flush=True)  # noqa: T201 - this in-container program prints its own request log
                 if asks_for_stream(body) and steering.get("mode", "answer") in STREAM_MODES:
-                    self.stream({**expect, **steering})
+                    stream(self, {**expect, **steering})
                     return
                 status, reply = self.provider_answer(steering, body)
             if status:
@@ -201,20 +216,6 @@ def handler(role: str, expect: dict) -> type[http.server.BaseHTTPRequestHandler]
                 # A reply holds only the probe's own values: its control file in JSON for LiteLLM,
                 # which HTML escaping would only corrupt.
                 self.wfile.write(reply)  # NOSONAR(S5131) JSON from the probe's control file
-
-        def stream(self, answer: dict) -> None:
-            """The event stream; the first delta goes out before a `stream_hold` holds the rest."""
-            self.send_response(200)
-            self.send_header("Content-Type", "text/event-stream")
-            self.end_headers()
-            events = stream_events(answer)
-            self.wfile.write(b"".join(events[:FIRST_DELTA]))
-            if answer.get("mode") == STREAM_HOLD:
-                seconds = answer.get("hold_seconds", HOLD_SECONDS)
-                held = wait_for_disconnect(self.connection, seconds, STREAM_HOLD)
-                print(f"held {held}", flush=True)  # noqa: T201 - this in-container program prints its own request log
-            with contextlib.suppress(OSError):  # a client that left gets no rest
-                self.wfile.write(b"".join(events[FIRST_DELTA:]))
 
         def provider_answer(self, steering: dict, body: bytes) -> tuple[int, bytes]:
             """The status and body of the mode; status 0 means the connection was reset instead."""

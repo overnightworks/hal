@@ -111,6 +111,7 @@ TOOL_TABLE = "LiteLLM_ToolTable"
 FINGERPRINT_TABLES = {"LiteLLM_EndUserTable", "LiteLLM_DailyEndUserSpend"}
 TAG_TABLE, DAILY_TAG_TABLE = "LiteLLM_TagTable", "LiteLLM_DailyTagSpend"
 TOOL_WRITE_SECONDS = 120
+TAG_SETTLE_POLLS = 4  # 5 s apart: over two of LiteLLM's batch writes
 STORE_NAMES = re.compile(
     r"DATABASE|REDIS|CALLBACK|LANGFUSE|VERBOSE|SPEND|S3_|LITELLM_PRINT_STANDARD_LOGGING_PAYLOAD",
     re.I,
@@ -564,13 +565,15 @@ class RetentionProbe(FailureProbe, KeyFiles):
 
     def cell_str_c(self) -> None:
         self.held_stream("STR-c", front=False)
+        self.hold("STR-c", "around the front, the first delta reached the caller while F held the "
+                  "rest; released, the stream ended with the second")  # fmt: skip
 
     def cell_str(self) -> None:
         tokens, person = self.held_stream("STR", front=True)
         self.wait_for_row("LiteLLM_DailyEndUserSpend", "end_user_id", person)
         self.expect_nothing_retained("STR", tokens)
-        self.hold("STR", "the first event reached the caller through the front during the hold; "
-                  "the three canaries retained nowhere")  # fmt: skip
+        self.hold("STR", "through the front, the first delta reached the caller while F held the "
+                  "rest; released, the stream ended; the canaries retained nowhere")  # fmt: skip
 
     def held_stream(self, cell: str, *, front: bool) -> tuple[dict[str, str], str]:
         """One streamed request the fake holds after its first delta, released only once the
@@ -599,8 +602,6 @@ class RetentionProbe(FailureProbe, KeyFiles):
         expect(tokens["rest"] in "".join(texts), f"{cell}: the stream ended without the rest")
         expect(self.request_canary_hits(before) == 1, f"{cell}: F saw the request canary")
         self.steer()
-        self.hold(cell, "the first delta reached the caller while F held the rest; released, "
-                  "the stream ended with the second")  # fmt: skip
         return tokens, person
 
     def read_held_stream(self, cell: str, process, first: str, held: list[str]) -> list[str]:
@@ -623,7 +624,7 @@ class RetentionProbe(FailureProbe, KeyFiles):
 
     def cell_t4(self) -> None:
         """Q after the conforming flows: no tag row of hopin's key, the tag table empty."""
-        tags = self.count(f'SELECT count(*) FROM "{TAG_TABLE}"')
+        tags = self.count(f'SELECT count(*) FROM "{TAG_TABLE}"')  # noqa: S608 - the table name is this probe's literal
         hopin = self.count(self.tag_rows_of(self.key))
         presentator = self.count(self.tag_rows_of(self.file_keys["presentator"]))
         expect(tags == 0 and hopin == 0, f"T4: {tags} tag table rows, {hopin} of hopin's key")
@@ -642,7 +643,9 @@ class RetentionProbe(FailureProbe, KeyFiles):
         """Each body tag form on its own non-conforming request through the front."""
         tags = {form: canary("t3-tag") for form in TAG_FORMS}
         recorded = {form: self.tagged_request(form, tag) for form, tag in tags.items()}
+        rows = self.settled_tag_rows(list(tags.values()))
         found = self.sweep(tags).found
+        expect(self.tag_rows(list(tags.values())) == rows, "T3: a tag row came after the dump")
         failed = []
         for form, tag in tags.items():
             sinks = found.get(form, ())
@@ -655,6 +658,20 @@ class RetentionProbe(FailureProbe, KeyFiles):
             else:
                 self.hold(form, figures if tables else f"{figures}: lands nowhere")
         expect(not failed, f"T3: {failed}")
+
+    def tag_rows(self, tags: list[str]) -> int:
+        named = ", ".join(f"'{tag}'" for tag in tags)
+        return self.count(f'SELECT count(*) FROM "{DAILY_TAG_TABLE}" WHERE tag IN ({named})')  # noqa: S608 - the tags are tokens this probe generated
+
+    def settled_tag_rows(self, tags: list[str]) -> int:
+        """The count of the tags' rows once it held over TAG_SETTLE_POLLS polls: LiteLLM writes a
+        tag row in a later batch than the person's row."""
+        deadline, seen = time.monotonic() + TOOL_WRITE_SECONDS, []
+        while len(seen) < TAG_SETTLE_POLLS or len(set(seen[-TAG_SETTLE_POLLS:])) > 1:
+            expect(time.monotonic() < deadline, f"T3: the tag rows never settled: {seen}")
+            seen.append(self.tag_rows(tags))
+            time.sleep(5)
+        return seen[-1]
 
     def tagged_request(self, form: str, tag: str) -> str:
         """A, whether the tag reached F, and the batch of the form's fingerprint written."""
