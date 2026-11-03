@@ -29,7 +29,7 @@ DATABASE = "litellm-db"
 NEW_NETWORKS = ("litellm-api", "litellm-backend", "litellm-egress", "litellm-db")
 ISOLATED_MODE = {"com.docker.network.bridge.gateway_mode_ipv4": "isolated"}
 DIGEST_PINNED = re.compile(r"^[^@\s]+:[^@\s]+@sha256:[0-9a-f]{64}$")
-KEY_SECRET, CREDENTIAL_SECRET = "litellm_anthropic_key", "agent_service_api_credential"
+KEY_SECRET = "litellm_anthropic_key"
 MASTER_SECRET, PASSWORD_SECRET = "litellm_master_key", "litellm_db_password"
 CLAUDE_ID = re.compile(r"anthropic/claude-(?P<family>[a-z]+)-[\w.-]+")
 START_SCRIPT = (LITELLM_DIRECTORY / "start.sh").read_text()
@@ -192,17 +192,6 @@ def test_only_litellm_reads_the_provider_key_and_the_master_key(compose):
     }
 
     assert holders == {KEY_SECRET: [LITELLM], MASTER_SECRET: [LITELLM]}
-
-
-def test_no_service_of_profile_litellm_reads_the_credential(compose):
-    readers = [
-        name
-        for name, service in compose["services"].items()
-        if LITELLM in service.get("profiles", [])
-        and CREDENTIAL_SECRET in service.get("secrets", [])
-    ]
-
-    assert readers == []
 
 
 def test_the_fronts_http_block_global_and_log_are_those_of_the_public_traefik(front_static):

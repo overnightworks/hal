@@ -3,7 +3,7 @@
 # :4000, whose `http` block equals the `edge` entrypoint's (the hardening of traefik.yml), and the
 # global and log blocks of traefik.yml; tests/test_litellm_unit.py and the CI job `front` hold the
 # equality. The api, ping and metrics blocks stay absent. The one route stands in
-# dynamic/route.yml. The front reads no secret file; the service credential passes through its
+# dynamic/route.yml. The front reads no secret file; app keys pass through its
 # memory only.
 global:
   checkNewVersion: false

@@ -170,49 +170,6 @@ while songmaker-web is not on the network (otherwise as in "The service"), then
 songmaker-web with songmaker's own deploy command. A file bind keeps the old inode, so only a recreate
 reaches a container, never a restart. There is no grace period.
 
-## The API credential
-
-No service reads the service credential: LiteLLM's own keys decide who may call
-([The API route](#the-api-route)). Only `agent-service/setup` makes it, in the operator's terminal
-after `hal apply` has asked:
-
-```
-~/.secrets/agent-service/api/                   0700, uid 1000
-~/.secrets/agent-service/api/credential.json    0600, uid 1000, UTF-8 JSON, only the field shared_key, at most 16 KiB
-```
-
-**The contract.** The file is what agent-runtime's reader accepts (`docs/operations.md` of
-agent-runtime): UTF-8 JSON with only `shared_key` and/or `app_keys`, no duplicate field, `app_keys` an
-object, every value of the credential syntax. The rules live once on the hal side, in
-`agent-service/litellm/gate.py` (`shared_key_of`), and setup judges the bytes it read through them,
-so `--check` never says "set up" for a file that reader refuses. A missing credential is made with
-`secrets.token_urlsafe(32)` through `credential.json.new` (created exclusively), then `link(2)`,
-which refuses any existing entry. Every path is reached without following a link, under one lock on
-the folder. A plain run and `--renew` never replace a credential, and nothing is printed of it. Setup
-refuses, in one line that names the file, and changes nothing, `--renew` and the token included:
-
-- a credential the reader refuses (larger than its 16 KiB, not UTF-8 JSON, an unknown or duplicate
-  field, `app_keys` not an object, a value outside the syntax): the line names
-  `agent-service/setup --replace-api-credential`; a file within the limit is judged whole;
-- a wrong owner, a mode other than 0600, a link or no regular file: the line asks for the operator's
-  own fix, because setup never narrows or unlinks those. A file setup may not open is judged by its
-  owner first; only one of the right owner that still cannot be read is a host failure (`--check`
-  exits 2).
-
-`agent-service/setup --check` changes nothing and exits 0 for an accepted credential and 1 for the
-first gap, a refusal or a leftover `credential.json.new`, which the next plain run clears.
-`credential.next.json` waits for `--replace-api-credential`.
-
-**Replacing the credential.** `agent-service/setup --replace-api-credential` works only at a terminal,
-says what it does and goes on after a typed `yes`. It writes `credential.next.json`, checks it with
-the reader and renames it over `credential.json`; the old key is not erased from the disk. It still
-ends by naming a recreate of `litellm`, which no longer reads the file, so nothing needs one. A lost
-credential needs no backup: it protects no stored data.
-
-The master key `~/.secrets/litellm/master-key` and the database password
-`~/.secrets/litellm/db-password` are not made here: `hal setup` generates each (a `service-password`,
-never shown) and creates only a missing file.
-
 ## What a turn leaves behind
 
 The service has no writable persistent mount but the Codex login directory (a renewal rewrites `auth.json` there, nothing a turn leaves). The CLI's per-run home and work directories and `/tmp`
@@ -301,7 +258,7 @@ unit, and no app holds a key in LiteLLM's database.
   `POST /v1/chat/completions` (`agent-service/litellm/front/`); every other method and path ends in
   the front itself, so LiteLLM's own unauthenticated routes are unreachable. Behind it LiteLLM's
   own keys decide, with no hal code in its process: a request needs an app key as bearer (401
-  otherwise, the old service credential included), a model among the key's `models` (the three
+  otherwise), a model among the key's `models` (the three
   names `text/opus`, `text/sonnet`, `text/haiku` of `config.yaml`; 403 otherwise), a path among
   the key's `allowed_routes` (403 otherwise, the provider routes `/v1/messages` and
   `/v1/completions` included), and a `user`, the person's fingerprint (`enforce_user_param`; 401
@@ -314,8 +271,8 @@ unit, and no app holds a key in LiteLLM's database.
   turn into request tags; the bearer and `Content-Type` pass unchanged.
   LiteLLM's ban list refuses `api_base` in the body with 401, and a fallback naming a URL with 401
   too. Messages are
-  not logged; LiteLLM needs a master key to boot, a file secret that `hal setup` generates and no
-  app holds, so its admin routes stay closed to apps, straight at `litellm:4000` too.
+  not logged; LiteLLM needs a master key to boot, a file secret that no app holds (`hal setup`
+  makes it, see below), so its admin routes stay closed to apps, straight at `litellm:4000` too.
 - **The money.** Each app key carries `max_budget` in dollars and `budget_duration` `1mo`; LiteLLM
   prices each answer by its cost map and refuses the next request of a key past its budget before
   the provider, with 422 `budget_exceeded`, never the 429 agent-runtime's client reads as busy
@@ -381,6 +338,9 @@ unit, and no app holds a key in LiteLLM's database.
   through its recreate, until then it keeps sending the old key. Compose refuses to create LiteLLM's
   container when the provider key file is missing; an empty one makes the container exit non-zero
   with a line that names the path only.
+- **What `hal setup` makes.** The master key `~/.secrets/litellm/master-key` and the database
+  password `~/.secrets/litellm/db-password` come from `hal setup` alone: it generates each (a
+  `service-password`, never shown) and creates only a missing file.
 - **Proof:** `probe/agent-service/litellm.py` runs the whole path on a fake-only stack (its
   docstring gives the command line): the fake Anthropic and a fake issuer sit on `internet`, made
   internal, and the probe refuses to start otherwise. Its caller is a throwaway on HopIn's agent

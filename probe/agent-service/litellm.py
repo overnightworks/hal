@@ -13,7 +13,7 @@ live cells.
 Measured: a run takes about two minutes and its teardown a few seconds (K 30 s, CAP 1800 s).
 
 The scratch HOME holds the throwaway secrets (random values, never printed): the provider key, the
-master key, the old service credential (a bearer K2 expects refused), the CA and the signing pair.
+master key, the database password, the CA and the signing pair.
 The fake provider (alias api.anthropic.com) and the fake issuer (alias auth.hallucinai.de) hold
 certificates of the scratch CA, which LiteLLM's SSL_CERT_FILE trusts. Keys, budgets and
 fingerprints are the probe's scenario data; a key reaches a throwaway inside the program on its
@@ -86,7 +86,6 @@ LOOPBACK_ADDRESS = "127.0.0.1"
 PROVIDER_KEY_FILE = Path(".secrets/litellm/anthropic")
 MASTER_KEY_FILE = Path(".secrets/litellm/master-key")
 DATABASE_PASSWORD_FILE = Path(".secrets/litellm/db-password")
-CREDENTIAL_FILE = Path(".secrets/agent-service/api/credential.json")
 # The processes of the container and its listening TCP sockets in one snapshot: argv: none; prints
 # {"processes": {pid: {parent, executable}}, "listeners": [{address, version, owners: [pid]}]}, the
 # address in /proc/net's hexadecimal. A process or descriptor that vanishes mid-scan repeats the
@@ -298,7 +297,6 @@ class LitellmProbe(IssuerProbe):
         self.image = resolved["services"]["agent-probe"]["image"]
         home = Path(self.environment["HOME"])
         self.provider_key = secrets.token_urlsafe(32)
-        self.credential = secrets.token_urlsafe(32)
         self.master_key = f"sk-{secrets.token_hex(32)}"
         self.app_keys: list[str] = []
         self.marker = secrets.token_hex(8)
@@ -320,7 +318,6 @@ class LitellmProbe(IssuerProbe):
         for relative, text in (
             (PROVIDER_KEY_FILE, self.provider_key + "\n"),
             (MASTER_KEY_FILE, self.master_key + "\n"),
-            (CREDENTIAL_FILE, json.dumps({"shared_key": self.credential})),
             (DATABASE_PASSWORD_FILE, self.database_password + "\n"),
         ):
             folder = home
@@ -346,7 +343,7 @@ class LitellmProbe(IssuerProbe):
         """One directory per fake host: its certificate and key, what it checks and its program."""
         directory.mkdir()
         expectations = json.dumps({
-            "provider_key": self.provider_key, "credential": self.credential,
+            "provider_key": self.provider_key,
             "identity": list(self.identity.values()),
             "marker": self.marker,
         })  # fmt: skip
@@ -615,7 +612,6 @@ class LitellmProbe(IssuerProbe):
         user, stored = self.fingerprint(), hashed(key)
         for how, bearer, front in (
             ("no bearer", None, True), ("a wrong one", secrets.token_urlsafe(24), True),
-            ("the old shared credential", self.credential, True),
             ("the key's stored hash through the front", stored, True),
             ("the key's stored hash straight at LiteLLM", stored, False),
         ):  # fmt: skip
@@ -626,7 +622,7 @@ class LitellmProbe(IssuerProbe):
                 write_line("K2 measured: the stored hash is accepted as a bearer", flush=True)
             expect(answer["status"] == 401, f"K2: {how}: {answer['status']} {error_of(answer)}")
             expect(len(self.provider_requests()) == before, f"K2: {how}: the provider was reached")
-        self.hold("K2", "no bearer, a wrong one, the old shared credential and the key's stored "
+        self.hold("K2", "no bearer, a wrong one and the key's stored "
                   "hash, through the front and straight at LiteLLM: 401 each, F 0")  # fmt: skip
 
     def cell_k4(self, key: str) -> None:

@@ -64,11 +64,6 @@ rule = "test-layout"
 reason = "it tests compose.yaml, the gateway files and the probe overlay of the agent service's egress, which no module of src/hal mirrors"
 
 [[layout.allow]]
-path = "tests/test_agent_service_api_credential.py"
-rule = "test-layout"
-reason = "it tests agent-service/setup and the gate's credential reader, outside src/hal, which no module of src/hal mirrors"
-
-[[layout.allow]]
 path = "tests/test_agent_service_cells_12b.py"
 rule = "test-layout"
 reason = "it tests the agent service's login command, outside src/hal, which no module of src/hal mirrors"
