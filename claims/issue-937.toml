@@ -3,6 +3,6 @@ agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
 role = "builder"
 base = "768c555a835e6955a9a14f2be0d084f0746aeebc"
 branch = "claude/issue-937-litellm-database"
-scope = ["agent-service/litellm/config.yaml", "agent-service/litellm/start.sh", "agent-service/retention_census.py", "compose.yaml", "docs/agent-service.md", "docs/stack.md", "probe/agent-service/litellm.py", "probe/agent-service/litellm_failures.py", "probe/agent-service/litellm_network.py", "probe/agent-service/litellm_retention.py", "src/hal/workstation/secrets_manifest.toml", "tests/test_litellm_unit.py", "tests/test_workstation_secrets_setup.py"]
+scope = ["agent-service/litellm/config.yaml", "agent-service/litellm/start.sh", "agent-service/retention_census.py", "compose.yaml", "docs/agent-service.md", "docs/stack.md", "probe/agent-service/litellm.py", "probe/agent-service/litellm_failures.py", "probe/agent-service/litellm_network.py", "probe/agent-service/litellm_retention.py", "src/hal/workstation/secrets_manifest.toml", "tests/test_agent_service_retention_census.py", "tests/test_litellm_unit.py", "tests/test_workstation_secrets_setup.py"]
 opened_commit = "a513a6c447d1e196e419d7532e30d6862ad2cc5f"
 whole_reason = "One service, its secret and the proofs that name its reach: a database that boots unproven is the risk this slice removes."
