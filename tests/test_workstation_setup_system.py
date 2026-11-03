@@ -508,17 +508,18 @@ def test_a_play_that_fails_after_the_restart_was_named_ends_with_the_red_row_and
 
 
 def test_the_agent_prints_no_restart_row_on_a_docker_that_would_restart(sandbox: Sandbox, capsys: pytest.CaptureFixture[str]) -> None:
-    """Ruled S3b-5, cell R6: the agent role reads no Docker."""
+    """Ruled S3b-5, cell R7: the agent role reads no Docker."""
     sandbox.system.docker_driver = "json-file"
     sandbox.system.running_policies = ("no",)
     sandbox.system.user = AGENT_USER
     _, lines, _ = run_setup(sandbox, capsys)
 
     assert not any("restarts" in line for line in lines)
+    assert sandbox.system.driver_reads == 0
 
 
 def test_the_dry_run_and_the_plan_before_the_yes_print_no_restart_row_on_a_docker_that_would_restart(sandbox: Sandbox, capsys: pytest.CaptureFixture[str]) -> None:
-    """Ruled S3b-5, cell R7: the restart is named at the sudo announcement, so neither the dry run nor the plan half of a run holds it."""
+    """Ruled S3b-5, cell R6: the restart is named at the sudo announcement, so neither the dry run nor the plan half of a run holds it."""
     sandbox.system.docker_driver = "json-file"
     sandbox.system.running_policies = ("no",)
     _, dry_lines, _ = run_setup(sandbox, capsys, "--dry-run")
