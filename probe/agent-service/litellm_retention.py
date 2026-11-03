@@ -434,7 +434,7 @@ class RetentionProbe(FailureProbe):
         self.steer()
         self.wait_for_tool(tool)
         self.sql(
-            f"CREATE TABLE d9_control (value text); INSERT INTO d9_control VALUES ('{planted}')"
+            f"CREATE TABLE d9_control (value text); INSERT INTO d9_control VALUES ('{planted}')"  # noqa: S608 - the value is a token this probe generated
         )
         try:
             dump = self.dump()
@@ -454,7 +454,7 @@ class RetentionProbe(FailureProbe):
 
     def wait_for_tool(self, tool: str) -> None:
         """LiteLLM writes tool names with its batched database updates, not with the request."""
-        query = f"SELECT count(*) FROM \"{TOOL_TABLE}\" WHERE tool_name = '{tool}'"
+        query = f"SELECT count(*) FROM \"{TOOL_TABLE}\" WHERE tool_name = '{tool}'"  # noqa: S608 - the value is a token this probe generated
         deadline = time.monotonic() + TOOL_WRITE_SECONDS
         while True:
             counted = self.run([
