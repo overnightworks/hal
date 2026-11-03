@@ -1,8 +1,9 @@
 # LiteLLM's configuration (compose.yaml, service `litellm`). Three model names the agent service
 # sends in full (`<provider>/<model>`), each mapped to the current id of its family; the families
 # are those of service.toml's [cli.anthropic] models. A change reaches LiteLLM only through a
-# recreate of the container. No callback, cache, database or fallback; the provider key and the
-# master key come from the environment start.sh fills from their files. The master key is one no
+# recreate of the container. No callback, cache or fallback; the provider key, the master key and
+# the database URL come from the environment start.sh fills from their files. The database holds
+# keys and budgets; no spend or error log row is written, and no prompt reaches one. The master key is one no
 # client knows (LiteLLM refuses to boot without one), so the admin routes stay closed; the hook
 # decides who may call.
 model_list:
@@ -31,3 +32,6 @@ litellm_settings:
 
 general_settings:
   custom_auth: auth.user_api_key_auth
+  disable_spend_logs: true
+  disable_error_logs: true
+  store_prompts_in_spend_logs: false

@@ -25,8 +25,11 @@ from __future__ import annotations
 import json
 import re
 import secrets
+import subprocess
 import sys
 import time
+from dataclasses import dataclass
+from functools import cached_property
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
@@ -35,17 +38,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(REPO / "src"))
 sys.path.insert(0, str(REPO / "agent-service"))
 
-from agent_networks import gateway_listeners, listeners_of  # noqa: E402
+from agent_networks import EMBEDDED_RESOLVER, gateway_listeners, listeners_of  # noqa: E402
 from api_canary import verdicts  # noqa: E402
 from egress import LABEL, PROJECT, ProbeFailed, expect, run_scratch_probe  # noqa: E402
+from egress_observe import socket_name  # noqa: E402
 from issuer import ISSUER_ORIGIN, ISSUER_SERVICE, SERVICE, IssuerProbe  # noqa: E402
 from refusals import API_GROUP  # noqa: E402
-from retention_census import FRONT, GATEWAY, LITELLM  # noqa: E402
+from retention_census import DATABASE, FRONT, GATEWAY, LITELLM  # noqa: E402
 from scratch_secrets import issue_certificate, write_new  # noqa: E402
 
 FAKE_PROVIDER, FAKE_ISSUER, CANARY = "fake-anthropic", "fake-issuer", "agent-canary"
 PROVIDER_HOST, ISSUER_HOST = "api.anthropic.com", "auth.hallucinai.de"
-NEW_NETWORKS = ("litellm-api", "litellm-backend", "litellm-egress")
+NEW_NETWORKS = ("litellm-api", "litellm-backend", "litellm-egress", "litellm-db")
 ISOLATED = "isolated"
 LISTEN_SECONDS = 60
 CANARY_SECONDS = 240
@@ -58,11 +62,58 @@ LISTENING = "Uvicorn running"
 FRONT_STATIC = "/etc/traefik/traefik.yml"
 ENTRYPOINT_ADDRESS = re.compile(r'address:\s*"([^"]+)"')
 START_LISTENER = re.compile(r"--host (\S+) --port (\d+)")
+# The database service and port as start.sh's DATABASE_URL names them.
+START_DATABASE = re.compile(r"@(?P<service>[\w-]+):(?P<port>\d+)/")
 WILDCARD_SOCKETS = ("0.0.0.0", "[::]")  # noqa: S104 - names the listener addresses the probe accepts and binds none
+LOOPBACK_ADDRESS = "127.0.0.1"
 # The secret files under the scratch HOME, where compose.yaml's `secrets` read them.
 PROVIDER_KEY_FILE = Path(".secrets/litellm/anthropic")
 MASTER_KEY_FILE = Path(".secrets/litellm/master-key")
+DATABASE_PASSWORD_FILE = Path(".secrets/litellm/db-password")
 CREDENTIAL_FILE = Path(".secrets/agent-service/api/credential.json")
+# The processes of the container and its listening TCP sockets in one snapshot: argv: none; prints
+# {"processes": {pid: {parent, executable}}, "listeners": [{address, version, owners: [pid]}]}, the
+# address in /proc/net's hexadecimal. A process or descriptor that vanishes mid-scan repeats the
+# scan; a scan that never completes ends non-zero.
+SNAPSHOT_PROGRAM = """\
+import json, os, sys, time
+def scan():
+    processes, held = {}, {}
+    for entry in filter(str.isdigit, os.listdir("/proc")):
+        if int(entry) == os.getpid():
+            continue
+        fields = open(f"/proc/{entry}/stat").read().rpartition(")")[2].split()
+        processes[entry] = {
+            "parent": int(fields[1]), "executable": os.readlink(f"/proc/{entry}/exe"),
+        }
+        for fd in os.listdir(f"/proc/{entry}/fd"):
+            target = os.readlink(f"/proc/{entry}/fd/{fd}")
+            if target.startswith("socket:["):
+                held.setdefault(target[8:-1], []).append(int(entry))
+    listeners = []
+    for table, version in (("tcp", 4), ("tcp6", 6)):
+        for row in (line.split() for line in open(f"/proc/net/{table}").read().splitlines()[1:]):
+            if row[3] == "0A":
+                owners = held.get(row[9], [])
+                listeners.append({"address": row[1], "version": version, "owners": owners})
+    return {"processes": processes, "listeners": listeners}
+for _ in range(50):
+    try:
+        print(json.dumps(scan()))
+        break
+    except OSError:
+        time.sleep(0.1)
+else:
+    sys.exit("the processes of the container never stood still for one scan")
+"""
+# The query engine path Prisma's client resolves for the proxy, from the image and not from a
+# running process: prints the version check of the binary, then the path on the last line.
+ENGINE_PATH_PROGRAM = """\
+import os
+from prisma.client import BINARY_PATHS
+from prisma.engine import utils
+print(os.path.realpath(utils.ensure(BINARY_PATHS.query_engine)))
+"""
 HTTP_PROGRAM = """\
 import json, socket, sys
 method, path, bearer, body = sys.argv[1:5]
@@ -108,6 +159,29 @@ def bound_names(declared: str) -> list[list[str]]:
     return [[f"{wildcard}:{port}"] for wildcard in WILDCARD_SOCKETS]
 
 
+def named_sockets(listeners: list[dict]) -> list[tuple[str, list[int]]]:
+    """Each listening socket as `listeners_of` names it with the pids that hold it, without Docker's
+    embedded resolver, which listens in every container's namespace."""
+    named = [
+        (socket_name(entry["address"], entry["version"]), entry["owners"]) for entry in listeners
+    ]
+    resolver = EMBEDDED_RESOLVER + ":"
+    return [(name, owners) for name, owners in named if not name.startswith(resolver)]
+
+
+@dataclass(frozen=True)
+class ProxySnapshot:
+    """LiteLLM's listening TCP sockets as one scan of the container saw them."""
+
+    proxies: frozenset[int]  # the owners of the declared proxy address
+    engines: dict[int, list[str]]  # each query engine child of a proxy, with its socket names
+    outside: list[str]  # the sockets no query engine owns
+
+    @property
+    def listening(self) -> bool:
+        return bool(self.proxies)
+
+
 class LitellmProbe(IssuerProbe):
     """The service with an API-only person, the front, LiteLLM and a fake Anthropic."""
 
@@ -127,6 +201,7 @@ class LitellmProbe(IssuerProbe):
         self.identity = {
             name: f"{name}-{secrets.token_hex(6)}" for name in ("sub", "username", "email")
         }
+        self.database_password = secrets.token_urlsafe(32)
         self.write_secrets(home)
         self.fake = scratch / "fake"
         self.write_fakes(self.fake)
@@ -145,13 +220,17 @@ class LitellmProbe(IssuerProbe):
             (PROVIDER_KEY_FILE, self.provider_key + "\n"),
             (MASTER_KEY_FILE, f"sk-{secrets.token_hex(32)}\n"),
             (CREDENTIAL_FILE, json.dumps({"shared_key": self.credential})),
+            (DATABASE_PASSWORD_FILE, self.database_password + "\n"),
         ):
             folder = home
             for part in relative.parent.parts:
                 folder /= part
                 folder.mkdir(exist_ok=True)
                 folder.chmod(0o700)
-            write_new(home / relative, text.encode(), 0o600)
+            # The database user is not the probe's: it reads the password as the live file's
+            # loosest_mode allows, inside the 0700 folder.
+            mode = 0o644 if relative == DATABASE_PASSWORD_FILE else 0o600
+            write_new(home / relative, text.encode(), mode)
 
     def write_fakes(self, directory: Path) -> None:
         """One directory per fake host: its certificate and key, what it checks and its program."""
@@ -259,7 +338,16 @@ class LitellmProbe(IssuerProbe):
     # --- life cycle ---------------------------------------------------------------------------
 
     def services_to_start(self) -> tuple[str, ...]:
-        return (GATEWAY, SERVICE, ISSUER_SERVICE, FAKE_PROVIDER, FAKE_ISSUER, FRONT, LITELLM)
+        return (
+            GATEWAY,
+            SERVICE,
+            ISSUER_SERVICE,
+            FAKE_PROVIDER,
+            FAKE_ISSUER,
+            FRONT,
+            DATABASE,
+            LITELLM,
+        )
 
     def log_of(self, service: str) -> str:
         return self.container_log(service, container=self.container(service))
@@ -339,6 +427,7 @@ class LitellmProbe(IssuerProbe):
     def drive(self) -> None:
         self.wait_until(SERVICE, LISTENING)
         self.wait_until(LITELLM, LISTENING)
+        self.cell_d1()
         self.cell_n1()
         self.cells_listeners()
         self.cells_r1_r2()
@@ -421,9 +510,44 @@ class LitellmProbe(IssuerProbe):
         expect(run.get("exit") == "0" and [r["model"] for r in sent] == [new], f"G4: {run} {sent}")
         self.hold("G4", "a remapped config reaches LiteLLM after its recreate")
 
+    def cell_d1(self) -> None:
+        """LiteLLM runs as its configured user on a read-only root, and its migrations are done."""
+        resolved = json.loads(self.compose("config", "--format", "json").stdout)["services"]
+        container = json.loads(self.run(["docker", "inspect", self.container(LITELLM)]).stdout)[0]
+        user = resolved[LITELLM]["user"]
+        expect(
+            container["Config"]["User"] == user,
+            f"D1: LiteLLM runs as {container['Config']['User']}",
+        )
+        expect(container["HostConfig"]["ReadonlyRootfs"] is True, "D1: the root is writable")
+        counted = self.sql(
+            "SELECT count(finished_at), count(*) FROM _prisma_migrations",
+            "--tuples-only", "--no-align",
+        ).stdout.strip()  # fmt: skip
+        finished, total = (int(number) for number in counted.split("|"))
+        expect(total > 0 and finished == total, f"D1: {finished} of {total} migrations finished")
+        self.hold("D1", f"LiteLLM runs as {user} on a read-only root; {finished} of {total} "
+                  "migrations finished")  # fmt: skip
+
+    def database_options(self) -> list[str]:
+        """The user and database `compose.yaml` gives `litellm-db`, as the options of psql and
+        pg_dump."""
+        resolved = json.loads(self.compose("config", "--format", "json").stdout)["services"]
+        environment = resolved[DATABASE]["environment"]
+        return [
+            f"--username={environment['POSTGRES_USER']}",
+            f"--dbname={environment['POSTGRES_DB']}",
+        ]
+
+    def sql(self, statement: str, *options: str) -> subprocess.CompletedProcess:
+        return self.run([
+            "docker", "exec", self.container(DATABASE), "psql", *self.database_options(),
+            *options, "--command", statement,
+        ])  # fmt: skip
+
     def cell_n1(self) -> None:
         resolved = json.loads(self.compose("config", "--format", "json").stdout)
-        members = (SERVICE, FRONT, LITELLM, GATEWAY)
+        members = (SERVICE, FRONT, LITELLM, GATEWAY, DATABASE)
         for service in members:
             container = json.loads(self.run(["docker", "inspect", self.container(service)]).stdout)[
                 0
@@ -443,8 +567,10 @@ class LitellmProbe(IssuerProbe):
             declared[FRONT] == {"litellm-api", "litellm-backend"}, f"N1: front {declared[FRONT]}"
         )
         expect(
-            declared[LITELLM] == {"litellm-backend", "litellm-egress"}, f"N1: {declared[LITELLM]}"
+            declared[LITELLM] == {"litellm-backend", "litellm-egress", "litellm-db"},
+            f"N1: {declared[LITELLM]}",
         )
+        expect(declared[DATABASE] == {"litellm-db"}, f"N1: database {declared[DATABASE]}")
         for network in NEW_NETWORKS:
             inspected = self.inspect_network(network)
             expect(inspected["Internal"] is True, f"N1: {network} is not internal")
@@ -455,9 +581,7 @@ class LitellmProbe(IssuerProbe):
             members = {c["Name"] for c in inspected["Containers"].values()}
             wanted = {self.container_name(s) for s, n in declared.items() if network in n}
             expect(members == wanted, f"N1: {network} holds {sorted(members)}")
-        self.hold(
-            "N1", "members as declared; the three new networks internal and isolated; no port"
-        )
+        self.hold("N1", "members as declared; the four new networks internal and isolated; no port")
 
     def container_name(self, service: str) -> str:
         found = json.loads(self.run(["docker", "inspect", self.container(service)]).stdout)[0]
@@ -471,16 +595,73 @@ class LitellmProbe(IssuerProbe):
         )
         resolved = json.loads(self.compose("config", "--format", "json").stdout)["services"]
         front_static = mounted_file(resolved[FRONT], FRONT_STATIC).read_text()
-        start = mounted_file(resolved[LITELLM], resolved[LITELLM]["entrypoint"][0]).read_text()
         (front_address,) = ENTRYPOINT_ADDRESS.findall(front_static)
-        declared = {FRONT: front_address, LITELLM: ":".join(START_LISTENER.search(start).groups())}
+        declared = {FRONT: front_address, LITELLM: self.proxy_address}
         for cell, service in (("L2", FRONT), ("L3", LITELLM)):
             found = listeners_of(self, service)
+            tcp, engines = found["tcp"], {}
+            if service == LITELLM:
+                snapshot = self.proxy_snapshot()
+                tcp, engines = snapshot.outside, snapshot.engines
+                expect(snapshot.listening, f"{cell}: nothing listens on {self.proxy_address}")
+            engine = [name for names in engines.values() for name in names]
             expect(
-                found["tcp"] in bound_names(declared[service]) and found["udp"] == [],
+                tcp in bound_names(declared[service]) and found["udp"] == [],
                 f"{cell}: {service} declares {declared[service]} and listens on {found}",
             )
-            self.hold(cell, f"{service} declares {declared[service]} and listens on {found['tcp']}")
+            expect(
+                service != LITELLM or (len(engines) == 1 and len(engine) == 1),
+                f"{cell}: {len(engines)} query engines with sockets {engine}",
+            )
+            expect(
+                all(name.startswith(f"{LOOPBACK_ADDRESS}:") for name in engine),
+                f"{cell}: the query engine listens beyond loopback: {engine}",
+            )
+            self.hold(
+                cell,
+                f"{service} declares {declared[service]} and listens on {tcp}"
+                + (f"; its Prisma engine on {engine}" if engine else ""),
+            )
+
+    @cached_property
+    def proxy_address(self) -> str:
+        """The `host:port` start.sh gives LiteLLM, from the resolved configuration."""
+        resolved = json.loads(self.compose("config", "--format", "json").stdout)["services"]
+        start = mounted_file(resolved[LITELLM], resolved[LITELLM]["entrypoint"][0]).read_text()
+        return ":".join(START_LISTENER.search(start).groups())
+
+    @cached_property
+    def engine_executable(self) -> str:
+        """The one query engine binary the image ships for the proxy, read from the image."""
+        shown = self.run(
+            ["docker", "exec", "-i", self.container(LITELLM), "python3", "-"],
+            stdin=ENGINE_PATH_PROGRAM,
+        ).stdout
+        return shown.strip().splitlines()[-1]
+
+    def is_engine(self, row: dict, proxy: int) -> bool:
+        """The process is the query engine: the image's engine binary, a child of the proxy."""
+        return row["parent"] == proxy and row["executable"] == self.engine_executable
+
+    def proxy_snapshot(self) -> ProxySnapshot:
+        """LiteLLM's listeners from one scan: the proxy owns the declared address, and the engine
+        sockets are those of the processes `is_engine` accepts."""
+        scan = json.loads(
+            self.run(
+                ["docker", "exec", "-i", self.container(LITELLM), "python3", "-"],
+                stdin=SNAPSHOT_PROGRAM,
+            ).stdout
+        )
+        sockets = named_sockets(scan["listeners"])
+        declared = {name for names in bound_names(self.proxy_address) for name in names}
+        proxies = {pid for name, owners in sockets if name in declared for pid in owners}
+        engines = {
+            int(pid): [name for name, owners in sockets if int(pid) in owners]
+            for pid, row in scan["processes"].items()
+            if any(self.is_engine(row, proxy) for proxy in proxies)
+        }
+        outside = [name for name, owners in sockets if not set(owners) & engines.keys()]
+        return ProxySnapshot(frozenset(proxies), engines, outside)
 
     def cells_r1_r2(self) -> None:
         for cell, name in (("R1", PROVIDER_HOST), ("R2", ISSUER_HOST)):

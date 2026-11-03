@@ -44,6 +44,7 @@ sys.path.insert(0, str(REPO / "agent-service"))
 from api_canary import verdicts  # noqa: E402
 from litellm import (  # noqa: E402
     CANARY_SECONDS,
+    DATABASE,
     DEFAULT_APP,
     FRONT,
     FRONT_STATIC,
@@ -55,7 +56,6 @@ from litellm import (  # noqa: E402
     SERVICE,
     ProbeFailed,
     expect,
-    listeners_of,
     mounted_file,
     run_scratch_probe,
 )
@@ -72,11 +72,20 @@ SETTINGS_SECTIONS = {
         "turn_off_message_logging": True,
         "redact_messages_in_exceptions": True,
     },
-    "general_settings": {"custom_auth": "auth.user_api_key_auth"},
+    "general_settings": {
+        "custom_auth": "auth.user_api_key_auth",
+        "disable_spend_logs": True,
+        "disable_error_logs": True,
+        "store_prompts_in_spend_logs": False,
+    },
     "router_settings": {"num_retries": 0},
 }
 DEPLOYMENT_KEYS = {"model_name", "litellm_params"}
 DEPLOYMENT_PARAMS = {"model", "api_key", "max_retries"}
+# The one table of LiteLLM's database that may name a tool (D9).
+TOOL_TABLE = "LiteLLM_ToolTable"
+TOOL_WRITE_SECONDS = 120
+COPY_HEADER = re.compile(r'^COPY public\."?(\w+)"? ')
 STORE_NAMES = re.compile(
     r"DATABASE|REDIS|CALLBACK|LANGFUSE|VERBOSE|SPEND|S3_|LITELLM_PRINT_STANDARD_LOGGING_PAYLOAD",
     re.I,
@@ -144,7 +153,7 @@ class RetentionProbe(FailureProbe):
         ]
 
     def sweep(self, tokens: Mapping[str, str]) -> Sweep:
-        """C: the census over the four containers for the canaries `tokens` (label -> value)."""
+        """C: the census over the route's containers for the canaries `tokens` (label -> value)."""
         result = self.census.sweep(self.targets(), tokens)
         expect(not result.problems, f"C: sinks not examined: {list(result.problems)}")
         return result
@@ -177,14 +186,15 @@ class RetentionProbe(FailureProbe):
         return sum(request["request_canary_hits"] for request in self.provider_requests()[since:])
 
     def wait_until(self, service: str, line: str, seconds: int = 60) -> None:
-        """LiteLLM at CRITICAL prints no start line, so its listening socket is the signal."""
+        """LiteLLM at CRITICAL prints no start line, so the declared proxy address listening is the
+        signal."""
         if service != LITELLM:
             super().wait_until(service, line, seconds)
             return
         deadline = time.monotonic() + seconds
         while True:
             try:
-                if listeners_of(self, LITELLM)["tcp"]:
+                if self.proxy_snapshot().listening:
                     return
             except ProbeFailed:
                 pass  # the container is not up yet
@@ -214,8 +224,8 @@ class RetentionProbe(FailureProbe):
         failed = []
         for step in (
             self.cell_b2, self.cells_b3, self.recreate_route, self.cell_b1, self.cell_b4,
-            self.cell_b5, self.cell_b6, self.cell_b7, self.cell_b8, self.cell_b9, self.cell_b10,
-            self.cell_b11,
+            self.cell_b5, self.cell_b6, self.cell_b7, self.cell_b8, self.cell_b9, self.cell_d9,
+            self.cell_b10, self.cell_b11,
         ):  # fmt: skip
             try:
                 step()
@@ -244,34 +254,39 @@ class RetentionProbe(FailureProbe):
 
     def cells_b3(self) -> None:
         self.overlays.append(self.controls)
-        for service in (LITELLM, FRONT):
-            self.compose("up", "--detach", "--wait", "--force-recreate", "--no-deps", service)
-        self.wait_until(LITELLM, LISTENING)
-        self.wait_for_front()
-        litellm_canary, front_canary = canary("b3a-request"), canary("b3b-path")
-        run = self.canary(DEFAULT_APP, ("--request-marker", litellm_canary))
-        expect(run["exit"] == "0", f"B3a: {run}")
-        status = self.http("GET", f"/{front_canary}")
-        expect(status == 404, f"B3b: the front answered {status}")
-        found = self.sweep({"request in LiteLLM debug log": litellm_canary,
-                            "path in front access log": front_canary}).found  # fmt: skip
-        expect(
-            f"{self.container_name(LITELLM)} log" in found.get("request in LiteLLM debug log", ()),
-            f"B3a: found {found}",
-        )
-        self.hold("B3a", "with LITELLM_LOG=DEBUG the request canary is found in LiteLLM's log")
-        expect(
-            f"{self.container_name(FRONT)} log" in found.get("path in front access log", ()),
-            f"B3b: found {found}",
-        )
-        self.hold("B3b", "with the access log on, a canary in the path is found in the front's log")
-        self.overlays.remove(self.controls)
+        try:
+            for service in (LITELLM, FRONT):
+                self.compose("up", "--detach", "--wait", "--force-recreate", "--no-deps", service)
+            self.wait_until(LITELLM, LISTENING)
+            self.wait_for_front()
+            litellm_canary, front_canary = canary("b3a-request"), canary("b3b-path")
+            run = self.canary(DEFAULT_APP, ("--request-marker", litellm_canary))
+            expect(run["exit"] == "0", f"B3a: {run}")
+            status = self.http("GET", f"/{front_canary}")
+            expect(status == 404, f"B3b: the front answered {status}")
+            found = self.sweep({"request in LiteLLM debug log": litellm_canary,
+                                "path in front access log": front_canary}).found  # fmt: skip
+            expect(
+                f"{self.container_name(LITELLM)} log"
+                in found.get("request in LiteLLM debug log", ()),
+                f"B3a: found {found}",
+            )
+            self.hold("B3a", "with LITELLM_LOG=DEBUG the request canary is found in LiteLLM's log")
+            expect(
+                f"{self.container_name(FRONT)} log" in found.get("path in front access log", ()),
+                f"B3b: found {found}",
+            )
+            self.hold(
+                "B3b", "with the access log on, a canary in the path is found in the front's log"
+            )
+        finally:
+            self.overlays.remove(self.controls)
 
     def cell_b1(self) -> None:
         result = self.sweep({"probe": canary("b1")})
         resolved = json.loads(self.compose("config", "--format", "json").stdout)["services"]
         lines = []
-        for service in (FRONT, GATEWAY, LITELLM, SERVICE):
+        for service in (FRONT, GATEWAY, LITELLM, SERVICE, DATABASE):
             inspected = json.loads(self.run(["docker", "inspect", self.container(service)]).stdout)[
                 0
             ]
@@ -389,12 +404,93 @@ class RetentionProbe(FailureProbe):
             "B9", "the hook refuses (401) a body key holding the canary: F 0, retained nowhere"
         )
 
+    def cell_d9(self) -> None:
+        """D9: no canary of a request or an answer in a `pg_dump`, with a planted row as the
+        search's control; a request and a response tool name appear in the tool table alone."""
+        canaries = {
+            label: canary(f"d9-{label}")
+            for label in ("message", "description", "arguments", "result", "answer", "call")
+        }
+        tool = canary("d9-tool").replace("-", "_")
+        answered = canary("d9-answered").replace("-", "_")
+        planted = canary("d9-planted")
+        self.steer(
+            marker=canaries["answer"],
+            tool_use={"name": answered, "input": {"q": canaries["call"]}},
+        )
+        function = {"name": tool, "description": canaries["description"],
+                    "parameters": {"type": "object", "properties": {}}}  # fmt: skip
+        arguments = json.dumps({"q": canaries["arguments"]})
+        call = {"id": "call_d9", "type": "function",
+                "function": {"name": tool, "arguments": arguments}}  # fmt: skip
+        body = {
+            "model": "anthropic/opus",
+            "messages": [
+                {"role": "user", "content": canaries["message"]},
+                {"role": "assistant", "content": None, "tool_calls": [call]},
+                {"role": "tool", "tool_call_id": "call_d9", "content": canaries["result"]},
+            ],
+            "tools": [{"type": "function", "function": function}],
+        }  # fmt: skip
+        status = self.http("POST", ROUTE, self.credential, body)
+        expect(status == 200, f"D9: the route answered {status}")
+        self.steer()
+        for name in (tool, answered):
+            self.wait_for_tool(name)
+        self.sql(
+            f"CREATE TABLE d9_control (value text); INSERT INTO d9_control VALUES ('{planted}')"  # noqa: S608 - the value is a token this probe generated
+        )
+        try:
+            dump = self.dump()
+        finally:
+            self.sql("DROP TABLE d9_control")
+        expect(planted in dump, "D9: the planted row is not in the dump")
+        held = [label for label, value in canaries.items() if value in dump]
+        expect(not held, f"D9: the dump holds the canaries of {held}")
+        for kind, name in (("request", tool), ("response", answered)):
+            tables = self.tables_naming(dump, name)
+            expect(tables == {TOOL_TABLE}, f"D9: the {kind} tool name is in {sorted(tables)}")
+        self.expect_nothing_retained("D9", canaries)
+        self.hold(
+            "D9",
+            f"the dump of {len(dump)} characters holds none of {len(canaries)} canaries and the"
+            f" planted row; the request and the response tool name are in {TOOL_TABLE} alone",
+        )
+
+    def wait_for_tool(self, tool: str) -> None:
+        """LiteLLM writes tool names with its batched database updates, not with the request."""
+        query = f"SELECT count(*) FROM \"{TOOL_TABLE}\" WHERE tool_name = '{tool}'"  # noqa: S608 - the value is a token this probe generated
+        deadline = time.monotonic() + TOOL_WRITE_SECONDS
+        while True:
+            counted = self.sql(query, "--tuples-only", "--no-align").stdout.strip()
+            if counted == "1":
+                return
+            expect(time.monotonic() < deadline, f"D9: the tool name {tool} is not in {TOOL_TABLE}")
+            time.sleep(3)
+
+    def dump(self) -> str:
+        return self.run(["docker", "exec", self.container(DATABASE), "pg_dump",
+                         *self.database_options()]).stdout  # fmt: skip
+
+    @staticmethod
+    def tables_naming(dump: str, name: str) -> set[str]:
+        """The tables of a plain-format dump whose rows hold `name`."""
+        tables, current = set(), None
+        for line in dump.splitlines():
+            if header := COPY_HEADER.match(line):
+                current = header[1]
+            elif line == r"\.":
+                current = None
+            elif current and name in line:
+                tables.add(current)
+        return tables
+
     def cell_b10(self) -> None:
         """Every sink of the route over B4 to B9."""
         found = self.sweep(self.clean).found
         expect(not found, f"B10: retained in {found}")
-        self.hold("B10", f"the mounts and logs of the front, the gateway, LiteLLM and the service "
-                  f"hold none of {len(self.clean)} canaries of B4 to B9")  # fmt: skip
+        self.hold("B10", f"the mounts and logs of {', '.join(ROUTE_SERVICES)} hold none of "
+                  f"{len(self.clean)} canaries of B4 to B9")  # fmt: skip
 
     def cell_b11(self) -> None:
         litellm, front = self.container_name(LITELLM), self.container_name(FRONT)
@@ -414,7 +510,7 @@ class RetentionProbe(FailureProbe):
         static = self.run(["docker", "exec", front, "cat", FRONT_STATIC]).stdout
         expect("accessLog" not in static and "level: INFO" in static, "B11: the front's log")
         self.hold("B11", "LiteLLM: message logging off, redaction on, custom_auth only, retries 0, "
-                  "no callback, cache, database or spend setting, no such environment name, "
+                  "no callback, cache or spend and error log, no such environment name, "
                   "log level CRITICAL; the front: INFO and no access log")  # fmt: skip
 
 

@@ -13,20 +13,24 @@ import secrets
 import stat
 import subprocess
 import tomllib
+from collections.abc import Iterator
 from pathlib import Path
+from types import ModuleType, SimpleNamespace
 
 import pytest
 import yaml
+from support.probe_support import probe_imports
 from support.script_module import loaded_script
 
 ROOT = Path(__file__).resolve().parents[1]
 LITELLM_DIRECTORY = ROOT / "agent-service" / "litellm"
 LITELLM, FRONT, SERVICE, GATEWAY = "litellm", "litellm-front", "agent-service", "agent-egress"
-NEW_NETWORKS = ("litellm-api", "litellm-backend", "litellm-egress")
+DATABASE = "litellm-db"
+NEW_NETWORKS = ("litellm-api", "litellm-backend", "litellm-egress", "litellm-db")
 ISOLATED_MODE = {"com.docker.network.bridge.gateway_mode_ipv4": "isolated"}
 DIGEST_PINNED = re.compile(r"^[^@\s]+:[^@\s]+@sha256:[0-9a-f]{64}$")
 KEY_SECRET, CREDENTIAL_SECRET = "litellm_anthropic_key", "agent_service_api_credential"
-MASTER_SECRET = "litellm_master_key"
+MASTER_SECRET, PASSWORD_SECRET = "litellm_master_key", "litellm_db_password"
 API_ROUTE_BOUND = "API_ROUTE_MAX_PARALLEL_REQUESTS"
 START_SCRIPT = (LITELLM_DIRECTORY / "start.sh").read_text()
 START_LISTENER = re.compile(r"--port (?P<port>\d+)")
@@ -51,7 +55,7 @@ def front_static() -> dict:
     return load(LITELLM_DIRECTORY / "front" / "traefik.yml")
 
 
-def test_the_three_new_networks_are_internal_and_isolated_and_litellm_egress_pins_a_subnet(
+def test_the_four_new_networks_are_internal_and_isolated_and_litellm_egress_pins_a_subnet(
     compose,
 ):
     for name in NEW_NETWORKS:
@@ -66,7 +70,12 @@ def test_each_member_joins_exactly_the_networks_the_boundary_declares(compose):
     services = compose["services"]
 
     assert set(services[FRONT]["networks"]) == {"litellm-api", "litellm-backend"}
-    assert set(services[LITELLM]["networks"]) == {"litellm-backend", "litellm-egress"}
+    assert set(services[LITELLM]["networks"]) == {"litellm-backend", "litellm-egress", "litellm-db"}
+    assert services[DATABASE]["networks"] == ["litellm-db"]
+    assert {n for n, s in services.items() if "litellm-db" in s.get("networks", [])} == {
+        LITELLM,
+        DATABASE,
+    }
     assert "litellm-api" in services[SERVICE]["networks"]
     assert "litellm-backend" not in services[SERVICE]["networks"]
     assert "egress" not in services[LITELLM]["networks"]
@@ -89,7 +98,7 @@ def test_litellm_is_pinned_by_digest_hardened_and_reaches_the_provider_through_t
     assert service["security_opt"] == ["no-new-privileges:true"]
     assert service["ulimits"] == {"core": 0}
     assert service["init"] is True
-    assert not {"ports", "expose", "depends_on", "network_mode", "cap_add"} & service.keys()
+    assert not {"ports", "expose", "network_mode", "cap_add"} & service.keys()
     assert service["extra_hosts"] == {"api.anthropic.com": compose["x-litellm-egress-address"]}
     assert service["profiles"] == ["litellm"]
 
@@ -116,6 +125,33 @@ def test_the_front_shares_the_public_traefiks_image_and_hardening_and_reads_no_s
         key: compose["services"]["traefik"][key] for key in shared
     }
     assert not {"secrets", "ports", "expose", "depends_on", "environment"} & front.keys()
+
+
+def test_litellm_waits_for_a_healthy_database_and_both_read_only_the_password(compose):
+    services = compose["services"]
+
+    assert services[LITELLM]["depends_on"] == {DATABASE: {"condition": "service_healthy"}}
+    assert "healthcheck" in services[DATABASE]
+    assert {n for n, s in services.items() if PASSWORD_SECRET in s.get("secrets", [])} == {
+        LITELLM,
+        DATABASE,
+    }
+
+
+def test_the_database_keeps_keycloaks_postgres_image_and_hardening_and_its_volume_is_its_own(
+    compose,
+):
+    services = compose["services"]
+    hardening = ("image", "user", "read_only", "tmpfs", "cap_drop", "security_opt", "restart")
+
+    assert {key: services[DATABASE][key] for key in hardening} == {
+        key: services["keycloak-db"][key] for key in hardening
+    }
+    assert services[DATABASE]["profiles"] == [LITELLM]
+    assert services[DATABASE]["volumes"] == [
+        f"{DATABASE}:{services['keycloak-db']['volumes'][0].split(':')[1]}"
+    ]
+    assert DATABASE in compose["volumes"]
 
 
 def test_only_litellm_reads_the_provider_key_and_only_it_and_later_the_service_the_credential(
@@ -176,14 +212,33 @@ def test_the_three_model_names_map_to_the_family_of_the_service_configurations_c
         assert parameters["max_retries"] == 0
 
 
-def test_litellm_retries_nothing_logs_no_messages_and_has_no_callback_cache_or_database(config):
+def test_litellm_retries_nothing_logs_no_messages_and_has_no_callback_cache_or_spend_log(config):
     assert config["router_settings"] == {"num_retries": 0}
     assert config["litellm_settings"] == {
         "turn_off_message_logging": True,
         "redact_messages_in_exceptions": True,
     }
     assert set(config) == {"model_list", "router_settings", "litellm_settings", "general_settings"}
-    assert config["general_settings"] == {"custom_auth": "auth.user_api_key_auth"}
+    assert config["general_settings"] == {
+        "custom_auth": "auth.user_api_key_auth",
+        "disable_spend_logs": True,
+        "disable_error_logs": True,
+        "store_prompts_in_spend_logs": False,
+    }
+
+
+def test_litellm_holds_no_license_and_none_of_the_settings_behind_the_premium_check(
+    compose, config
+):
+    premium_settings = (
+        "LITELLM_LICENSE", "enforced_params", "allowed_ips", "allowed_routes", "tags",
+        "model_max_budget", "regenerate",
+    )  # fmt: skip
+    environment = compose["services"][LITELLM]["environment"]
+    configured = json.dumps(config) + json.dumps(environment)
+
+    assert not [name for name in premium_settings if name in configured]
+    assert "LITELLM_LICENSE" not in START_SCRIPT
 
 
 def test_litellm_finds_its_config_hook_and_start_script_where_compose_mounts_them(compose, config):
@@ -208,18 +263,28 @@ def stub_path(tmp_path) -> Path:
     stub = directory / "litellm"
     stub.write_text(
         '#!/bin/sh\n[ "$ANTHROPIC_API_KEY" = "$(cat "$KEY_FILE")" ] '
-        '&& [ "$LITELLM_MASTER_KEY" = "$(cat "$MASTER_FILE")" ] && echo started\n'
+        '&& [ "$LITELLM_MASTER_KEY" = "$(cat "$MASTER_FILE")" ] && echo "$DATABASE_URL"\n'
     )
     stub.chmod(stub.stat().st_mode | stat.S_IEXEC)
     return directory
 
 
-def start(stub_path, key_file: Path, master_file: Path | None = None):
+def start(
+    stub_path, key_file: Path, master_file: Path | None = None, password_file: Path | None = None
+):
     if master_file is None:
         master_file = key_file.with_name("master")
         master_file.write_text(secrets.token_urlsafe(32) + "\n")
+    if password_file is None:
+        password_file = key_file.with_name("password")
+        password_file.write_text(secrets.token_urlsafe(32) + "\n")
     return subprocess.run(
-        [str(LITELLM_DIRECTORY / "start.sh"), str(key_file), str(master_file)],
+        [
+            str(LITELLM_DIRECTORY / "start.sh"),
+            str(key_file),
+            str(master_file),
+            str(password_file),
+        ],
         capture_output=True,
         text=True,
         check=False,
@@ -231,16 +296,25 @@ def start(stub_path, key_file: Path, master_file: Path | None = None):
     )
 
 
-def test_start_execs_litellm_with_a_one_line_key_in_its_environment(stub_path, tmp_path):
-    key_file = tmp_path / "key"
+def test_start_execs_litellm_with_the_database_url_of_the_composed_database(
+    stub_path, tmp_path, compose
+):
+    key_file, password_file = tmp_path / "key", tmp_path / "password"
     key_file.write_text(secrets.token_urlsafe(32) + "\n")
+    password = secrets.token_urlsafe(32)
+    password_file.write_text(password + "\n")
+    database = compose["services"][DATABASE]["environment"]
 
-    result = start(stub_path, key_file)
+    result = start(stub_path, key_file, password_file=password_file)
 
-    assert (result.returncode, result.stdout.strip()) == (0, "started")
+    assert result.returncode == 0
+    assert result.stdout.strip() == (
+        f"postgresql://{database['POSTGRES_USER']}:{password}@{DATABASE}:5432/{database['POSTGRES_DB']}"
+    )
+    assert result.stderr == ""
 
 
-@pytest.mark.parametrize("bad", ["provider", "master"])
+@pytest.mark.parametrize("bad", ["provider", "master", "password"])
 @pytest.mark.parametrize(
     "contents",
     [
@@ -267,9 +341,9 @@ def test_start_refuses_a_bad_key_file_with_one_line_that_names_the_path_only(
     good.write_text(secrets.token_urlsafe(32) + "\n")
     if contents is not None:
         refused.write_text(contents)
-    key_file, master_file = (refused, good) if bad == "provider" else (good, refused)
+    files = {"provider": good, "master": good, "password": good} | {bad: refused}
 
-    result = start(stub_path, key_file, master_file)
+    result = start(stub_path, files["provider"], files["master"], files["password"])
 
     assert result.returncode != 0
     assert result.stdout == ""
@@ -562,3 +636,91 @@ def test_the_canary_with_cancel_reads_no_record_for_a_run_id_it_cannot_trust(can
 
     assert (code, lines[-1]) == (1, "status other")
     assert [method for method, _ in connection.requests] == ["POST"]
+
+
+# --- the probe's reading of LiteLLM's processes and listeners, on synthetic scans ---------------
+
+ENGINE_BINARY = "/opt/prisma/engine"
+PROXY_SOCKET = {"address": "00000000:0FA0", "version": 4}
+ENGINE_SOCKET = {"address": "0100007F:15B3", "version": 4}
+
+
+def snapshot_of(litellm, monkeypatch, processes: dict, listeners: list[dict]):
+    """`proxy_snapshot` over one scan of a LiteLLM container, without a container."""
+    probe = object.__new__(litellm.LitellmProbe)
+    probe.__dict__.update(proxy_address="0.0.0.0:4000", engine_executable=ENGINE_BINARY)
+    scan = {"processes": processes, "listeners": listeners}
+    monkeypatch.setattr(probe, "container", lambda _service: "litellm-1", raising=False)
+    monkeypatch.setattr(
+        probe, "run", lambda *_, **__: SimpleNamespace(stdout=json.dumps(scan)), raising=False
+    )
+    return probe.proxy_snapshot()
+
+
+@pytest.fixture(scope="module")
+def litellm() -> Iterator[ModuleType]:
+    with probe_imports():
+        import litellm as probe
+
+        yield probe
+
+
+@pytest.mark.parametrize(
+    ("executable", "parent", "is_engine"),
+    [
+        pytest.param(ENGINE_BINARY, 7, True, id="the image's engine under the proxy"),
+        pytest.param(ENGINE_BINARY + "-other", 7, False, id="a name that starts like the engine"),
+        pytest.param(
+            "/opt/other/query-engine", 7, False, id="the engine's name in another directory"
+        ),
+        pytest.param(ENGINE_BINARY, 1, False, id="the engine binary under another parent"),
+    ],
+)
+def test_only_the_images_engine_binary_under_the_proxy_is_the_query_engine(
+    litellm, executable, parent, is_engine
+):
+    probe = object.__new__(litellm.LitellmProbe)
+    probe.__dict__["engine_executable"] = ENGINE_BINARY
+
+    assert probe.is_engine({"parent": parent, "executable": executable}, 7) is is_engine
+
+
+def test_the_proxy_listens_once_it_owns_the_declared_address_and_the_engine_is_told_apart(
+    litellm, monkeypatch
+):
+    processes = {
+        "7": {"parent": 1, "executable": "/app/python"},
+        "9": {"parent": 7, "executable": ENGINE_BINARY},
+    }
+    listeners = [{**PROXY_SOCKET, "owners": [7]}, {**ENGINE_SOCKET, "owners": [9]}]
+
+    snapshot = snapshot_of(litellm, monkeypatch, processes, listeners)
+
+    assert (snapshot.listening, snapshot.engines, snapshot.outside) == (
+        True,
+        {9: ["127.0.0.1:5555"]},
+        ["0.0.0.0:4000"],
+    )
+
+
+def test_a_lone_engine_socket_is_no_listening_proxy(litellm, monkeypatch):
+    processes = {
+        "7": {"parent": 1, "executable": "/app/python"},
+        "9": {"parent": 7, "executable": ENGINE_BINARY},
+    }
+
+    snapshot = snapshot_of(litellm, monkeypatch, processes, [{**ENGINE_SOCKET, "owners": [9]}])
+
+    assert (snapshot.listening, snapshot.engines) == (False, {})
+
+
+def test_a_listener_of_a_look_alike_engine_stays_outside_the_engine(litellm, monkeypatch):
+    processes = {
+        "7": {"parent": 1, "executable": "/app/python"},
+        "9": {"parent": 7, "executable": "/opt/other/query-engine-other"},
+    }
+    listeners = [{**PROXY_SOCKET, "owners": [7]}, {**ENGINE_SOCKET, "owners": [9]}]
+
+    snapshot = snapshot_of(litellm, monkeypatch, processes, listeners)
+
+    assert (snapshot.engines, snapshot.outside) == ({}, ["0.0.0.0:4000", "127.0.0.1:5555"])
