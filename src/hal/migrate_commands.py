@@ -162,6 +162,11 @@ def _write_state_plan(home: Path, plans: tuple[SourcePlan, ...]) -> None:
                 write_row(Row(glyph, source, event, fact, details=names))
 
 
+def _state_stopped(why: str) -> ExitCode:
+    write_error(f"migrate state stopped, {why} · rerun finishes what is left", _again(STATE))
+    return ExitCode.FAILURE
+
+
 def _move_state(home: Path, targets: state_move.Targets, plans: tuple[SourcePlan, ...]) -> ExitCode:
     try:
         with state_move.held_locks(home, targets):
@@ -172,14 +177,10 @@ def _move_state(home: Path, targets: state_move.Targets, plans: tuple[SourcePlan
     except state_move.Refusal as refusal:
         write_error(f"cannot migrate state, {refusal} · nothing moved", _again(STATE))
         return ExitCode.REFUSED
-    except (state_move.Stopped, OSError) as error:
-        why = (
-            error.describe(_shown(home, error.entry))
-            if isinstance(error, state_move.Stopped)
-            else error.strerror
-        )
-        write_error(f"migrate state stopped, {why} · rerun finishes what is left", _again(STATE))
-        return ExitCode.FAILURE
+    except state_move.Stopped as stopped:
+        return _state_stopped(stopped.describe(_shown(home, stopped.entry)))
+    except OSError as error:
+        return _state_stopped(error.strerror)
     summary = "hal's state is in its new directories"
     write_verdict(Verdict(Glyph.DONE, summary, (), next_step=command(Verb.SETUP)))
     return ExitCode.OK
