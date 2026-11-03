@@ -16,7 +16,7 @@ from hal.grammar import ExitCode
 import hal.output
 from hal.output import verbose_run
 from hal.workstation import system_step
-from hal.workstation.system_step import PlaybookFinished, PlaybookRun, PlaybookUnfinished
+from hal.workstation.system_step import PlaybookFinished, PlaybookNotStarted, PlaybookRun, PlaybookUnfinished
 from support.terminal_support import TerminalStream, put_stdout_on_a_terminal
 from support.workstation_support import FRESH_APPLY, Sandbox, StubSudo, lines_of_the_run, run_hal_setup
 
@@ -26,6 +26,7 @@ UNREACHABLE_COUNTS = system_step.EVENT_MARK + json.dumps({"event": "counts", "ch
 FAILED_RESULT = system_step.EVENT_MARK + json.dumps({"event": "result", "status": "failed", "msg": "names no `tunnel:`"})
 CHANGED_WRITE = system_step.EVENT_MARK + json.dumps({"event": "changed", "task": "Write edge files"})
 CHANGED_RESTART = system_step.EVENT_MARK + json.dumps({"event": "changed", "task": "Restart Docker"})
+STARTED = system_step.STARTED_LINE
 TASK_START = system_step.EVENT_MARK + json.dumps({"event": "task", "task": "Read the default log driver"})
 UNREACHABLE_RESULT = system_step.EVENT_MARK + json.dumps({"event": "result", "status": "unreachable", "msg": "no route"})
 
@@ -47,26 +48,31 @@ MALFORMED_COUNTS = [
 @pytest.mark.parametrize(
     ("returncode", "events", "expected"),
     [
-        (0, [COUNTS], PlaybookFinished(3)),
-        (0, [CHANGED_WRITE, CHANGED_RESTART, COUNTS], PlaybookFinished(3, ("Write edge files", "Restart Docker"))),
-        (2, [FAILED_RESULT, FAILED_COUNTS], PlaybookUnfinished("names no `tunnel:`", 1)),
-        (4, [UNREACHABLE_RESULT, UNREACHABLE_COUNTS], PlaybookUnfinished("no route", 0)),
-        (0, [FAILED_RESULT, COUNTS, COUNTS], PlaybookUnfinished()),
+        (0, [STARTED, COUNTS], PlaybookFinished(3)),
+        (0, [STARTED, CHANGED_WRITE, CHANGED_RESTART, COUNTS], PlaybookFinished(3, ("Write edge files", "Restart Docker"))),
+        (2, [STARTED, FAILED_RESULT, FAILED_COUNTS], PlaybookUnfinished("names no `tunnel:`", 1)),
+        (4, [STARTED, UNREACHABLE_RESULT, UNREACHABLE_COUNTS], PlaybookUnfinished("no route", 0)),
+        (0, [STARTED, FAILED_RESULT, COUNTS, COUNTS], PlaybookUnfinished()),
+        (0, [STARTED], PlaybookUnfinished()),
+        (0, [STARTED, TASK_START, CHANGED_WRITE, COUNTS], PlaybookFinished(3, ("Write edge files",))),
+        (0, [STARTED, system_step.EVENT_MARK + json.dumps({"event": "task"}), COUNTS], PlaybookUnfinished()),
+        (0, [STARTED, system_step.EVENT_MARK + json.dumps({"event": "task", "task": None}), COUNTS], PlaybookUnfinished()),
+        (0, [STARTED, system_step.EVENT_MARK + json.dumps({"event": "task", "task": 7}), COUNTS], PlaybookUnfinished()),
+        (0, [STARTED, system_step.EVENT_MARK + json.dumps({"event": "task", "task": ["a"]}), COUNTS], PlaybookUnfinished()),
+        (0, [STARTED, system_step.EVENT_MARK + json.dumps({"event": "task", "task": {"a": 1}}), COUNTS], PlaybookUnfinished()),
+        (0, [STARTED, system_step.EVENT_MARK + json.dumps({"event": "heartbeat"}), COUNTS], PlaybookUnfinished()),
+        (0, [STARTED, system_step.EVENT_MARK + "not json", COUNTS], PlaybookUnfinished()),
+        (0, [STARTED, system_step.EVENT_MARK + json.dumps({"event": "changed"}), COUNTS], PlaybookUnfinished()),
+        (0, [STARTED, system_step.EVENT_MARK + json.dumps({"event": "changed", "task": 7}), COUNTS], PlaybookUnfinished()),
+        (0, [STARTED, system_step.EVENT_MARK + json.dumps({"event": "changed", "task": None}), COUNTS], PlaybookUnfinished()),
+        (1, [STARTED, COUNTS], PlaybookUnfinished(changed=3)),
+        (0, [STARTED, FAILED_RESULT, COUNTS], PlaybookFinished(3)),
+        (2, [STARTED, CHANGED_WRITE, FAILED_RESULT, counts_event(changed=0, failed=1, unreachable=0)], PlaybookUnfinished("names no `tunnel:`", 1)),
+        (1, [], PlaybookNotStarted()),
         (0, [], PlaybookUnfinished()),
-        (0, [TASK_START, CHANGED_WRITE, COUNTS], PlaybookFinished(3, ("Write edge files",))),
-        (0, [system_step.EVENT_MARK + json.dumps({"event": "task"}), COUNTS], PlaybookUnfinished()),
-        (0, [system_step.EVENT_MARK + json.dumps({"event": "task", "task": None}), COUNTS], PlaybookUnfinished()),
-        (0, [system_step.EVENT_MARK + json.dumps({"event": "task", "task": 7}), COUNTS], PlaybookUnfinished()),
-        (0, [system_step.EVENT_MARK + json.dumps({"event": "task", "task": ["a"]}), COUNTS], PlaybookUnfinished()),
-        (0, [system_step.EVENT_MARK + json.dumps({"event": "task", "task": {"a": 1}}), COUNTS], PlaybookUnfinished()),
-        (0, [system_step.EVENT_MARK + json.dumps({"event": "started"}), COUNTS], PlaybookUnfinished()),
-        (0, [system_step.EVENT_MARK + "not json", COUNTS], PlaybookUnfinished()),
-        (0, [system_step.EVENT_MARK + json.dumps({"event": "changed"}), COUNTS], PlaybookUnfinished()),
-        (0, [system_step.EVENT_MARK + json.dumps({"event": "changed", "task": 7}), COUNTS], PlaybookUnfinished()),
-        (0, [system_step.EVENT_MARK + json.dumps({"event": "changed", "task": None}), COUNTS], PlaybookUnfinished()),
-        (1, [COUNTS], PlaybookUnfinished(changed=3)),
-        (0, [FAILED_RESULT, COUNTS], PlaybookFinished(3)),
-        (2, [CHANGED_WRITE, FAILED_RESULT, counts_event(changed=0, failed=1, unreachable=0)], PlaybookUnfinished("names no `tunnel:`", 1)),
+        (1, [COUNTS], PlaybookUnfinished()),
+        (0, [TASK_START, COUNTS], PlaybookUnfinished()),
+        (0, [STARTED, STARTED, COUNTS], PlaybookUnfinished()),
     ],
     ids=[
         "clean counts",
@@ -89,6 +95,11 @@ MALFORMED_COUNTS = [
         "nonzero exit",
         "rescued failure",
         "a changed task the counts missed",
+        "sudo never ran the shell",
+        "no line and exit 0",
+        "counts without the started line",
+        "an event before the started line",
+        "a second started line",
     ],
 )
 def test_a_run_finishes_only_with_exit_0_and_one_counts_event_without_failures(returncode: int, events: list[str], expected: PlaybookRun) -> None:
@@ -216,7 +227,9 @@ def test_the_play_runs_under_sudo_in_its_own_directory_and_sudo_forgets_the_tick
     system_step.run_playbook_as_root([str(playbook), "--diff"])
 
     play_call, forget_call = stub_sudo.calls()
-    assert play_call[0] == f"env PYTHONDONTWRITEBYTECODE=1 sh -c exec \"$@\" 2>&1 sh {playbook} --diff"
+    assert play_call[0].startswith("env PYTHONDONTWRITEBYTECODE=1 sh -c ")
+    assert system_step.STARTED_LINE in play_call[0]
+    assert play_call[0].endswith(f" {playbook} --diff")
     assert play_call[1] == str(system_step.PLAYBOOK.parent)
     assert forget_call[0] == "-k"
 
@@ -243,6 +256,22 @@ def test_sudo_forgets_the_ticket_after_a_failing_play(tmp_path: Path, stub_sudo:
 
     assert isinstance(run, PlaybookUnfinished)
     assert stub_sudo.calls()[-1][0] == "-k"
+
+
+def test_a_sudo_that_refuses_runs_nothing_and_is_told_apart_from_an_ansible_that_died(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ruled S3b-3: no line from the shell under sudo means sudo never started the play; sudo still forgets its ticket."""
+    stub_sudo = StubSudo(tmp_path, monkeypatch, refusing=True)
+
+    run = system_step.run_playbook_as_root([str(fake_ansible(tmp_path, "true"))])
+
+    assert run == PlaybookNotStarted()
+    assert stub_sudo.calls()[-1][0] == "-k"
+
+
+def test_an_ansible_that_dies_before_any_event_is_unfinished_and_not_a_refusal(tmp_path: Path, stub_sudo: StubSudo) -> None:
+    run = system_step.run_playbook_as_root([str(fake_ansible(tmp_path, "exit 2"))])
+
+    assert run == PlaybookUnfinished()
 
 
 def test_a_failing_sudo_k_fails_the_step_after_a_successful_play(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
