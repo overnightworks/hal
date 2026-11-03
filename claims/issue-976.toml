@@ -1,0 +1,8 @@
+claim_id = "fc5ae0e2a775497280902ea846fc076d"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "9bc72eddec7a09cf6a0790db48bb155e66776118"
+branch = "claude/issue-976-apply-collaborators-record"
+scope = ["src/hal/stack/apply.py", "src/hal/stack/cli.py", "tests/support/stack_apply.py", "tests/support/stack_apply_publish.py", "tests/test_stack_apply.py", "tests/test_stack_barrier_declared_hosts.py", "tests/test_stack_update.py"]
+opened_commit = "4088d5131f00ef538cf304cedf4b9a4a1f80a3a4"
+whole_reason = "One signature change and its callers: a half-moved signature does not import."
