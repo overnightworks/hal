@@ -136,8 +136,8 @@ class AdmissionProbe(LitellmProbe):
 
     def move_due(self, table: str, column: str, value: str) -> None:
         """Moves a budget's reset into the past in LiteLLM's database."""
-        self.sql(f'UPDATE "{table}" SET budget_reset_at = now() - interval \'1 minute\' '
-                 f"WHERE {column} = '{value}'")  # fmt: skip  # noqa: S608 - the probe names the table and the value
+        moved = "budget_reset_at = now() - interval '1 minute'"
+        self.sql(f"UPDATE \"{table}\" SET {moved} WHERE {column} = '{value}'")  # noqa: S608 - the probe names the table and the value
 
     # --- the cells ----------------------------------------------------------------------------
 
