@@ -623,13 +623,16 @@ def with_questions(first: str, *more: str) -> bytes:
         (dns_message("x.litellm-db.example.com"), {}),
         (with_questions("litellm-db", "license.litellm.ai"), {}),
         (dns_message("litellm-db")[:4] + struct.pack("!H", 0) + dns_message("litellm-db")[6:], {}),
+        (dns_message("litellm-db")[:-4], {}),
         (dns_message("litellm-db")[:-5], {}),
+        (dns_message("litellm-db")[:12] + b"\x0alitellm-db\xc0\x0c" + bytes(200), {}),
         (dns_message("litellm-db")[:20], {}),
         (dns_message("litellm-db")[:8], {}),
     ],
     ids=["the label with a domain", "the label alone", "another host of litellm",
          "a longer first label", "the label deeper in the name",
          "a second question behind the label", "no question", "a question cut after its name",
+         "a name without its root", "a name that ends in a compression pointer",
          "a name cut inside a label", "a header cut short"],
 )  # fmt: skip
 def test_the_dns_window_matches_one_whole_question_by_its_first_label_and_counts_every_message(

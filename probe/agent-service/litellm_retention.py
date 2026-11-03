@@ -1,23 +1,25 @@
-"""Probe of the API route's retention (#814 S1c cells B1-B11): the stack of litellm.py (the real
-service, the one-route front, LiteLLM and the gateway's second entrypoint, against a fake Anthropic)
-with a unique canary in each request and answer, searched afterwards in every writable mount and
-every log of the front, the gateway, LiteLLM and the service by `agent-service/retention_census.py`.
+"""Probe of the API route's retention (#814 S1c cells B1-B7, B9-B11, D9, and P7): the stack of
+litellm.py (the service, the one-route front, LiteLLM and the gateway's second entrypoint, against a
+fake Anthropic) and its caller with an app key, with a unique canary in each request and answer,
+searched afterwards in every writable mount and every log of the front, the gateway, LiteLLM and
+the service by `agent-service/retention_census.py`.
 Nothing live and nothing paid: the probe refuses to start unless `internet` is internal and holds
 only the fakes.
 
     flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \\
         python3 probe/agent-service/litellm_retention.py --scratch DIR
 
-Measured: a run takes about four minutes (B8 waits for the fake's 120 s hold limit) and its
+Measured: a run takes about three minutes and its
 teardown a few seconds (K 30 s, CAP 1800 s).
 
-Evidence: F is the fake provider's request log, R the canary's verdict lines, C the census's verdict
+Evidence: F is the fake provider's request log, A the caller's status, C the census's verdict
 (canaries found per sink, and every sink it could not examine). B2, B3a and B3b are the controls:
 each plants a canary where the search must find it (a file by exec into a tmpfs, a LiteLLM debug
 log, the front's access log), and they run first on a stack the probe then recreates, so no clean
 cell sees their tmpfs. The probe differs from production as the controls say, for B3a and B3b
-only: `LITELLM_LOG=DEBUG`, and the front's access log. The fake's control file and the client's
-scratch are harness inputs that hold the canaries by design and are no sinks of the route.
+only: `LITELLM_LOG=DEBUG`, and the front's access log. The fake's control file and the caller's
+program are harness inputs that hold the canaries by design and are no sinks of the route. Unlike
+litellm.py, the probe runs the shipped config.yaml unchanged, which B11 reads.
 Every clean cell sends fresh canaries. B11 prints the configuration of the running
 containers; the reviewer judges it against the pinned image's source writers.
 
@@ -41,39 +43,40 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(REPO / "agent-service"))
 
-from api_canary import verdicts  # noqa: E402
 from litellm import (  # noqa: E402
-    CANARY_SECONDS,
     DATABASE,
-    DEFAULT_APP,
     FRONT,
     FRONT_STATIC,
     GATEWAY,
     LISTENING,
     LITELLM,
-    REMAPPED_APP,
+    PROJECT,
     ROUTE,
     SERVICE,
     ProbeFailed,
+    answer_text,
     expect,
     mounted_file,
+    person_budget,
     run_scratch_probe,
+    wire_body,
 )
 from litellm_failures import FailureProbe  # noqa: E402
 from retention_census import ROUTE_SERVICES, Census, Sweep, Target, run_docker  # noqa: E402
 
 from hal.output import write_line  # noqa: E402
 
-HOLD_SECONDS = 45  # B4's hold: below the service's 120 s idle timeout, over a scan of the route
+HOLD_SECONDS = 45  # B4's hold: over a scan of the route
 SCAN_DEADLINE_SECONDS = 60
 UPSTREAM_ERROR = 400
 SETTINGS_SECTIONS = {
     "litellm_settings": {
         "turn_off_message_logging": True,
         "redact_messages_in_exceptions": True,
+        "max_end_user_budget_id": "person-monthly",
     },
     "general_settings": {
-        "custom_auth": "auth.user_api_key_auth",
+        "enforce_user_param": True,
         "disable_spend_logs": True,
         "disable_error_logs": True,
         "store_prompts_in_spend_logs": False,
@@ -81,9 +84,11 @@ SETTINGS_SECTIONS = {
     "router_settings": {"num_retries": 0},
 }
 DEPLOYMENT_KEYS = {"model_name", "litellm_params"}
-DEPLOYMENT_PARAMS = {"model", "api_key", "max_retries"}
-# The one table of LiteLLM's database that may name a tool (D9).
+DEPLOYMENT_PARAMS = {"model", "api_key", "max_retries", "max_tokens"}
+# The one table of LiteLLM's database that may name a tool (D9), and those that may name a
+# fingerprint (P7).
 TOOL_TABLE = "LiteLLM_ToolTable"
+FINGERPRINT_TABLES = {"LiteLLM_EndUserTable", "LiteLLM_DailyEndUserSpend"}
 TOOL_WRITE_SECONDS = 120
 COPY_HEADER = re.compile(r'^COPY public\."?(\w+)"? ')
 STORE_NAMES = re.compile(
@@ -144,6 +149,10 @@ class RetentionProbe(FailureProbe):
         )  # fmt: skip
         return overlay
 
+    def write_litellm_config(self, config: dict) -> None:
+        self.litellm_config.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+        self.litellm_config.chmod(0o644)
+
     # --- the census ---------------------------------------------------------------------------
 
     def targets(self) -> list[Target]:
@@ -177,29 +186,15 @@ class RetentionProbe(FailureProbe):
                 ]  # fmt: skip
         return "".join(f"\n  {line}" for line in shown)
 
-    def failed_with(self, cell: str, app: str, options: tuple[str, ...]) -> dict[str, str]:
-        run = self.canary(app, options)
-        expect(run.get("route") == "api" and run["exit"] != "0", f"{cell}: {run}")
-        return run
+    def failed_with(self, cell: str, request: str, model: str = "text/opus") -> int:
+        """The status of a request holding the canary `request` that does not succeed."""
+        asked = [{"role": "user", "content": request}]
+        answer = self.complete(self.key, model, self.fingerprint(), messages=asked)
+        expect(answer["status"] != 200, f"{cell}: the request was answered 200")
+        return answer["status"]
 
     def request_canary_hits(self, since: int) -> int:
         return sum(request["request_canary_hits"] for request in self.provider_requests()[since:])
-
-    def wait_until(self, service: str, line: str, seconds: int = 60) -> None:
-        """LiteLLM at CRITICAL prints no start line, so the declared proxy address listening is the
-        signal."""
-        if service != LITELLM:
-            super().wait_until(service, line, seconds)
-            return
-        deadline = time.monotonic() + seconds
-        while True:
-            try:
-                if self.proxy_snapshot().listening:
-                    return
-            except ProbeFailed:
-                pass  # the container is not up yet
-            expect(time.monotonic() < deadline, f"LiteLLM did not listen in {seconds} seconds")
-            time.sleep(1)
 
     # --- life cycle ---------------------------------------------------------------------------
 
@@ -208,7 +203,7 @@ class RetentionProbe(FailureProbe):
         remains."""
         for service in (GATEWAY, LITELLM, FRONT, SERVICE):
             self.compose("up", "--detach", "--wait", "--force-recreate", "--no-deps", service)
-        self.wait_until(LITELLM, LISTENING)
+        self.wait_until_listening()
         self.wait_until(SERVICE, LISTENING)
         self.wait_until_the_gateway_answers()
         self.wait_for_front()
@@ -218,14 +213,16 @@ class RetentionProbe(FailureProbe):
     def drive(self) -> None:
         """The controls first, then a recreated route for the clean cells, in the order of the
         matrix."""
-        for service in (SERVICE, LITELLM):
-            self.wait_until(service, LISTENING)
+        self.wait_until(SERVICE, LISTENING)
+        self.wait_until_listening()
+        self.admin("POST", "/budget/new", person_budget())
+        self.key = self.make_key()
         self.steer()
         failed = []
         for step in (
             self.cell_b2, self.cells_b3, self.recreate_route, self.cell_b1, self.cell_b4,
-            self.cell_b5, self.cell_b6, self.cell_b7, self.cell_b8, self.cell_b9, self.cell_d9,
-            self.cell_b10, self.cell_b11,
+            self.cell_b5, self.cell_b6, self.cell_b7, self.cell_b9, self.cell_d9, self.cell_b10,
+            self.cell_b11,
         ):  # fmt: skip
             try:
                 step()
@@ -257,12 +254,13 @@ class RetentionProbe(FailureProbe):
         try:
             for service in (LITELLM, FRONT):
                 self.compose("up", "--detach", "--wait", "--force-recreate", "--no-deps", service)
-            self.wait_until(LITELLM, LISTENING)
+            self.wait_until_listening()
             self.wait_for_front()
             litellm_canary, front_canary = canary("b3a-request"), canary("b3b-path")
-            run = self.canary(DEFAULT_APP, ("--request-marker", litellm_canary))
-            expect(run["exit"] == "0", f"B3a: {run}")
-            status = self.http("GET", f"/{front_canary}")
+            asked = [{"role": "user", "content": litellm_canary}]
+            status = self.complete(self.key, user=self.fingerprint(), messages=asked)["status"]
+            expect(status == 200, f"B3a: the request got {status}")
+            status = self.call(None, "GET", f"/{front_canary}")["status"]
             expect(status == 404, f"B3b: the front answered {status}")
             found = self.sweep({"request in LiteLLM debug log": litellm_canary,
                                 "path in front access log": front_canary}).found  # fmt: skip
@@ -325,12 +323,16 @@ class RetentionProbe(FailureProbe):
         tokens = {"request": request, "answer": answer}
         self.steer(mode="hold", hold_seconds=HOLD_SECONDS, marker=answer, request_canary=request)
         before, already = len(self.provider_requests()), len(self.hold_ends())
+        asked = [{"role": "user", "content": request}]
+        body = json.dumps(wire_body(user=self.fingerprint(), messages=asked))
+        argv, program = self.call_command(
+            f"{PROJECT}-b4-caller", self.key, ("POST", ROUTE, body), front=True
+        )
         process = subprocess.Popen(  # noqa: S603 - argv is built by the program itself
-            self.canary_command(("--request-marker", request, "--marker", answer)),
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
             env=self.environment, cwd=REPO,
         )  # fmt: skip
-        process.stdin.write(self.canary_input(DEFAULT_APP))
+        process.stdin.write(program)
         process.stdin.close()
         deadline = time.monotonic() + SCAN_DEADLINE_SECONDS
         while len(self.provider_requests()) == before:
@@ -338,9 +340,9 @@ class RetentionProbe(FailureProbe):
             time.sleep(1)
         during = self.sweep(tokens).found
         expect(len(self.hold_ends()) == already, "B4: the hold ended before the scan did")
-        out, _ = process.communicate(timeout=CANARY_SECONDS)
-        run = verdicts(out, process.returncode)
-        expect(run["exit"] == "0" and run.get("marker") == "yes", f"B4: {run}")
+        out, _ = process.communicate(timeout=HOLD_SECONDS + SCAN_DEADLINE_SECONDS)
+        reply = json.loads(out.strip().splitlines()[-1])
+        expect(answer_text(reply) == answer, f"B4: {reply['status']}, the answer canary missing")
         expect(self.request_canary_hits(before) >= 1, "B4: the request canary never reached F")
         self.steer()
         after = self.sweep(tokens).found
@@ -353,60 +355,45 @@ class RetentionProbe(FailureProbe):
         request = canary("b5-request")
         self.steer(mode="status", status=500, request_canary=request)
         before = len(self.provider_requests())
-        run = self.failed_with("B5", DEFAULT_APP, ("--request-marker", request))
-        expect(run.get("code") == "provider_unavailable", f"B5: {run}")
+        status = self.failed_with("B5", request)
         expect(self.request_canary_hits(before) == 1, "B5: the request canary never reached F")
         self.expect_nothing_retained("B5", {"request": request})
-        self.hold(
-            "B5", "upstream 500: provider_unavailable, the canary reached F, retained nowhere"
-        )
+        self.hold("B5", f"upstream 500: the caller got {status}, the canary reached F, retained "
+                  "nowhere")  # fmt: skip
 
     def cell_b6(self) -> None:
         request = canary("b6-request")
         self.steer(mode="echo", status=UPSTREAM_ERROR, request_canary=request)
         before = len(self.provider_requests())
-        run = self.failed_with("B6", DEFAULT_APP, ("--request-marker", request))
+        status = self.failed_with("B6", request)
         expect(self.request_canary_hits(before) == 1, "B6: the request canary never reached F")
         self.expect_nothing_retained("B6", {"request": request})
         self.hold("B6", f"an upstream {UPSTREAM_ERROR} whose body echoes the request canary: "
-                  f"code {run.get('code')}, retained nowhere")  # fmt: skip
+                  f"the caller got {status}, retained nowhere")  # fmt: skip
 
     def cell_b7(self) -> None:
         request = canary("b7-request")
         self.steer(request_canary=request)
         before = len(self.provider_requests())
-        self.failed_with("B7", REMAPPED_APP, ("--request-marker", request))
+        self.failed_with("B7", request, "text/nonesuch")
         expect(len(self.provider_requests()) == before, "B7: the provider was reached")
         self.expect_nothing_retained("B7", {"request": request})
         self.hold("B7", "a model LiteLLM lacks: refused, F 0, the canary retained nowhere")
 
-    def cell_b8(self) -> None:
-        request = canary("b8-request")
-        self.steer(mode="hold", request_canary=request)
-        before, already = len(self.provider_requests()), len(self.hold_ends())
-        run = self.canary(DEFAULT_APP, ("--cancel", "--request-marker", request))
-        expect(run.get("status") == "cancelled", f"B8: {run}")
-        ended = self.wait_for_hold_end("B8", already)
-        self.steer()
-        expect(self.request_canary_hits(before) == 1, "B8: the request canary never reached F")
-        self.expect_nothing_retained("B8", {"request": request})
-        self.hold("B8", f"cancelled: the canary reached F once, its request ended {ended}, "
-                  "retained nowhere")  # fmt: skip
-
     def cell_b9(self) -> None:
         body = canary("b9-body")
         before = len(self.provider_requests())
-        status = self.http("POST", ROUTE, self.credential, {**self.good_body(), "api_base": body})
-        expect(status == 401, f"B9: the hook answered {status}")
+        status = self.complete(self.key, user=self.fingerprint(), api_base=body)["status"]
+        expect(400 <= status < 500, f"B9: LiteLLM answered {status}")
         expect(len(self.provider_requests()) == before, "B9: the provider was reached")
         self.expect_nothing_retained("B9", {"body": body})
-        self.hold(
-            "B9", "the hook refuses (401) a body key holding the canary: F 0, retained nowhere"
-        )
+        self.hold("B9", f"LiteLLM's guard refuses ({status}) `api_base` holding the canary: F 0, "
+                  "retained nowhere")  # fmt: skip
 
     def cell_d9(self) -> None:
         """D9: no canary of a request or an answer in a `pg_dump`, with a planted row as the
-        search's control; a request and a response tool name appear in the tool table alone."""
+        search's control; a request and a response tool name appear in the tool table alone. P7:
+        the request's fingerprint only in the end-user tables, no identity string anywhere."""
         canaries = {
             label: canary(f"d9-{label}")
             for label in ("message", "description", "arguments", "result", "answer", "call")
@@ -423,8 +410,10 @@ class RetentionProbe(FailureProbe):
         arguments = json.dumps({"q": canaries["arguments"]})
         call = {"id": "call_d9", "type": "function",
                 "function": {"name": tool, "arguments": arguments}}  # fmt: skip
+        person = self.fingerprint()
         body = {
-            "model": "anthropic/opus",
+            "model": "text/opus",
+            "user": person,
             "messages": [
                 {"role": "user", "content": canaries["message"]},
                 {"role": "assistant", "content": None, "tool_calls": [call]},
@@ -432,11 +421,12 @@ class RetentionProbe(FailureProbe):
             ],
             "tools": [{"type": "function", "function": function}],
         }  # fmt: skip
-        status = self.http("POST", ROUTE, self.credential, body)
+        status = self.call(self.key, "POST", ROUTE, body)["status"]
         expect(status == 200, f"D9: the route answered {status}")
         self.steer()
         for name in (tool, answered):
             self.wait_for_tool(name)
+        self.wait_for_row("LiteLLM_DailyEndUserSpend", "end_user_id", person)
         self.sql(
             f"CREATE TABLE d9_control (value text); INSERT INTO d9_control VALUES ('{planted}')"  # noqa: S608 - the value is a token this probe generated
         )
@@ -456,16 +446,31 @@ class RetentionProbe(FailureProbe):
             f"the dump of {len(dump)} characters holds none of {len(canaries)} canaries and the"
             f" planted row; the request and the response tool name are in {TOOL_TABLE} alone",
         )
+        self.cell_p7(dump, person)
+
+    def cell_p7(self, dump: str, person: str) -> None:
+        """The dump D9 found its planted row in: the fingerprint in the end-user tables alone, no
+        identity string anywhere."""
+        tables = self.tables_naming(dump, person)
+        expect(tables == FINGERPRINT_TABLES, f"P7: the fingerprint is in {sorted(tables)}")
+        named = [label for label, value in self.identity.items() if value in dump]
+        expect(not named, f"P7: the dump holds the scratch {named}")
+        self.hold("P7", f"the fingerprint only in {sorted(tables)}; sub, name and mail nowhere; "
+                  "the planted row found")  # fmt: skip
 
     def wait_for_tool(self, tool: str) -> None:
-        """LiteLLM writes tool names with its batched database updates, not with the request."""
-        query = f"SELECT count(*) FROM \"{TOOL_TABLE}\" WHERE tool_name = '{tool}'"  # noqa: S608 - the value is a token this probe generated
+        self.wait_for_row(TOOL_TABLE, "tool_name", tool)
+
+    def wait_for_row(self, table: str, column: str, value: str) -> None:
+        """LiteLLM writes tool names and daily spends with its batched database updates, not with
+        the request."""
+        query = f"SELECT count(*) FROM \"{table}\" WHERE {column} = '{value}'"  # noqa: S608 - the value is a token this probe generated
         deadline = time.monotonic() + TOOL_WRITE_SECONDS
         while True:
             counted = self.sql(query, "--tuples-only", "--no-align").stdout.strip()
             if counted == "1":
                 return
-            expect(time.monotonic() < deadline, f"D9: the tool name {tool} is not in {TOOL_TABLE}")
+            expect(time.monotonic() < deadline, f"D9: {value} is not in {table}")
             time.sleep(3)
 
     def dump(self) -> str:
@@ -490,7 +495,7 @@ class RetentionProbe(FailureProbe):
         found = self.sweep(self.clean).found
         expect(not found, f"B10: retained in {found}")
         self.hold("B10", f"the mounts and logs of {', '.join(ROUTE_SERVICES)} hold none of "
-                  f"{len(self.clean)} canaries of B4 to B9")  # fmt: skip
+                  f"{len(self.clean)} canaries of B4 to B7 and B9")  # fmt: skip
 
     def cell_b11(self) -> None:
         litellm, front = self.container_name(LITELLM), self.container_name(FRONT)
@@ -509,7 +514,8 @@ class RetentionProbe(FailureProbe):
         expect(level == ["LITELLM_LOG=CRITICAL"], f"B11: LiteLLM's log level {level}")
         static = self.run(["docker", "exec", front, "cat", FRONT_STATIC]).stdout
         expect("accessLog" not in static and "level: INFO" in static, "B11: the front's log")
-        self.hold("B11", "LiteLLM: message logging off, redaction on, custom_auth only, retries 0, "
+        self.hold("B11", "LiteLLM: message logging off, redaction on, no custom_auth, "
+                  "enforce_user_param on, one person budget id, retries 0, "
                   "no callback, cache or spend and error log, no such environment name, "
                   "log level CRITICAL; the front: INFO and no access log")  # fmt: skip
 

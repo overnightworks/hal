@@ -1,27 +1,32 @@
-# LiteLLM's configuration (compose.yaml, service `litellm`). Three model names the agent service
-# sends in full (`<provider>/<model>`), each mapped to the current id of its family; the families
-# are those of service.toml's [cli.anthropic] models. A change reaches LiteLLM only through a
-# recreate of the container. No callback, cache or fallback; the provider key, the master key and
-# the database URL come from the environment start.sh fills from their files. The database holds
-# keys and budgets; no spend or error log row is written, and no prompt reaches one. The master key is one no
-# client knows (LiteLLM refuses to boot without one), so the admin routes stay closed; the hook
-# decides who may call.
+# LiteLLM's configuration (compose.yaml, service `litellm`). Three model names an app sends, each
+# mapped to the current id of its family, with `max_tokens` as its output ceiling: LiteLLM sends it
+# when a request names none, and it equals the output LiteLLM reserves against a budget. A change
+# reaches LiteLLM only through a recreate of the container. No callback, cache or fallback; the
+# provider key, the master key and the database URL come from the environment start.sh fills from
+# their files. LiteLLM's own keys decide who may call: each app holds one, with its models, its
+# route, its money budget and its bound on parallel requests. Every request names its person as
+# `user`, whose spend the budget `max_end_user_budget_id` bounds unless the person's own row links
+# another. The database holds keys, budgets and counters; no spend or error log row is written,
+# and no prompt reaches one. No app knows the master key, so the admin routes stay closed to apps.
 model_list:
-  - model_name: anthropic/opus
+  - model_name: text/opus
     litellm_params:
       model: anthropic/claude-opus-5-5
       api_key: os.environ/ANTHROPIC_API_KEY
       max_retries: 0
-  - model_name: anthropic/sonnet
+      max_tokens: 16384
+  - model_name: text/sonnet
     litellm_params:
       model: anthropic/claude-sonnet-5-5
       api_key: os.environ/ANTHROPIC_API_KEY
       max_retries: 0
-  - model_name: anthropic/haiku
+      max_tokens: 16384
+  - model_name: text/haiku
     litellm_params:
       model: anthropic/claude-haiku-5-5
       api_key: os.environ/ANTHROPIC_API_KEY
       max_retries: 0
+      max_tokens: 16384
 
 router_settings:
   num_retries: 0
@@ -29,9 +34,10 @@ router_settings:
 litellm_settings:
   turn_off_message_logging: true
   redact_messages_in_exceptions: true
+  max_end_user_budget_id: person-monthly
 
 general_settings:
-  custom_auth: auth.user_api_key_auth
+  enforce_user_param: true
   disable_spend_logs: true
   disable_error_logs: true
   store_prompts_in_spend_logs: false
