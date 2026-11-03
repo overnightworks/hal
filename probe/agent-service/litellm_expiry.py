@@ -94,14 +94,14 @@ class ExpiryProbe(LitellmProbe):
         chosen = [t for t in tables if all_tables or t not in EXPIRED_TABLES]
         expect(len(chosen) > len(EXPIRED_TABLES), f"the database holds {len(tables)} tables")
         union = " UNION ALL ".join(
-            f"SELECT '{table}', coalesce(md5(string_agg(r::text, E'\\n' ORDER BY r::text)), '-')"
+            f"SELECT '{table}', coalesce(md5(string_agg(r::text, E'\\n' ORDER BY r::text)), '-')"  # noqa: S608 - the table names come from pg_tables and are quoted
             f' FROM "{table}" AS r'
             for table in chosen
         )
         return dict(line.split("|", 1) for line in self.query(union))
 
     def present(self, table: str, column: str, value: str) -> bool:
-        (count,) = self.query(f'SELECT count(*) FROM "{table}" WHERE "{column}" = \'{value}\'')
+        (count,) = self.query(f'SELECT count(*) FROM "{table}" WHERE "{column}" = \'{value}\'')  # noqa: S608 - table and column are this probe's literals and the value a token it generated
         return int(count) > 0
 
     def hal_expire(self) -> Run:
@@ -158,7 +158,7 @@ class ExpiryProbe(LitellmProbe):
 
     def person_day(self, fingerprint: str, days_back: int) -> None:
         self.sql(
-            'INSERT INTO "LiteLLM_DailyEndUserSpend" (id, end_user_id, date, api_key, updated_at)'
+            'INSERT INTO "LiteLLM_DailyEndUserSpend" (id, end_user_id, date, api_key, updated_at)'  # noqa: S608 - every value is a token or a number this probe generated
             f" VALUES ('{self.name('day')}', '{fingerprint}', {utc_day(days_back)},"
             f" '{self.name('key-hash')}', now())"
         )
@@ -166,14 +166,14 @@ class ExpiryProbe(LitellmProbe):
     def customer(self, fingerprint: str, spend: float, budget: str | None = None) -> None:
         link = "NULL" if budget is None else f"'{budget}'"
         self.sql(
-            'INSERT INTO "LiteLLM_EndUserTable" (user_id, spend, budget_id)'
+            'INSERT INTO "LiteLLM_EndUserTable" (user_id, spend, budget_id)'  # noqa: S608 - every value is a token or a number this probe generated
             f" VALUES ('{fingerprint}', {spend}, {link})"
         )
 
     def budget(self, max_budget: str) -> str:
         budget = self.name("budget")
         self.sql(
-            'INSERT INTO "LiteLLM_BudgetTable" (budget_id, max_budget, created_by, updated_by)'
+            'INSERT INTO "LiteLLM_BudgetTable" (budget_id, max_budget, created_by, updated_by)'  # noqa: S608 - every value is a token or a number this probe generated
             f" VALUES ('{budget}', {max_budget}, 'probe', 'probe')"
         )
         return budget
@@ -181,7 +181,7 @@ class ExpiryProbe(LitellmProbe):
     def tool_day(self, days_back: int) -> str:
         tool = self.name("tool")
         self.sql(
-            'INSERT INTO "LiteLLM_DailyToolSpend" (date, tool_name, updated_at)'
+            'INSERT INTO "LiteLLM_DailyToolSpend" (date, tool_name, updated_at)'  # noqa: S608 - every value is a token or a number this probe generated
             f" VALUES ({utc_day(days_back)}, '{tool}', now())"
         )
         return tool
@@ -189,14 +189,14 @@ class ExpiryProbe(LitellmProbe):
     def tool(self, days_back: int) -> str:
         tool = self.name("tool")
         self.sql(
-            'INSERT INTO "LiteLLM_ToolTable" (tool_id, tool_name, last_used_at)'
+            'INSERT INTO "LiteLLM_ToolTable" (tool_id, tool_name, last_used_at)'  # noqa: S608 - every value is a token or a number this probe generated
             f" VALUES ('{self.name('tool-id')}', '{tool}', {utc_moment(days_back)})"
         )
         return tool
 
     def key(self) -> str:
         token = self.name("token")
-        self.sql(f"INSERT INTO \"LiteLLM_VerificationToken\" (token) VALUES ('{token}')")
+        self.sql(f"INSERT INTO \"LiteLLM_VerificationToken\" (token) VALUES ('{token}')")  # noqa: S608 - every value is a token or a number this probe generated
         return token
 
     # --- the cells ----------------------------------------------------------------------------

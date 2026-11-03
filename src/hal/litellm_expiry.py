@@ -89,7 +89,7 @@ WITH person_days AS (
 )
 SELECT (SELECT count(*) FROM person_days), (SELECT count(*) FROM tool_days),
   (SELECT count(*) FROM tools), (SELECT count(*) FROM people)
-"""  # noqa: S608 - the only values are the cutoff's day and moment, formatted from date types
+"""  # noqa: S608 - the only values are the cutoff's day and moment formatted from date types
 
 
 def expire(project: str, now: datetime) -> Off | Expired:
