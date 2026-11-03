@@ -801,7 +801,7 @@ def test_without_a_terminal_it_refuses_before_anything_else(
     environment_file = (any_tree / ".env").stat()
 
     exit_code = apply.apply_local(state, any_tree, home, apply.Collaborators(
-        compose.Compose(scripted.run, any_tree), missing_setup, setup_run,
+        engine=compose.Compose(scripted.run, any_tree), check=missing_setup, run_setup=setup_run,
         git=scripted_git,
     ))  # fmt: skip
 

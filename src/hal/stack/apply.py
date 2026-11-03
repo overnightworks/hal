@@ -61,7 +61,7 @@ import fcntl
 import os
 import sys
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from enum import IntEnum
 from pathlib import Path
 
@@ -234,7 +234,7 @@ def _plan(
     )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class Collaborators:
     """What `apply_local` talks to and a test replaces; the default is production. A None
     `engine`, `realm_backup` or `app_runtime` is built from the repository, home and state
@@ -288,13 +288,8 @@ def apply_local(
         return _plan_and_apply(
             state_directory,
             live,
-            replace(
-                collaborators,
-                realm_backup=collaborators.realm_backup
-                or reconcile.Backup.installed(repository, _say_waiting),
-                app_runtime=collaborators.app_runtime
-                or AppRuntime.of(home or Path.home(), state_directory),
-            ),
+            home or Path.home(),
+            collaborators,
             lambda: collaborators.verifier.clock() - started,
         )
     finally:
@@ -373,19 +368,22 @@ def _environment_ready(repository: Path, ensure_environment: EnsureEnvironment) 
 def _plan_and_apply(
     state_directory: Path,
     live: checkout.Git,
+    home: Path,
     collaborators: Collaborators,
     elapsed: Callable[[], float],
 ) -> int:
     repository = live.tree
     engine = collaborators.engine or compose.Compose(repository=repository)
+    app_runtime = collaborators.app_runtime or AppRuntime.of(home, state_directory)
+    realm_backup = collaborators.realm_backup or reconcile.Backup.installed(
+        repository, _say_waiting
+    )
     marks = switches.Switches(state_directory)
     record = core.Record(state_directory)
     try:
         completed: list[str] = []
         while True:  # the plan made after the setups ran is held to the same refusals
-            planned = _plan(
-                engine, marks, record, live, collaborators.app_runtime, collaborators.rename
-            )
+            planned = _plan(engine, marks, record, live, app_runtime, collaborators.rename)
             missing = _missing_setups(planned, repository, collaborators.check)
             exit_code = _refusal(missing, planned, bool(completed))
             if exit_code is None:
@@ -420,7 +418,7 @@ def _plan_and_apply(
         marks,
         CorePhase(record, repository, collaborators.verifier, collaborators.watch),
         completed,
-        collaborators.realm_backup,
+        realm_backup,
     )
 
 
