@@ -1,4 +1,4 @@
-"""Probe of LiteLLM's own keys on the API route (cells K1-K4, and #768 S1a's G6-G9, N1, L1-L3,
+"""Probe of LiteLLM's own keys on the API route (cells K1, K2, K4, and #768 S1a's G6-G9, N1, L1-L3,
 R1, R2, D1): the service, the one-route front, LiteLLM and the gateway's
 second entrypoint, in a throwaway compose project, against a fake Anthropic. The caller is a
 throwaway on `litellm-api` that posts agent-runtime's wire body (`model`, `messages`, `user`,
@@ -129,13 +129,13 @@ from prisma.engine import utils
 print(os.path.realpath(utils.ensure(BINARY_PATHS.query_engine)))
 """
 # One HTTP/1.0 request, so no answer is chunked. The program on standard input starts with
-# `BEARER = ...` (a key, or None) and `HIDDEN = [...]` (the keys its output shows as `<key>`), so no
-# key reaches argv or the output. argv: host, port, method, path, body (`-` for none); prints
-# {"status", "retry_after", "seconds", "document"}, the answer's JSON or None.
+# `BEARER = ...` (a key, or None), `BODY = ...` (the request's JSON, or None) and `HIDDEN = [...]`
+# (the keys its output shows as `<key>`), so no key reaches argv or the output. argv: host, port,
+# method, path; prints {"status", "retry_after", "seconds", "document"}, the answer's JSON or None.
 CALL_PROGRAM = """\
 import json, socket, sys, time
-host, port, method, path, body = sys.argv[1:6]
-payload = b"" if body == "-" else body.encode()
+host, port, method, path = sys.argv[1:5]
+payload = b"" if BODY is None else BODY.encode()
 head = f"{method} {path} HTTP/1.0\\r\\nHost: {host}:{port}\\r\\n"
 if BEARER:
     head += f"Authorization: Bearer {BEARER}\\r\\n"
@@ -473,9 +473,11 @@ class LitellmProbe(IssuerProbe):
 
     # --- the caller ---------------------------------------------------------------------------
 
-    def call_command(self, name: str, bearer: str | None, request: tuple[str, ...], front: bool):
+    def call_command(self, name: str, bearer: str | None, method: str, path: str,
+                     body: dict | None, *, front: bool):  # fmt: skip
         """The argv and standard input of one throwaway's request: through the front from
-        `litellm-api`, or straight at LiteLLM from `litellm-backend`."""
+        `litellm-api`, or straight at LiteLLM from `litellm-backend`. Bearer and body go on
+        standard input, since a body may carry a key."""
         network, host, port = (
             ("litellm-api", FRONT, str(FRONT_PORT)) if front
             else ("litellm-backend", LITELLM, self.proxy_address.rsplit(":", 1)[1])
@@ -484,10 +486,12 @@ class LitellmProbe(IssuerProbe):
             "docker", "run", "--rm", "-i", "--name", name, "--label", LABEL,
             f"--network={PROJECT}_{network}", "--read-only", "--user", "65534:65534",
             "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", self.image,
-            "python", "-I", "-", host, port, *request,
+            "python", "-I", "-", host, port, method, path,
         ]  # fmt: skip
+        payload = None if body is None else json.dumps(body)
         hidden = [*self.app_keys, self.master_key]
-        return argv, f"BEARER = {bearer!r}\nHIDDEN = {hidden!r}\n{CALL_PROGRAM}"
+        preamble = f"BEARER = {bearer!r}\nBODY = {payload!r}\nHIDDEN = {hidden!r}\n"
+        return argv, preamble + CALL_PROGRAM
 
     def call(
         self, bearer: str | None, method: str, path: str, body: dict | None = None,
@@ -495,10 +499,8 @@ class LitellmProbe(IssuerProbe):
     ) -> dict:  # fmt: skip
         """A: one request's status, Retry-After, seconds and answer document."""
         self.throwaways += 1
-        request = (method, path, "-" if body is None else json.dumps(body))
-        argv, program = self.call_command(
-            f"{PROJECT}-caller-{self.throwaways}", bearer, request, front
-        )
+        name = f"{PROJECT}-caller-{self.throwaways}"
+        argv, program = self.call_command(name, bearer, method, path, body, front=front)
         return json.loads(
             self.run(argv, stdin=program, timeout=240).stdout.strip().splitlines()[-1]
         )
@@ -524,7 +526,7 @@ class LitellmProbe(IssuerProbe):
     def key_info(self, key: str) -> dict:
         return self.admin("GET", f"/key/info?key={hashed(key)}")["info"]
 
-    def customer(self, user: str) -> dict | None:
+    def customer_row(self, user: str) -> dict | None:
         """The person's row; None while LiteLLM's batched write has not made it yet."""
         path = f"/customer/info?end_user_id={user}"
         answer = self.call(self.master_key, "GET", path, front=False)
@@ -532,7 +534,7 @@ class LitellmProbe(IssuerProbe):
         return answer["document"] if answer["status"] == 200 else None
 
     def customer_spend(self, user: str) -> float:
-        return (self.customer(user) or {"spend": 0.0})["spend"]
+        return (self.customer_row(user) or {"spend": 0.0})["spend"]
 
     def complete(self, key: str | None, model: str = "text/opus", user: str | None = None,
                  path: str = ROUTE, **extra: object) -> dict:  # fmt: skip
@@ -580,7 +582,6 @@ class LitellmProbe(IssuerProbe):
         ):  # fmt: skip
             self.cell_unreachable(cell, method, path, key)
         self.cell_k2()
-        self.cell_k3(key)
         self.cell_k4(key)
 
     def cell_k1(self, key: str) -> None:
@@ -613,22 +614,6 @@ class LitellmProbe(IssuerProbe):
             expect(answer["status"] == 401, f"K2: {how}: {answer['status']} {error_of(answer)}")
             expect(len(self.provider_requests()) == before, f"K2: {how}: the provider was reached")
         self.hold("K2", "no bearer, a wrong one and the old shared credential: 401 each, F 0")
-
-    def cell_k3(self, key: str) -> None:
-        user, refusals = self.fingerprint(), []
-        for how, model, path in (
-            ("a model outside the key's", "text/nonesuch", ROUTE),
-            ("the CLI route's name", "anthropic/opus", ROUTE),
-            ("?model= outside them", "text/opus", f"{ROUTE}?model=anthropic/opus"),
-        ):  # fmt: skip
-            before = len(self.provider_requests())
-            answer = self.complete(key, model, user, path)
-            self.refused(f"K3: {how}", answer, before)
-            refusals.append(f"{answer['status']} {error_of(answer)}")
-        before = len(self.provider_requests())
-        answer = self.complete(key, "text/opus", user, f"{ROUTE}?model=text/sonnet")
-        self.served("K3", answer, self.provider_requests()[before:], "text/sonnet")
-        self.hold("K3", f"refused with F 0: {refusals}; ?model=text/sonnet served, F names its id")
 
     def cell_k4(self, key: str) -> None:
         user, results = self.fingerprint(), []

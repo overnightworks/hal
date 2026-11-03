@@ -221,12 +221,19 @@ def test_litellm_retries_nothing_logs_no_messages_and_has_no_callback_cache_or_s
     assert config["litellm_settings"]["turn_off_message_logging"] is True
     assert config["litellm_settings"]["redact_messages_in_exceptions"] is True
     assert set(config) == {"model_list", "router_settings", "litellm_settings", "general_settings"}
-    assert config["general_settings"] == {
-        "enforce_user_param": True,
-        "disable_spend_logs": True,
-        "disable_error_logs": True,
-        "store_prompts_in_spend_logs": False,
+    assert config["general_settings"].keys() - {"enforce_user_param"} == {
+        "disable_spend_logs",
+        "disable_error_logs",
+        "store_prompts_in_spend_logs",
     }
+    assert config["general_settings"]["disable_spend_logs"] is True
+    assert config["general_settings"]["disable_error_logs"] is True
+    assert config["general_settings"]["store_prompts_in_spend_logs"] is False
+
+
+def test_litellm_demands_a_user_and_loads_no_auth_hook(config):
+    assert config["general_settings"]["enforce_user_param"] is True
+    assert "custom_auth" not in config["general_settings"]
 
 
 def test_litellm_holds_no_license_and_none_of_the_settings_behind_the_premium_check(
@@ -686,7 +693,7 @@ def test_only_the_images_engine_binary_under_the_proxy_is_the_query_engine(
 
 
 def test_the_proxy_listens_once_it_owns_the_declared_address_and_the_engine_is_told_apart(
-    litellm, monkeypatch
+    litellm,
 ):
     processes = {
         "7": {"parent": 1, "executable": "/app/python"},

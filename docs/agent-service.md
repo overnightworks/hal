@@ -229,8 +229,8 @@ a turn leaves this PC for Anthropic, which generates the answer.
 
 **The API route keeps no content, as evidence for the paths exercised only.** LiteLLM logs no
 message and redacts the `Messages:` suffix of its exceptions, and neither it nor the front
-configures a callback, cache or spend log; LiteLLM's database holds keys, budgets and tool names but no
-spend-log or error-log row and no prompt (`disable_spend_logs`, `disable_error_logs`,
+configures a callback, cache or spend log; LiteLLM's database holds keys, budgets, tool names and each
+person's fingerprint with its counters, but no spend-log or error-log row and no prompt (`disable_spend_logs`, `disable_error_logs`,
 `store_prompts_in_spend_logs`). Only the per-request logs stop: the daily and the key, user and team
 spend aggregates are written whatever `disable_spend_logs` says, and they hold amounts, never content.
 What the database keeps per person or per tool goes after 90 days without use ([The API route](#the-api-route), What expires).
@@ -300,11 +300,14 @@ unit, and no app holds a key in LiteLLM's database.
   the front itself, so LiteLLM's own unauthenticated routes are unreachable. Behind it LiteLLM's
   own keys decide, with no hal code in its process: a request needs an app key as bearer (401
   otherwise, the old service credential included), a model among the key's `models` (the three
-  names `text/opus`, `text/sonnet`, `text/haiku` of `config.yaml`; 403 otherwise; LiteLLM also
-  reads `model` from the query string and judges it too), a path among the key's `allowed_routes`
-  (403 otherwise), and a `user`, the person's fingerprint (`enforce_user_param`; 401 without one).
-  LiteLLM's ban list refuses `api_base` and any other client-side credential in the body with 401,
-  and a fallback naming a URL. Messages are
+  names `text/opus`, `text/sonnet`, `text/haiku` of `config.yaml`; 403 otherwise), a path among
+  the key's `allowed_routes` (403 otherwise, the provider routes `/v1/messages` and
+  `/v1/completions` included), and a `user`, the person's fingerprint (`enforce_user_param`; 401
+  without one). LiteLLM also routes by a `model` in the query string, which the key's `models` do
+  not bind: one unknown to `config.yaml` is refused with 400, but a configured name outside the
+  key's `models` is served by that model (measured), and the front passes the query string.
+  LiteLLM's ban list refuses `api_base` in the body with 401, and a fallback naming a URL with 401
+  too. Messages are
   not logged; LiteLLM needs a master key to boot, a file secret that `hal setup` generates and no
   app holds, so its admin routes stay closed to apps, straight at `litellm:4000` too.
 - **The money.** Each app key carries `max_budget` in dollars and `budget_duration` `1mo`; LiteLLM
@@ -318,12 +321,13 @@ unit, and no app holds a key in LiteLLM's database.
   lives in the database. Without its database a running proxy keeps admitting a cached key until
   its cache expires (about a minute, measured), then refuses every request before the provider
   with 503.
-- **The output ceiling.** Each name sets `max_tokens` 16384 in `config.yaml`; LiteLLM sends it when
-  a request names none, and it is the output LiteLLM reserves against a budget.
+- **The output default.** Each name sets `max_tokens` 16384 in `config.yaml`: what a request that
+  names none gets, and the output LiteLLM reserves against a budget, so the ceiling of a conforming
+  app. An app that names more is bound by the budgets alone.
 - **The database.** `litellm-db` is Postgres 17 at the image and hardening of `keycloak-db` (one
   `x-postgres` anchor in `compose.yaml`), with its own volume and the file secret `litellm/db-password`,
-  which `start.sh` turns into `DATABASE_URL`. It holds the keys (their hashes only), the budgets and the
-  counters. LiteLLM stays the official image by its digest: BerriAI ships one
+  which `start.sh` turns into `DATABASE_URL`. It holds the keys (their hashes only), the budgets, and
+  each person's fingerprint with its counters. LiteLLM stays the official image by its digest: BerriAI ships one
   image whose enterprise part a licence key switches on, and hal sets no key and uses no enterprise
   function, so it builds no image of its own. It runs with no `LITELLM_LICENSE` and none of the settings behind its premium check (`enforced_params`,
   `allowed_ips`, global `allowed_routes`, key `tags`, `model_max_budget`, `/key/regenerate`). It
@@ -335,7 +339,7 @@ unit, and no app holds a key in LiteLLM's database.
   (`LiteLLM_DailyEndUserSpend`, `LiteLLM_DailyToolSpend`) dated more than 90 UTC days back, the tool
   rows (`LiteLLM_ToolTable`) not used for 90 days, and the customer rows (`LiteLLM_EndUserTable`)
   whose fingerprint has had no request for 90 days and whose spend is 0. A customer row linked to
-  its own budget stays, and so do keys, budgets and every other table. The period is
+  its own budget, as the operator's is, stays, and so do keys, budgets and every other table. The period is
   `RETENTION_DAYS` in `src/hal/litellm_expiry.py`, not a setting, because the privacy text states
   it. The run prints counts only; with `litellm-db` not running it deletes nothing and exits 0. A
   backup that copies the database keeps deleted rows until that copy goes, and a restore brings them
@@ -360,8 +364,8 @@ unit, and no app holds a key in LiteLLM's database.
   database and change without a recreate.
 - **A provider failure reaches the caller.** An upstream reset, a broken answer and Anthropic's
   refusal of a used-up balance (a 402 `billing_error`, or a 400 saying the credit balance is too
-  low) each reach the provider once; the caller gets 500 for the first two and the provider's
-  status for the balance; LiteLLM logs at `CRITICAL`,
+  low) each reach the provider once, and the caller gets an error, never a 200; LiteLLM logs at
+  `CRITICAL`,
   so no log tells them apart, and the operator checks his credit and his key. A caller that leaves
   does not end the request in flight, which may finish and is billed.
 - **Rotating the provider key is a recreate.** A replaced provider key file reaches LiteLLM only
@@ -372,9 +376,9 @@ unit, and no app holds a key in LiteLLM's database.
   docstring gives the command line): the fake Anthropic and a fake issuer sit on `internet`, made
   internal, and the probe refuses to start otherwise. Its caller is a throwaway on `litellm-api`
   that posts agent-runtime's wire body with an app key the probe made through the master key.
-  `litellm_admission.py` drives the budgets, the person budget, the operator's exception and the
-  bound, `litellm_failures.py` the failure and key cases, and `litellm_retention.py` the retention
-  census of the route, on the same stack and with the same caller. Re-run them for every LiteLLM,
+  `litellm_admission.py` drives the key's models, the budgets, the person budget, the operator's
+  exception and the bound, `litellm_failures.py` the failure and key cases, and
+  `litellm_retention.py` the retention census of the route, on the same stack and with the same caller. Re-run them for every LiteLLM,
   Traefik or Docker bump. The CI job `front` runs the front's table of requests
   (`tests/test_litellm_front.py`) for every Traefik bump; a LiteLLM bump still needs the probes.
 
@@ -413,7 +417,8 @@ capability. It needs `[apps.songmaker] mcp_origin` in `service.toml`. It also re
 songmaker's own call is the proof.
 
 **The live canary** is `cd ~/srv/hal && python3 agent-service/live_canary.py`, for the operator at the go
-to let people in; it has not been run. It makes a paid call, so it runs only when the operator says so, as a
+to let people in; it has not been run. It and its probe are frozen until HAL-2.8: LiteLLM no longer
+admits the service's call, which carries no app key and no `user`. It makes a paid call, so it runs only when the operator says so, as a
 person of the API group outside the subscription group: you sign in as for the live smoke, but the
 prompt is the only thing on standard error and no browser starts, you open its link yourself. It
 checks that the route's five containers run and that the running service's `[api]` names

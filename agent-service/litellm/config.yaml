@@ -1,13 +1,15 @@
 # LiteLLM's configuration (compose.yaml, service `litellm`). Three model names an app sends, each
-# mapped to the current id of its family, with `max_tokens` as its output ceiling: LiteLLM sends it
-# when a request names none, and it equals the output LiteLLM reserves against a budget. A change
-# reaches LiteLLM only through a recreate of the container. No callback, cache or fallback; the
-# provider key, the master key and the database URL come from the environment start.sh fills from
-# their files. LiteLLM's own keys decide who may call: each app holds one, with its models, its
-# route, its money budget and its bound on parallel requests. Every request names its person as
-# `user`, whose spend the budget `max_end_user_budget_id` bounds unless the person's own row links
-# another. The database holds keys, budgets and counters; no spend or error log row is written,
-# and no prompt reaches one. No app knows the master key, so the admin routes stay closed to apps.
+# mapped to the current id of its family, with `max_tokens`: what LiteLLM sends for a request that
+# names none, and the output it reserves against a budget, so the ceiling of a conforming app; an
+# app that names more is bound by the budgets alone. A change reaches LiteLLM only through a
+# recreate of the container. No callback, cache or fallback; the provider key, the master key and
+# the database URL come from the environment start.sh fills from their files. LiteLLM's own keys
+# decide who may call: each app holds one, with its models, its route, its money budget and its
+# bound on parallel requests. Every request names its person as `user`, whose spend the budget
+# `max_end_user_budget_id` bounds unless the person's own row links another. The database holds
+# keys, budgets and each person's fingerprint with its counters; no spend or error log row is
+# written, and no prompt reaches one. No app knows the master key, so the admin routes stay closed
+# to apps.
 model_list:
   - model_name: text/opus
     litellm_params:

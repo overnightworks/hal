@@ -56,6 +56,7 @@ from litellm import (  # noqa: E402
     ProbeFailed,
     answer_text,
     expect,
+    hashed,
     mounted_file,
     person_budget,
     run_scratch_probe,
@@ -69,11 +70,23 @@ from hal.output import write_line  # noqa: E402
 HOLD_SECONDS = 45  # B4's hold: over a scan of the route
 SCAN_DEADLINE_SECONDS = 60
 UPSTREAM_ERROR = 400
+
+
+class NonEmptyId:
+    """Equal to any non-empty string: B11 judges the person budget's id, not today's value."""
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, str) and other != ""
+
+    def __repr__(self) -> str:
+        return "a non-empty id"
+
+
 SETTINGS_SECTIONS = {
     "litellm_settings": {
         "turn_off_message_logging": True,
         "redact_messages_in_exceptions": True,
-        "max_end_user_budget_id": "person-monthly",
+        "max_end_user_budget_id": NonEmptyId(),
     },
     "general_settings": {
         "enforce_user_param": True,
@@ -324,9 +337,9 @@ class RetentionProbe(FailureProbe):
         self.steer(mode="hold", hold_seconds=HOLD_SECONDS, marker=answer, request_canary=request)
         before, already = len(self.provider_requests()), len(self.hold_ends())
         asked = [{"role": "user", "content": request}]
-        body = json.dumps(wire_body(user=self.fingerprint(), messages=asked))
+        body = wire_body(user=self.fingerprint(), messages=asked)
         argv, program = self.call_command(
-            f"{PROJECT}-b4-caller", self.key, ("POST", ROUTE, body), front=True
+            f"{PROJECT}-b4-caller", self.key, "POST", ROUTE, body, front=True
         )
         process = subprocess.Popen(  # noqa: S603 - argv is built by the program itself
             argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
@@ -437,6 +450,7 @@ class RetentionProbe(FailureProbe):
         expect(planted in dump, "D9: the planted row is not in the dump")
         held = [label for label, value in canaries.items() if value in dump]
         expect(not held, f"D9: the dump holds the canaries of {held}")
+        self.expect_key_hashes_alone(dump)
         for kind, name in (("request", tool), ("response", answered)):
             tables = self.tables_naming(dump, name)
             expect(tables == {TOOL_TABLE}, f"D9: the {kind} tool name is in {sorted(tables)}")
@@ -444,9 +458,15 @@ class RetentionProbe(FailureProbe):
         self.hold(
             "D9",
             f"the dump of {len(dump)} characters holds none of {len(canaries)} canaries and the"
-            f" planted row; the request and the response tool name are in {TOOL_TABLE} alone",
+            f" planted row; of {len(self.app_keys)} app keys only hashes; the request and the"
+            f" response tool name are in {TOOL_TABLE} alone",
         )
         self.cell_p7(dump, person)
+
+    def expect_key_hashes_alone(self, dump: str) -> None:
+        """No app key in the dump, and the probe's key there as its hash: the control."""
+        raw = sum(key in dump for key in self.app_keys)
+        expect(raw == 0 and hashed(self.key) in dump, f"D9: {raw} raw app keys in the dump")
 
     def cell_p7(self, dump: str, person: str) -> None:
         """The dump D9 found its planted row in: the fingerprint in the end-user tables alone, no

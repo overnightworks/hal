@@ -1,5 +1,5 @@
-"""Probe of the API route's failures, keys and rotation (#807 S1b cells F6-F8, F10, F11, F13-F17,
-F19, D6, and K10): the stack of litellm.py (the service, the one-route front, LiteLLM and the
+"""Probe of the API route's failures, keys and rotation (#807 S1b cells F6-F11, F13-F17, F19, D6,
+and K10): the stack of litellm.py (the service, the one-route front, LiteLLM and the
 gateway's second entrypoint, against a fake Anthropic) with the fake steered through its control
 file and the caller of litellm.py, a throwaway with an app key. Nothing live and nothing paid: the
 probe refuses to start unless `internet` is internal and holds only the fakes.
@@ -12,7 +12,8 @@ LiteLLM's caches) and its teardown a few seconds (K 30 s, CAP 1800 s).
 
 Evidence: F is the fake provider's request log, A the caller's status and LiteLLM's error type, I
 `docker inspect`, L the container logs, LA LiteLLM's access log. The probe differs from production
-as litellm.py does, plus the fake's control file. Exit 0: every cell held.
+as litellm.py does, plus the fake's control file and, for F9 only, the fake's certificate from a
+second scratch CA. Exit 0: every cell held.
 """
 
 from __future__ import annotations
@@ -37,6 +38,7 @@ from litellm import (
     LISTENING,
     LITELLM,
     PROJECT,
+    PROVIDER_HOST,
     PROVIDER_KEY_FILE,
     REPO,
     ROUTE,
@@ -50,7 +52,7 @@ from litellm import (
     run_scratch_probe,
     wire_body,
 )
-from scratch_secrets import write_new
+from scratch_secrets import ScratchSecrets, issue_certificate, write_new, write_scratch_secrets
 
 HOLD_END_SECONDS = 150
 CACHE_SECONDS = 300
@@ -114,6 +116,14 @@ class FailureProbe(LitellmProbe):
     def hold(self, cell: str, how: str) -> None:
         super().hold(cell, how)
         self.record(f"{cell} held: {how}")
+
+    def call_command(self, name: str, bearer: str | None, method: str, path: str,
+                     body: dict | None, *, front: bool):  # fmt: skip
+        """Every caller's argv enters the corpus, the command line its container's Config.Cmd
+        comes from, so F15 sees a key that reached it."""
+        argv, program = super().call_command(name, bearer, method, path, body, front=front)
+        self.record(" ".join(argv))
+        return argv, program
 
     def containers_of(self, service: str) -> list[str]:
         """Every container of `service`, stopped ones included."""
@@ -188,6 +198,7 @@ class FailureProbe(LitellmProbe):
         self.key = self.make_key()
         self.steer()
         self.cells_provider_failures()
+        self.cell_f9()
         self.cell_f10()
         self.cell_f11()
         self.cell_f17()
@@ -213,6 +224,35 @@ class FailureProbe(LitellmProbe):
             self.hold(cell, f"{how}: F 1 per answer, the caller got {statuses}")
         self.steer()
 
+    def serve_provider_certificate_of(self, authority: ScratchSecrets) -> None:
+        """The fake provider recreated with a certificate of `authority`, once it listens."""
+        folder = self.fake / PROVIDER_HOST
+        issue_certificate(authority, PROVIDER_HOST, folder)
+        for file in folder.iterdir():
+            file.chmod(0o644)
+        self.harvest(FAKE_PROVIDER)
+        self.compose("up", "--detach", "--wait", "--force-recreate", "--no-deps", FAKE_PROVIDER)
+        connect = "import socket; socket.create_connection(('127.0.0.1', 443), timeout=1)"
+        self.wait_for("F9", "the fake provider's listener", lambda: self.run(
+            ["docker", "exec", self.container(FAKE_PROVIDER), "python", "-I", "-c", connect],
+            check=False,
+        ).returncode == 0, seconds=30)  # fmt: skip
+
+    def cell_f9(self) -> None:
+        """A provider certificate from a CA LiteLLM does not trust: refused before any request
+        reaches F, and served again once the trusted certificate is back."""
+        (self.scratch / "other-home").mkdir()
+        other = write_scratch_secrets(self.scratch / "other-home", self.scratch / "other-ca")
+        self.serve_provider_certificate_of(other)
+        answer = self.complete(self.key, user=self.fingerprint())
+        expect(answer["status"] != 200, "F9: an untrusted certificate was answered 200")
+        expect(not self.provider_requests(), "F9: a request reached the untrusted provider")
+        self.serve_provider_certificate_of(self.scratch_secrets)
+        recovered = self.complete(self.key, user=self.fingerprint())
+        self.served("F9", recovered, self.provider_requests())
+        self.hold("F9", f"a provider certificate of an untrusted CA: {answer['status']} "
+                  f"{error_of(answer)}, F 0; the trusted one back, served")  # fmt: skip
+
     def hold_ends(self) -> list[str]:
         return re.findall(r"^held (disconnected|timed out)$", self.log_of(FAKE_PROVIDER), re.M)
 
@@ -232,8 +272,8 @@ class FailureProbe(LitellmProbe):
         self.steer(mode="hold")
         before, already = len(self.provider_requests()), len(self.hold_ends())
         name = f"{PROJECT}-leaving-caller"
-        request = ("POST", ROUTE, json.dumps(wire_body(user=self.fingerprint())))
-        argv, program = self.call_command(name, self.key, request, front=True)
+        body = wire_body(user=self.fingerprint())
+        argv, program = self.call_command(name, self.key, "POST", ROUTE, body, front=True)
         process = subprocess.Popen(  # noqa: S603 - argv is built by the program itself
             argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, env=self.environment, cwd=REPO,
@@ -244,6 +284,7 @@ class FailureProbe(LitellmProbe):
         while len(self.provider_requests()) == before:
             expect(time.monotonic() < deadline, "F10: the request never reached the provider")
             time.sleep(1)
+        self.run(["docker", "inspect", name])  # I of a key-bearing caller while it runs, for F15
         self.run(["docker", "rm", "--force", name])
         process.communicate(timeout=60)
         ended = self.wait_for_hold_end("F10", already)
@@ -345,7 +386,7 @@ class FailureProbe(LitellmProbe):
         self.hold(
             "F15",
             f"{len(self.every_value)} values absent from {size} characters of every command's"
-            " output and every container's I and L",
+            " output, every caller's argv and every container's I and L",
         )
         planted = self.every_value[0]
         plant = self.run([

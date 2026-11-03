@@ -1,4 +1,4 @@
-"""Probe of what LiteLLM admits on the API route (cells K5-K9, K11, M1, P1-P6, A1-A4, and #768
+"""Probe of what LiteLLM admits on the API route (cells K3, K5-K9, K11, M1, P1-P6, A1-A4, and #768
 S1a's G4): the stack of litellm.py against a fake Anthropic that reports the usage the probe
 steers or holds requests until the probe releases them. App keys, budgets and fingerprints are
 the scenario of litellm.py: each key with a money budget per month and a parallel bound, the
@@ -53,6 +53,8 @@ from litellm import (
     wire_body,
 )
 
+from hal.output import write_line
+
 WORKERS = "NUM_WORKERS"
 REQUEST_SECONDS = 60
 HOLDER_SECONDS = 150
@@ -81,10 +83,8 @@ class AdmissionProbe(LitellmProbe):
 
     def start_client(self, key: str, user: str) -> subprocess.Popen:
         self.client_count += 1
-        request = ("POST", ROUTE, json.dumps(wire_body(user=user)))
-        argv, program = self.call_command(
-            f"{PROJECT}-client-{self.client_count}", key, request, front=True
-        )
+        name, body = f"{PROJECT}-client-{self.client_count}", wire_body(user=user)
+        argv, program = self.call_command(name, key, "POST", ROUTE, body, front=True)
         process = subprocess.Popen(  # noqa: S603 - argv is built by the program itself
             argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
             env=self.environment, cwd=REPO,
@@ -157,6 +157,7 @@ class AdmissionProbe(LitellmProbe):
                     process.kill()
                     process.communicate()
         self.cell_m1(key)
+        self.cell_k3(key)
         self.cells_p1_p2(key)
         self.cell_k6()
         self.cell_k11(key)
@@ -184,8 +185,9 @@ class AdmissionProbe(LitellmProbe):
         held = [self.start_client(key, self.fingerprint()) for _ in range(PARALLEL)]
         self.wait_for_requests("K9", base + PARALLEL)
         over = self.finish(self.start_client(key, self.fingerprint()))
-        retry = over["retry_after"]
+        retry, sent = over["retry_after"], len(self.provider_requests()) - base
         expect(over["status"] == TOO_MANY, f"K9: the sixth got {over['status']} {error_of(over)}")
+        expect(sent == PARALLEL, f"K9: F saw {sent} requests of the first key, not {PARALLEL}")
         expect(
             retry is not None and retry.isdigit() and int(retry) >= 1, f"K9: Retry-After {retry!r}"
         )
@@ -198,15 +200,45 @@ class AdmissionProbe(LitellmProbe):
         expect(answered == [200] * 2 * PARALLEL, f"K9: the held ones ended {answered}")
         self.expect_served("K9", key, self.fingerprint())
         self.steer_fake(mode="status", status=UPSTREAM_FAILURE)
+        before = len(self.provider_requests())
         failed = [
             self.complete(key, user=self.fingerprint())["status"] for _ in range(PARALLEL + 1)
         ]
         self.steer_fake()
         expect(TOO_MANY not in failed and 200 not in failed, f"K9: failed requests {failed}")
+        reached = len(self.provider_requests()) - before
+        expect(reached == PARALLEL + 1, f"K9: F saw {reached} of {PARALLEL + 1} failed requests")
         self.hold("K9", f"one worker; {PARALLEL} held at F, the sixth 429 Retry-After {retry} "
                   f"after {over['seconds']:.2f} s; the second key's {PARALLEL} reached F "
                   f"meanwhile; all ended 200, the next served; {PARALLEL + 1} upstream failures "
-                  f"kept no slot ({failed})")  # fmt: skip
+                  f"each reached F and kept no slot ({failed})")  # fmt: skip
+
+    def cell_k3(self, key: str) -> None:
+        """A model outside the key's `models`, in the body or in the query string. `narrow` allows
+        only the first configured name, so the second is refused by the key, not the router."""
+        first, second = list(shipped_models())[:2]
+        narrow, user, refusals = self.make_key(models=[first]), self.fingerprint(), []
+        for how, model, path, bearer in (
+            (f"{second} outside the key's", second, ROUTE, narrow),
+            ("the CLI route's name", "anthropic/opus", ROUTE, key),
+            ("?model= outside them", first, f"{ROUTE}?model=anthropic/opus", key),
+        ):  # fmt: skip
+            before = len(self.provider_requests())
+            answer = self.complete(bearer, model, user, path)
+            self.refused(f"K3: {how}", answer, before)
+            refusals.append(f"{how}: {answer['status']} {error_of(answer)}")
+        before = len(self.provider_requests())
+        passed = self.complete(narrow, first, user, f"{ROUTE}?model={second}")
+        reached = [request["model"] for request in self.provider_requests()[before:]]
+        before = len(self.provider_requests())
+        answer = self.complete(key, first, user, f"{ROUTE}?model={second}")
+        self.served("K3", answer, self.provider_requests()[before:], second)
+        self.hold("K3", f"refused with F 0: {refusals}; ?model={second} on a key allowing it "
+                  "served, F names its id")  # fmt: skip
+        # Not a cell: refusing a query string is the front's call, not LiteLLM's.
+        measured = f"{passed['status']} {error_of(passed)}, F saw {reached}"
+        write_line(f"K3 measured, not held: ?model={second} on a key allowing only {first}: "
+                   f"{measured}", flush=True)  # fmt: skip
 
     def cell_m1(self, key: str) -> None:
         user, seen = self.fingerprint(), {}
@@ -254,7 +286,17 @@ class AdmissionProbe(LitellmProbe):
             )
             expect(control["status"] == 200, f"K11: {path}: the master key got {control['status']}")
             results.append(f"{path.split('?')[0]} {refused['status']} {error_of(refused)}")
-        self.hold("K11", f"the app key at litellm:4000 refused: {results}; the master key 200 each")
+        user = self.fingerprint()
+        for path, body in (
+            ("/v1/messages", {**wire_body(user=user), "max_tokens": 16}),
+            ("/v1/completions", {"model": wire_body()["model"], "prompt": "probe", "user": user}),
+        ):  # fmt: skip
+            before = len(self.provider_requests())
+            refused = self.call(key, "POST", path, body, front=False)
+            self.refused(f"K11: {path}", refused, before)
+            results.append(f"{path} {refused['status']} {error_of(refused)}, F 0")
+        self.hold("K11", f"the app key at litellm:4000 refused: {results}; the master key 200 on "
+                  "the admin routes")  # fmt: skip
 
     def cells_p3_p4(self, key: str, second: str) -> str:
         person, other = self.fingerprint(), self.fingerprint()
@@ -280,7 +322,7 @@ class AdmissionProbe(LitellmProbe):
     def cell_a4(self) -> None:
         key, person = self.make_key(), self.fingerprint()
         self.expect_served("A4", key, person)
-        self.wait_for("A4", "the row of the first request", lambda: self.customer(person))
+        self.wait_for("A4", "the row of the first request", lambda: self.customer_row(person))
         linked = time.monotonic()
         self.admin("POST", "/customer/update", {"user_id": person, "budget_id": OPERATOR_BUDGET})
         spend = self.push_person("A4", key, person)
@@ -309,11 +351,17 @@ class AdmissionProbe(LitellmProbe):
         self.hold("K7", f"after the recreate the key over budget: {refusal}")
         self.hold("P5", f"after the recreate X: {self.expect_refused('P5', key, person)}")
 
-    def cell_k8(self, over: str) -> None:
-        reset_at = datetime.fromisoformat(self.key_info(over)["budget_reset_at"])
-        expect(reset_at.tzinfo is not None, f"K8: budget_reset_at {reset_at} names no zone")
+    def expect_reset_on_the_first(self, cell: str, value: str | None) -> datetime:
+        """A `budget_reset_at` LiteLLM reports: 00:00 UTC on the first of the next month."""
+        expect(isinstance(value, str), f"{cell}: budget_reset_at is {value!r}")
+        reset_at = datetime.fromisoformat(value)
+        expect(reset_at.tzinfo is not None, f"{cell}: budget_reset_at {reset_at} names no zone")
         wanted = first_of_next_month(datetime.now(UTC))
-        expect(reset_at == wanted, f"K8: budget_reset_at {reset_at}, not {wanted}")
+        expect(reset_at == wanted, f"{cell}: budget_reset_at {reset_at}, not {wanted}")
+        return reset_at
+
+    def cell_k8(self, over: str) -> None:
+        reset_at = self.expect_reset_on_the_first("K8", self.key_info(over)["budget_reset_at"])
         self.move_due("LiteLLM_VerificationToken", "token", hashed(over))
         took = self.wait_for("K8", "the reset", lambda: self.key_info(over)["spend"] == 0)
         self.expect_served("K8", over, self.fingerprint())
@@ -322,10 +370,13 @@ class AdmissionProbe(LitellmProbe):
 
     def cell_p6(self, key: str, person: str) -> None:
         budget_id = person_budget()["budget_id"]
+        (row,) = self.admin("POST", "/budget/info", {"budgets": [budget_id]})
+        reset_at = self.expect_reset_on_the_first("P6", row["budget_reset_at"])
         self.move_due("LiteLLM_BudgetTable", "budget_id", budget_id)
         took = self.wait_for("P6", "the reset", lambda: self.customer_spend(person) == 0)
         self.expect_served("P6", key, person)
-        self.hold("P6", f"the person budget moved due: X's spend 0 after {took:.0f} s, X served")
+        self.hold("P6", f"the person budget's budget_reset_at {reset_at.isoformat()}; moved due: "
+                  f"X's spend 0 after {took:.0f} s, X served")  # fmt: skip
 
     def cell_g4(self, key: str) -> None:
         config = shipped_config()

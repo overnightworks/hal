@@ -46,8 +46,8 @@ from refusals import API_GROUP  # noqa: E402
 from retention_census import run_docker  # noqa: E402
 from smoke import Tokens  # noqa: E402
 
-# Frozen until HAL-2.8: the names and the token builder the service canary needs, moved here from
-# the probe base, which no longer calls through the service.
+# The names and the token builder the service canary needs stand here, not in the probe base, which
+# no longer calls through the service; frozen until HAL-2.8 re-points the canary.
 CANARY, DEFAULT_APP = "agent-canary", "songmaker"
 
 # The grammar of the grammar table, written from it and not from the program: a (cell, verdict)
