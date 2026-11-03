@@ -27,6 +27,7 @@ from support.stack_apply_fakes import (
     RealmBackup,
     ScriptedCompose,
     ScriptedGit,
+    ScriptedKeys,
     Setup,
     SetupRun,
     Terminal,
@@ -34,6 +35,7 @@ from support.stack_apply_fakes import (
 from support.stack_core import bind, bind_core_files, sha256
 
 from hal.stack import (
+    api_limits,
     apply,
     apps,
     checkout,
@@ -41,6 +43,7 @@ from hal.stack import (
     core,
     emergency,
     environment,
+    litellm_keys,
     setup,
     switches,
 )
@@ -201,6 +204,7 @@ def switch(
         app_runtime: apps.AppRuntime | None = None,
         rename=os.rename,
         clock=None,
+        api: api_limits.ApiSettings = api_limits.NONE_SET,
     ) -> tuple[int, str, str]:
         at_terminal(answer, while_prompt_waits)
         if not at_a_terminal:
@@ -220,6 +224,7 @@ def switch(
             None if installed_backup else realm_backup,
             app_runtime,
             rename,
+            api=api,
         )
         return exit_code, sys.stdout.getvalue(), capsys.readouterr().err
 
@@ -250,6 +255,33 @@ def start(repository, scripted, at_terminal, capsys, state, ingress, setup_check
 
 def write_fleet(repository: Path, text: str) -> None:
     (repository / "fleet.yaml").write_text(text)
+
+
+LITELLM_APPS = ("hopin", "presentator", "songmaker")
+LITELLM_BUDGET_ID = "scenario-budget"
+
+
+def desired_row(app: str, models: tuple[str, ...]) -> dict:
+    """`app`'s key at the code defaults, as the one-off reports it."""
+    desired = litellm_keys.desired_key(app, models, api_limits.NONE_SET.limits_of(app))
+    return {
+        name: list(value) if isinstance(value, tuple) else value for name, value in desired.items()
+    }
+
+
+def litellm_running(repository: Path, scripted: ScriptedCompose) -> ScriptedKeys:
+    """LiteLLM running, its config naming the budget id; every key and the person budget at the
+    code defaults, so the key step alone has nothing to change."""
+    config = repository / litellm_keys.CONFIG_FILE
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text(
+        yaml.safe_dump({"litellm_settings": {litellm_keys.BUDGET_ID_SETTING: LITELLM_BUDGET_ID}})
+    )
+    scripted.config["services"][litellm_keys.LITELLM_SERVICE] = {"profiles": ["litellm"]}
+    scripted.put_containers({litellm_keys.LITELLM_SERVICE: "running"})
+    scripted.keys.rows = {app: desired_row(app, scripted.keys.models) for app in LITELLM_APPS}
+    scripted.keys.budget = dict(litellm_keys.desired_budget(api_limits.NONE_SET.person_budget()))
+    return scripted.keys
 
 
 STEP_CA_ON = {"step-ca": "running", "traefik-mcp-acme-owner": "exited", "traefik-mcp": "running"}

@@ -8,7 +8,7 @@ from pathlib import Path
 
 from hal.output import Stream, write_line
 from hal.output.command import Verb, command
-from hal.stack import apply, emergency, switches, tunnel, update
+from hal.stack import api_limits, apply, emergency, switches, tunnel, update
 from hal.stack.external import cli as external_cli
 
 COMMAND = command(Verb.APPLY)
@@ -69,13 +69,13 @@ def update_checkout() -> update.UpdateEnd:
     return update.update_checkout(switches.default_state_directory())
 
 
-def apply_units(local: bool) -> int:
+def apply_units(local: bool, api: api_limits.ApiSettings) -> int:
     if local:
-        return apply.apply_local(switches.default_state_directory())
-    return _apply_then_publish()
+        return apply.apply_local(switches.default_state_directory(), api=api)
+    return _apply_then_publish(api)
 
 
-def _apply_then_publish() -> int:
+def _apply_then_publish(api: api_limits.ApiSettings) -> int:
     """The local part, then the publish only if the local part ended clean. The exit is the local
     one unless it is 0, then the publish's with its 2 ("cannot plan") made 1: a 2 from here means
     the local part could not finish planning, and nothing was published. No signal handler is
@@ -87,7 +87,7 @@ def _apply_then_publish() -> int:
     `_exit_after_interrupt` prints (ends with a traceback)."""
     run = _Run()
     try:
-        local_exit = apply.apply_local(switches.default_state_directory())
+        local_exit = apply.apply_local(switches.default_state_directory(), api=api)
         if local_exit != apply.ApplyExit.APPLIED_OR_NOTHING:
             write_line(f"{COMMAND}: nothing published", stream=Stream.STDERR)
             return local_exit

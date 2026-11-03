@@ -46,6 +46,7 @@ from support.stack_external import (
     live_checkout,  # noqa: F401 the fixture, requested by name below
 )
 from support.stack_global_stop import hosts_asked  # noqa: F401 the fixture, used by `fakes`
+from support.workstation_support import write_hal_config
 
 from hal import cli, stack_commands
 from hal.grammar import ExitCode
@@ -180,11 +181,36 @@ def test_the_emergency_verbs_end_every_outcome_with_the_exit_they_always_had(
     ],
     ids=lambda value: value.name,
 )
-def test_every_outcome_of_apply_has_one_exit_of_hal(monkeypatch, stack_exit, hal_exit):
+def test_every_outcome_of_apply_has_one_exit_of_hal(monkeypatch, home, stack_exit, hal_exit):  # noqa: F811
     """#784 D1, D2: declined 1, a guard 4, cannot plan, failed and partial 3."""
-    monkeypatch.setattr(stack, "apply_units", lambda _local: stack_exit)
+    monkeypatch.setattr(stack, "apply_units", lambda _local, _api: stack_exit)
 
     assert cli.main(["apply"]) == hal_exit
+
+
+@pytest.mark.parametrize(
+    ("arguments", "stack_function", "stack_end"),
+    [
+        (["stop", UNIT], "stop_unit", apply.ApplyExit.APPLIED_OR_NOTHING),
+        (["start", UNIT], "start_unit", apply.ApplyExit.APPLIED_OR_NOTHING),
+        (["offline"], "stop_all", apply.ApplyExit.APPLIED_OR_NOTHING),
+        (["online"], "start_all", apply.ApplyExit.APPLIED_OR_NOTHING),
+        (["update"], "update_checkout", UpdateEnd.DONE),
+    ],
+    ids=lambda value: " ".join(value) if isinstance(value, list) else None,
+)
+def test_the_verbs_beside_apply_never_read_the_settings_file(
+    monkeypatch,
+    home,  # noqa: F811
+    arguments,
+    stack_function,
+    stack_end,
+):
+    """#889: a malformed `config.toml` stops `hal apply` alone; the switches still act."""
+    write_hal_config(home, "[api]\nbudget_dollars = -1\n")
+    monkeypatch.setattr(stack, stack_function, lambda *_arguments: stack_end)
+
+    assert cli.main(arguments) == ExitCode.OK
 
 
 @pytest.mark.parametrize(
@@ -343,6 +369,30 @@ def test_apply_from_a_checkout_that_is_not_a_clean_main_is_refused(hal, applying
     assert "runs only on main" in result.err
     assert "nothing published" in result.err
     assert applying.scripted.changing_verbs() == []
+    assert applying.publish_never_began()
+
+
+@pytest.mark.parametrize(
+    ("text", "key"),
+    [("[api]\nbudget_dollars = -1\n", "budget_dollars"), ("[alarm]\ninterval = 0\n", "interval")],
+    ids=["api", "alarm"],
+)
+def test_apply_with_a_malformed_settings_file_ends_2_before_any_guard(
+    hal,
+    applying,
+    home,  # noqa: F811
+    text,
+    key,
+):
+    """#889: any malformed table stops `hal apply` at its door, with the path and the reason."""
+    config_file = write_hal_config(home, text)
+
+    result = hal("apply", answers=("yes",))
+
+    assert result.exit_code == ExitCode.USAGE
+    assert f"{config_file}: {key} must be " in result.err
+    assert applying.scripted.calls == []
+    assert applying.scripted_git.calls == []
     assert applying.publish_never_began()
 
 

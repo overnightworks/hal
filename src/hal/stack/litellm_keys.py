@@ -1,5 +1,7 @@
-"""The key step of `hal apply`: each app's LiteLLM key and the person budget, from the code
-defaults below, through the one-off `litellm-keys` (`hal.stack.litellm_admin`).
+"""The key step of `hal apply`: each app's LiteLLM key and the person budget, from the numbers of
+`[api]` and `[api.<app>]` in `~/.config/hal/config.toml` (the door reads the file, `api_limits`
+decides which number holds and keeps the code defaults), through the one-off `litellm-keys`
+(`hal.stack.litellm_admin`).
 
 At plan time the one-off reads what LiteLLM holds; the diff of desired and found is the step's
 plan rows, part of the one question. After the yes, past the realm step and before the apps, the
@@ -7,8 +9,9 @@ one-off makes the changes: the person budget first, then the apps in name order,
 failed write stops the rest. A key is found by the SHA-256 of its file, so a retry after a lost
 answer makes no second key, and an unchanged row changes nothing. Only changed fields are sent:
 a pure limit change sends no period, so LiteLLM keeps its reset. The apps are the key files
-compose mounts into the one-off. hal's own process never opens a key file or the master key; the
-step's stdin and stdout carry names, numbers and model names only.
+compose mounts into the one-off, so an `[api.<app>]` naming none of them cannot be planned.
+hal's own process never opens a key file or the master key; the step's stdin and stdout carry
+names, numbers and model names only.
 
 The step reads while the `litellm` container runs and is absent otherwise; nothing in `hal apply`
 starts or stops LiteLLM yet.
@@ -23,16 +26,12 @@ from typing import Any, cast
 
 import yaml
 
-from hal.stack import compose
+from hal.stack import api_limits, compose
 
 KEYS_SERVICE = "litellm-keys"
 LITELLM_SERVICE = "litellm"
 CONFIG_FILE = Path("agent-service") / "litellm" / "config.yaml"
 BUDGET_ID_SETTING = "max_end_user_budget_id"
-# The code defaults until `config.toml` carries the operator's numbers.
-APP_BUDGET_DOLLARS = 10.0
-PERSON_BUDGET_DOLLARS = 2.0
-MAX_PARALLEL_REQUESTS = 5
 BUDGET_DURATION = "1mo"
 ROUTE = "/v1/chat/completions"  # the one path litellm-front serves
 
@@ -42,6 +41,11 @@ type Settings = Mapping[str, Value]
 
 class KeysError(Exception):
     """The key step's one-off failed or answered nonsense; the message is one line."""
+
+
+class UnknownApps(Exception):
+    """An `[api.<app>]` names no app with a key; outside `KeysError`, since a typo in the
+    operator's file is no step that could not be read."""
 
 
 class Target(StrEnum):
@@ -126,21 +130,21 @@ class KeysSkipped:
 type KeysResult = KeysDone | KeysFailed | KeysSkipped | None  # None: nothing to do
 
 
-def desired_key(app: str, models: tuple[str, ...]) -> Settings:
+def desired_key(app: str, models: tuple[str, ...], limits: api_limits.AppLimits) -> Settings:
     return {
         "key_alias": app,
-        "max_budget": APP_BUDGET_DOLLARS,
+        "max_budget": limits.budget_dollars,
         "budget_duration": BUDGET_DURATION,
         "models": models,
         "allowed_routes": (ROUTE,),
-        "max_parallel_requests": MAX_PARALLEL_REQUESTS,
+        "max_parallel_requests": limits.max_parallel_requests,
         "rpm_limit": None,
         "tpm_limit": None,
     }
 
 
-def desired_budget() -> Settings:
-    return {"max_budget": PERSON_BUDGET_DOLLARS, "budget_duration": BUDGET_DURATION}
+def desired_budget(dollars: float) -> Settings:
+    return {"max_budget": dollars, "budget_duration": BUDGET_DURATION}
 
 
 def _comparable(value: object) -> Value:
@@ -168,12 +172,17 @@ def diff(
     return Change(target, subject, False, fields) if fields else None
 
 
-def planned(found: Found, budget_id: str) -> KeysPlan:
+def planned(found: Found, budget_id: str, api: api_limits.ApiSettings) -> KeysPlan:
     """The person budget first, then each app in name order; an app whose name another key holds
-    gets no change."""
-    budget = diff(Target.BUDGET, budget_id, desired_budget(), found.budget)
+    gets no change. Raises `UnknownApps` when an app table names no app the one-off read."""
+    if unknown := sorted(set(api.apps) - set(found.keys)):
+        tables = ", ".join(f"[api.{app}]" for app in unknown)
+        verb = "names" if len(unknown) == 1 else "name"
+        read_apps = ", ".join(sorted(found.keys))
+        raise UnknownApps(f"{tables} {verb} no app with a LiteLLM key ({read_apps})")
+    budget = diff(Target.BUDGET, budget_id, desired_budget(api.person_budget()), found.budget)
     keys = (
-        diff(Target.KEY, app, desired_key(app, found.models), found.keys[app])
+        diff(Target.KEY, app, desired_key(app, found.models, api.limits_of(app)), found.keys[app])
         for app in sorted(found.keys)
         if app not in found.name_taken
     )
@@ -182,16 +191,20 @@ def planned(found: Found, budget_id: str) -> KeysPlan:
 
 
 def plan_keys(
-    engine: compose.Compose, states: Mapping[str, set[str]], repository: Path
+    engine: compose.Compose,
+    states: Mapping[str, set[str]],
+    repository: Path,
+    api: api_limits.ApiSettings,
 ) -> KeysPlan:
     """Reads while the `litellm` container runs; a read that fails is a step not read."""
     if not compose.has_running_container(states, (LITELLM_SERVICE,)):
         return KeysPlan()
     try:
         budget_id = read_budget_id(repository)
-        return planned(read(engine, budget_id), budget_id)
+        found = read(engine, budget_id)
     except KeysError as error:
         return KeysPlan(not_read=str(error))
+    return planned(found, budget_id, api)
 
 
 def read_budget_id(repository: Path) -> str:

@@ -21,6 +21,7 @@ import pytest
 
 from hal.stack import litellm_admin as admin
 from hal.stack import litellm_keys
+from hal.stack.api_limits import NONE_SET
 
 ROOT = Path(__file__).resolve().parents[1]
 APPS = ("hopin", "presentator", "songmaker")
@@ -261,7 +262,7 @@ def scene_on(
 def desired_row(app: str) -> dict:
     return {
         name: list(value) if isinstance(value, tuple) else value
-        for name, value in litellm_keys.desired_key(app, MODELS).items()
+        for name, value in litellm_keys.desired_key(app, MODELS, NONE_SET.limits_of(app)).items()
     }
 
 

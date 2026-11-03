@@ -30,7 +30,8 @@ the run is refused: nothing is asked or published. After the setups, and before 
 shown, a service this run creates that names a secret file which does not exist refuses the run
 with that path and `next: hal setup`, where Compose would refuse it at `up`.
 While the `litellm` container runs, the key step (`litellm_keys.py`) plans each app's LiteLLM key
-and the person budget in the same plan and makes them after the realm step and before the apps.
+and the person budget, with the numbers of `[api]` in `~/.config/hal/config.toml` that `hal`'s door
+read, in the same plan and makes them after the realm step and before the apps.
 An app (an entry with `repo`) is planned last, in the same plan and under the same `yes`: its
 newest release tag is checked out, built, started and recorded once its containers are settled
 (`apps.py`).
@@ -78,6 +79,7 @@ from hal.output import (
 )
 from hal.output.command import Verb, command
 from hal.stack import (
+    api_limits,
     barrier,
     catalog,
     checkout,
@@ -164,6 +166,7 @@ CANNOT_PLAN_ERRORS = (
     checkout.GitError,
     LegalError,
     AppkitError,
+    litellm_keys.UnknownApps,
 )
 
 
@@ -180,6 +183,7 @@ def _plan(
     record: core.Record,
     live: checkout.Git,
     app_runtime: AppRuntime,
+    api: api_limits.ApiSettings,
     rename: Rename = os.rename,
 ) -> Plan:
     repository = live.tree
@@ -212,7 +216,7 @@ def _plan(
         gates.get(reconcile.REALM_UNIT),
         reconcile.restart_of(plans, unit_services.recreates),
     )
-    keys = litellm_keys.plan_keys(engine, states, repository)
+    keys = litellm_keys.plan_keys(engine, states, repository, api)
     app_plans = plan_apps(repository, fleet, app_runtime, marks)
     appkit = plan_appkit(repository, rename=rename)
     legal = plan_legal(repository, record.directory / RECORD_FILE, fleet)
@@ -248,6 +252,7 @@ def apply_local(
     realm_backup: reconcile.Backup | None = None,
     app_runtime: AppRuntime | None = None,
     rename: Rename = os.rename,
+    api: api_limits.ApiSettings = api_limits.NONE_SET,
 ) -> int:
     started = verifier.clock()
     if not at_terminal():
@@ -284,6 +289,7 @@ def apply_local(
             realm_backup or reconcile.Backup.installed(repository, _say_waiting),
             app_runtime or AppRuntime.of(home or Path.home(), state_directory),
             rename,
+            api,
             lambda: verifier.clock() - started,
         )
     finally:
@@ -370,6 +376,7 @@ def _plan_and_apply(
     realm_backup: reconcile.Backup,
     app_runtime: AppRuntime,
     rename: Rename,
+    api: api_limits.ApiSettings,
     elapsed: Callable[[], float],
 ) -> int:
     repository = live.tree
@@ -379,7 +386,7 @@ def _plan_and_apply(
     try:
         completed: list[str] = []
         while True:  # the plan made after the setups ran is held to the same refusals
-            planned = _plan(engine, marks, record, live, app_runtime, rename)
+            planned = _plan(engine, marks, record, live, app_runtime, api, rename)
             missing = _missing_setups(planned, repository, check)
             exit_code = _refusal(missing, planned, bool(completed))
             if exit_code is None:

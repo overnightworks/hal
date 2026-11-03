@@ -1,5 +1,6 @@
-"""The key step's host side (#964): the desired key and person budget from the code defaults, the
-diff against what the one-off read, and whether the step reads at all (decision 14)."""
+"""The key step's host side (#964, #889): the desired key and person budget from the numbers of
+the operator's record, the diff against what the one-off read, and whether the step reads at all
+(decision 14)."""
 
 import json
 import subprocess
@@ -9,7 +10,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-from hal.stack import compose, litellm_keys
+from hal.stack import api_limits, compose, litellm_keys
+from hal.stack.api_limits import NONE_SET, ApiSettings, AppLimits, AppNumbers
 from hal.stack.litellm_keys import Change, FieldChange, Found, KeysPlan, Target
 
 APPS = ("hopin", "presentator", "songmaker")
@@ -20,14 +22,14 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def found_key(app: str, **overrides: object) -> dict:
     """The live row of `app` as the one-off reports it: the desired settings, overridden."""
-    desired = litellm_keys.desired_key(app, MODELS)
+    desired = litellm_keys.desired_key(app, MODELS, NONE_SET.limits_of(app))
     return {
         name: list(value) if isinstance(value, tuple) else value for name, value in desired.items()
     } | overrides
 
 
 def found_budget(**overrides: object) -> dict:
-    return dict(litellm_keys.desired_budget()) | overrides
+    return dict(litellm_keys.desired_budget(NONE_SET.person_budget())) | overrides
 
 
 def found(
@@ -50,26 +52,24 @@ def changed_fields(change: Change | None) -> dict[str, object]:
     return {field_change.name: field_change.new for field_change in change.fields}
 
 
-def test_a_new_key_carries_its_app_as_name_the_code_defaults_and_every_model_litellm_lists() -> (
-    None
-):
-    desired = litellm_keys.desired_key("hopin", MODELS)
+def test_a_new_key_carries_its_app_as_name_its_numbers_and_every_model_litellm_lists() -> None:
+    desired = litellm_keys.desired_key("hopin", MODELS, AppLimits(6.0, 3))
 
     assert desired == {
         "key_alias": "hopin",
-        "max_budget": litellm_keys.APP_BUDGET_DOLLARS,
+        "max_budget": 6.0,
         "budget_duration": litellm_keys.BUDGET_DURATION,
         "models": MODELS,
         "allowed_routes": (litellm_keys.ROUTE,),
-        "max_parallel_requests": litellm_keys.MAX_PARALLEL_REQUESTS,
+        "max_parallel_requests": 3,
         "rpm_limit": None,
         "tpm_limit": None,
     }
 
 
-def test_the_person_budget_holds_the_person_default_for_the_period() -> None:
-    assert litellm_keys.desired_budget() == {
-        "max_budget": litellm_keys.PERSON_BUDGET_DOLLARS,
+def test_the_person_budget_holds_its_dollars_for_the_period() -> None:
+    assert litellm_keys.desired_budget(1.5) == {
+        "max_budget": 1.5,
         "budget_duration": litellm_keys.BUDGET_DURATION,
     }
 
@@ -113,6 +113,7 @@ def test_a_found_key_is_changed_in_exactly_the_fields_that_differ(
             keys={app: found_key(app, **row) if app == "hopin" else found_key(app) for app in APPS}
         ),
         BUDGET_ID,
+        NONE_SET,
     )
 
     hopin = [change for change in plan.changes if change.subject == "hopin"]
@@ -132,6 +133,7 @@ def test_a_pure_limit_change_sends_no_period_so_the_reset_stays() -> None:
             budget=found_budget(max_budget=1.5),
         ),
         BUDGET_ID,
+        NONE_SET,
     )
 
     assert plan.changes
@@ -140,7 +142,7 @@ def test_a_pure_limit_change_sends_no_period_so_the_reset_stays() -> None:
 
 def test_a_cleared_rpm_travels_as_null() -> None:
     plan = litellm_keys.planned(
-        found(keys={app: found_key(app, rpm_limit=60) for app in APPS}), BUDGET_ID
+        found(keys={app: found_key(app, rpm_limit=60) for app in APPS}), BUDGET_ID, NONE_SET
     )
 
     assert {json.dumps(change.wire()["fields"]) for change in plan.changes} == {
@@ -165,7 +167,7 @@ def test_a_cleared_rpm_travels_as_null() -> None:
 def test_the_plan_makes_absent_keys_and_names_taken_names(
     keys: dict | None, taken: tuple[str, ...], new_keys: tuple[str, ...], conflicts: tuple[str, ...]
 ) -> None:
-    plan = litellm_keys.planned(found(keys=keys, taken=taken), BUDGET_ID)
+    plan = litellm_keys.planned(found(keys=keys, taken=taken), BUDGET_ID, NONE_SET)
 
     assert tuple(change.subject for change in plan.changes if change.new) == new_keys
     assert plan.name_taken == conflicts
@@ -174,7 +176,9 @@ def test_the_plan_makes_absent_keys_and_names_taken_names(
         changed_fields(change)
         == {
             name: value
-            for name, value in litellm_keys.desired_key(change.subject, MODELS).items()
+            for name, value in litellm_keys.desired_key(
+                change.subject, MODELS, NONE_SET.limits_of(change.subject)
+            ).items()
             if value is not None
         }
         for change in new
@@ -187,6 +191,7 @@ def test_the_person_budget_comes_first_then_the_apps_in_name_order() -> None:
             keys=dict.fromkeys(reversed(APPS)), name_taken=frozenset(), budget=None, models=MODELS
         ),
         BUDGET_ID,
+        NONE_SET,
     )
 
     assert [(change.target, change.subject) for change in plan.changes] == [
@@ -198,22 +203,55 @@ def test_the_person_budget_comes_first_then_the_apps_in_name_order() -> None:
         BUDGET_ID,
         True,
         tuple(
-            FieldChange(name, None, value) for name, value in litellm_keys.desired_budget().items()
+            FieldChange(name, None, value)
+            for name, value in litellm_keys.desired_budget(NONE_SET.person_budget()).items()
         ),
     )
 
 
 def test_a_changed_person_budget_is_changed_in_its_amount_alone() -> None:
-    plan = litellm_keys.planned(found(budget=found_budget(max_budget=1.5)), BUDGET_ID)
+    plan = litellm_keys.planned(found(budget=found_budget(max_budget=1.5)), BUDGET_ID, NONE_SET)
 
     assert plan.changes == (
         Change(
             Target.BUDGET,
             BUDGET_ID,
             False,
-            (FieldChange("max_budget", 1.5, litellm_keys.PERSON_BUDGET_DOLLARS),),
+            (FieldChange("max_budget", 1.5, api_limits.PERSON_BUDGET_DOLLARS),),
         ),
     )
+
+
+def test_a_number_the_record_changes_is_sent_alone_and_never_with_a_period() -> None:
+    api = ApiSettings(AppNumbers(4.0, 3), {"hopin": AppNumbers(budget_dollars=6.0)}, 1.5)
+
+    plan = litellm_keys.planned(found(), BUDGET_ID, api)
+
+    assert {change.subject: changed_fields(change) for change in plan.changes} == {
+        BUDGET_ID: {"max_budget": 1.5},
+        "hopin": {"max_budget": 6.0, "max_parallel_requests": 3},
+        "presentator": {"max_budget": 4.0, "max_parallel_requests": 3},
+        "songmaker": {"max_budget": 4.0, "max_parallel_requests": 3},
+    }
+
+
+def test_an_app_table_naming_no_app_read_cannot_be_planned_and_names_the_apps_read() -> None:
+    api = ApiSettings(apps={"hopn": AppNumbers(budget_dollars=1.0)})
+
+    with pytest.raises(litellm_keys.UnknownApps) as raised:
+        litellm_keys.planned(found(), BUDGET_ID, api)
+
+    assert "[api.hopn]" in str(raised.value)
+    assert all(app in str(raised.value) for app in APPS)
+
+
+def test_an_app_whose_name_is_taken_gets_no_change_whatever_its_table_says() -> None:
+    api = ApiSettings(apps={"hopin": AppNumbers(budget_dollars=6.0)})
+
+    plan = litellm_keys.planned(found(taken=("hopin",)), BUDGET_ID, api)
+
+    assert plan.changes == ()
+    assert plan.name_taken == ("hopin",)
 
 
 # --- whether the step reads (decision 14) ------------------------------------------------------
@@ -271,7 +309,7 @@ def test_no_key_step_runs_while_litellm_does_not_run(repository: Path, state: st
 
     assert (
         litellm_keys.plan_keys(
-            compose.Compose(run=runner, repository=repository), states, repository
+            compose.Compose(run=runner, repository=repository), states, repository, NONE_SET
         )
         == KeysPlan()
     )
@@ -284,7 +322,7 @@ def test_while_litellm_runs_the_step_reads_with_the_budget_id_config_yaml_names(
     runner = OneOff(read_answer(found(keys={}, budget={})))
     states = {litellm_keys.LITELLM_SERVICE: {"running"}}
     plan = litellm_keys.plan_keys(
-        compose.Compose(run=runner, repository=repository), states, repository
+        compose.Compose(run=runner, repository=repository), states, repository, NONE_SET
     )
 
     assert [command[-3:] for command in runner.one_offs] == [
@@ -319,6 +357,7 @@ def test_a_read_that_fails_while_litellm_runs_plans_nothing_and_says_why(
         compose.Compose(run=runner, repository=repository),
         {litellm_keys.LITELLM_SERVICE: {"running"}},
         repository,
+        NONE_SET,
     )
 
     assert plan.changes == ()
@@ -335,12 +374,25 @@ def test_a_config_yaml_without_the_budget_id_is_a_step_not_read(
     runner = OneOff()
     states = {litellm_keys.LITELLM_SERVICE: {"running"}}
     plan = litellm_keys.plan_keys(
-        compose.Compose(run=runner, repository=repository), states, repository
+        compose.Compose(run=runner, repository=repository), states, repository, NONE_SET
     )
 
     assert plan.not_read is not None
     assert litellm_keys.BUDGET_ID_SETTING in plan.not_read
     assert runner.one_offs == []
+
+
+def test_an_app_table_naming_no_app_read_is_no_step_not_read(repository: Path) -> None:
+    runner = OneOff(read_answer(found()))
+    states = {litellm_keys.LITELLM_SERVICE: {"running"}}
+
+    with pytest.raises(litellm_keys.UnknownApps):
+        litellm_keys.plan_keys(
+            compose.Compose(run=runner, repository=repository),
+            states,
+            repository,
+            ApiSettings(apps={"hopn": AppNumbers(budget_dollars=1.0)}),
+        )
 
 
 def test_the_shipped_config_yaml_names_the_person_budget_id() -> None:

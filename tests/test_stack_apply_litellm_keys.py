@@ -1,17 +1,17 @@
-"""`hal apply`'s key step (#964): its rows in the one question, its run
-before the apps, and every ending of the item's table "How the run ends"."""
+"""`hal apply`'s key step (#964, #889): its rows in the one question, its run before the apps,
+every ending of the item's table "How the run ends", and the operator's numbers handed to it."""
 
 import re
 import subprocess
 
 import pytest
-import yaml
 from support.stack_apply import (
     DISABLED,
     ENABLED,
     at_terminal,  # noqa: F401 the fixture, requested by name below
     home,  # noqa: F401 the fixture, requested by name below
     ingress,  # noqa: F401 the fixture, requested by name below
+    litellm_running,
     realm_backup,  # noqa: F401 the fixture, requested by name below
     repository,  # noqa: F401 the fixture, requested by name below
     scripted,  # noqa: F401 the fixture, requested by name below
@@ -22,6 +22,12 @@ from support.stack_apply import (
     switch,  # noqa: F401 the fixture, requested by name below
     write_fleet,
 )
+from support.stack_apply import (
+    LITELLM_APPS as APPS,
+)
+from support.stack_apply import (
+    LITELLM_BUDGET_ID as BUDGET_ID,
+)
 from support.stack_apply_apps import (
     RELEASE,
     app_world,  # noqa: F401 the fixture, requested by name below
@@ -29,40 +35,23 @@ from support.stack_apply_apps import (
 from support.stack_apply_fakes import ScriptedCompose
 from support.stack_plan_rows import find_row, plain
 
-from hal.stack import litellm_keys
+from hal.stack import api_limits, litellm_keys
+from hal.stack.api_limits import ApiSettings, AppNumbers
+from hal.stack.apply import ApplyExit
 from hal.stack.plan_rows import KeysEvent, PlanGroup
 from hal.stack.result_rows import ResultEvent
-
-APPS = ("hopin", "presentator", "songmaker")
-BUDGET_ID = "scenario-budget"
 
 
 def lines_of(text: str) -> list[str]:
     return plain(text).splitlines()
 
 
-def desired_row(app: str, models: tuple[str, ...]) -> dict:
-    desired = litellm_keys.desired_key(app, models)
-    return {
-        name: list(value) if isinstance(value, tuple) else value for name, value in desired.items()
-    }
-
-
 @pytest.fixture
 def keys(repository, scripted: ScriptedCompose):  # noqa: F811
-    """LiteLLM running beside a disabled fleet, its config naming the budget id; every key and the
-    person budget as desired, so the step alone has nothing to change."""
+    """LiteLLM running beside a disabled fleet, every key and the person budget at the code
+    defaults, so the step alone has nothing to change."""
     write_fleet(repository, DISABLED)
-    config = repository / litellm_keys.CONFIG_FILE
-    config.parent.mkdir(parents=True, exist_ok=True)
-    config.write_text(
-        yaml.safe_dump({"litellm_settings": {litellm_keys.BUDGET_ID_SETTING: BUDGET_ID}})
-    )
-    scripted.config["services"][litellm_keys.LITELLM_SERVICE] = {"profiles": ["litellm"]}
-    scripted.put_containers({litellm_keys.LITELLM_SERVICE: "running"})
-    scripted.keys.rows = {app: desired_row(app, scripted.keys.models) for app in APPS}
-    scripted.keys.budget = dict(litellm_keys.desired_budget())
-    return scripted.keys
+    return litellm_running(repository, scripted)
 
 
 def with_other_change(repository) -> None:  # noqa: F811
@@ -119,7 +108,7 @@ def test_a_changed_number_shows_its_old_and_new_value(switch, keys):  # noqa: F8
     assert exit_code == 0
     row = find_row(plain(out).partition("Type yes")[0], "songmaker", KeysEvent.KEY_CHANGED)
     assert row
-    assert f"7 → {litellm_keys.APP_BUDGET_DOLLARS:g}" in row.group(0)
+    assert f"7 → {api_limits.APP_BUDGET_DOLLARS:g}" in row.group(0)
     assert "60 → none" in row.group(0)
     assert keys.writes == [
         [
@@ -127,10 +116,31 @@ def test_a_changed_number_shows_its_old_and_new_value(switch, keys):  # noqa: F8
                 "target": "key",
                 "subject": "songmaker",
                 "new": False,
-                "fields": {"max_budget": litellm_keys.APP_BUDGET_DOLLARS, "rpm_limit": None},
+                "fields": {"max_budget": api_limits.APP_BUDGET_DOLLARS, "rpm_limit": None},
             }
         ]
     ]
+
+
+def test_an_app_table_of_the_record_shows_its_change_and_writes_that_number_alone(switch, keys):  # noqa: F811
+    exit_code, out, _ = switch(api=ApiSettings(apps={"hopin": AppNumbers(budget_dollars=6.0)}))
+
+    assert exit_code == 0
+    row = find_row(plain(out).partition("Type yes")[0], "hopin", KeysEvent.KEY_CHANGED)
+    assert row
+    assert f"{api_limits.APP_BUDGET_DOLLARS:g} → 6" in row.group(0)
+    assert keys.writes == [
+        [{"target": "key", "subject": "hopin", "new": False, "fields": {"max_budget": 6.0}}]
+    ]
+
+
+def test_an_app_table_naming_no_app_read_cannot_plan_and_asks_nothing(switch, keys):  # noqa: F811
+    exit_code, out, err = switch(api=ApiSettings(apps={"hopn": AppNumbers(budget_dollars=1.0)}))
+
+    assert exit_code == ApplyExit.CANNOT_PLAN
+    assert "Type yes" not in plain(out)
+    assert "cannot plan, [api.hopn] names no app" in plain(err)
+    assert keys.writes == []
 
 
 def test_keys_not_read_with_nothing_else_to_change_ask_nothing_and_refuse(switch, keys):  # noqa: F811
