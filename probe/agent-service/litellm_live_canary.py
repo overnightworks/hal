@@ -30,9 +30,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(REPO / "agent-service"))
 
 from egress import PROJECT  # noqa: E402
+from issuer import ISSUER_ORIGIN  # noqa: E402
 from litellm import (  # noqa: E402
-    CANARY,
-    DEFAULT_APP,
     FRONT,
     LISTENING,
     LITELLM,
@@ -43,8 +42,13 @@ from litellm import (  # noqa: E402
 from litellm_retention import RetentionProbe  # noqa: E402
 from live_canary import Verdicts, live_canary, route_targets  # noqa: E402
 from live_smoke import Stack  # noqa: E402
+from refusals import API_GROUP  # noqa: E402
 from retention_census import run_docker  # noqa: E402
 from smoke import Tokens  # noqa: E402
+
+# Frozen until HAL-2.8: the names and the token builder the service canary needs, moved here from
+# the probe base, which no longer calls through the service.
+CANARY, DEFAULT_APP = "agent-canary", "songmaker"
 
 # The grammar of the grammar table, written from it and not from the program: a (cell, verdict)
 # and the figures that may follow.
@@ -110,6 +114,21 @@ class LiveCanaryProbe(RetentionProbe):
         super().__init__(scratch)
         self.printed: list[str] = []
         self.forbidden: list[str] = []
+
+    def canary_input(self, app: str) -> str:
+        """The two tokens of a person of the API group alone, as the canary reads them."""
+        claims = {
+            "sub": self.identity["sub"], "preferred_username": self.identity["username"],
+            "email": self.identity["email"], "azp": app, "groups": [f"/apps/{app}", API_GROUP],
+        }  # fmt: skip
+        issuer = f"{ISSUER_ORIGIN}/realms/hallucinai"
+        person = self.issuer.token(issuer, claims)
+        workload = self.issuer.token(
+            issuer,
+            {"sub": "workload", "azp": app, "client_id": app,
+             "realm_access": {"roles": ["agent-workload"]}},
+        )  # fmt: skip
+        return f"{person}\n{workload}\n"
 
     def drive(self) -> None:
         for service in (SERVICE, LITELLM):
