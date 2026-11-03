@@ -599,7 +599,7 @@ def test_the_staging_of_a_killed_run_in_the_old_cache_is_swept_by_the_next_backu
 
 
 def test_a_backup_on_a_scratch_home_never_creates_the_old_state(edge_backup, machine, home):
-    """M8, the backup's part; the stack's is in tests/test_state_directory_owners.py."""
+    """M8, the backup's part; the stack's is in tests/test_workstation_state_move_owners.py."""
     outcome = edge_backup("backup")
 
     assert outcome.exit_code == ExitCode.OK, outcome.err
