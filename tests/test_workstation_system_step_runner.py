@@ -23,7 +23,7 @@ from support.workstation_support import FRESH_APPLY, Sandbox, StubSudo, lines_of
 COUNTS = system_step.EVENT_MARK + json.dumps({"event": "counts", "changed": 3, "failed": 0, "unreachable": 0})
 FAILED_COUNTS = system_step.EVENT_MARK + json.dumps({"event": "counts", "changed": 1, "failed": 1, "unreachable": 0})
 UNREACHABLE_COUNTS = system_step.EVENT_MARK + json.dumps({"event": "counts", "changed": 0, "failed": 0, "unreachable": 1})
-FAILED_RESULT = system_step.EVENT_MARK + json.dumps({"event": "result", "status": "failed", "msg": "names no `tunnel:`; nothing was written"})
+FAILED_RESULT = system_step.EVENT_MARK + json.dumps({"event": "result", "status": "failed", "msg": "names no `tunnel:`"})
 CHANGED_WRITE = system_step.EVENT_MARK + json.dumps({"event": "changed", "task": "Write edge files"})
 CHANGED_RESTART = system_step.EVENT_MARK + json.dumps({"event": "changed", "task": "Restart Docker"})
 TASK_START = system_step.EVENT_MARK + json.dumps({"event": "task", "task": "Read the default log driver"})
@@ -49,8 +49,8 @@ MALFORMED_COUNTS = [
     [
         (0, [COUNTS], PlaybookFinished(3)),
         (0, [CHANGED_WRITE, CHANGED_RESTART, COUNTS], PlaybookFinished(3, ("Write edge files", "Restart Docker"))),
-        (2, [FAILED_RESULT, FAILED_COUNTS], PlaybookUnfinished("names no `tunnel:`; nothing was written")),
-        (4, [UNREACHABLE_RESULT, UNREACHABLE_COUNTS], PlaybookUnfinished("no route")),
+        (2, [FAILED_RESULT, FAILED_COUNTS], PlaybookUnfinished("names no `tunnel:`", 1)),
+        (4, [UNREACHABLE_RESULT, UNREACHABLE_COUNTS], PlaybookUnfinished("no route", 0)),
         (0, [FAILED_RESULT, COUNTS, COUNTS], PlaybookUnfinished()),
         (0, [], PlaybookUnfinished()),
         (0, [TASK_START, CHANGED_WRITE, COUNTS], PlaybookFinished(3, ("Write edge files",))),
@@ -62,8 +62,11 @@ MALFORMED_COUNTS = [
         (0, [system_step.EVENT_MARK + json.dumps({"event": "started"}), COUNTS], PlaybookUnfinished()),
         (0, [system_step.EVENT_MARK + "not json", COUNTS], PlaybookUnfinished()),
         (0, [system_step.EVENT_MARK + json.dumps({"event": "changed"}), COUNTS], PlaybookUnfinished()),
-        (1, [COUNTS], PlaybookUnfinished()),
+        (0, [system_step.EVENT_MARK + json.dumps({"event": "changed", "task": 7}), COUNTS], PlaybookUnfinished()),
+        (0, [system_step.EVENT_MARK + json.dumps({"event": "changed", "task": None}), COUNTS], PlaybookUnfinished()),
+        (1, [COUNTS], PlaybookUnfinished(changed=3)),
         (0, [FAILED_RESULT, COUNTS], PlaybookFinished(3)),
+        (2, [CHANGED_WRITE, FAILED_RESULT, counts_event(changed=0, failed=1, unreachable=0)], PlaybookUnfinished("names no `tunnel:`", 1)),
     ],
     ids=[
         "clean counts",
@@ -81,8 +84,11 @@ MALFORMED_COUNTS = [
         "unknown event",
         "unreadable event",
         "changed event without a task",
+        "changed event named by a number",
+        "changed event named null",
         "nonzero exit",
         "rescued failure",
+        "a changed task the counts missed",
     ],
 )
 def test_a_run_finishes_only_with_exit_0_and_one_counts_event_without_failures(returncode: int, events: list[str], expected: PlaybookRun) -> None:
@@ -426,6 +432,7 @@ def test_a_failing_sudo_k_after_a_finished_play_still_fails_the_system_row_with_
     captured = capsys.readouterr()
     assert code == ExitCode.FAILURE
     assert f"  ✗ system          failed         {TICKET_SENTENCE}" in captured.out.splitlines()
+    assert captured.err == "error: setup stopped at system · /etc may be partial\nnext: hal setup\n"
 
 
 def test_a_missing_sudo_fails_alone_without_a_ticket_to_forget(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

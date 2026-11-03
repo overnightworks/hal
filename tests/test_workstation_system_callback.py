@@ -63,6 +63,12 @@ LOOPED_AND_UNCHANGED = """
       ansible.builtin.command: "true"
       changed_when: false
 """
+LOOP_THAT_FAILS_AFTER_A_WRITE = """
+    - name: looped write
+      ansible.builtin.command: "test {{ item }} = 1"
+      changed_when: true
+      loop: [1, 2]
+"""
 HANDLER = """
   handlers:
     - name: handler
@@ -86,12 +92,13 @@ def run_scratch_play(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tasks: str
     [
         (CHANGED_SKIPPED_AND_HANDLED, HANDLER, PlaybookFinished(2, ("changed task", "handler"))),
         (LOOPED_AND_UNCHANGED, "", PlaybookFinished(1, ("looped task",))),
-        (FAILING_ASSERT, "", PlaybookUnfinished("the file names no tunnel")),
-        (RESCUE_THAT_FAILS, "", PlaybookUnfinished("the rescue refused")),
+        (FAILING_ASSERT, "", PlaybookUnfinished("the file names no tunnel", 0)),
+        (RESCUE_THAT_FAILS, "", PlaybookUnfinished("the rescue refused", 0)),
+        (LOOP_THAT_FAILS_AFTER_A_WRITE, "", PlaybookUnfinished("One or more items failed", 1)),
         (IGNORED_FAILURE, "", PlaybookFinished(0)),
         (RESCUE_THAT_HOLDS, "", PlaybookFinished(0)),
     ],
-    ids=["changed skipped and handled", "looped and unchanged", "failed assert", "rescue that fails", "ignored failure", "rescued failure"],
+    ids=["changed skipped and handled", "looped and unchanged", "failed assert", "rescue that fails", "loop that fails after a write", "ignored failure", "rescued failure"],
 )
 def test_the_callback_reports_counts_and_the_message_of_the_last_failed_task(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tasks: str, handlers: str, expected: PlaybookRun
@@ -111,6 +118,7 @@ def test_an_unreachable_host_is_an_unfinished_run_with_the_connection_message(tm
 
     assert isinstance(run, PlaybookUnfinished)
     assert "hal-test: connection refused by fixture" in run.reason
+    assert run == PlaybookUnfinished(run.reason, 0)
 
 
 def test_without_v_none_of_ansibles_text_shows(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]) -> None:

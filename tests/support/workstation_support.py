@@ -406,7 +406,7 @@ class StubSudo:
         return [[part.strip() for part in line.split(" | ")] for line in self.log.read_text().splitlines()]
 
 
-TASK_MESSAGE = "/etc/cloudflared/config.yml names no `tunnel:`; nothing was written"
+TASK_MESSAGE = "/etc/cloudflared/config.yml names no `tunnel:`"
 
 
 class FakePlaybook:
@@ -416,6 +416,7 @@ class FakePlaybook:
         self.calls: list[list[str]] = []
         self.succeeds = True
         self.failure = ""
+        self.changed_before_failing: int | None = None
         self.applied = False
         self.tasks = ("Write edge files", "Restart Docker")
 
@@ -425,7 +426,7 @@ class FakePlaybook:
         if self.succeeds and "--check" not in argv:
             self.applied = True
         if not self.succeeds:
-            return system_step.PlaybookUnfinished(self.failure)
+            return system_step.PlaybookUnfinished(self.failure, self.changed_before_failing)
         return system_step.PlaybookFinished(len(tasks), tasks)
 
 

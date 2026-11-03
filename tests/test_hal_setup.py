@@ -1,5 +1,5 @@
 """`hal setup`: the command table entry. The steps run against a sandboxed HOME
-in tests/test_workstation_setup.py, where the sandbox lives."""
+in tests/support/workstation_support.py, where the sandbox lives."""
 
 from hal import setup_commands
 from hal.grammar import Asks

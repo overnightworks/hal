@@ -68,6 +68,16 @@ in_log() {
     return
 }
 
+says_or_no_etc_line() {  # says_or_no_etc_line <log> <text>: the log has <text>; an empty <text> means the log prints no /etc line at all
+    local log=$1 text=$2
+    if [[ -z $text ]]; then
+        ! in_log "$log" "/etc "
+    else
+        in_log "$log" "$text"
+    fi
+    return
+}
+
 YES_PROMPT_PATTERN='Type .*yes.* to .*: '
 
 after_the_yes() {  # after_the_yes <log>: the output after the yes prompt; all of it when no yes was asked
@@ -353,7 +363,7 @@ cell_12_without_a_tunnel_id() {  # <case> <sed edit of config.yml>: the `tunnel:
     at_terminal "$log" "$HAL_BIN setup"
     code=$?
     cp /proof/config.yml.saved /etc/cloudflared/config.yml
-    verdict 12 "apply fails loudly when the tunnel id is $case_name" '[ $code -eq 3 ] && in_log "$log" "names no \`tunnel:\`"'
+    verdict 12 "apply fails loudly when the tunnel id is $case_name" '[ $code -eq 3 ] && in_log "$log" "names no \`tunnel:\`" && in_log "$log" "/etc unchanged"'
     verdict 12 "nothing is half-written when the tunnel id is $case_name" '[ "$before" = "$(snapshot)" ]'
     return
 }
@@ -863,8 +873,8 @@ cell_a1_2() {  # runs after the second apply of cell 9
     return
 }
 
-refuses_foreign_shape() {  # refuses_foreign_shape <name> <make> <undo> [reason] [dry]: the play fails with exit 3 and nothing, not even cloudflared's files, moves
-    local name=$1 make=$2 undo=$3 reason=${4:-nothing was written} before after code dry_code dry_after  # NOSONAR(shelldre:S1481) read inside the condition that verdict evals
+refuses_foreign_shape() {  # refuses_foreign_shape <name> <make> <undo> [reason] [dry] [says]: the play fails with exit 3 and nothing, not even cloudflared's files, moves; <says> is the /etc line it prints, empty where hal refuses before the play
+    local name=$1 make=$2 undo=$3 reason=${4:-exists with} says=${6-/etc unchanged} before after code dry_code dry_after  # NOSONAR(shelldre:S1481) read inside the condition that verdict evals
     eval "$make"
     before=$(agent_world)
     at_terminal "a1-3-$name" "$HAL_BIN setup"
@@ -877,10 +887,10 @@ refuses_foreign_shape() {  # refuses_foreign_shape <name> <make> <undo> [reason]
     fi
     eval "$undo"
     verdict A1-3 "$name: the apply refuses with exit 3 and nothing was written" \
-        '[ $code -eq 3 ] && in_log "a1-3-$name" "$reason" && ! in_log "a1-3-$name" "$OPERATORS_SKIP" && [ "$before" = "$after" ]'
+        '[ $code -eq 3 ] && in_log "a1-3-$name" "$reason" && says_or_no_etc_line "a1-3-$name" "$says" && ! in_log "a1-3-$name" "$OPERATORS_SKIP" && [ "$before" = "$after" ]'
     if [[ ${5:-} == dry ]]; then
         verdict A1-3 "$name: the dry run refuses with exit 3 and nothing was written" \
-            '[ $dry_code -eq 3 ] && in_log "a1-3-$name-dry" "$reason" && [ "$before" = "$dry_after" ]'
+            '[ $dry_code -eq 3 ] && in_log "a1-3-$name-dry" "$reason" && says_or_no_etc_line "a1-3-$name-dry" "$says" && [ "$before" = "$dry_after" ]'
     fi
     verdict A1-3 "$name: undone, the account is dormant again" agent_is_dormant
     return
@@ -983,9 +993,9 @@ cell_a1_3_shared_ids() {  # a uid or gid the account shares, with the shared nam
     refuses_foreign_shape "the uid of bystander, agent listed first" 'set_passwd_field agent 3 $(id -u bystander); move_entry /etc/passwd agent first' \
         'set_passwd_field agent 3 $AGENT_ID; move_entry /etc/passwd agent last' "a uid shared with"
     refuses_foreign_shape "the uid of the running user, agent listed after" 'set_passwd_field agent 3 $(id -u tester)' 'set_passwd_field agent 3 $AGENT_ID' \
-        "must have a uid of its own"
+        "must have a uid of its own" "" ""
     refuses_foreign_shape "the uid of the running user, agent listed first" 'set_passwd_field agent 3 $(id -u tester); move_entry /etc/passwd agent first' \
-        'set_passwd_field agent 3 $AGENT_ID; move_entry /etc/passwd agent last' "must have a uid of its own"
+        'set_passwd_field agent 3 $AGENT_ID; move_entry /etc/passwd agent last' "must have a uid of its own" "" ""
     refuses_foreign_shape "its gid in another group, listed after" 'groupadd --non-unique --gid $AGENT_GID sharer' 'drop_entry /etc/group sharer; drop_entry /etc/gshadow sharer' "a gid shared with sharer"
     refuses_foreign_shape "its gid in another group, listed first" 'groupadd --non-unique --gid $AGENT_GID sharer; move_entry /etc/group sharer first' \
         'drop_entry /etc/group sharer; drop_entry /etc/gshadow sharer' "a gid shared with sharer"
@@ -1617,7 +1627,7 @@ cell_dk3_case() {  # cell_dk3_case <name> <daemon.json text> <text the refusal n
     file_before=$(sha256sum <"$DAEMON_JSON")
     at_terminal "$log" "$HAL_BIN setup $flag"
     code=$?
-    verdict DK3 "$name: refused with exit 3, naming $names" '[ $code -eq 3 ] && in_log "$log" "$names"'
+    verdict DK3 "$name: refused with exit 3, naming $names" '[ $code -eq 3 ] && in_log "$log" "$names" && in_log "$log" "/etc unchanged"'
     verdict DK3 "$name: daemon.json, edge's files and Docker's start time are unchanged" \
         '[ "$file_before" = "$(sha256sum <"$DAEMON_JSON")" ] && [ "$before" = "$(snapshot)" ] && [ "$started" = "$(docker_started_at)" ]'
     rm -f "$DAEMON_JSON"
@@ -1643,7 +1653,7 @@ cell_dk3() {  # after cell 1, so Docker and edge's files are in place and a writ
     systemctl start docker.socket
     wait_for_engine
     verdict DK3 "Docker does not answer: refused with exit 3, naming Docker, nothing written" \
-        '[ $code -eq 3 ] && in_log dk3-down "Docker does not answer" && [ ! -e "$DAEMON_JSON" ] && [ "$(snapshot)" = "$(cat "$EVIDENCE/dk3-before.txt")" ]'
+        '[ $code -eq 3 ] && in_log dk3-down "Docker does not answer" && in_log dk3-down "/etc unchanged" && [ ! -e "$DAEMON_JSON" ] && [ "$(snapshot)" = "$(cat "$EVIDENCE/dk3-before.txt")" ]'
     return
 }
 
@@ -1741,7 +1751,7 @@ cell_dk7_case() {  # cell_dk7_case <name> <state of the file before the apply: c
     # The failed check is a rescued task, whose message only Ansible's text carries, so this apply runs with -v.
     at_terminal "dk7-$state-$failure" "$HAL_BIN setup -v"
     code=$?
-    verdict DK7 "$name: the apply exits 3 naming the rescue" '[ $code -eq 3 ] && in_log "dk7-$state-$failure" "was written back without"'
+    verdict DK7 "$name: the apply exits 3 naming the rescue" '[ $code -eq 3 ] && in_log "dk7-$state-$failure" "was written back without" && in_log "dk7-$state-$failure" "/etc may be partial"'
     if [[ $failure = wrong-driver ]]; then
         verdict DK7 "$name: the apply saw Docker start and name json-file, not the journal" 'in_log "dk7-$state-$failure" "Docker reports json-file"'
     fi
@@ -1875,7 +1885,7 @@ cell_p_fails_in_the_play() {  # cell_p_fails_in_the_play <cell> <log> <ticket> <
     code=$?
     cp /proof/config.yml.saved /etc/cloudflared/config.yml
     verdict "$cell" "the step fails after $prompts prompt(s) and the ticket is gone" \
-        "[ \$code -eq 3 ] && active_sudo_is \"\$sudo_alternative\" && hal_prompts_are $log $prompts && row_in_log $log system failed && ticket_is_gone $log"
+        "[ \$code -eq 3 ] && active_sudo_is \"\$sudo_alternative\" && hal_prompts_are $log $prompts && row_in_log $log system failed && in_log $log \"/etc unchanged\" && ticket_is_gone $log"
     return
 }
 
