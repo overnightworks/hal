@@ -104,8 +104,8 @@ stack behind, ends with `PROBE FAILED` and exit 1.
   (TC2); Decline ends in `access_denied` with no session and no stored time (TC3); Accept stores the time as Unix seconds,
   which an admin reads and the account REST, both tokens and an admin PUT do not show or change (TC4); a later
   sign-in to hopin and presentator asks nothing (TC5); asked again, Decline removes the old time and Accept stores a new one (TC6).
-  Cells SP1 to SP6 and SP8 (#837, #941) also run in proof 10: hopin's and presentator's workload tokens carry the `speech-service` audience
-  only when they ask for `speech-service-audience`, and `speech-workload` either way, as their service accounts' role (SP1, SP2); the rest of the speech cells run in hopin's branch only. A
+  Cells SP1 to SP6 and SP8 (#837) also run in proof 10: hopin's and presentator's workload tokens carry the `speech-service` audience
+  only when they ask for `speech-service-audience`, and `speech-workload` either way, as their service accounts' role (SP1, SP2); SP3, SP4, SP6, SP8 and W4 run in hopin's branch only. A
   member's person token carries the audience only when asked and `/services/speech-service` either way, as the default `groups`
   scope gives it, and its ID token never the audience (SP3); a non-member's token without the scope carries no audience (SP4); songmaker is refused the scope as the control and
   never get the audience (SP5); `agent-service` and `speech-service` are bearer-only with every flow off (W4, SP6); the group has no subgroup (SP8).

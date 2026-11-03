@@ -302,7 +302,7 @@ clients:
       - speech-service-audience
   # One client for presentator's two hosts (agent-presentator#242). It is logged out like hopin, on
   # presentator's own port, over its own back-channel network. Its service account is a workload of
-  # the agent service and of the speech service (#941), whose audience it asks for by the optional
+  # the agent service and of the speech service, whose audience it asks for by the optional
   # scope speech-service-audience.
   - clientId: presentator
     name: presentator

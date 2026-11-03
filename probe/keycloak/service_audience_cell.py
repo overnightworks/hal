@@ -1,7 +1,7 @@
 """Cells SP1-SP6, SP8 and W4 of probe.py: a service's audience reaches a token only
 through the client scope that names it. The agent service's scope is a default of every app
-client; the speech service's is an optional scope of hopin and presentator alone, so a token
-carries `speech-service` only when one of them asks for it, and songmaker cannot ask. Each
+client; the speech service's is an optional scope of the clients that declare it, so a token
+carries `speech-service` only when one of them asks for it, and the others cannot ask. Each
 service is a bearer-only client, and `/services/speech-service` has no subgroup. The held lines
 print the decoded claims the speech service reads and never a token. After them, hopin's branch
 runs the measurements of `scope_measurement_cell` on clients the probe makes."""
@@ -22,9 +22,7 @@ AGENT_SERVICE = "agent-service"
 SPEECH_SERVICE = "speech-service"
 WORKLOAD_ROLES = {AGENT_SERVICE: "agent-workload", SPEECH_SERVICE: "speech-workload"}
 SPEECH_SCOPE = "speech-service-audience"
-SPEECH_CALLERS = ("hopin", "presentator")
-SPEECH_CALLER_ACCOUNTS = [f"service-account-{name}" for name in SPEECH_CALLERS]
-SPEECH_PROOF_CLIENT = SPEECH_CALLERS[0]  # the caller whose branch also runs SP3, SP4 and SP8
+PROOF_CLIENT = "hopin"  # the client whose branch also runs the bearer-only and measurement cells
 SPEECH_GROUP = f"/services/{SPEECH_SERVICE}"
 USERNAME = "probe-hopin-speech-member"
 BEARER_ONLY_PROOFS = {AGENT_SERVICE: "W4", SPEECH_SERVICE: "SP6"}
@@ -41,14 +39,17 @@ def audience_of(access: dict[str, Any]) -> list[str]:
     return [audience] if isinstance(audience, str) else audience
 
 
+def has_workload_role(access: dict[str, Any], service: str) -> bool:
+    return WORKLOAD_ROLES[service] in access.get("realm_access", {}).get("roles", [])
+
+
 def is_workload_identity_of(
     access: dict[str, Any], client_id: str, service: str = AGENT_SERVICE
 ) -> bool:
     """The shape a service accepts: its workload role and audience, `client_id` and `azp` both
     naming the app, and no group."""
-    roles = access.get("realm_access", {}).get("roles", [])
     return (
-        WORKLOAD_ROLES[service] in roles
+        has_workload_role(access, service)
         and service in audience_of(access)
         and access.get("client_id") == client_id
         and access.get("azp") == client_id
@@ -87,6 +88,7 @@ class Client(Protocol):
     client_id: str
     group: str
     secret_file: str
+    optional_scopes: frozenset[str]
 
 
 class Probe(scope_measurement_cell.Probe, Protocol):
@@ -143,7 +145,9 @@ class ServiceAudienceCell:
         )
         plain = self.workload_claims()
         self.expect(
-            is_workload_identity_of(plain, self.name) and SPEECH_SERVICE not in audience_of(plain),
+            is_workload_identity_of(plain, self.name)
+            and has_workload_role(plain, SPEECH_SERVICE)
+            and SPEECH_SERVICE not in audience_of(plain),
             f"{self.name}'s workload token asked for no scope: {decoded(plain)}",
         )
         self.probe.held(
@@ -168,8 +172,7 @@ class ServiceAudienceCell:
             SPEECH_SERVICE in audience_of(access)
             and SPEECH_GROUP in access.get("groups", [])
             and "/services" not in access["groups"]
-            and WORKLOAD_ROLES[SPEECH_SERVICE]
-            not in access.get("realm_access", {}).get("roles", [])
+            and not has_workload_role(access, SPEECH_SERVICE)
             and SPEECH_SERVICE not in audience_of(identity),
             f"a member's token asked for {SPEECH_SCOPE}: {decoded(access)}; "
             f"ID token aud {audience_of(identity)}",
@@ -214,10 +217,10 @@ def prove(
     person_access_token: str,
 ) -> None:
     cell = ServiceAudienceCell(probe, expect, client)
-    if client.client_id not in SPEECH_CALLERS:
+    if SPEECH_SCOPE not in client.optional_scopes:
         cell.client_without_the_scope(person_access_token)
         return
-    runs_whole_proof = client.client_id == SPEECH_PROOF_CLIENT
+    runs_whole_proof = client.client_id == PROOF_CLIENT
     if runs_whole_proof:
         cell.bearer_only_services()
     cell.workload_with_and_without_the_scope()

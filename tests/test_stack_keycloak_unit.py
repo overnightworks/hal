@@ -342,15 +342,9 @@ def test_the_account_console_offers_no_groups_page():
     assert "groups" not in [entry["label"] for entry in json.loads(content.read_text())]
 
 
-@pytest.mark.parametrize(
-    ("app", "personal_scopes"),
-    [("hopin", {"email", "web-origins", "acr"}), ("presentator", set())],
-)
-def test_a_speech_caller_has_a_workload_service_account_in_no_group_and_without_personal_scopes(
-    app, personal_scopes
-):
-    """#506, #941: the account holds only declared workload roles, and an app that reads no
-    `email`, `web-origins` or `acr` has none of them."""
+@pytest.mark.parametrize("app", ["hopin", "presentator"])
+def test_a_speech_caller_has_a_workload_service_account_in_no_group(app):
+    """The account holds only declared workload roles."""
     realm = yaml.safe_load((REPOSITORY / "keycloak/realm.yaml").read_text())
     account = next(user for user in realm["users"] if user["username"] == f"service-account-{app}")
 
@@ -360,7 +354,21 @@ def test_a_speech_caller_has_a_workload_service_account_in_no_group_and_without_
     assert set(account["realmRoles"]) <= declared_roles
     assert "groups" not in account
     assert realm_clients()[app]["serviceAccountsEnabled"] is True
-    assert not personal_scopes & set(realm_clients()[app]["defaultClientScopes"])
+
+
+def test_hopin_has_no_personal_scope():
+    """#506: an app that reads no `email`, `web-origins` or `acr` has none of them."""
+    assert not {"email", "web-origins", "acr"} & set(
+        realm_clients()["hopin"]["defaultClientScopes"]
+    )
+
+
+def test_presentator_shares_songmakers_default_scopes():
+    clients = realm_clients()
+
+    assert (
+        clients["presentator"]["defaultClientScopes"] == clients["songmaker"]["defaultClientScopes"]
+    )
 
 
 @pytest.mark.parametrize(
@@ -371,8 +379,19 @@ def test_a_speech_caller_has_a_workload_service_account_in_no_group_and_without_
         ("songmaker", []),
     ],
 )
-def test_only_the_speech_callers_can_ask_for_the_speech_audience(app, offered):
+def test_the_speech_callers_alone_offer_the_speech_audience_as_an_optional_scope(app, offered):
     assert realm_clients()[app]["optionalClientScopes"] == offered
+
+
+def test_only_the_speech_callers_list_the_speech_audience_among_their_scopes():
+    listing = {
+        name
+        for name, client in realm_clients().items()
+        if "speech-service-audience"
+        in client.get("defaultClientScopes", []) + client.get("optionalClientScopes", [])
+    }
+
+    assert listing == {"hopin", "presentator"}
 
 
 def test_only_songmaker_allows_the_device_grant():
