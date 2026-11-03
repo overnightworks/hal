@@ -132,6 +132,17 @@ class AdmissionProbe(LitellmProbe):
         self.refused(cell, answer, before)
         return f"{answer['status']} {error_of(answer)}"
 
+    def expect_query_refused(self, cell: str, key: str, user: str) -> str:
+        """A `?model=` request naming the second configured name, as K3 sends, from a key or a
+        person past the budget: refused before the provider like the body's model."""
+        second = list(shipped_models())[1]
+        before = len(self.provider_requests())
+        answer = self.complete(key, user=user, path=f"{ROUTE}?model={second}")
+        expect(answer["status"] != 200 and len(self.provider_requests()) == before,
+               f"{cell}: BUDGET PASSED BY ?model={second}: {answer['status']}")  # fmt: skip
+        self.refused(cell, answer, before)
+        return f"?model={second}: {answer['status']} {error_of(answer)}, F 0"
+
     def move_due(self, table: str, column: str, value: str) -> None:
         """Moves a budget's reset into the past in LiteLLM's database."""
         moved = "budget_reset_at = now() - interval '1 minute'"
@@ -301,8 +312,10 @@ class AdmissionProbe(LitellmProbe):
         person, other = self.fingerprint(), self.fingerprint()
         spend = self.push_person("P3", key, person)
         refusal = self.expect_refused("P3", key, person)
+        query = self.expect_query_refused("P3", key, person)
         self.expect_served("P3", key, other)
-        self.hold("P3", f"X at {spend:.2f} dollars refused: {refusal}, F 0; Y on the key served")
+        self.hold("P3", f"X at {spend:.2f} dollars refused: {refusal}, F 0, and {query}; Y on the "
+                  "key served")  # fmt: skip
         self.hold(
             "P4", f"X through the second key: {self.expect_refused('P4', second, person)}, F 0"
         )
@@ -340,8 +353,9 @@ class AdmissionProbe(LitellmProbe):
         self.wait_for("K5", "the key's spend past its budget",
                       lambda: self.key_info(key)["spend"] > APP_BUDGET)  # fmt: skip
         refusal = self.expect_refused("K5", key, self.fingerprint())
+        query = self.expect_query_refused("K5", key, self.fingerprint())
         self.hold("K5", f"past max_budget the next request is refused before the provider: "
-                  f"{refusal}, F 0")  # fmt: skip
+                  f"{refusal}, F 0, and {query}")  # fmt: skip
         return key
 
     def cells_k7_p5(self, over: str, key: str, person: str) -> None:

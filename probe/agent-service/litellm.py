@@ -55,6 +55,8 @@ from issuer import ISSUER_SERVICE, SERVICE, IssuerProbe  # noqa: E402
 from retention_census import DATABASE, FRONT, GATEWAY, LITELLM  # noqa: E402
 from scratch_secrets import issue_certificate, write_new  # noqa: E402
 
+from hal.output import write_line  # noqa: E402
+
 FAKE_PROVIDER, FAKE_ISSUER = "fake-anthropic", "fake-issuer"
 PROVIDER_HOST, ISSUER_HOST = "api.anthropic.com", "auth.hallucinai.de"
 NEW_NETWORKS = ("litellm-api", "litellm-backend", "litellm-egress", "litellm-db")
@@ -584,7 +586,7 @@ class LitellmProbe(IssuerProbe):
             ("G8", "POST", "/mcp/"), ("G9", "POST", "/register"),
         ):  # fmt: skip
             self.cell_unreachable(cell, method, path, key)
-        self.cell_k2()
+        self.cell_k2(key)
         self.cell_k4(key)
 
     def cell_k1(self, key: str) -> None:
@@ -608,15 +610,23 @@ class LitellmProbe(IssuerProbe):
         expect(len(self.access_lines()) == before, f"{cell}: LiteLLM's log grew")
         self.hold(cell, f"{method} {path} through the front: 404, LiteLLM saw nothing")
 
-    def cell_k2(self) -> None:
-        user = self.fingerprint()
-        for how, bearer in (("no bearer", None), ("a wrong one", secrets.token_urlsafe(24)),
-                            ("the old shared credential", self.credential)):  # fmt: skip
+    def cell_k2(self, key: str) -> None:
+        user, stored = self.fingerprint(), hashed(key)
+        for how, bearer, front in (
+            ("no bearer", None, True), ("a wrong one", secrets.token_urlsafe(24), True),
+            ("the old shared credential", self.credential, True),
+            ("the key's stored hash through the front", stored, True),
+            ("the key's stored hash straight at LiteLLM", stored, False),
+        ):  # fmt: skip
             before = len(self.provider_requests())
-            answer = self.complete(bearer, user=user)
+            answer = self.call(bearer, "POST", ROUTE, wire_body(user=user), front=front)
+            served = answer["status"] == 200 or len(self.provider_requests()) != before
+            if bearer == stored and served:
+                write_line("K2 measured: the stored hash is accepted as a bearer", flush=True)
             expect(answer["status"] == 401, f"K2: {how}: {answer['status']} {error_of(answer)}")
             expect(len(self.provider_requests()) == before, f"K2: {how}: the provider was reached")
-        self.hold("K2", "no bearer, a wrong one and the old shared credential: 401 each, F 0")
+        self.hold("K2", "no bearer, a wrong one, the old shared credential and the key's stored "
+                  "hash, through the front and straight at LiteLLM: 401 each, F 0")  # fmt: skip
 
     def cell_k4(self, key: str) -> None:
         user, results = self.fingerprint(), []
@@ -630,9 +640,10 @@ class LitellmProbe(IssuerProbe):
             self.refused(f"K4: {how}", answer, before)
             results.append(f"{how}: {answer['status']} {error_of(answer)}")
         before = len(self.provider_requests())
-        answer = self.complete(key, user=user, fallbacks=["text/sonnet"])
+        second = list(shipped_models())[1]
+        answer = self.complete(key, user=user, fallbacks=[second])
         self.served("K4", answer, self.provider_requests()[before:])
-        self.hold("K4", f"{'; '.join(results)}, F 0; fallbacks naming text/sonnet: served by "
+        self.hold("K4", f"{'; '.join(results)}, F 0; fallbacks naming {second}: served by "
                   f"{DEFAULT_MODEL}")  # fmt: skip
 
     def cell_d1(self) -> None:

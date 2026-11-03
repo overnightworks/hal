@@ -305,7 +305,8 @@ unit, and no app holds a key in LiteLLM's database.
   `/v1/completions` included), and a `user`, the person's fingerprint (`enforce_user_param`; 401
   without one). LiteLLM also routes by a `model` in the query string, which the key's `models` do
   not bind: one unknown to `config.yaml` is refused with 400, but a configured name outside the
-  key's `models` is served by that model (measured), and the front passes the query string.
+  key's `models` is served by that model and its spend counts on the key, and a key or person
+  past its budget is refused (measured); the front passes the query string.
   LiteLLM's ban list refuses `api_base` in the body with 401, and a fallback naming a URL with 401
   too. Messages are
   not logged; LiteLLM needs a master key to boot, a file secret that `hal setup` generates and no
