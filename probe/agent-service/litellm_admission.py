@@ -53,8 +53,6 @@ from litellm import (
     wire_body,
 )
 
-from hal.output import write_line
-
 WORKERS = "NUM_WORKERS"
 REQUEST_SECONDS = 60
 HOLDER_SECONDS = 150
@@ -227,18 +225,19 @@ class AdmissionProbe(LitellmProbe):
             answer = self.complete(bearer, model, user, path)
             self.refused(f"K3: {how}", answer, before)
             refusals.append(f"{how}: {answer['status']} {error_of(answer)}")
-        before = len(self.provider_requests())
-        passed = self.complete(narrow, first, user, f"{ROUTE}?model={second}")
-        reached = [request["model"] for request in self.provider_requests()[before:]]
+        before, spent = len(self.provider_requests()), self.key_info(narrow)["spend"]
+        bypass = self.complete(narrow, first, user, f"{ROUTE}?model={second}")
+        self.served("K3", bypass, self.provider_requests()[before:], second)
+        self.wait_for("K3", "SPEND NOT COUNTED: the narrow key's spend after the ?model= request",
+                      lambda: self.key_info(narrow)["spend"] > spent)  # fmt: skip
+        counted = self.key_info(narrow)["spend"]
         before = len(self.provider_requests())
         answer = self.complete(key, first, user, f"{ROUTE}?model={second}")
         self.served("K3", answer, self.provider_requests()[before:], second)
-        self.hold("K3", f"refused with F 0: {refusals}; ?model={second} on a key allowing it "
-                  "served, F names its id")  # fmt: skip
-        # Not a cell: refusing a query string is the front's call, not LiteLLM's.
-        measured = f"{passed['status']} {error_of(passed)}, F saw {reached}"
-        write_line(f"K3 measured, not held: ?model={second} on a key allowing only {first}: "
-                   f"{measured}", flush=True)  # fmt: skip
+        self.hold("K3", f"refused with F 0: {refusals}; ?model={second} passes the models of a key "
+                  f"allowing only {first}: served, F names {second}'s id, and its spend counts on "
+                  f"the key ({spent} -> {counted}); ?model={second} on a key allowing it served, "
+                  "F names its id")  # fmt: skip
 
     def cell_m1(self, key: str) -> None:
         user, seen = self.fingerprint(), {}
