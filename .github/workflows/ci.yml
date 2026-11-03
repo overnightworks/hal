@@ -278,8 +278,6 @@ jobs:
           front = compose["services"]["litellm-front"]
           if "secrets" in front or "ports" in front or "network_mode" in front:
               sys.exit("litellm-front reads a secret, publishes a port or has host networking")
-          if sorted(front["networks"]) != ["litellm-api", "litellm-backend"]:
-              sys.exit(f"litellm-front is on {sorted(front['networks'])}")
           public = yaml.safe_load(open("traefik.yml"))
           static = yaml.safe_load(open("agent-service/litellm/front/traefik.yml"))
           for block in ("global", "log"):

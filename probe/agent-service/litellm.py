@@ -1,7 +1,7 @@
 """Probe of LiteLLM's own keys on the API route (cells K1, K2, K4, and #768 S1a's G6-G9, N1, L1-L3,
 R1, R2, D1): the service, the one-route front, LiteLLM and the gateway's
 second entrypoint, in a throwaway compose project, against a fake Anthropic. The caller is a
-throwaway on `litellm-api` that posts agent-runtime's wire body (`model`, `messages`, `user`,
+throwaway on HopIn's network that posts agent-runtime's wire body (`model`, `messages`, `user`,
 `tools`) through the front with an app key the probe made through the master key from a throwaway
 on `litellm-backend`. Nothing live and nothing paid: the probe refuses to start unless the resolved
 copy marks `internet` internal and holds only the two fake hosts, and it never calls `egress.py`'s
@@ -287,6 +287,7 @@ class LitellmProbe(IssuerProbe):
     """The service with an API-only person, the front, LiteLLM and a fake Anthropic."""
 
     LITELLM_LOG_LEVEL: str | None = "INFO"  # None keeps the level compose.yaml ships
+    caller_network = "agent_hopin"  # hal_agent_hopin, as the probe's copy names it
 
     def __init__(self, scratch: Path) -> None:
         super().__init__(scratch)
@@ -480,11 +481,11 @@ class LitellmProbe(IssuerProbe):
 
     def call_command(self, name: str, bearer: str | None, method: str, path: str,
                      body: dict | None, *, front: bool):  # fmt: skip
-        """The argv and standard input of one throwaway's request: through the front from
-        `litellm-api`, or straight at LiteLLM from `litellm-backend`. Bearer and body go on
-        standard input, since a body may carry a key."""
+        """The argv and standard input of one throwaway's request: through the front from an app's
+        network (`caller_network`), or straight at LiteLLM from `litellm-backend`. Bearer and body
+        go on standard input, since a body may carry a key."""
         network, host, port = (
-            ("litellm-api", FRONT, str(FRONT_PORT)) if front
+            (self.caller_network, FRONT, str(FRONT_PORT)) if front
             else ("litellm-backend", LITELLM, self.proxy_address.rsplit(":", 1)[1])
         )  # fmt: skip
         argv = [
@@ -542,9 +543,9 @@ class LitellmProbe(IssuerProbe):
         return (self.customer_row(user) or {"spend": 0.0})["spend"]
 
     def complete(self, key: str | None, model: str = DEFAULT_MODEL, user: str | None = None,
-                 path: str = ROUTE, **extra: object) -> dict:  # fmt: skip
+                 path: str = ROUTE, front: bool = True, **extra: object) -> dict:  # fmt: skip
         """A: one request of agent-runtime's wire body."""
-        return self.call(key, "POST", path, wire_body(model, user, **extra))
+        return self.call(key, "POST", path, wire_body(model, user, **extra), front=front)
 
     def fingerprint(self) -> str:
         return f"fp-{secrets.token_hex(8)}"

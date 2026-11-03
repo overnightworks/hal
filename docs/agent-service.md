@@ -286,12 +286,14 @@ host process can reach it, because the network has no host address and publishes
 An app that calls LiteLLM directly holds only its own key, the file `~/.secrets/litellm/apps/<app>` (`songmaker`,
 `hopin`, `presentator`). `hal setup` creates a missing one with the prefix `sk-` that LiteLLM requires of a custom
 key, mode 0644 in a 0700 folder so the app's container reads it as its own user; no service reads the file today.
+On the same agent network the app posts to `http://litellm-front:4000/v1/chat/completions` with that
+key as bearer; nothing starts the front yet.
 
 ## The API route
 
-An app reaches the provider through LiteLLM with its own key. The path is `litellm-front`,
-`litellm`, `agent-egress`, the provider, over the internal, isolated networks `litellm-api`,
-`litellm-backend` and `litellm-egress`; `litellm` also reaches its own Postgres, `litellm-db`, over
+An app reaches the provider through LiteLLM with its own key. The path starts on the app's own
+agent network, `hal_agent_<app>`, and is `litellm-front`, `litellm`, `agent-egress`, the provider,
+over the internal, isolated networks `litellm-backend` and `litellm-egress`; `litellm` also reaches its own Postgres, `litellm-db`, over
 `litellm-db`, a network with those two members. Nothing runs it yet: the profile `litellm` is in no
 unit, and no app holds a key in LiteLLM's database.
 
@@ -306,7 +308,10 @@ unit, and no app holds a key in LiteLLM's database.
   without one). LiteLLM also routes by a `model` in the query string, which the key's `models` do
   not bind: one unknown to `config.yaml` is refused with 400, but a configured name outside the
   key's `models` is served by that model and its spend counts on the key, and a key or person
-  past its budget is refused (measured); the front passes the query string.
+  past its budget is refused (measured). The front therefore answers any query string on its
+  route itself with 400 and no `Location`, so nothing of such a request reaches LiteLLM. It sets
+  `User-Agent` to one constant, `litellm-front`, and removes `x-litellm-tags`, which LiteLLM would
+  turn into request tags; the bearer and `Content-Type` pass unchanged.
   LiteLLM's ban list refuses `api_base` in the body with 401, and a fallback naming a URL with 401
   too. Messages are
   not logged; LiteLLM needs a master key to boot, a file secret that `hal setup` generates and no
@@ -351,8 +356,11 @@ unit, and no app holds a key in LiteLLM's database.
   LiteLLM bump, since a schema change shows in production only as a failed unit.
 - **What stays reachable.** The front sees every message and every app key in memory; a
   compromised front could spend credit through LiteLLM, bounded by each key's budget and parallel
-  bound. LiteLLM reaches only the front, its database
-  and, through the gateway's `litellm` entrypoint, the provider's name.
+  bound. The front is a member of every app's agent network beside the service's `litellm-api`,
+  so an app could give itself the alias `litellm` there; the front therefore finds LiteLLM through
+  `extra_hosts` at its fixed address on `litellm-backend` (`compose.yaml` pins the subnet, and its
+  `ip_range` keeps that address from any other container), never by Docker's DNS. LiteLLM reaches
+  only the front, its database and, through the gateway's `litellm` entrypoint, the provider's name.
 - **The bound.** Each app key's `max_parallel_requests` bounds its requests in flight; LiteLLM
   refuses the next one at once with 429 and `Retry-After`, before the provider, and another key's
   requests are not counted against it. It counts HTTP requests, not runs, per LiteLLM process in
@@ -375,8 +383,10 @@ unit, and no app holds a key in LiteLLM's database.
   with a line that names the path only.
 - **Proof:** `probe/agent-service/litellm.py` runs the whole path on a fake-only stack (its
   docstring gives the command line): the fake Anthropic and a fake issuer sit on `internet`, made
-  internal, and the probe refuses to start otherwise. Its caller is a throwaway on `litellm-api`
-  that posts agent-runtime's wire body with an app key the probe made through the master key.
+  internal, and the probe refuses to start otherwise. Its caller is a throwaway on HopIn's agent
+  network that posts agent-runtime's wire body with an app key the probe made through the master
+  key; `litellm_apps.py` puts one fake app with a key of its own on each app network and proves
+  that each reaches the front alone and that an app's alias `litellm` captures nothing.
   `litellm_admission.py` drives the key's models, the budgets, the person budget, the operator's
   exception and the bound, `litellm_failures.py` the failure and key cases, and
   `litellm_retention.py` the retention census of the route, on the same stack and with the same caller. Re-run them for every LiteLLM,

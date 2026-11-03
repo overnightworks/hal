@@ -1,6 +1,7 @@
 """The CI job `front` (#768): litellm-front, as shipped, against a stand-in for LiteLLM, driven by
-a table of raw requests. Only the one completion route reaches the backend; every other method,
-path form and encoded character stops in the front itself. The job re-runs on every Traefik bump.
+a table of raw requests. Only the one completion route without a query string reaches the
+backend, with one constant `User-Agent` and no tag header; every other method, path form, encoded
+character and query string stops in the front itself. The job re-runs on every Traefik bump.
 
 It starts containers, so it runs only where EDGE_FRONT_CASES is set (the job `front`; locally under
 the probe lock). The stand-in and client images are compose.yaml's pins.
@@ -23,6 +24,8 @@ PROJECT = "edge-litellm-front-ci"
 COMPOSE_FILES = [ROOT / "compose.yaml", ROOT / "tests" / "support" / "front.compose.yaml"]
 FRONT, STAND_IN, CLIENT = "litellm-front", "stand-in", "client"
 ROUTE = "/v1/chat/completions"
+ROUTE_FILE = ROOT / "agent-service" / "litellm" / "front" / "dynamic" / "route.yml"
+TAG_HEADER = "x-litellm-tags"  # lower case, `-` for `_`: every spelling LiteLLM could read
 FRONT_ORIGIN = "litellm-front:4000"
 BACKEND_MARK = "Hostname:"  # the stand-in's (whoami's) answer begins with it; the front's never
 H2C_PRIOR_KNOWLEDGE_BODY = b"{}"
@@ -72,9 +75,10 @@ def h2c(path):
 def http(raw_hex):
     reply = exchange(bytes.fromhex(raw_hex))
     head, _, body = reply.partition(b"\\r\\n\\r\\n")
-    first = head.split(b"\\r\\n")[0].decode("latin-1")
+    first, *fields = head.decode("latin-1").split("\\r\\n")
+    names = [field.partition(":")[0].strip().lower() for field in fields]
     return {"status": int(first.split()[1]) if first else None,
-            "body": body.decode("latin-1")[:2000]}
+            "location": "location" in names, "body": body.decode("latin-1")[:2000]}
 
 kind, argument = sys.argv[1], sys.argv[2]
 print(json.dumps(h2c(argument) if kind == "h2c" else http(argument)))
@@ -91,6 +95,7 @@ class Case:
     target: str = ROUTE
     headers: tuple[str, ...] = ()
     kind: str = "http"  # http, h2c
+    forwarded: tuple[str, ...] = ()  # header lines the stand-in must echo unchanged
 
 
 def reaches(name: str, target: str, sees: str, **changes) -> Case:
@@ -100,6 +105,8 @@ def reaches(name: str, target: str, sees: str, **changes) -> Case:
 def stops(name: str, status: int, **changes) -> Case:
     return Case(name, status, **changes)
 
+
+POSITIVE_CONTROL = reaches("C32 positive control", ROUTE, f"POST {ROUTE} HTTP/1.1")
 
 # The committed outcomes are what the pinned image measured. C11 to C13: Traefik cleans the path
 # (`sanitizePath`) and the backend sees the route itself. C14 to C20: an encoded character inside
@@ -126,7 +133,7 @@ CASES = [
     stops("C18 encoded percent", 404, target="/v1/chat%25completions"),
     stops("C19 encoded question mark", 404, target="/v1/chat%3Fcompletions"),
     stops("C20 encoded hash", 404, target="/v1/chat%23completions"),
-    reaches("C21 query", ROUTE + "?model=x", f"POST {ROUTE}?model=x HTTP/1.1"),
+    stops("C21 query", 400, target=ROUTE + "?model=x"),
     reaches(
         "C22 arbitrary host", ROUTE, f"POST {ROUTE} HTTP/1.1", headers=("Host: anything.invalid",)
     ),
@@ -150,8 +157,53 @@ CASES = [
             f"Sec-WebSocket-Key: {base64.b64encode(os.urandom(16)).decode()}",
         ),
     ),
-    reaches("C32 positive control", ROUTE, f"POST {ROUTE} HTTP/1.1"),
+    POSITIVE_CONTROL,
+    stops("C33 empty query", 400, target=ROUTE + "?"),
+    stops("C34 api version", 400, target=ROUTE + "?api-version=x"),
+    stops("C35 semicolon pair", 400, target=ROUTE + "?a=1;model=text/opus"),
+    stops("C36 absolute form", 400, target=f"http://{FRONT_ORIGIN}{ROUTE}?model=x"),
+    stops("C37 h2c query", 400, target=ROUTE + "?model=x", kind="h2c"),
+    reaches(
+        "C38 own user agent", ROUTE, f"POST {ROUTE} HTTP/1.1", headers=("User-Agent: probe/1.0",)
+    ),
+    reaches("C39 no user agent", ROUTE, f"POST {ROUTE} HTTP/1.1"),
+    reaches(
+        "C40 tag headers",
+        ROUTE,
+        f"POST {ROUTE} HTTP/1.1",
+        headers=(
+            "x-litellm-tags: a",
+            "X-LiteLLM-Tags: b",
+            "x_litellm_tags: c",
+            "X-Litellm-Tags: d",
+        ),
+    ),
+    reaches(
+        "C41 authorization and content type",
+        ROUTE,
+        f"POST {ROUTE} HTTP/1.1",
+        headers=("Authorization: Bearer probe-token", "Content-Type: application/json"),
+        forwarded=("Authorization: Bearer probe-token", "Content-Type: application/json"),
+    ),
+    stops("C42 path parameter", 404, target=ROUTE + ";model=x"),
 ]
+
+
+def constant_user_agent() -> str:
+    """The `User-Agent` the front's headers middleware sets, from route.yml."""
+    middlewares = yaml.safe_load(ROUTE_FILE.read_text())["http"]["middlewares"].values()
+    (headers,) = [middleware["headers"] for middleware in middlewares if "headers" in middleware]
+    return headers["customRequestHeaders"]["User-Agent"]
+
+
+def echoed_headers(body: str) -> list[tuple[str, str]]:
+    """The header lines of the stand-in's echo, after its request line."""
+    _, _, after = body.partition(" HTTP/1.1")
+    return [
+        (name, value.strip())
+        for name, separator, value in (line.partition(":") for line in after.splitlines())
+        if separator
+    ]
 
 
 def raw_request(case: Case) -> bytes:
@@ -195,7 +247,7 @@ def stack() -> Iterator[Stack]:
     try:
         running.compose("up", "--detach", "--wait", "--no-deps", FRONT, STAND_IN, CLIENT)
         deadline = time.monotonic() + 30
-        while running.drive(CASES[-1])["status"] != 200:  # the front has loaded its file
+        while running.drive(POSITIVE_CONTROL)["status"] != 200:  # the front has loaded its file
             assert time.monotonic() < deadline, "the front never routed the positive control"
             time.sleep(1)
         yield running
@@ -207,7 +259,22 @@ def stack() -> Iterator[Stack]:
 def test_the_front_forwards_only_the_one_route_and_answers_the_rest_itself(stack, case):
     answer = stack.drive(case)
     assert answer["status"] == case.status
+    assert not answer.get("location")  # the front never sends a client elsewhere
     body = answer.get("body", "")
     assert (BACKEND_MARK in body) == case.reaches_backend
     if case.backend_sees:
         assert case.backend_sees in body
+    for line in case.forwarded:
+        assert line in body.splitlines()
+
+
+@pytest.mark.parametrize(
+    "case", [case for case in CASES if case.reaches_backend], ids=lambda case: case.name
+)
+def test_litellm_sees_one_constant_user_agent_and_no_tag_header(stack, case):
+    echoed = echoed_headers(stack.drive(case)["body"])
+
+    assert [value for name, value in echoed if name.lower() == "user-agent"] == [
+        constant_user_agent()
+    ]
+    assert not [name for name, _ in echoed if name.lower().replace("_", "-") == TAG_HEADER]
