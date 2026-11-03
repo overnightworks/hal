@@ -3,7 +3,6 @@
 error pair and the exit code. It prints counts only, never a row value."""
 
 import argparse
-import signal
 from enum import StrEnum
 
 from hal import litellm_expiry
@@ -12,6 +11,7 @@ from hal.grammar import Asks, Command, ExitCode
 from hal.litellm_expiry import Expired, ExpiryFailed, Kind, Outcome
 from hal.output import Glyph, Noun, Row, Verdict, counted, write_error, write_row, write_verdict
 from hal.output.command import Verb, command
+from hal.stack.external.apply import terminate_like_interrupt
 
 HAL_EXPIRE = command(Verb.EXPIRE)
 DAYS = litellm_expiry.RETENTION_DAYS
@@ -46,18 +46,15 @@ def _configure(parser: argparse.ArgumentParser) -> None:
 
 def _expire(arguments: argparse.Namespace) -> ExitCode:
     started = host.monotonic()
-    # systemd stops a unit with SIGTERM: as KeyboardInterrupt, the run says what it knows.
-    previous_handler = signal.signal(signal.SIGTERM, signal.default_int_handler)
-    try:
-        result = litellm_expiry.expire(arguments.project, host.now())
-    except ExpiryFailed as failure:
-        _tell_failed(str(failure), failure.outcome)
-        return ExitCode.FAILURE
-    except KeyboardInterrupt:
-        _tell_failed("interrupted", Outcome.UNKNOWN)
-        return ExitCode.INTERRUPTED
-    finally:
-        signal.signal(signal.SIGTERM, previous_handler)
+    with terminate_like_interrupt():
+        try:
+            result = litellm_expiry.expire(arguments.project, host.now())
+        except ExpiryFailed as failure:
+            _tell_failed(str(failure), failure.outcome)
+            return ExitCode.FAILURE
+        except KeyboardInterrupt:
+            _tell_failed("interrupted", Outcome.UNKNOWN)
+            return ExitCode.INTERRUPTED
     if isinstance(result, Expired):
         _tell_expired(result, host.monotonic() - started)
     else:

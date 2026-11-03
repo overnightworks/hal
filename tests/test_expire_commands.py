@@ -221,7 +221,11 @@ def test_a_sigterm_during_the_statement_says_the_outcome_is_unknown_and_exits_13
     capsys: pytest.CaptureFixture[str],
     restored_signal_handlers: None,
 ) -> None:
-    litellm_host.answer = lambda: signal.raise_signal(signal.SIGTERM)
+    def terminated_by_systemd() -> None:
+        assert callable(signal.getsignal(signal.SIGTERM)), "SIGTERM would kill"
+        signal.raise_signal(signal.SIGTERM)
+
+    litellm_host.answer = terminated_by_systemd
 
     assert expire(capsys) == (
         ExitCode.INTERRUPTED,
