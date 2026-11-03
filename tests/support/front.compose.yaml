@@ -3,11 +3,9 @@
 # network. Both images are read from compose.yaml's pins by the test. Never used live. The front
 # keeps only its own two networks, so a local run never joins the fixed-name app networks, and finds
 # the stand-in by its alias: no extra_hosts, and no pinned subnet that a live network could hold.
+# Those three replacements need compose's `!override` and `!reset` tags, which the repository's YAML
+# checks cannot read: the test writes them into a third overlay at run time.
 services:
-  litellm-front:
-    networks: !override [litellm-api, litellm-backend]
-    extra_hosts: !reset []
-
   stand-in:
     image: ${STAND_IN_IMAGE:?run through tests/test_litellm_front.py}
     networks:
@@ -23,7 +21,3 @@ services:
     security_opt: ["no-new-privileges:true"]
     networks: [litellm-api]
     command: ["sleep", "infinity"]
-
-networks:
-  litellm-backend:
-    ipam: !reset {}

@@ -57,17 +57,26 @@ def front_static() -> dict:
     return load(LITELLM_DIRECTORY / "front" / "traefik.yml")
 
 
-def test_the_four_new_networks_are_internal_and_isolated_and_backend_and_egress_pin_a_subnet(
+def test_the_four_new_networks_are_internal_and_isolated(
     compose,
 ):
     for name in NEW_NETWORKS:
         network = compose["networks"][name]
         assert network["internal"] is True
         assert network["driver_opts"] == ISOLATED_MODE
-    assert [name for name in NEW_NETWORKS if "ipam" in compose["networks"][name]] == [
-        "litellm-backend",
-        "litellm-egress",
+
+
+def test_every_pinned_network_the_agent_probe_joins_is_one_the_probe_moves(compose, litellm):
+    from edge_copy import PINNED_NETWORKS  # on the path while the probe module is imported
+
+    services = compose["services"]
+    probe_services = [SERVICE, GATEWAY] + [
+        name for name, service in services.items() if "litellm" in service.get("profiles", [])
     ]
+    joined = {network for name in probe_services for network in services[name]["networks"]}
+    pinned = {name for name, network in compose["networks"].items() if "ipam" in (network or {})}
+
+    assert pinned & joined == set(PINNED_NETWORKS)
 
 
 def app_networks(compose: dict) -> set[str]:

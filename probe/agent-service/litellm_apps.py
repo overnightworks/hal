@@ -11,7 +11,8 @@ connection" is an outcome of `tcp_connect` in `egress_observe.UNREACHABLE`. A fa
 container that listens on one app network (agent_networks.start_caller); a request of an app is a
 throwaway on its network that posts agent-runtime's wire body to `litellm-front:4000` by name.
 Y5's holder claims the network alias `litellm` on HopIn's network and listens on LiteLLM's port;
-the front's embedded resolver handing it that name is the control that only the front's
+the front, restarted so that its first dial resolves the name afresh, has its embedded resolver
+hand the holder that name: the control that only the front's
 `extra_hosts` keeps the route on LiteLLM. Exit 0: every cell held.
 """
 
@@ -38,9 +39,11 @@ from litellm import (  # noqa: E402
     LISTENING,
     LITELLM,
     PROJECT,
+    ROUTE,
     SERVICE,
     START_DATABASE,
     LitellmProbe,
+    ProbeFailed,
     expect,
     mounted_file,
     person_budget,
@@ -106,11 +109,7 @@ class AppsProbe(LitellmProbe):
 
     def from_app(self, network: str, key: str) -> dict:
         """A: one request of the app on `network` through the front, with its key."""
-        self.caller_network = network
-        try:
-            return self.complete(key, user=self.fingerprint())
-        finally:
-            del self.caller_network  # back to the class's own
+        return self.complete(key, user=self.fingerprint(), network=network)
 
     def reached(self, container: str, address: str, port: str) -> str:
         return self.client_in_namespace_of(container, "connect", address, port)["result"]
@@ -212,6 +211,9 @@ class AppsProbe(LitellmProbe):
         self.wait_for("Y5", "the holder listening", lambda: self.reached(
             HOLDER, "127.0.0.1", self.litellm_port) == "connected", HOLDER_SECONDS)  # fmt: skip
         holder = self.address_of(HOLDER, HOPIN)
+        # A fresh front has no pooled connection to LiteLLM, so its first dial resolves the name.
+        self.run(["docker", "restart", front])
+        self.wait_for("Y5", "the restarted front routing", self.front_routes, HOLDER_SECONDS)
         answered = self.throwaway([f"--network=container:{front}"], [LITELLM], RESOLVER_PROGRAM)[
             "addresses"
         ]
@@ -228,6 +230,14 @@ class AppsProbe(LitellmProbe):
         self.hold("Y5", f"the front's resolver answers {LITELLM} with the holder's {holder}; the "
                   f"front maps {LITELLM} to {upstream}; {SONGMAKER}'s request served by LiteLLM, F "
                   "one request; the holder received no connection")  # fmt: skip
+
+    def front_routes(self) -> bool:
+        """True once the front refuses a query string itself, which no connection to LiteLLM
+        precedes: its route is loaded and nothing is pooled."""
+        try:
+            return self.complete(None, network=SONGMAKER, path=f"{ROUTE}?probe")["status"] == 400
+        except ProbeFailed:
+            return False
 
     def holder_connections(self) -> int:
         return self.run(["docker", "logs", HOLDER]).stdout.count("accepted")

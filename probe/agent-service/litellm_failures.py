@@ -117,10 +117,12 @@ class FailureProbe(LitellmProbe):
         self.record(f"{cell} held: {how}")
 
     def call_command(self, name: str, bearer: str | None, method: str, path: str,
-                     body: dict | None, *, front: bool):  # fmt: skip
+                     body: dict | None, *, front: bool, network: str | None = None):  # fmt: skip
         """Every caller's argv enters the corpus, the command line its container's Config.Cmd
         comes from, so F15 sees a key that reached it."""
-        argv, program = super().call_command(name, bearer, method, path, body, front=front)
+        argv, program = super().call_command(
+            name, bearer, method, path, body, front=front, network=network
+        )
         self.record(" ".join(argv))
         return argv, program
 

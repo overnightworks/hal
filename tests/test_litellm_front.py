@@ -22,6 +22,16 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 PROJECT = "edge-litellm-front-ci"
 COMPOSE_FILES = [ROOT / "compose.yaml", ROOT / "tests" / "support" / "front.compose.yaml"]
+# Compose's own tags, which no YAML check of the repository reads, so the file is written per run.
+TAGGED_OVERLAY = """\
+services:
+  litellm-front:
+    networks: !override [litellm-api, litellm-backend]
+    extra_hosts: !reset []
+networks:
+  litellm-backend:
+    ipam: !reset {}
+"""
 FRONT, STAND_IN, CLIENT = "litellm-front", "stand-in", "client"
 ROUTE = "/v1/chat/completions"
 ROUTE_FILE = ROOT / "agent-service" / "litellm" / "front" / "dynamic" / "route.yml"
@@ -216,8 +226,9 @@ def raw_request(case: Case) -> bytes:
 
 
 class Stack:
-    def __init__(self) -> None:
+    def __init__(self, tagged_overlay: Path) -> None:
         compose = yaml.safe_load(COMPOSE_FILES[0].read_text())["services"]
+        self.files = [*COMPOSE_FILES, tagged_overlay]
         self.environment = {
             **os.environ,
             "DOCKER_GID": "0",
@@ -227,7 +238,7 @@ class Stack:
         }
 
     def compose(self, *arguments: str, stdin: str | None = None) -> subprocess.CompletedProcess:
-        files = [argument for file in COMPOSE_FILES for argument in ("--file", str(file))]
+        files = [argument for file in self.files for argument in ("--file", str(file))]
         return subprocess.run(
             ["docker", "compose", "-p", PROJECT, *files, "--profile", "litellm", *arguments],
             input=stdin, capture_output=True, text=True, env=self.environment, check=True,
@@ -242,8 +253,10 @@ class Stack:
 
 
 @pytest.fixture(scope="module")
-def stack() -> Iterator[Stack]:
-    running = Stack()
+def stack(tmp_path_factory) -> Iterator[Stack]:
+    tagged_overlay = tmp_path_factory.mktemp("front") / "tagged.compose.yaml"
+    tagged_overlay.write_text(TAGGED_OVERLAY)
+    running = Stack(tagged_overlay)
     try:
         running.compose("up", "--detach", "--wait", "--no-deps", FRONT, STAND_IN, CLIENT)
         deadline = time.monotonic() + 30

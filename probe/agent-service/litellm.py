@@ -48,7 +48,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(REPO / "src"))
 sys.path.insert(0, str(REPO / "agent-service"))
 
-from agent_networks import EMBEDDED_RESOLVER, gateway_listeners, listeners_of  # noqa: E402
+from agent_networks import AGENT_NETWORKS, EMBEDDED_RESOLVER, gateway_listeners, listeners_of  # noqa: E402
 from egress import LABEL, PROJECT, ProbeFailed, expect, run_scratch_probe  # noqa: E402
 from egress_observe import socket_name  # noqa: E402
 from issuer import ISSUER_SERVICE, SERVICE, IssuerProbe  # noqa: E402
@@ -286,7 +286,7 @@ class LitellmProbe(IssuerProbe):
     """The service with an API-only person, the front, LiteLLM and a fake Anthropic."""
 
     LITELLM_LOG_LEVEL: str | None = "INFO"  # None keeps the level compose.yaml ships
-    caller_network = "agent_hopin"  # hal_agent_hopin, as the probe's copy names it
+    caller_network = AGENT_NETWORKS[-1]  # the app network a request comes from unless it names one
 
     def __init__(self, scratch: Path) -> None:
         super().__init__(scratch)
@@ -477,12 +477,12 @@ class LitellmProbe(IssuerProbe):
     # --- the caller ---------------------------------------------------------------------------
 
     def call_command(self, name: str, bearer: str | None, method: str, path: str,
-                     body: dict | None, *, front: bool):  # fmt: skip
+                     body: dict | None, *, front: bool, network: str | None = None):  # fmt: skip
         """The argv and standard input of one throwaway's request: through the front from an app's
-        network (`caller_network`), or straight at LiteLLM from `litellm-backend`. Bearer and body
-        go on standard input, since a body may carry a key."""
+        network (`network`, else `caller_network`), or straight at LiteLLM from `litellm-backend`.
+        Bearer and body go on standard input, since a body may carry a key."""
         network, host, port = (
-            (self.caller_network, FRONT, str(FRONT_PORT)) if front
+            (network or self.caller_network, FRONT, str(FRONT_PORT)) if front
             else ("litellm-backend", LITELLM, self.proxy_address.rsplit(":", 1)[1])
         )  # fmt: skip
         argv = [
@@ -498,12 +498,14 @@ class LitellmProbe(IssuerProbe):
 
     def call(
         self, bearer: str | None, method: str, path: str, body: dict | None = None,
-        *, front: bool = True,
+        *, front: bool = True, network: str | None = None,
     ) -> dict:  # fmt: skip
         """A: one request's status, Retry-After, seconds and answer document."""
         self.throwaways += 1
         name = f"{PROJECT}-caller-{self.throwaways}"
-        argv, program = self.call_command(name, bearer, method, path, body, front=front)
+        argv, program = self.call_command(
+            name, bearer, method, path, body, front=front, network=network
+        )
         return json.loads(
             self.run(argv, stdin=program, timeout=240).stdout.strip().splitlines()[-1]
         )
@@ -540,9 +542,11 @@ class LitellmProbe(IssuerProbe):
         return (self.customer_row(user) or {"spend": 0.0})["spend"]
 
     def complete(self, key: str | None, model: str = DEFAULT_MODEL, user: str | None = None,
-                 path: str = ROUTE, front: bool = True, **extra: object) -> dict:  # fmt: skip
+                 path: str = ROUTE, front: bool = True, network: str | None = None,
+                 **extra: object) -> dict:  # fmt: skip
         """A: one request of agent-runtime's wire body."""
-        return self.call(key, "POST", path, wire_body(model, user, **extra), front=front)
+        body = wire_body(model, user, **extra)
+        return self.call(key, "POST", path, body, front=front, network=network)
 
     def fingerprint(self) -> str:
         return f"fp-{secrets.token_hex(8)}"
