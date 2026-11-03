@@ -732,7 +732,11 @@ def test_the_environment_name_of_litellms_payload_print_is_a_forbidden_store(
 # --- T3, P7 and D9: where a canary may sit besides the permitted tables -----------------------
 
 DATABASE_NAME = "db-1"
-DATA_VOLUME = "/var/lib/postgresql/data"
+DATA_VOLUME, BOUND_FILE = "/var/lib/postgresql/data", "/docker-entrypoint-initdb.d/init.sql"
+DATABASE_MOUNTS = [
+    {"type": "volume", "target": DATA_VOLUME},
+    {"type": "bind", "target": BOUND_FILE},
+]
 
 
 @pytest.mark.parametrize(
@@ -743,6 +747,7 @@ DATA_VOLUME = "/var/lib/postgresql/data"
         f"{DATABASE_NAME} /run/postgresql",
         f"{DATABASE_NAME} /dev/shm",  # noqa: S108 - a sink name and no test creates the path
         f"{DATABASE_NAME} /dev",
+        f"{DATABASE_NAME} {BOUND_FILE}",
         "litellm-1 log",
         f"{DATABASE_NAME}-other dump",
     ],
@@ -750,7 +755,7 @@ DATA_VOLUME = "/var/lib/postgresql/data"
 def test_a_sink_of_the_database_other_than_its_volume_and_dump_is_outside_it(
     retention_probe: ModuleType, sink: str
 ) -> None:
-    outside = retention_probe.sinks_outside_the_database([sink], DATABASE_NAME, [DATA_VOLUME])
+    outside = retention_probe.sinks_outside_the_database([sink], DATABASE_NAME, DATABASE_MOUNTS)
 
     assert outside == [sink]
 
@@ -762,4 +767,4 @@ def test_a_sink_of_the_database_other_than_its_volume_and_dump_is_outside_it(
 def test_the_databases_volume_and_its_dump_are_not_outside_it(
     retention_probe: ModuleType, sink: str
 ) -> None:
-    assert retention_probe.sinks_outside_the_database([sink], DATABASE_NAME, [DATA_VOLUME]) == []
+    assert retention_probe.sinks_outside_the_database([sink], DATABASE_NAME, DATABASE_MOUNTS) == []

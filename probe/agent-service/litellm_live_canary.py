@@ -250,7 +250,7 @@ class LiveCanaryProbe(RetentionProbe):
             "docker", "compose", "--project-directory", str(REPO), "--file", str(file),
             "--profile", "*", "config", "--hash", "*",
         ]).stdout  # fmt: skip
-        return {name: digest for name, digest in map(str.split, listed.splitlines())}
+        return dict(map(str.split, listed.splitlines()))
 
 
 def main() -> int:

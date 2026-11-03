@@ -37,7 +37,7 @@ import secrets
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 import yaml
@@ -67,6 +67,7 @@ from litellm import (  # noqa: E402
 from litellm_caller import CALL_PROGRAM, STREAM_PROGRAM, caller_input  # noqa: E402
 from litellm_failures import FailureProbe  # noqa: E402
 from litellm_key_files import APPS, KeyFiles  # noqa: E402
+from live_canary import LITELLM_LONGEST_WRITE_INTERVAL_SECONDS  # noqa: E402
 from retention_census import (  # noqa: E402
     DUMP,
     ROUTE_SERVICES,
@@ -120,7 +121,7 @@ FINGERPRINT_TABLES = {"LiteLLM_EndUserTable", "LiteLLM_DailyEndUserSpend"}
 TAG_TABLE, DAILY_TAG_TABLE = "LiteLLM_TagTable", "LiteLLM_DailyTagSpend"
 USER_AGENT = "user agent"  # the label of the user-agent canary in T1 and D9
 TOOL_WRITE_SECONDS = 120
-TAG_SETTLE_POLLS = 4  # 5 s apart: over two of LiteLLM's batch writes
+TAG_BARRIER_SECONDS = 2 * LITELLM_LONGEST_WRITE_INTERVAL_SECONDS  # two runs of the tag job
 STORE_NAMES = re.compile(
     r"DATABASE|REDIS|CALLBACK|LANGFUSE|VERBOSE|SPEND|S3_|LITELLM_PRINT_STANDARD_LOGGING_PAYLOAD",
     re.I,
@@ -167,10 +168,12 @@ def tool_body(tool: str, user: str, messages: list[dict], description: str = "pr
 
 
 def sinks_outside_the_database(
-    sinks: Sequence[str], database: str, volumes: Sequence[str]
+    sinks: Sequence[str], database: str, mounts: Sequence[Mapping[str, str]]
 ) -> list[str]:
     """The sinks of a canary that are neither the database's dump nor one of its volumes: its log,
-    its tmpfs and its other mounts count as outside."""
+    its tmpfs, its binds and its other mounts count as outside. `mounts` are the resolved Compose
+    entries of the database service."""
+    volumes = [mount["target"] for mount in mounts if mount["type"] == "volume"]
     permitted = {f"{database} {volume}" for volume in volumes} | {f"{database} {DUMP}"}
     return [
         sink for sink in sinks
@@ -189,6 +192,7 @@ class RetentionProbe(FailureProbe, KeyFiles):
         self.census = Census(run_docker, secrets.token_bytes(16))
         self.clean: dict[str, str] = {}
         self.controls = self.write_controls(scratch)
+        self.t1_tag = ""
 
     def write_controls(self, scratch: Path) -> Path:
         """The overlay of B3a and B3b alone: LiteLLM's debug log and the front's access log."""
@@ -238,12 +242,8 @@ class RetentionProbe(FailureProbe, KeyFiles):
 
     def outside_the_database(self, sinks: tuple[str, ...]) -> list[str]:
         """The sinks of a canary that are neither the database's dump nor its volume."""
-        volumes = [
-            volume["target"]
-            for volume in self.resolved_services()[DATABASE]["volumes"]
-            if volume["type"] == "volume"
-        ]
-        return sinks_outside_the_database(sinks, self.container_name(DATABASE), volumes)
+        mounts = self.resolved_services()[DATABASE]["volumes"]
+        return sinks_outside_the_database(sinks, self.container_name(DATABASE), mounts)
 
     def landing(self, sinks: tuple[str, ...]) -> list[str]:
         """Where a canary sits, the database's container shown as its service."""
@@ -424,6 +424,7 @@ class RetentionProbe(FailureProbe, KeyFiles):
     def cell_t1(self) -> None:
         """Around the front with presentator's key: both header canaries reach their tables."""
         tool, agent, tag = canary("t1-tool").replace("-", "_"), canary("t1-agent"), canary("t1-tag")
+        self.t1_tag = tag
         body = tool_body(tool, self.fingerprint(), [{"role": "user", "content": "probe"}])
         headers = {"User-Agent": agent, "x-litellm-tags": tag}
         presentator = self.file_keys["presentator"]
@@ -656,13 +657,14 @@ class RetentionProbe(FailureProbe, KeyFiles):
 
     def cell_t4(self) -> None:
         """Q after the conforming flows: no tag row of hopin's key, the tag table empty."""
-        hopin = self.settled_tag_rows(lambda: self.count(self.tag_rows_of(self.key)), "T4")
+        self.tag_barrier("T4")
+        hopin = self.count(self.tag_rows_of(self.key))
         tags = self.count(f'SELECT count(*) FROM "{TAG_TABLE}"')  # noqa: S608 - the table name is this probe's literal
-        presentator = self.count(self.tag_rows_of(self.file_keys["presentator"]))
+        control = self.tag_rows([self.t1_tag])
         expect(tags == 0 and hopin == 0, f"T4: {tags} tag table rows, {hopin} of hopin's key")
-        expect(presentator >= 1, "T4: the control finds no tag row of T1")
+        expect(control >= 1, "T4: the control finds no tag row of T1")
         self.hold("T4", f"{TAG_TABLE} empty and no {DAILY_TAG_TABLE} row of hopin's key; "
-                  f"{presentator} of presentator's from T1")  # fmt: skip
+                  f"{control} of presentator's from T1")  # fmt: skip
 
     @staticmethod
     def tag_rows_of(key: str) -> str:
@@ -675,7 +677,8 @@ class RetentionProbe(FailureProbe, KeyFiles):
         """Each body tag form on its own non-conforming request through the front."""
         tags = {form: canary("t3-tag") for form in TAG_FORMS}
         recorded = {form: self.tagged_request(form, tag) for form, tag in tags.items()}
-        rows = self.settled_tag_rows(lambda: self.tag_rows(list(tags.values())), "T3")
+        self.tag_barrier("T3")
+        rows = self.tag_rows(list(tags.values()))
         found = self.sweep(tags).found
         expect(self.tag_rows(list(tags.values())) == rows, "T3: a tag row came after the dump")
         failed = []
@@ -695,15 +698,20 @@ class RetentionProbe(FailureProbe, KeyFiles):
         named = ", ".join(f"'{tag}'" for tag in tags)
         return self.count(f'SELECT count(*) FROM "{DAILY_TAG_TABLE}" WHERE tag IN ({named})')  # noqa: S608 - the tags are tokens this probe generated
 
-    def settled_tag_rows(self, count: Callable[[], int], cell: str) -> int:
-        """A tag-row count once it held over TAG_SETTLE_POLLS polls: LiteLLM writes a tag row in a
-        later batch than the person's row."""
-        deadline, seen = time.monotonic() + TOOL_WRITE_SECONDS, []
-        while len(seen) < TAG_SETTLE_POLLS or len(set(seen[-TAG_SETTLE_POLLS:])) > 1:
-            expect(time.monotonic() < deadline, f"{cell}: the tag rows never settled: {seen}")
-            seen.append(count())
-            time.sleep(5)
-        return seen[-1]
+    def tag_barrier(self, cell: str) -> None:
+        """LiteLLM writes tag rows in a job of its own that flushes its whole queue. A request
+        straight to LiteLLM under presentator's key carries a fresh tag: once that tag's row is
+        written, every tag row queued before it is too."""
+        tag = canary("barrier-tag")
+        body = wire_body(user=self.fingerprint(), messages=[{"role": "user", "content": "probe"}])
+        headers = {"x-litellm-tags": tag}
+        presentator = self.file_keys["presentator"]
+        status = self.call_with_headers(presentator, body, headers, front=False)["status"]
+        expect(status == 200, f"{cell}: the barrier request was answered {status}")
+        waited = self.wait_for(
+            cell, "the barrier's tag row", lambda: self.tag_rows([tag]) >= 1, TAG_BARRIER_SECONDS
+        )
+        write_line(f"{cell} barrier: the tag row came after {waited:.0f} s", flush=True)
 
     def tagged_request(self, form: str, tag: str) -> str:
         """A, whether the tag reached F, and the batch of the form's fingerprint written."""

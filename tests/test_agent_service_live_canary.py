@@ -189,6 +189,13 @@ def test_the_census_waits_for_a_settle_after_the_turn_and_before_any_sink_is_rea
     assert timeline.index("canary") < timeline.index(settle) < timeline.index("census")
 
 
+def test_the_settle_outlasts_the_longest_interval_of_any_of_litellms_database_writers():
+    longest_batch = live_canary.LITELLM_BATCH_SECONDS + live_canary.LITELLM_BATCH_JITTER_SECONDS
+    tag_job = int(longest_batch * live_canary.LITELLM_TAG_MULTIPLIER)
+
+    assert tag_job <= live_canary.ROUTE_SETTLE_SECONDS
+
+
 def test_the_canary_runs_once_as_a_one_off_with_the_marker_alone_and_no_standard_input(capsys):
     route = Route()
 

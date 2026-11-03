@@ -5,10 +5,10 @@
 It runs only at V3, on the operator's word: it makes a paid call, which spends from hopin's app
 budget. It checks that each container of the direct route runs once (C0), runs `agent-canary` once,
 which posts a random value through the front with hopin's key and asks for it back (C1), waits for
-two of LiteLLM's database batches, and runs the retention census over those containers for that
-value (C2), the dump of `litellm-db` among the sinks. The dump reads the whole store into this
-program's memory; no line of it is ever printed. Nothing is recreated and no one signs in; a failed
-C0 or C1 ends the run, and a new run uses a new value.
+the longest interval at which LiteLLM writes to its database, and runs the retention census over
+those containers for that value (C2), the dump of `litellm-db` among the sinks. The dump reads the
+whole store into this program's memory; no line of it is ever printed. Nothing is recreated and no
+one signs in; a failed C0 or C1 ends the run, and a new run uses a new value.
 
 stdout holds verdict lines of a closed grammar and the last line (`canary and census held` or
 `canary and census FAILED`, matching the exit code); stderr holds nothing. No exception text, no
@@ -43,9 +43,18 @@ from retention_census import ROUTE_SERVICES, Census, Run, Sweep, Target, route_t
 CANARY_SERVICE = "agent-canary"
 INSPECT_NAME = "{{.Name}}"
 # LiteLLM 1.106.6 writes its batched updates every PROXY_BATCH_WRITE_AT = 10 s (constants.py:1877)
-# plus randint(0, 5) (proxy_server.py:10936), and a tag row comes a batch after the person's row:
-# two batches of at most 15 s, so the dump holds the rows the request wrote.
-ROUTE_SETTLE_SECONDS = 2 * (10 + 5)
+# plus randint(0, 5) (proxy_server.py:10936), and a job of its own writes the daily tag rows every
+# int(that interval * DAILY_TAG_SPEND_BATCH_MULTIPLIER = 2.3) s (constants.py:1901,
+# proxy_server.py:10983). The longest of these is the tag job's, the longest interval at which
+# LiteLLM writes anything. The front strips body and header tags, so this canary writes no tag row;
+# the settle still outlasts every writer, and the retention probe's barrier timeout reads it.
+LITELLM_BATCH_SECONDS = 10
+LITELLM_BATCH_JITTER_SECONDS = 5
+LITELLM_TAG_MULTIPLIER = 2.3
+LITELLM_LONGEST_WRITE_INTERVAL_SECONDS = int(
+    (LITELLM_BATCH_SECONDS + LITELLM_BATCH_JITTER_SECONDS) * LITELLM_TAG_MULTIPLIER
+)
+ROUTE_SETTLE_SECONDS = LITELLM_LONGEST_WRITE_INTERVAL_SECONDS
 
 
 class Reason(StrEnum):
