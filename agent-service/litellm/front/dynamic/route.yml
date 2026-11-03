@@ -5,7 +5,33 @@ http:
     completions:
       entryPoints: [api]
       rule: Method(`POST`) && Path(`/v1/chat/completions`)
+      middlewares: [query-refused, query-caught, request-headers]
       service: litellm
+  middlewares:
+    # LiteLLM routes by `?model=` past a key's `models` and copies other query values into the
+    # request it builds, and Traefik has no matcher for "any query". So query-caught answers every
+    # request URI with a `?` (the absolute form too) with a redirect, and query-refused turns that
+    # 307 into a 400 without the redirect's headers: no `Location` leaves the front, so a client
+    # that follows redirects re-sends neither the messages nor the key, and LiteLLM sees nothing.
+    query-refused:
+      errors:
+        status: ["307"]
+        statusRewrites:
+          "307": 400
+        service: noop@internal
+        errorRequestHeaders: []
+    query-caught:
+      redirectRegex:
+        regex: '^[^?]*\?.*$'
+        replacement: /query-refused
+    # LiteLLM writes the client's User-Agent into request metadata and switches behaviour on some
+    # agent CLIs' values, and turns x-litellm-tags into request tags: one constant that names this
+    # hop, and the tag header set empty, which Traefik deletes.
+    request-headers:
+      headers:
+        customRequestHeaders:
+          User-Agent: litellm-front
+          X-Litellm-Tags: ""
   services:
     litellm:
       loadBalancer:

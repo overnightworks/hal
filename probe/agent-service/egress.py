@@ -8,8 +8,8 @@ the real `agent-service` of compose.yaml, in a throwaway compose project of thei
 Measured teardown: 2 s (K 50 s, CAP 1780 s).
 
 The stack runs from a copy of compose.yaml and of the gateway's static file with each network that
-pins the gateway's address (`egress`, `litellm-egress`; edge_copy.GATEWAY_NETWORKS) moved to a free
-/24 of its own (the gateway's addresses and the `extra_hosts` follow through the anchors), so it
+pins an address (`egress`, `litellm-egress`, `litellm-backend`; edge_copy.PINNED_NETWORKS) moved to
+a free /24 of its own (the addresses and the `extra_hosts` follow through the anchors), so it
 never collides with the live stack's. E3-E5 and E10 are observed through the packet windows of
 capture.py, each with a control; a window that dropped a frame, held a frame it could not decode,
 or in which the control did not show, is NOT DRIVEN and fails the run. The service target runs the
@@ -80,6 +80,7 @@ LABEL = f"edge.probe={PROJECT}"
 COMPOSE_FILE = REPO / "compose.yaml"
 OVERLAY = REPO / "probe" / "agent-service" / "compose.probe.yaml"
 GATEWAY_STATIC = REPO / "agent-service" / "egress" / "traefik.yml"
+NAMED_PINS = {COMPOSE_FILE: edge_copy.PINNED_NETWORKS, GATEWAY_STATIC: edge_copy.GATEWAY_NETWORKS}
 SERVICE_CONFIGURATION = REPO / "agent-service" / "service.toml"
 PROVIDER = "api.anthropic.com"
 GATEWAY_PORT = 443
@@ -287,11 +288,11 @@ class Probe:
         home.mkdir()
         write_login_folders(home)
         self.scratch_secrets = write_scratch_secrets(home, scratch / "ca")
-        live = edge_copy.live_gateway_prefixes(COMPOSE_FILE.read_text())
-        self.moved = edge_copy.free_gateway_prefixes(
-            live, SUBNET_CANDIDATES, edge_copy.daemon_subnets()
+        self.live = edge_copy.live_pinned_prefixes(COMPOSE_FILE.read_text())
+        self.moved = edge_copy.free_probe_prefixes(
+            self.live, SUBNET_CANDIDATES, edge_copy.daemon_subnets()
         )
-        self.address = f"{self.moved[live['egress']]}{GATEWAY_HOST_NUMBER}"
+        self.address = f"{self.moved[self.live['egress']]}{GATEWAY_HOST_NUMBER}"
         self.compose_file = scratch / "compose.yaml"
         self.static_file = scratch / "traefik.yml"
         self.environment = {
@@ -399,14 +400,15 @@ class Probe:
         return self
 
     def write_on_probe_subnet(self, source: Path, copy: Path) -> None:
-        """A copy of the file with the live gateway subnets replaced by the probe's: the live
-        stack's networks own their /24s, and Docker refuses a second network on one."""
+        """A copy of the file with the live subnets it pins (NAMED_PINS) replaced by the probe's:
+        the live stack's networks own their /24s, and Docker refuses a second network on one."""
         text = source.read_text()
         # The copy lies in the scratch directory that scratch_directory() made absolute and
         # required at the command line, and the text comes from the repository's own files; the
         # route tried was checking the path once at that boundary, which Sonar does not follow
         # across calls.
-        moved = edge_copy.moved_to_probe_subnets(text, self.moved)
+        named = {self.live[network] for network in NAMED_PINS[source]}
+        moved = edge_copy.moved_to_probe_subnets(text, {live: self.moved[live] for live in named})
         copy.write_text(  # NOSONAR(S2083)
             edge_copy.namespaced_compose(moved, PROJECT) if source == COMPOSE_FILE else moved
         )

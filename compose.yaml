@@ -21,6 +21,9 @@ x-egress-address: &egress-address 172.31.252.10
 # The gateway's second address, on the network LiteLLM shares with it: the entrypoint `litellm`
 # of agent-service/egress/traefik.yml. LiteLLM finds the provider through extra_hosts too.
 x-litellm-egress-address: &litellm-egress-address 172.31.239.10
+# LiteLLM's address on litellm-backend, where the front finds it through extra_hosts: the front
+# shares the app networks, where an app could claim the name `litellm` in Docker's DNS.
+x-litellm-backend-address: &litellm-backend-address 172.31.199.10
 # What both Postgres databases share: one image digest and one hardening. The alpine image's
 # postgres user owns the data directory a named volume inherits.
 x-postgres: &postgres
@@ -433,14 +436,16 @@ services:
       - ./agent-service/egress/traefik.yml:/etc/traefik/traefik.yml:ro
       - ./agent-service/egress/dynamic:/egress/dynamic:ro
 
-  # The one-route front of LiteLLM (agent-service/litellm/front/): the agent service's only way to
-  # the inference gateway. It reads no secret and reaches only `litellm`. Not started by any
-  # unit yet.
+  # The one-route front of LiteLLM (agent-service/litellm/front/): the apps' only way to the
+  # inference gateway, on each app's agent network. It reads no secret and reaches only `litellm`,
+  # at its fixed address, never by DNS. Not started by any unit yet.
   litellm-front:
     <<: *traefik
     profiles: [litellm]
     restart: unless-stopped
-    networks: [litellm-api, litellm-backend]
+    networks: [agent-songmaker, agent-presentator, agent-hopin, litellm-api, litellm-backend]
+    extra_hosts:
+      litellm: *litellm-backend-address
     volumes:
       - ./agent-service/litellm/front/traefik.yml:/etc/traefik/traefik.yml:ro
       - ./agent-service/litellm/front/dynamic:/litellm-front/dynamic:ro
@@ -483,7 +488,10 @@ services:
     depends_on:
       litellm-db:
         condition: service_healthy
-    networks: [litellm-backend, litellm-egress, litellm-db]
+    networks:
+      litellm-backend: {ipv4_address: *litellm-backend-address}
+      litellm-egress: {}
+      litellm-db: {}
     extra_hosts:
       api.anthropic.com: *litellm-egress-address
     environment:
@@ -701,8 +709,8 @@ networks:
     name: hal_mcp_songmaker
     internal: true
     driver_opts: *isolated-bridge
-  # One app's callers and the agent service; each app joins its own network as an external network,
-  # so no app sees another's.
+  # One app's callers, the agent service and the front of LiteLLM; each app joins its own network
+  # as an external network, so no app sees another's.
   agent-songmaker:
     name: hal_agent_songmaker
     internal: true
@@ -744,10 +752,16 @@ networks:
   litellm-api:
     internal: true
     driver_opts: *isolated-bridge
-  # The front, LiteLLM and hal apply's key step.
+  # The front, LiteLLM and hal apply's key step. Pinned so LiteLLM has one address, which no app
+  # network can claim; the dynamic range keeps it from the others, the key step included. The probe
+  # moves it to a free /24.
   litellm-backend:
     internal: true
     driver_opts: *isolated-bridge
+    ipam:
+      config:
+        - subnet: 172.31.199.0/24
+          ip_range: 172.31.199.128/25
   # LiteLLM and agent-egress's second entrypoint, the only way out of LiteLLM.
   litellm-egress:
     internal: true
