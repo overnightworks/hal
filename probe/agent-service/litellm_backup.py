@@ -6,7 +6,7 @@ unless `internet` is internal and holds only the fakes.
     flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 50 1780 \\
         python3 probe/agent-service/litellm_backup.py --scratch DIR
 
-Measured: a run takes about MEASURED and its teardown a few seconds (K 50 s, CAP 1780 s).
+Measured: a run takes about three minutes and its teardown a few seconds (K 50 s, CAP 1780 s).
 
 The checkout's `hal` runs under the scratch HOME, with its own restic repository, password and
 status, and with `--apps` naming a scratch record: the shipped `litellm` record of
@@ -162,6 +162,8 @@ class BackupProbe(KeysProbe, AdmissionProbe):
     # --- the cells ----------------------------------------------------------------------------
 
     def drive(self) -> None:
+        initialised = self.hal("backup", "--init")
+        expect(initialised.returncode == 0, f"hal backup --init exited {initialised.returncode}")
         self.steer_fake()
         self.wait_until_listening()
         self.cell_b1()
@@ -287,13 +289,13 @@ class BackupProbe(KeysProbe, AdmissionProbe):
         self.backed_up("B7")
         snapshot = self.last_snapshot()
         tested = self.hal("restore", "--test", APP, "--snapshot", snapshot)
-        line = rf"✗ litellm\s+not proven\s+the restored table {COUNT_TABLE} is empty"
+        line = rf"✗ litellm\s+not proven\s+verify: the restored table {COUNT_TABLE} is empty"
         expect(tested.returncode == FAILURE_EXIT, f"B7: exit {tested.returncode}")
         expect(bool(re.search(line, tested.stdout)), f"B7: {tested.stdout.strip()[-300:]!r}")
         self.make_keys("B7", APPS, budget_new=False)
-        self.hold("B7", f"no key rows: snapshot {snapshot[:8]} ✗ litellm not proven, the "
-                  f"restored table {COUNT_TABLE} is empty, exit {FAILURE_EXIT}; the key step "
-                  "made the three keys again")  # fmt: skip
+        self.hold("B7", f"no key rows: snapshot {snapshot[:8]} ✗ litellm not proven, verify: "
+                  f"the restored table {COUNT_TABLE} is empty, exit {FAILURE_EXIT}; the key "
+                  "step made the three keys again")  # fmt: skip
 
 
 def main() -> int:

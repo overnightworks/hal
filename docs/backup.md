@@ -51,7 +51,7 @@ Allow by `owner` alone only when the service opens random ports.
 
 ## hal backup and hal restore
 
-A weekly encrypted backup of the declared apps (Songmaker and Keycloak) into a local restic repository,
+A weekly encrypted backup of the declared apps (Songmaker, Keycloak and LiteLLM) into a local restic repository,
 and a monthly test that restores the last successful backup's snapshot and proves it is good.
 
 **What it protects against:** accidental deletion and corruption. The repository `~/backups/restic` sits
@@ -201,6 +201,23 @@ when the run ends), and the target of `hal restore keycloak --target`, which you
 If Keycloak is off or its database is down, the weekly run waits 10 minutes, reports keycloak as failed
 and still backs up Songmaker. A failed run skips retention and the repository check for every app.
 
+LiteLLM's dump is its whole database `litellm`: each app key's hash, the person budget, the month
+spend per key and per fingerprint, the daily rows and the tool names, and `key_name`, the fragment
+LiteLLM shows of each key; never a key in clear. In plain text it exists in the same three 0700
+places as Keycloak's. LiteLLM writes spend to its database in batches every 10 seconds
+(`PROXY_BATCH_WRITE_AT`), so a dump lacks at most that last batch.
+
+A row that `hal expire` deletes ([agent-service.md](agent-service.md), „What expires“) stays in
+every snapshot taken before the delete, until retention forgets that snapshot:
+
+- a weekly snapshot is kept while it is one of the last 4 weekly or 3 monthly ones (`KEEP_WEEKLY`,
+  `KEEP_MONTHLY` in `src/hal/backup/restic.py`), so at most about ten weeks after the delete;
+- a pre-apply snapshot is kept until 10 newer pre-apply snapshots of its app replace it
+  (`KEEP_PRE_APPLY`, `--keep-last`); the weekly policy keeps every pre-apply snapshot;
+- both hold only while runs succeed: a run with any failed app forgets nothing for any app, and
+  restic counts weeks and months that have snapshots, so an app that is no longer backed up keeps
+  its last ones.
+
 ### The restore test
 
 It restores the last successful backup's snapshot into a private directory under `~/.cache/edge-backup`
@@ -208,12 +225,14 @@ and checks:
 
 - `pg_restore --list` reads the dump;
 - the dump loads with `pg_restore --exit-on-error --single-transaction` into a throwaway PostgreSQL
-  container without network, of the major the app's database runs (16 for Songmaker, 17 for Keycloak),
+  container without network, of the major the app's database runs (16 for Songmaker, 17 for Keycloak
+  and LiteLLM),
   each image a stage of `src/hal/backup/images/Dockerfile`; the pin of major 17 equals `keycloak-db` in
   `compose.yaml` and a test fails when they differ. The server's diagnostics are discarded because
   PostgreSQL quotes row values in them: a failure shows the step and the exit code only;
-- the row count of the app's table (`songs`, Keycloak's `realm`) answers; for Keycloak
-  (`require_rows = true`) it is above zero;
+- the row count of the app's table (`songs`, Keycloak's `realm`, LiteLLM's
+  `LiteLLM_VerificationToken`) answers; for Keycloak and LiteLLM (`require_rows = true`) it is above
+  zero: a LiteLLM without a key is no backup;
 - for a SQLite app there is no throwaway server: a container of the `sqlite` stage mounts only the
   restored directory, read-only, and the file passes `PRAGMA integrity_check` with exactly `ok` and its
   table holds the manifest's `rows` (a manifest without `rows` fails; `require_rows` applies as above);
@@ -393,6 +412,16 @@ rm -rf "$restored"
 
 A failed load changed nothing (`--single-transaction`); `docker start` with the
 printed ID brings the old Keycloak back.
+
+### A lost LiteLLM volume
+
+At its next start `litellm-db` is empty and LiteLLM migrates it. The key step of `hal apply` then
+makes the person budget and each app's key anew from the key files (when it runs:
+[agent-service.md](agent-service.md), „The API route“). Every budget restarts at zero, and the
+daily rows are gone. The key files must be the ones that made the hashes; `~/.secrets` is in no
+backup. `hal restore litellm --target <dir>` restores the last backup's dump into a folder;
+loading it into the live database is not scripted yet ([architecture.md](architecture.md),
+gap 18).
 
 ### Stale locks
 

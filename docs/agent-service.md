@@ -312,7 +312,8 @@ step below).
 - **The database.** `litellm-db` is Postgres 17 at the image and hardening of `keycloak-db` (one
   `x-postgres` anchor in `compose.yaml`), with its own volume and the file secret `litellm/db-password`,
   which `start.sh` turns into `DATABASE_URL`. It holds the keys (their hashes only), the budgets, and
-  each person's fingerprint with its counters. LiteLLM stays the official image by its digest: BerriAI ships one
+  each person's fingerprint with its counters; the weekly backup copies it whole
+  ([backup.md](backup.md)). LiteLLM stays the official image by its digest: BerriAI ships one
   image whose enterprise part a licence key switches on, and hal sets no key and uses no enterprise
   function, so it builds no image of its own. It runs with no `LITELLM_LICENSE` and none of the settings behind its premium check (`enforced_params`,
   `allowed_ips`, global `allowed_routes`, key `tags`, `model_max_budget`, `/key/regenerate`). It
@@ -327,8 +328,8 @@ step below).
   its own budget, as the operator's is, stays, and so do keys, budgets and every other table. The period is
   `RETENTION_DAYS` in `src/hal/litellm_expiry.py`, not a setting, because the privacy text states
   it. The run prints counts only; with `litellm-db` not running it deletes nothing and exits 0. A
-  backup that copies the database keeps deleted rows until that copy goes, and a restore brings them
-  back until the next daily run deletes them again. A failed run fails `hal-expire.service`, which
+  deleted row stays in the backup's snapshots as long as [backup.md](backup.md), „What a backup
+  holds“, states, and a restore brings it back until the next daily run deletes it again. A failed run fails `hal-expire.service`, which
   `hal check` and `hal alarm` report as `job-failed`; its error line says `nothing deleted` only
   when psql reported the failure, and otherwise that the outcome is unknown and the next run repeats
   it. `probe/agent-service/litellm_expiry.py` proves it on the fake-only stack; re-run it on every
@@ -371,8 +372,9 @@ step below).
   that each reaches the front alone and that an app's alias `litellm` captures nothing.
   `litellm_admission.py` drives the key's models, the budgets, the person budget, the operator's
   exception and the bound, `litellm_failures.py` the failure and key cases, and
-  `litellm_retention.py` the retention census of the route, and `litellm_keys.py` the key step through
-  `hal apply`'s own plan and run, on the same stack and with the same caller. Re-run them for every LiteLLM,
+  `litellm_retention.py` the retention census of the route, `litellm_keys.py` the key step through
+  `hal apply`'s own plan and run, and `litellm_backup.py` the backup, its restore test and a lost
+  volume, on the same stack and with the same caller. Re-run them for every LiteLLM,
   Traefik or Docker bump. The CI job `front` runs the front's table of requests
   (`tests/test_litellm_front.py`) for every Traefik bump; a LiteLLM bump still needs the probes.
 
@@ -381,7 +383,9 @@ step below).
 Re-run the probes in `probe/agent-service/` for every Traefik, Docker, agent-runtime or LiteLLM upgrade.
 `litellm_keys.py` proves `hal apply`'s key step on the fake-only stack: its plan and run, a lost answer,
 a pure limit change, a taken name, a failed write and a deleted key, and that no key or hash reaches an
-argument, the step's input or output, or LiteLLM's log.
+argument, the step's input or output, or LiteLLM's log. `litellm_backup.py` proves `hal backup litellm`,
+its pre-apply snapshot and `hal restore --test litellm` under a scratch HOME, that the dump holds every
+table and no key in clear, and that a lost volume rebuilds through the key step with budgets at zero.
 
 **The live smoke** is one command, run in the live checkout after `hal apply` and with the image
 built: `cd ~/srv/hal && python3 agent-service/live_smoke.py`. It signs you in as yourself (the
