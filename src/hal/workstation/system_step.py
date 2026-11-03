@@ -29,6 +29,10 @@ LOG_RETENTION_DAYS = 30
 # The default log driver of Docker, which the play merges into daemon.json and `hal check` expects.
 DOCKER_LOG_DRIVER = "journald"
 DOCKER_DEFAULT_DRIVER = ["docker", "info", "--format", "{{.LoggingDriver}}"]
+DOCKER_RUNNING_CONTAINERS = ["docker", "ps", "--quiet", "--no-trunc"]
+DOCKER_RESTART_POLICY = ["docker", "inspect", "--format", "{{.HostConfig.RestartPolicy.Name}}"]
+# The only policies Docker promises to start again after its own restart.
+RESTARTED_POLICIES = frozenset({"always", "unless-stopped"})
 DOCKER_DOES_NOT_ANSWER = "Docker does not answer `docker info`"
 DOCKER_STATUS = "systemctl status docker"
 # journalctl deletes whole archive files by the age of their oldest entry: one day for a file's span
@@ -287,25 +291,51 @@ def _running_user() -> str:
 
 @dataclass(frozen=True)
 class Boundaries:
-    """The terminal the sudo prompt needs, Ansible itself, who runs `home`, and the log driver Docker tells the operator (`None` when it does not answer)."""
+    """The terminal the sudo prompt needs, Ansible itself, who runs `home`, the log driver Docker tells the operator (`None` when it does not answer),
+    and the restart policy of each running container (`None` when they cannot be read)."""
 
     has_terminal: Callable[[], bool]
     run_playbook: PlaybookRunner
     operator_user: Callable[[], str]
     docker_driver: Callable[[], str | None]
+    running_restart_policies: Callable[[], tuple[str, ...] | None]
+
+
+@dataclass(frozen=True)
+class RestartForecast:
+    """The Docker restart the play will make; `stay_down` counts the running containers Docker will not start again, `None` when their policies could not be read."""
+
+    stay_down: int | None
+
+
+def _docker_output(command: list[str]) -> str | None:
+    """What a docker command prints; None when it cannot be run or does not answer (a `docker` that is not executable raises `PermissionError`)."""
+    try:
+        return run_command(command)
+    except OSError:
+        return None
 
 
 def _docker_driver() -> str | None:
-    """The log driver `docker info` tells the operator; None for a Docker that cannot be run or does not answer (a `docker` that is not executable raises `PermissionError`)."""
-    try:
-        output = run_command(DOCKER_DEFAULT_DRIVER)
-    except OSError:
-        return None
+    """The log driver `docker info` tells the operator; None for a Docker that cannot be run or does not answer."""
+    output = _docker_output(DOCKER_DEFAULT_DRIVER)
     return None if output is None else output.strip()
 
 
+def _running_restart_policies() -> tuple[str, ...] | None:
+    """The restart policy of each running container as the operator reads it; None when `docker ps` or `docker inspect` fails."""
+    listing = _docker_output(DOCKER_RUNNING_CONTAINERS)
+    if listing is None:
+        return None
+    container_ids = listing.split()
+    if not container_ids:
+        return ()
+    policies = _docker_output([*DOCKER_RESTART_POLICY, *container_ids])
+    return None if policies is None else tuple(policies.splitlines())
+
+
 # The terminal fact is the one the wizard asks: both ends are a terminal.
-TERMINAL_BOUNDARIES = Boundaries(secrets_setup.TERMINAL_BOUNDARIES.terminal.is_interactive, run_playbook_as_root, _running_user, _docker_driver)
+TERMINAL_BOUNDARIES = Boundaries(secrets_setup.TERMINAL_BOUNDARIES.terminal.is_interactive, run_playbook_as_root, _running_user, _docker_driver, _running_restart_policies)
 
 
 @dataclass(frozen=True)
@@ -336,10 +366,22 @@ class SystemStep:
             return NEEDS_ANSIBLE
         return ""
 
+    def _answering_docker_driver(self) -> str:
+        driver = self.boundaries.docker_driver()
+        if driver is None:
+            raise DockerDoesNotAnswer(DOCKER_DOES_NOT_ANSWER)
+        return driver
+
     def refuse_unless_docker_answers(self) -> None:
         """Docker is read as the operator, so a Docker that does not answer ends the step before sudo asks for a password."""
-        if self.boundaries.docker_driver() is None:
-            raise DockerDoesNotAnswer(DOCKER_DOES_NOT_ANSWER)
+        self._answering_docker_driver()
+
+    def restart_forecast(self) -> RestartForecast | None:
+        """The restart the play makes when Docker's default driver is not the journal, `None` when it makes none; a Docker that does not answer refuses first."""
+        if self._answering_docker_driver() == DOCKER_LOG_DRIVER:
+            return None
+        policies = self.boundaries.running_restart_policies()
+        return RestartForecast(None if policies is None else sum(policy not in RESTARTED_POLICIES for policy in policies))
 
     def check(self) -> CheckState | TasksWouldChange:
         """At a terminal, Ansible's check mode asks for sudo once and names the tasks that would change; without what it needs nothing is read."""
