@@ -6,7 +6,7 @@ unless `internet` is internal and holds only the fakes.
     flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 50 1780 \\
         python3 probe/agent-service/litellm_backup.py --scratch DIR
 
-Measured: a run takes about three minutes and its teardown a few seconds (K 50 s, CAP 1780 s).
+Measured: a run takes about two minutes and its teardown a few seconds (K 50 s, CAP 1780 s).
 
 The checkout's `hal` runs under the scratch HOME, with its own restic repository, password and
 status, and with `--apps` naming a scratch record: the shipped `litellm` record of
