@@ -253,7 +253,8 @@ def test_litellm_holds_no_license_and_none_of_the_settings_behind_the_premium_ch
 def test_litellm_names_one_person_budget_for_every_fingerprint(config):
     budget_id = config["litellm_settings"]["max_end_user_budget_id"]
 
-    assert isinstance(budget_id, str) and budget_id.strip()
+    assert isinstance(budget_id, str)
+    assert budget_id.strip()
 
 
 def test_litellm_mounts_only_its_config_and_start_script_and_loads_no_hal_code(compose):
