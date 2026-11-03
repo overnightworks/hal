@@ -408,7 +408,7 @@ def restore(
     if target.resolve().is_relative_to(settings.work_dir.resolve()):
         raise StepFailed(
             ExitCategory.CONFIGURATION,
-            "the target is inside the work directory (~/.cache/edge-backup)",
+            "the target is inside the work directory (~/.cache/hal-backup)",
         )
     if target.exists():
         raise StepFailed(ExitCategory.CONFIGURATION, "the target already exists")

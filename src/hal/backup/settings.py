@@ -49,13 +49,13 @@ class Settings:
 
     @classmethod
     def for_home(cls, home: Path, uid: int, gid: int) -> Settings:
-        state = home / ".local/state/edge"
+        state = home / ".local/state/hal"
         return cls(
             repository=home / "backups/restic",
             password_file=home / ".secrets/restic/password",
             status_file=state / "backup-status.json",
             lock_file=state / "backup.lock",
-            work_dir=home / ".cache/edge-backup",
+            work_dir=home / ".cache/hal-backup",
             uid=uid,
             gid=gid,
         )

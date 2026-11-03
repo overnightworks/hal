@@ -13,7 +13,7 @@ from pathlib import PurePosixPath
 from typing import Self
 
 CLOUDFLARED_UNIT = "cloudflared.service"
-BOOT_DROP_IN = "30-edge-global-stop.conf"
+BOOT_DROP_IN = "30-hal-global-stop.conf"
 MANAGE_UNITS_ACTION = "org.freedesktop.systemd1.manage-units"
 UNIT_VARIABLE = "EDGE_TUNNEL_UNIT"
 MANAGER_VARIABLE = "EDGE_TUNNEL_MANAGER"

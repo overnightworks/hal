@@ -109,7 +109,7 @@ read by anyone, ever:** losing the key loses every backup, and restic has no rec
 | `hal-backup-restore-test.timer` | first Sunday of the month 05:00, `Persistent=true` | restore the last successful backup's snapshot, load and verify it; then `check --read-data-subset=10%` |
 
 A missed run (PC off) runs at the next boot. If Docker or the app's database is not up yet, the backup
-waits up to 10 minutes, then fails. One host lock (`~/.local/state/edge/backup.lock`) serialises every
+waits up to 10 minutes, then fails. One host lock (`~/.local/state/hal/backup.lock`) serialises every
 `hal backup` or `hal restore` run: run by hand during a backup or restore test, `hal restore --list`,
 `hal restore` or any other verb waits silently until that run ends.
 
@@ -203,7 +203,7 @@ and still backs up Songmaker. A failed run skips retention and the repository ch
 
 ### The restore test
 
-It restores the last successful backup's snapshot into a private directory under `~/.cache/edge-backup`
+It restores the last successful backup's snapshot into a private directory under `~/.cache/hal-backup`
 and checks:
 
 - `pg_restore --list` reads the dump;
@@ -225,13 +225,13 @@ and checks:
 
 The restore test never touches a live database or volume. (The SQLite backup's copy only reads the
 database file, as described above.) Backup and restore test stage their plaintext in
-`~/.cache/edge-backup` and remove it when they end. A run killed outright cannot, so the plaintext stays
+`~/.cache/hal-backup` and remove it when they end. A run killed outright cannot, so the plaintext stays
 until the next backup or restore test, which removes it first; that sweep removes only directories a run
 marked as its own.
 
 ### Status
 
-`~/.local/state/edge/backup-status.json` is written atomically at every phase (schema 2; the shape is in
+`~/.local/state/hal/backup-status.json` is written atomically at every phase (schema 2; the shape is in
 `src/hal/backup/`). The run's verdict stands at the top (`state`: `running`, `ok` or `failed`, with
 `phase`, `failing_phase`, `failing_app`, `exit_category`, `last_attempt`); each app (its name, which is
 also its restic tag) has its own last good snapshot and times. The file holds no output, command line,
@@ -283,7 +283,7 @@ The two blocks below stay until `restore <app> --live` exists (`docs/architectur
 follow-up on overnightworks/edge#222).
 
 ```sh
-hal restore songmaker --target ~/restore-songmaker   # a new directory, not under ~/.cache/edge-backup
+hal restore songmaker --target ~/restore-songmaker   # a new directory, not under ~/.cache/hal-backup
 ```
 
 It restores the snapshot of that app's **last successful backup**

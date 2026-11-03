@@ -370,7 +370,7 @@ def session(keycloak: Keycloak) -> Session:
 
 @pytest.fixture
 def marks(tmp_path: Path) -> switches.Switches:
-    return switches.Switches(tmp_path / "state" / "edge")
+    return switches.Switches(tmp_path / "state" / "hal")
 
 
 @pytest.fixture

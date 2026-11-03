@@ -358,7 +358,7 @@ factor. `hal apply` publishes `auth.<EDGE_DOMAIN>` afterwards, once the catalog 
 `fleet.yaml` names `keycloak/go-live` as Keycloak's setup, so `hal apply` asks and runs it in
 your terminal on yes while it is not done.
 
-While `~/.local/state/edge/stopped/keycloak` exists (`hal stop keycloak`), go-live refuses and
+While `~/.local/state/hal/stopped/keycloak` exists (`hal stop keycloak`), go-live refuses and
 starts nothing; `hal start keycloak` ends the switch. `keycloak/go-live --check` asks nothing,
 changes nothing and ignores the marker: its exit codes are in `--help`. It reads go-live's durable
 trace, not Keycloak, and it is also the setup check of `hal apply --local` for the unit

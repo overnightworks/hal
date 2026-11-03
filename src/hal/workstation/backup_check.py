@@ -16,7 +16,7 @@ from pathlib import Path
 
 from hal.workstation.report import Finding, read_state_file, render_findings_report
 
-STATUS_FILE = Path(".local/state/edge/backup-status.json")  # below the home directory; written by the backup, which `home` only reads
+STATUS_FILE = Path(".local/state/hal/backup-status.json")  # below the home directory; written by the backup, which `home` only reads
 STATUS_SCHEMA = 2
 STATES = frozenset({"running", "ok", "failed"})
 EXIT_CATEGORIES = frozenset({"configuration", "not-ready", "command-failed", "verification-failed", "interrupted", "internal"})

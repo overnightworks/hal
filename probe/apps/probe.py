@@ -129,7 +129,7 @@ class Probe:
         self.environment.pop("DBUS_SESSION_BUS_ADDRESS", None)
         self.copy = checkout.live_checkout(self.home)
         self.srv = self.home / "srv" / self.key
-        self.record = self.home / ".local" / "state" / "edge" / "deployed" / self.key
+        self.record = self.home / ".local" / "state" / "hal" / "deployed" / self.key
         self.origin = scratch / "app-origin.git"
         self.work = scratch / "app-work"
         self.shas: dict[str, str] = {}

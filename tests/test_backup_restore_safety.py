@@ -1,6 +1,7 @@
 """What a restore may take, and what a run must check before it stages anything."""
 
 import json
+import os
 
 import pytest
 from support.backup_support import (
@@ -12,7 +13,7 @@ from support.backup_support import (
     schema_one_status,
 )
 
-from hal.backup.settings import RESTIC_IMAGE, RESTORE_IMAGES
+from hal.backup.settings import RESTIC_IMAGE, RESTORE_IMAGES, Settings
 
 
 def _leave_a_partial_snapshot(machine: Machine) -> str:
@@ -105,8 +106,8 @@ def test_a_pinned_image_that_cannot_be_pulled_fails_early_naming_it(
     assert set(machine.labels()) == {"docker info", "docker image inspect", "docker pull"}
     assert outcome.status["exit_category"] == "configuration"
     assert (
-        not (home / ".cache/edge-backup").exists()
-        or list((home / ".cache/edge-backup").iterdir()) == []
+        not Settings.for_home(home, os.getuid(), os.getgid()).work_dir.exists()
+        or list(Settings.for_home(home, os.getuid(), os.getgid()).work_dir.iterdir()) == []
     )
 
 

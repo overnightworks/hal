@@ -566,8 +566,8 @@ class Probe(McpNetworks, TraefikMcpFollows):
 
     @property
     def state_directory(self) -> Path:
-        """Where edge keeps its markers and its applied record under the probe's HOME."""
-        return self.home / ".local" / "state" / "edge"
+        """Where hal keeps its markers and its applied record under the probe's HOME."""
+        return self.home / ".local" / "state" / "hal"
 
     def traefik_started_at(self) -> str:
         container = self.compose("ps", "--quiet", "traefik-mcp").stdout.decode().strip()

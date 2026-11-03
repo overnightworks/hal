@@ -10,6 +10,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from support.backup_support import declare_shipped_apps, declare_two_apps, no_restore_server_left
 
+from hal.backup.settings import Settings
+
 
 @pytest.mark.parametrize(
     "command",
@@ -394,7 +396,7 @@ def test_sigterm_ends_a_run_as_an_interruption_that_cleans_up_and_frees_the_lock
     assert signal.getsignal(signal.SIGTERM) is sigterm_before
     assert machine._host_lock_is_free()
     assert no_restore_server_left(machine)
-    assert list((home / ".cache/edge-backup").iterdir()) == []
+    assert list(Settings.for_home(home, os.getuid(), os.getgid()).work_dir.iterdir()) == []
     if label in {"pg_dump", "pg_restore"}:  # the verbs that record their outcome
         assert outcome.status["state"] == "failed"
         assert outcome.status["exit_category"] == "interrupted"

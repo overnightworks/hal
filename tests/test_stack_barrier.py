@@ -388,8 +388,8 @@ def test_no_request_is_given_more_time_than_the_15_seconds_leave(checkout):
 
 
 KEYCLOAK_BARRIER = (
-    "# Written by `edge stop keycloak` from ~/.local/state/edge/stopped/keycloak; "
-    "removed by `edge start keycloak`. Generated, git-ignored.\n"
+    "# Written by `hal stop keycloak` from ~/.local/state/hal/stopped/keycloak; "
+    "removed by `hal start keycloak`. Generated, git-ignored.\n"
     """\
 http:
   routers:

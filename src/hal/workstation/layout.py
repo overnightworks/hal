@@ -27,10 +27,6 @@ class Layout:
         return self.local_dir / "share"
 
     @property
-    def state_dir(self) -> Path:
-        return self.local_dir / "state" / "home"
-
-    @property
     def hal_state_dir(self) -> Path:
         return self.local_dir / "state" / "hal"
 
@@ -86,7 +82,7 @@ class Layout:
 
     @property
     def secrets_report_file(self) -> Path:
-        return self.state_dir / "secrets-report.md"
+        return self.hal_state_dir / "secrets-report.md"
 
 
 CommandRunner = Callable[[Sequence[str]], str | None]

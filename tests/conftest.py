@@ -45,6 +45,7 @@ from support.workstation_support import (
 
 from hal import cli
 from hal.backup import host
+from hal.backup.settings import Settings
 from hal.grammar import ExitCode
 from hal.stack import appkit_step
 from hal.workstation import check, jobs, secrets_view, setup, system_step, tunnel_config
@@ -130,7 +131,7 @@ def berlin_time(monkeypatch) -> Iterator[None]:
 
 @pytest.fixture
 def machine(monkeypatch, home) -> Machine:
-    machine = Machine(status_file=home / ".local/state/edge/backup-status.json")
+    machine = Machine(status_file=Settings.for_home(home, os.getuid(), os.getgid()).status_file)
     monkeypatch.setattr(host, "run", machine.run)
     monkeypatch.setattr(host, "now", machine.clock.now)
     monkeypatch.setattr(host, "monotonic", machine.clock.monotonic)
@@ -165,8 +166,7 @@ def edge_backup(machine, home, capsys):
             declared = list(songmaker_only)
         exit_code = cli.main([*arguments_list, *declared])
         captured = capsys.readouterr()
-        status_file = home / ".local/state/edge/backup-status.json"
-        status = _status_if_readable(status_file)
+        status = _status_if_readable(machine.status_file)
         return Outcome(exit_code, captured.out, captured.err, status)
 
     return run

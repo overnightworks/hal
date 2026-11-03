@@ -10,14 +10,16 @@ UNIT_DIR=/etc/systemd/system
 SYSTEM_FILES=(
     "$UNIT_DIR/cloudflared.service"
     "$UNIT_DIR/cloudflared.service.d/20-nonroot.conf"
-    "$UNIT_DIR/cloudflared.service.d/30-edge-global-stop.conf"
     "$UNIT_DIR/cloudflared.service.d/30-hal-global-stop.conf"
-    /etc/polkit-1/rules.d/10-edge-cloudflared-stop.rules
     /etc/polkit-1/rules.d/10-hal-cloudflared-stop.rules
 )
 RETIRED_DROP_IN="$UNIT_DIR/cloudflared.service.d/10-root-binary.conf"
+# The pair under the old names, which today's PC has from earlier plays and `hal setup` retires.
+RETIRED_PAIR=(
+    "$UNIT_DIR/cloudflared.service.d/30-edge-global-stop.conf"
+    /etc/polkit-1/rules.d/10-edge-cloudflared-stop.rules
+)
 MARKER=/home/tester/.local/state/hal/global-stop
-OLD_MARKER=/home/tester/.local/state/edge/global-stop
 # The properties the operator's ruling „sauber ersetzen“ keeps equal; ExecStart is compared apart from its path.
 SHOWN=ExecStart,Type,User,DynamicUser,LoadCredential,Environment,ProtectSystem,ProtectHome,PrivateTmp,NoNewPrivileges,TimeoutStartUSec,Restart
 RETENTION_SERVICE=hal-journal-retention.service
@@ -283,6 +285,24 @@ UNIT
 ExecStart=
 ExecStart=/usr/bin/cloudflared --no-autoupdate --config /etc/cloudflared/config.yml tunnel run
 UNIT
+    cat >"${RETIRED_PAIR[0]}" <<'UNIT'
+[Unit]
+ConditionPathExists=!/home/tester/.local/state/edge/global-stop
+RequiresMountsFor=/home/tester/.local/state/edge
+UNIT
+    mkdir -p "$(dirname "${RETIRED_PAIR[1]}")"
+    cat >"${RETIRED_PAIR[1]}" <<'RULE'
+// The operator may stop the tunnel without a password, also over SSH; nothing else is granted
+// here, so `start`, `restart` and every other unit still ask. polkit's engine is ES5.
+polkit.addRule(function (action, subject) {
+    if (action.id == "org.freedesktop.systemd1.manage-units" &&
+        action.lookup("unit") == "cloudflared.service" &&
+        action.lookup("verb") == "stop" &&
+        subject.user == "tester") {
+        return polkit.Result.YES;
+    }
+});
+RULE
     sed "s/@TUNNEL_ID@/$id/" >"$UNIT_DIR/cloudflared.service.d/20-nonroot.conf" <<'UNIT'
 [Service]
 DynamicUser=yes
@@ -329,6 +349,9 @@ cell_2() {
     verdict 2 "10-root-binary.conf is gone" '[ ! -e "$RETIRED_DROP_IN" ]'
     verdict 2 "nothing started or restarted" 'diff "$EVIDENCE/state-before.txt" "$EVIDENCE/state-after.txt"'
     verdict 2 "the backups are outside $UNIT_DIR" '[ -n "$(find /var/backups/home-setup -name 10-root-binary.conf)" ]'
+    verdict 2 "the pair under the old names is gone" '[ ! -e "${RETIRED_PAIR[0]}" ] && [ ! -e "${RETIRED_PAIR[1]}" ]'
+    verdict 2 "a copy of each of the old pair is kept under /var/backups/home-setup" \
+        '[ -n "$(find /var/backups/home-setup -name "${RETIRED_PAIR[0]##*/}")" ] && [ -n "$(find /var/backups/home-setup -name "${RETIRED_PAIR[1]##*/}")" ]'
     return
 }
 
@@ -410,7 +433,7 @@ cell_1() {
         '[ $code -eq 0 ] && asked_once cell1 && row_in_log cell1 system changed && ! grep -qE "TASK \[|PLAY RECAP" "$EVIDENCE/cell1.log" && ! grep -qaP "\x1b" "$EVIDENCE/cell1.log"'
     verdict 1 "the apply announces needs sudo once, before the system's password prompt" \
         '[ "$(grep -c "^  › system  *needs sudo" "$EVIDENCE/cell1.log")" -eq 1 ] && announced_before_prompt cell1'
-    verdict 1 "the six files are root-owned, mode 644" '[ "$(stat -c "%U %a" "${SYSTEM_FILES[@]}" | sort -u)" = "root 644" ]'
+    verdict 1 "the four files are root-owned, mode 644" '[ "$(stat -c "%U %a" "${SYSTEM_FILES[@]}" | sort -u)" = "root 644" ]'
     verdict 1 "every placeholder is filled" 'all_exist "${SYSTEM_FILES[@]}" && ! grep -lE "@[A-Z_]+@" "${SYSTEM_FILES[@]}"'
     verdict 1 "systemd-analyze verify passes" 'systemd-analyze verify cloudflared.service >"$EVIDENCE/verify.log" 2>&1'
     verdict D1 "the apply installed msmtp and ca-certificates, and msmtp-mta is not there" \
@@ -765,28 +788,6 @@ cell_7() {
     systemctl show cloudflared -p ActiveState >"$EVIDENCE/cell7.txt"
     verdict 7 "with the marker the unit is condition-skipped after a reboot" \
         'grep -qx ActiveState=inactive "$EVIDENCE/cell7.txt" && grep -q "skipped, unmet condition check ConditionPathExists=!" "$EVIDENCE/boot-7.txt"'
-    return
-}
-
-cell_7o() {  # only the old marker exists (marker_off ran before): the old path alone keeps the tunnel down, for code that still writes it
-    local started_at
-    if [[ -e "$MARKER" ]] || ! as_tester mkdir -p "$(dirname "$OLD_MARKER")" || ! as_tester touch "$OLD_MARKER" || [[ ! -e "$OLD_MARKER" ]]; then
-        echo "cell 7o: FAILED: the preparation failed, the hal marker is not absent or the old marker is not present"
-        rm -f "$OLD_MARKER"
-        return 0
-    fi
-    started_at=$(date '+%F %T')
-    systemctl start cloudflared >"$EVIDENCE/cell7o.txt" 2>&1
-    echo "start exit code: $?" >>"$EVIDENCE/cell7o.txt"
-    journalctl --sync
-    journalctl --unit cloudflared --since "$started_at" --no-pager >>"$EVIDENCE/cell7o.txt" 2>&1
-    systemctl show cloudflared -p ActiveState >>"$EVIDENCE/cell7o.txt"
-    if ! rm -f "$OLD_MARKER" || [[ -e "$OLD_MARKER" ]]; then
-        echo "cell 7o: FAILED: the old marker could not be removed"
-        return 0
-    fi
-    verdict 7o "with only the old marker a start is condition-skipped" \
-        'grep -qx ActiveState=inactive "$EVIDENCE/cell7o.txt" && grep -qF "ConditionPathExists=!$OLD_MARKER" "$EVIDENCE/cell7o.txt"'
     return
 }
 
@@ -1977,7 +1978,7 @@ cells_sudo() {  # cells_sudo <suffix> <alternative>: P1-P10 under one variant of
 case "${1:?stage}" in
     install) install_home ;;
     fresh) cell_dk1; plant_rsyslog_files; record_rsyslog_before; cell_11; cell_12; cell_13; cell_10; cell_r0; cell_dk3_before_the_first_apply; cell_1; cells_rsyslog_purged; cell_a1_1; cell_9; cell_a1_2; cell_r4; cell_s1; cells_yes; cells_mail; cells_agent; cells_docker; cells_retention; cells_polkit; marker_on ;;
-    after-marker-reboot) cell_7; cell_a1_9; cell_r2_after_boot; marker_off; cell_7o ;;
+    after-marker-reboot) cell_7; cell_a1_9; cell_r2_after_boot; marker_off ;;
     after-unmarked-reboot) cell_8; cell_r5 ;;
     prepared) wait_for_engine; prepare_today; cell_2 ;;
     sudo-classic) cells_sudo c "$SUDO_CLASSIC" ;;

@@ -3,6 +3,7 @@ docker and restic."""
 
 import itertools
 import json
+import os
 import re
 import tempfile
 from collections.abc import Callable, Iterator
@@ -35,7 +36,11 @@ from hal.backup import cli, docker, host
 from hal.backup.apps import AppsError, PostgresMajor, parse_apps
 from hal.backup.docker import RESTORE_OWNER_LABEL, RESTORE_OWNER_ROLE
 from hal.backup.runner import RUN_MARK_SUFFIX, STAGING_PREFIX
-from hal.backup.settings import RESTIC_IMAGE, RESTORE_IMAGES
+from hal.backup.settings import RESTIC_IMAGE, RESTORE_IMAGES, Settings
+
+
+def work_dir_of(home: Path) -> Path:
+    return Settings.for_home(home, os.getuid(), os.getgid()).work_dir
 
 
 def test_backup_puts_dump_manifest_and_audio_into_one_snapshot(edge_backup, machine, home):
@@ -53,7 +58,7 @@ def test_backup_puts_dump_manifest_and_audio_into_one_snapshot(edge_backup, mach
     assert outcome.status["state"] == "ok"
     assert app_history(outcome.status)["last_snapshot_id"] == snapshot["id"]
     assert app_history(outcome.status)["last_successful_backup"] == "2026-10-18T03:00:00+00:00"
-    assert list((home / ".cache/edge-backup").iterdir()) == []
+    assert list(work_dir_of(home).iterdir()) == []
 
 
 def test_backup_forgets_by_host_and_app_tag_then_checks(edge_backup, machine):
@@ -205,7 +210,7 @@ def test_restore_test_restores_loads_and_verifies_the_latest_snapshot(edge_backu
     assert machine.labels()[-1] == "restic check"
     assert machine.labels().count("pg_isready") == 2
     assert no_restore_server_left(machine)
-    assert list((home / ".cache/edge-backup").iterdir()) == []
+    assert list(work_dir_of(home).iterdir()) == []
 
 
 def test_the_restored_audio_is_counted_by_the_manifests_own_rule(edge_backup, machine):
@@ -318,7 +323,7 @@ def test_a_failed_backup_step_fails_loud_and_never_counts_as_success(
     assert ("last_successful_backup" in app_history(outcome.status)) is backup_counts
     if not backup_counts:
         assert "restic forget" not in machine.labels()
-    assert list((home / ".cache/edge-backup").iterdir()) == []
+    assert list(work_dir_of(home).iterdir()) == []
 
 
 @pytest.mark.parametrize(
@@ -621,7 +626,7 @@ def test_restore_test_fails_when_the_copy_is_not_what_was_backed_up(
     assert outcome.status["exit_category"] == "verification-failed"
     assert app_history(outcome.status)["last_successful_restore_test"] is None
     assert no_restore_server_left(machine)
-    assert list((home / ".cache/edge-backup").iterdir()) == []
+    assert list(work_dir_of(home).iterdir()) == []
 
 
 @pytest.mark.parametrize(
@@ -661,7 +666,7 @@ def test_an_interrupted_run_is_failed_and_cleans_up(edge_backup, machine, home):
     assert outcome.status["state"] == "failed"
     assert outcome.status["exit_category"] == "interrupted"
     assert no_restore_server_left(machine)
-    assert list((home / ".cache/edge-backup").iterdir()) == []
+    assert list(work_dir_of(home).iterdir()) == []
 
 
 def _back_up_once(edge_backup, machine) -> None:
@@ -721,7 +726,7 @@ def test_a_run_sweeps_only_the_plaintext_a_killed_run_left_behind(
     edge_backup, machine, home, arguments, arrange, exit_code
 ):
     arrange(edge_backup, machine)
-    work_dir = home / ".cache/edge-backup"
+    work_dir = work_dir_of(home)
     killed_run = _leave_killed_run_staging(work_dir)
     unmarked = (work_dir / f"{STAGING_PREFIX}foreign", work_dir / "manual")
     for copy in (killed_run, *unmarked):
@@ -747,7 +752,7 @@ def test_a_run_whose_staging_name_is_taken_leaves_that_directory_alone(
     edge_backup, machine, home, monkeypatch, command
 ):
     _back_up_once(edge_backup, machine)
-    work_dir = home / ".cache/edge-backup"
+    work_dir = work_dir_of(home)
     taken = work_dir / f"{STAGING_PREFIX}taken"
     (taken / "db").mkdir(parents=True)
     (taken / "db/db.dump").write_bytes(DUMP)
@@ -777,7 +782,7 @@ def test_an_unexpected_error_marks_the_run_failed_and_surfaces(edge_backup, mach
 @pytest.fixture
 def undeletable_leftover(home) -> Iterator[Path]:
     """A killed run's staging that `rmtree` cannot remove: a read-only directory holding a file."""
-    locked = _leave_killed_run_staging(home / ".cache/edge-backup") / "audio/locked"
+    locked = _leave_killed_run_staging(work_dir_of(home)) / "audio/locked"
     locked.mkdir(parents=True)
     (locked / "one.mp3").write_bytes(AUDIO["u1/one.mp3"])
     locked.chmod(0o500)
@@ -943,7 +948,7 @@ def test_restore_puts_the_last_successful_snapshot_into_a_new_directory(edge_bac
 @pytest.mark.parametrize("target", [f"{STAGING_PREFIX}manual", "manual"])
 def test_restore_refuses_a_target_in_the_directory_runs_sweep(edge_backup, machine, home, target):
     edge_backup("backup")
-    work_dir = home / ".cache/edge-backup"
+    work_dir = work_dir_of(home)
 
     outcome = edge_backup("restore", "songmaker", "--target", str(work_dir / target))
 
@@ -1087,7 +1092,7 @@ def test_a_failing_restore_shows_no_row_value_of_the_dump(edge_backup, machine, 
     shown = outcome.out + outcome.err + machine.status_file.read_text()
     assert marker not in shown
     assert no_restore_server_left(machine)
-    assert list((home / ".cache/edge-backup").iterdir()) == []
+    assert list(work_dir_of(home).iterdir()) == []
 
 
 def test_an_app_never_backed_up_is_named_so_by_restore_and_restore_test(edge_backup, machine, home):

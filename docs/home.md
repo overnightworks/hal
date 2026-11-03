@@ -156,7 +156,7 @@ eigener Fund, nie ein sauberer Lauf.
   benannten Feldern, darunter das Projekt, ein Aufruf für alle; der Fund trägt den Projektnamen): `container-unhealthy`, `container-restarting`, `container-dead` und
   `container-exited` mit Code ungleich 0 (alle Action needed). Exit-Code 0, `starting` und ein Container ohne Healthcheck sind keine Funde,
   ein entfernter Container auch nicht. Gesunde erscheinen nur als Zahl. Ein Container einer App, die mit `hal stop`
-  abgeschaltet ist (eine Datei unter `~/.local/state/edge/stopped/`; nur der Name wird gelesen), ist mit jedem Code ungleich 0
+  abgeschaltet ist (eine Datei unter `~/.local/state/hal/stopped/`; nur der Name wird gelesen), ist mit jedem Code ungleich 0
   kein Fund, und der Bericht nennt die Schalter; `container-restarting`, `container-dead` und `container-unhealthy` bleiben
   Funde. Eine Einheit von edges eigenem Stack (Projekt `hal`) erscheint nach `hal stop` weiter, weil nur `hal` weiß, welche Dienste eine Einheit bilden und dafür noch niemand zuständig ist; `hal alarm` meldet sie deshalb nach der eingestellten Zahl Läufe. `docker-unreadable`, wenn Docker nicht lesbar ist.
 - **`platform`, Jobs.** `systemctl --user list-units --state=failed` für `hal*`: nur die erste Spalte, der Einheitenname
@@ -170,7 +170,7 @@ eigener Fund, nie ein sauberer Lauf.
   noch nutzen kann): `disk-low` (Action needed), wenn weniger als 10 % frei sind; genau 10 % ist kein Fund. Der Fund
   hat den Gegenstand `/`, der freie Platz gehört nicht zur Identität. Die Mail nennt keine Zahl, der Bericht GB frei,
   GB gesamt und den Anteil. Lässt sich die Platte nicht lesen, läuft die Prüfung `platform` nicht.
-- **`backup`.** `~/.local/state/edge/backup-status.json` (Schema 2, nur die dokumentierten Felder): `backup-failed`,
+- **`backup`.** `~/.local/state/hal/backup-status.json` (Schema 2, nur die dokumentierten Felder): `backup-failed`,
   wenn der letzte Lauf `failed` ist; `backup-crashed`, wenn `running` länger als 6 Stunden her ist; `backup-stale` je
   App, wenn `last_successful_backup` älter als 8 Tage ist oder fehlt; `backup-status-unreadable`, wenn die Datei
   fehlt, nicht lesbar ist (ein Symlink an ihrer Stelle wird nicht verfolgt), ein anderes Schema oder einen Wert außerhalb
@@ -217,7 +217,7 @@ hal secrets --by-service   # welcher Dienst welches Geheimnis liest (deklariert)
 
 `hal secrets` prüft jedes Geheimnis, das das Manifest
 `src/hal/workstation/secrets_manifest.toml` nennt, und ändert nichts außer seinem
-Bericht `~/.local/state/home/secrets-report.md`. Es braucht kein Terminal;
+Bericht `~/.local/state/hal/secrets-report.md`. Es braucht kein Terminal;
 Agenten dürfen es fahren. Einrichten geht nur mit `hal setup` (unten);
 eine Option dafür hat `hal secrets` nicht, ein unbekanntes Argument endet mit Exit 2. Exit-Code: `0` sauber, `1` Funde, `2` das Manifest ist ungültig
 (`error: <Datei>: …`), `3` ein unerwarteter Fehler, `130` unterbrochen.
@@ -585,18 +585,17 @@ their placeholders filled, to:
 
 - `/etc/systemd/system/cloudflared.service`, the clean base unit;
 - `/etc/systemd/system/cloudflared.service.d/20-nonroot.conf` and
-  `30-edge-global-stop.conf` and `30-hal-global-stop.conf`, so the tunnel stays
-  down after a reboot while `~/.local/state/edge/global-stop` or
+  `30-hal-global-stop.conf`, so the tunnel stays down after a reboot while
   `~/.local/state/hal/global-stop` exists;
-- `/etc/polkit-1/rules.d/10-edge-cloudflared-stop.rules` and
-  `10-hal-cloudflared-stop.rules`, so you may *stop* `cloudflared.service`
-  without a password, and only stop.
+- `/etc/polkit-1/rules.d/10-hal-cloudflared-stop.rules`, so you may *stop*
+  `cloudflared.service` without a password, and only stop.
 
-All six are root-owned, mode 644. `@HOME@` and `@OPERATOR_USER@` are your
+All four are root-owned, mode 644. `@HOME@` and `@OPERATOR_USER@` are your
 home and your user; `@TUNNEL_ID@` is `tunnel:` in `/etc/cloudflared/config.yml`,
 and without it the step fails before writing anything. Once the new base unit
-is in place, `10-root-binary.conf` is deleted. Every run of `hal setup` reloads systemd; `--dry-run` does not.
-An extra reload at the end follows only when an edge file or the retired drop-in changed;
+is in place, the files earlier runs installed and none installs now are deleted: `10-root-binary.conf`,
+`30-edge-global-stop.conf` and `/etc/polkit-1/rules.d/10-edge-cloudflared-stop.rules`. Every run of `hal setup` reloads systemd; `--dry-run` does not.
+An extra reload at the end follows only when an edge file or a retired file changed;
 cloudflared is never started, stopped or restarted.
 Whatever is replaced or deleted of these files is copied first to
 `/var/backups/home-setup/<UTC time>/`, outside `/etc/systemd/system`. The retention units
@@ -667,19 +666,17 @@ below and rsyslog's conffiles are home's own and are not backed up. `/etc/docker
   neither waits for a prompt.
 - **Rollback.** Restore the previous `cloudflared.service`,
   `10-root-binary.conf` and `20-nonroot.conf` from the backup (their content
-  before the first run is in the inventory of #9). Restore
-  `30-edge-global-stop.conf` from the backup too, or remove it when the backup
-  has none, because the step created it, and remove `30-hal-global-stop.conf`;
-  until then the global-stop condition stays in force. Then run
-  `sudo systemctl daemon-reload`, and remove
-  `/etc/polkit-1/rules.d/10-edge-cloudflared-stop.rules` and
-  `10-hal-cloudflared-stop.rules`.
+  before the first run is in the inventory of #9), and the deleted
+  `30-edge-global-stop.conf` and `10-edge-cloudflared-stop.rules`. Remove
+  `30-hal-global-stop.conf` and `10-hal-cloudflared-stop.rules` when the backup
+  has none, because the step created them; until then the global-stop condition
+  stays in force. Then run `sudo systemctl daemon-reload`.
 - **A failed `hal setup`.** Files are copied in the order above, so some may already be in place, and
-  `10-root-binary.conf` is deleted only after all six are. The `daemon-reload` handler does not run
+  the retired files are deleted only after all four are. The `daemon-reload` handler does not run
   after a failure, so systemd may still run its old configuration. Two cases:
-  - A failure while copying leaves some files in place and `10-root-binary.conf` still there. Run
-    `hal setup` again: it copies the rest, deletes the drop-in and reloads systemd.
-  - A failure in the reload itself leaves every file in place, `10-root-binary.conf` already deleted
+  - A failure while copying leaves some files in place and the retired files still there. Run
+    `hal setup` again: it copies the rest, deletes the retired files and reloads systemd.
+  - A failure in the reload itself leaves every file in place, the retired files already deleted
     and systemd not reloaded. Run `hal setup` again: it reloads systemd on every run,
     whatever else it finds to change.
 

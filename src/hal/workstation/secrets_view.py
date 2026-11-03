@@ -4,7 +4,7 @@ It reads secret files by `stat` only and never opens them. The one probe runs
 `gh auth status`, keeps nothing but its exit code and kills its whole process
 group when it hangs past a timeout or the run is stopped (Ctrl-C, SIGTERM, SIGHUP).
 Without options it only displays: it writes nothing but its report under
-~/.local/state/home/. Anything under ~/.secrets the manifest does not name is
+~/.local/state/hal/. Anything under ~/.secrets the manifest does not name is
 reported as unknown and left alone; loose modes are reported, never changed.
 
 Exit code: 0 when nothing needs attention, 1 when a finding exists, 2 when the

@@ -31,7 +31,7 @@ INSPECT_FORMAT = (
     '{{.Name}}\t{{.State.Status}}\t{{if .State.Health}}{{.State.Health.Status}}{{end}}\t{{.State.ExitCode}}'
     '\t{{index .Config.Labels "com.docker.compose.project"}}'
 )
-SWITCHES_DIRECTORY = Path(".local/state/edge/stopped")  # below the home directory; one file per app switched off with `hal stop`, which `home` only reads
+SWITCHES_DIRECTORY = Path(".local/state/hal/stopped")  # below the home directory; one file per app switched off with `hal stop`, which `home` only reads
 FAILED_HAL_UNITS = ["systemctl", "--user", "list-units", "--state=failed", "--plain", "--no-legend", "--no-pager", "--full", "hal*"]
 HAL_UNIT_NAME = re.compile(r"hal(-[a-z0-9]+)*\.(service|timer)")
 COMPOSE_PROJECT_NAME = re.compile(r"[a-z0-9][a-z0-9_-]*")

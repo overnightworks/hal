@@ -14,7 +14,7 @@ entry at HEAD, never the shape of the disk: a source HEAD does not track, a trac
 submodule cannot be planned. A directory bind such as `dynamic/` is live through
 Traefik's watch and needs no record.
 
-`~/.local/state/edge/applied.json`, beside the switches, holds for each service that binds a
+`~/.local/state/hal/applied.json`, beside the switches, holds for each service that binds a
 file from the checkout the sha256 of each file bind's bytes as last fully applied:
 `{service: {path in the checkout: sha256}}`. A file is changed when it differs from its entry; a
 missing, unreadable or malformed record, a missing entry or an entry naming another file counts as

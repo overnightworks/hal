@@ -301,7 +301,7 @@ def test_a_failed_unit_counts_as_stopped():
 
 
 def test_an_unrelated_drop_in_does_not_certify_the_reboot_protection(stop_all, systemd):
-    """#70 rule 3: only the exact 30-edge-global-stop.conf counts as the boot drop-in."""
+    """#70 rule 3: only the exact boot drop-in name counts as the boot drop-in."""
     systemd.drop_ins = ["130-" + tunnel.BOOT_DROP_IN.removeprefix("30-")]
 
     exit_code, output = stop_all()

@@ -1,21 +1,15 @@
 [edge-verb]
 "docs/architecture.md" = 9
 "docs/design/hal-output.html" = 18
-"src/hal/stack/barrier.py" = 2
 "src/hal/stack/environment.py" = 1
-"tests/test_stack_barrier.py" = 2
-"tunnel/cloudflared.service.d/30-edge-global-stop.conf" = 1
 
 [edge-script]
 "docs/architecture.md" = 1
-"docs/backup.md" = 5
-"src/hal/backup/runner.py" = 1
-"src/hal/backup/settings.py" = 1
+"docs/backup.md" = 2
+"src/hal/workstation/state_move.py" = 1
 "tests/support/backup_support.py" = 3
-"tests/test_backup_restore_safety.py" = 4
-"tests/test_backup_runner.py" = 11
-"tests/test_backup_sqlite.py" = 2
-"tests/test_hal_backup.py" = 1
+"tests/test_backup_restore_safety.py" = 2
+"tests/test_backup_runner.py" = 1
 
 [home-verb]
 "docs/design/hal-output.html" = 1
@@ -35,7 +29,5 @@
 [config-directory]
 
 [state-directory]
-"docs/home.md" = 1
-"src/hal/workstation/secrets_view.py" = 1
 
 [edge-checkout]

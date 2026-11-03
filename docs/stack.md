@@ -166,6 +166,10 @@ eine Zeile `checkout current`, und der Plan wendet HEAD an.
 `hal update` bringt den Live-Checkout `~/srv/hal` auf `origin/main` und die gesperrten Abhaengigkeiten
 auf ihren Stand; `hal apply` plant danach die Einheiten. Es laeuft nur an einem Terminal.
 
+Nach dem `hal update`, das hals Zustand nach `~/.local/state/hal` und `~/.cache/hal-backup` verlegt,
+kommt `hal migrate state` vor dem naechsten `hal apply`: es holt den Zustand aus den Verzeichnissen der
+alten Namen (Plan, ein `yes`, `--dry-run` zeigt nur).
+
 **Ablauf.** Die Waechter wie beim Apply, jeweils mit nur der ersten verweigernden Zeile (Terminal,
 Live-Checkout, `apply.lock`, sauberes `main`); `.env` prueft nur der Apply. Es haelt `apply.lock` vom
 Abruf bis zum Ende, so laufen `hal apply` und `hal update` nie gleichzeitig. Es holt `main` von `origin`
@@ -293,7 +297,7 @@ die Einheit laeuft, und verweigert eine im Katalog abgeschaltete. Hat die Einhei
 fragt es dessen `--check` vor der Rueckfrage; nicht eingerichtet: Exit 3, Schalter und
 Sperre bleiben.
 
-**Der Schalter** ist eine Datei pro Einheit, `~/.local/state/edge/stopped/<Einheit>`, mit der Zeit des
+**Der Schalter** ist eine Datei pro Einheit, `~/.local/state/hal/stopped/<Einheit>`, mit der Zeit des
 Ausschaltens (ISO 8601). `hal apply --local` startet eine ausgeschaltete Einheit nie und loescht
 ihren Schalter nie ("stays stopped"); sein Ende ist allein `hal start`. Ein `stop` waehrend der
 Rueckfrage von `apply` gewinnt (`apply` liest den Schalter nach dem `yes` noch einmal, `switch.lock`).
@@ -315,12 +319,12 @@ ausdruecklich gestoppten Container auch nach einem Neustart nicht, und der Schal
 Platte.
 
 **Global.** `hal offline` nimmt den PC sofort vom Internet. Es schreibt zuerst
-`~/.local/state/edge/global-stop` (ein zweites Stop behaelt die erste Zeit) ohne auf `switch.lock` zu
+`~/.local/state/hal/global-stop` (ein zweites Stop behaelt die erste Zeit) ohne auf `switch.lock` zu
 warten, stoppt `cloudflared.service`, schreibt den Schalter unter `switch.lock` noch einmal und meldet
 Erfolg erst, wenn `systemctl is-active` den Tunnel als beendet (`inactive` oder `failed`) zeigt. Die
 Einheiten laufen lokal weiter, ihre Schalter bleiben. Ohne Terminal laeuft `systemctl --no-ask-password`.
 Exit 3 heisst teilweise: "partial", wenn der Tunnel noch laeuft (Schalter bleibt;
-`systemctl stop cloudflared`), und "incomplete", wenn das Boot-Drop-in `30-edge-global-stop.conf`
+`systemctl stop cloudflared`), und "incomplete", wenn das Boot-Drop-in `30-hal-global-stop.conf`
 fehlt (ein Neustart oeffnete den Tunnel wieder; `hal setup` installiert es).
 `hal online` braucht ein Terminal und das exakte `yes` (Agenten nie, R4). Es beweist zuerst die
 Sperre jeder noch ausgeschalteten Einheit (bei Bedarf neu geschrieben), holt die Berechtigung des
@@ -334,8 +338,8 @@ Benutzer-Managers an die Stelle von `cloudflared.service`.
 
 **`tunnel/`** ist der Inhalt, den der Systemschritt von `hal setup` mit `sudo` nach `/etc` installiert;
 edge installiert nichts. `20-nonroot.conf` laesst `cloudflared.service` ohne root laufen,
-`30-edge-global-stop.conf` startet es nicht, solange `global-stop` existiert, und
-`polkit/10-edge-cloudflared-stop.rules` erlaubt dem Betreiber nur das **Stoppen** ohne Passwort, auch
+`30-hal-global-stop.conf` startet es nicht, solange `global-stop` existiert, und
+`polkit/10-hal-cloudflared-stop.rules` erlaubt dem Betreiber nur das **Stoppen** ohne Passwort, auch
 ueber SSH; `start` fragt weiter. Ein blosses `systemctl stop cloudflared` haelt daher nicht: nach einem
 Neustart laeuft der Tunnel wieder, denn nur der Schalter ueberlebt ihn. Der Notschalter ist
 `hal offline`.

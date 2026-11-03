@@ -35,7 +35,7 @@ def test_a_table_cell_stays_on_its_row_and_marks_empty_cells(cell: str, shown: s
 
 
 def test_a_state_file_that_cannot_be_replaced_raises_and_leaves_no_fresh_copy_behind(tmp_path: Path) -> None:
-    state_directory = tmp_path / ".local" / "state" / "home"
+    state_directory = tmp_path / ".local" / "state" / "hal"
     report_file = state_directory / "report.md"
     report_file.mkdir(parents=True)
 

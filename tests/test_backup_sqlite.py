@@ -29,7 +29,7 @@ from hal.backup.docker import (
     SQLITE_COPY_LABEL,
     SQLITE_OWNER_LABEL,
 )
-from hal.backup.settings import SQLITE_IMAGE
+from hal.backup.settings import SQLITE_IMAGE, Settings
 from hal.backup.verify import Manifest, VerificationError
 
 WRITER = """
@@ -294,7 +294,7 @@ def test_a_sqlite_backup_stages_the_copy_and_a_manifest_with_the_rows(
     }
     assert snapshot["audio"] == {}
     assert app_history(outcome.status, "presentator")["last_snapshot_id"] == snapshot["id"]
-    assert list((home / ".cache/edge-backup").iterdir()) == []
+    assert list(Settings.for_home(home, os.getuid(), os.getgid()).work_dir.iterdir()) == []
 
 
 def test_the_copy_runs_hardened_as_the_database_owner_with_exactly_the_one_volume(
@@ -389,7 +389,7 @@ def test_a_missing_database_file_fails_that_app_and_the_others_still_back_up(
         "presentator",
         "dump",
     )
-    assert list((home / ".cache/edge-backup").iterdir()) == []
+    assert list(Settings.for_home(home, os.getuid(), os.getgid()).work_dir.iterdir()) == []
 
 
 def test_a_staged_copy_that_fails_the_check_never_reaches_restic(edge_backup, machine, home):

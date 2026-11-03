@@ -103,7 +103,7 @@ class EmergencySwitch:
 
     @property
     def marker(self):
-        return self.probe.home / ".local" / "state" / "edge" / "stopped" / self.probe.key
+        return self.probe.home / ".local" / "state" / "hal" / "stopped" / self.probe.key
 
     @property
     def barrier_file(self):

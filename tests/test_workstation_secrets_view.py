@@ -545,7 +545,7 @@ def test_by_service_inverts_read_by_under_a_declared_dependencies_heading(clean_
     assert "| .bashrc | gitlab, cloudflared |" in output
     assert "Derived copies" not in output
     assert probe.calls == []
-    assert not Layout(clean_home).state_dir.exists()
+    assert not Layout(clean_home).hal_state_dir.exists()
 
 
 def test_no_service_reads_a_github_token_that_can_write_or_administer() -> None:

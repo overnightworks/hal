@@ -10,14 +10,12 @@ import pytest
 import yaml
 
 from hal.stack import switches, tunnel
-from hal.workstation.layout import Layout
 
 TUNNEL_FILES = Path(__file__).resolve().parents[1] / "tunnel"
 BASE_UNIT = TUNNEL_FILES / tunnel.CLOUDFLARED_UNIT
 DROP_INS = TUNNEL_FILES / f"{tunnel.CLOUDFLARED_UNIT}.d"
 NONROOT_DROP_IN = DROP_INS / "20-nonroot.conf"
 BOOT_DROP_IN = DROP_INS / tunnel.BOOT_DROP_IN
-HAL_DROP_IN = DROP_INS / "30-hal-global-stop.conf"
 POLKIT_RULES = tuple(sorted((TUNNEL_FILES / "polkit").glob("*.rules")))
 ALL_FILES = tuple(sorted(path for path in TUNNEL_FILES.rglob("*") if path.is_file()))
 
@@ -55,17 +53,6 @@ def test_the_boot_drop_in_skips_the_tunnel_while_the_global_stop_exists(tmp_path
     assert key_value_lines(rendered) == [
         f"ConditionPathExists=!{marker}",
         f"RequiresMountsFor={marker.parent}",
-    ]
-    assert "[Unit]" in rendered.splitlines()
-
-
-def test_the_hal_drop_in_names_the_marker_below_hal_state_dir(tmp_path):
-    """#858 A1: rendered with a temporary home, the condition names `hal_state_dir`."""
-    state_dir = Layout(tmp_path).hal_state_dir
-    rendered = render(HAL_DROP_IN.read_text(), {"HOME": str(tmp_path)})
-    assert key_value_lines(rendered) == [
-        f"ConditionPathExists=!{state_dir / switches.GLOBAL_STOP_FILE}",
-        f"RequiresMountsFor={state_dir}",
     ]
     assert "[Unit]" in rendered.splitlines()
 

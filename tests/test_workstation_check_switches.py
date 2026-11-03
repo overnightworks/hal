@@ -62,7 +62,7 @@ def test_the_same_exit_is_mailed_once_the_switch_is_gone(clean_home, runner, mai
 
 def test_a_switch_directory_that_cannot_be_read_breaks_the_platform_check_and_leaves_the_other_findings(clean_home, runner, sandbox) -> None:
     """#466 E-3 (#340 S5): a run fails rather than guesses."""
-    stopped = sandbox.home / ".local/state/edge/stopped"
+    stopped = switches.default_state_directory() / switches.STOPPED_DIRECTORY
     stopped.parent.mkdir(parents=True, exist_ok=True)
     stopped.write_text("")
     (clean_home / ".secrets" / "gitlab").unlink()

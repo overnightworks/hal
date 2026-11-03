@@ -38,8 +38,8 @@ VERIFY_SECONDS = 15.0
 _POLL_SECONDS = 0.5
 _REQUEST_SECONDS = 3.0
 _TEMPLATE = (
-    "# Written by `edge stop {unit}` from ~/.local/state/edge/stopped/{unit}; "
-    "removed by `edge start {unit}`. Generated, git-ignored.\n"
+    "# Written by `hal stop {unit}` from ~/.local/state/hal/stopped/{unit}; "
+    "removed by `hal start {unit}`. Generated, git-ignored.\n"
     """\
 http:
   routers:

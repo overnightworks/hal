@@ -137,7 +137,7 @@ class Probe:
         self.live_before = edge_copy.live_project(REPO)
         self.guard: edge_copy.NetworkGuard | None = None
         self.copy = checkout.live_checkout(self.home)
-        self.state = self.home / ".local" / "state" / "edge"
+        self.state = self.home / ".local" / "state" / "hal"
         self.marker = self.state / "stopped" / UNIT
         self.record = core.Record(self.state)
         self.volumes_before_p3: set[str] = set()
@@ -638,7 +638,7 @@ class Probe:
         throwaway = ThrowawayTunnel(self.home)
         self.environment["EDGE_TUNNEL_UNIT"] = throwaway.name
         self.environment["EDGE_TUNNEL_MANAGER"] = "user"
-        global_marker = self.home / ".local" / "state" / "edge" / "global-stop"
+        global_marker = self.home / ".local" / "state" / "hal" / "global-stop"
         try:
             self.hal("stop", UNIT, terminal=False)  # the unit barrier to be proven before reopening
             throwaway.install()

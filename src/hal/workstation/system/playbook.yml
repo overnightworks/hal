@@ -1,11 +1,11 @@
-# The system step of `hal setup`: edge's cloudflared unit, its three drop-ins and the stop-only polkit
+# The system step of `hal setup`: edge's cloudflared unit, its two drop-ins and the stop-only polkit
 # rule, and the daily timer that deletes journal entries before they are 30 days old.
 #
 # hal.workstation.system_step runs it as root under one `sudo`, which asks once, and passes `home`,
 # `operator_user`, `edge_tunnel_dir` and `journal_vacuum_days` as extra vars from home's Layout and
 # the running user, and the agents' account name as `agent_user`; nothing here is taken from facts gathered as root. It never starts, stops or
 # restarts cloudflared. Every run of `hal setup` reloads systemd; `--dry-run` does not. An extra reload at the end
-# follows only when an edge file or the retired drop-in changed. What it replaces of edge's files is
+# follows only when an edge file or a retired file changed. What it replaces or retires of edge's files is
 # copied to `backup_dir` first, outside /etc/systemd/system, so systemd never loads a backup as a unit
 # or a drop-in; the retention units and rsyslog's conffiles are home's own and are not backed up.
 #
@@ -38,7 +38,11 @@
     tunnel_config: /etc/cloudflared/config.yml
     unit_dir: /etc/systemd/system
     drop_in_dir: "{{ unit_dir }}/cloudflared.service.d"
-    retired_drop_in: "{{ drop_in_dir }}/10-root-binary.conf"
+    # Files earlier plays installed and none installs now: backed up with the files being replaced, then deleted.
+    retired_files:
+      - { dest: "{{ drop_in_dir }}/10-root-binary.conf" }
+      - { dest: "{{ drop_in_dir }}/30-edge-global-stop.conf" }
+      - { dest: /etc/polkit-1/rules.d/10-edge-cloudflared-stop.rules }
     backup_dir: /var/backups/home-setup
     agent_home: "/home/{{ agent_user }}"
     agent_nologin: /usr/sbin/nologin
@@ -64,13 +68,11 @@
 
           [Install]
           WantedBy=timers.target
-    # The base unit comes first, so the retired drop-in is only deleted once the unit that replaces it is in place.
+    # The base unit comes first, so the retired files are only deleted once the files that replace them are in place.
     system_files:
       - { src: cloudflared.service, dest: "{{ unit_dir }}/cloudflared.service" }
       - { src: cloudflared.service.d/20-nonroot.conf, dest: "{{ drop_in_dir }}/20-nonroot.conf" }
-      - { src: cloudflared.service.d/30-edge-global-stop.conf, dest: "{{ drop_in_dir }}/30-edge-global-stop.conf" }
       - { src: cloudflared.service.d/30-hal-global-stop.conf, dest: "{{ drop_in_dir }}/30-hal-global-stop.conf" }
-      - { src: polkit/10-edge-cloudflared-stop.rules, dest: /etc/polkit-1/rules.d/10-edge-cloudflared-stop.rules }
       - { src: polkit/10-hal-cloudflared-stop.rules, dest: /etc/polkit-1/rules.d/10-hal-cloudflared-stop.rules }
 
   tasks:
@@ -308,7 +310,7 @@
     - name: Look at what is in place
       ansible.builtin.stat:
         path: "{{ item.dest }}"
-      loop: "{{ rendered_files + [{'dest': retired_drop_in}, {'dest': docker_config_path, 'content': docker_config_merged}] }}"
+      loop: "{{ rendered_files + retired_files + [{'dest': docker_config_path, 'content': docker_config_merged}] }}"
       loop_control:
         label: "{{ item.dest }}"
       register: in_place
@@ -370,10 +372,13 @@
         label: "{{ item.dest }}"
       register: retention_written
 
-    - name: Delete the retired root drop-in, now that the new base unit is in place
+    - name: Delete the retired files, now that the files replacing them are in place
       ansible.builtin.file:
-        path: "{{ retired_drop_in }}"
+        path: "{{ item.dest }}"
         state: absent
+      loop: "{{ retired_files }}"
+      loop_control:
+        label: "{{ item.dest }}"
       notify: Reload systemd
 
     # useradd with -K because the user module cannot refuse the subordinate id ranges that login.defs grants by
