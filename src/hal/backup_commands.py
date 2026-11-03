@@ -4,7 +4,6 @@ the SIGTERM that systemd stops a unit with, and the exit code."""
 
 import argparse
 import os
-import signal
 from collections.abc import Callable
 from pathlib import Path
 
@@ -16,6 +15,7 @@ from hal.backup.settings import Settings
 from hal.grammar import Asks, Command, ExitCode
 from hal.output import write_error
 from hal.output.command import Verb, command
+from hal.stack.external.apply import terminate_like_interrupt
 
 HAL_BACKUP = command(Verb.BACKUP)
 HAL_RESTORE = command(Verb.RESTORE)
@@ -154,11 +154,9 @@ def _run(
         write_error(step, f"{program} --help")
         return ExitCode.USAGE
     settings = Settings.for_home(Path.home(), os.getuid(), os.getgid())
-    # systemd stops a unit with SIGTERM: as KeyboardInterrupt, cleanup runs and the status fails.
-    previous_handler = signal.signal(signal.SIGTERM, signal.default_int_handler)
     try:
         # Every run holds the one host lock, so no two runs share the repository.
-        with host.exclusive_lock(settings.lock_file):
+        with terminate_like_interrupt(), host.exclusive_lock(settings.lock_file):
             step(settings, arguments)
     except StepFailed as failure:
         tell_ended(failure)
@@ -166,8 +164,6 @@ def _run(
     except (Interrupted, KeyboardInterrupt) as interrupt:
         tell_ended(interrupt)
         return ExitCode.INTERRUPTED
-    finally:
-        signal.signal(signal.SIGTERM, previous_handler)
     return ExitCode.OK
 
 
