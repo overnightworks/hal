@@ -812,9 +812,10 @@ Schlüssels, wie ihn `compose.yaml` dem Schritt einbindet (etwa `hopin`).
 | `person_budget_dollars` | `[api]` | `2` | Dollar je Person und Monat, über alle Apps |
 
 Je Zahl gilt die Tabelle der App, sonst `[api]`, sonst der Default (`src/hal/stack/api_limits.py`).
-Dollar sind Zahlen ab 0, `max_parallel_requests` ist eine ganze Zahl ab 0; nach oben gibt es
-keine Grenze. Der Zeitraum ist keine Einstellung: ein Monat, zurückgesetzt am Monatsersten
-00:00 UTC.
+Dollar sind Zahlen ab 0, `max_parallel_requests` ist eine ganze Zahl ab 0. hal setzt keine
+obere Grenze; ein `max_parallel_requests` über 2147483647 (die 32-Bit-Spalte von LiteLLM) lehnt
+LiteLLM erst beim Schreiben nach dem `yes` ab. Der Zeitraum ist keine Einstellung: ein Monat, zurückgesetzt am
+Monatsersten 00:00 UTC.
 
 Der nächste `hal apply` zeigt eine geänderte Zahl als Zeile unter `litellm` (alt → neu) und setzt
 sie nach dem `yes` ohne Neustart von LiteLLM und ohne den Zeitraum zu verschieben; eine entfernte

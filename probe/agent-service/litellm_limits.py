@@ -22,6 +22,7 @@ import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import NamedTuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -38,10 +39,23 @@ BUDGET_TABLE = "LiteLLM_BudgetTable"
 BOOKKEEPING = frozenset({"settings_updated_at", "updated_at", "updated_by"})  # stamped on a write
 SET_UP_SPEND = {"hopin": 0.25, "presentator": 0.5, "songmaker": 0.75}
 SENT_ONLY_WITH_A_NEW_KEY = ("budget_duration", "models", "allowed_routes")
-BUDGET_EXCEEDED = 422
-TOO_MANY = 429
+L1_SETTINGS = (
+    "[api]\nbudget_dollars = 4\nmax_parallel_requests = 3\nperson_budget_dollars = 1.5\n"
+    "[api.hopin]\nbudget_dollars = 6\n"
+)
 REPOST_SECONDS = 10
 PERSON_BUDGET_WINDOW = 150
+
+
+class Refusal(NamedTuple):
+    """The status and LiteLLM's error type of a refused request."""
+
+    status: int
+    error_type: str
+
+
+BUDGET_EXCEEDED = Refusal(422, "budget_exceeded")
+TOO_MANY = Refusal(429, "throttling_error")
 
 type Rows = dict[tuple[str, str], dict]
 type Fields = dict[str, dict[str, tuple[object, object]]]
@@ -112,8 +126,9 @@ class LimitsProbe(KeysProbe):
         expect(isinstance(self.run_step(plan), KeysDone), f"{cell}: the run failed")
         return fields_of(plan)
 
-    def refused_as(self, cell: str, answer: dict, sent: list[dict], status: int) -> str:
-        expect(answer["status"] == status, f"{cell}: {answer['status']} {error_of(answer)}")
+    def refused_as(self, cell: str, answer: dict, sent: list[dict], refusal: Refusal) -> str:
+        found = Refusal(answer["status"], error_of(answer).partition("/")[0])
+        expect(found == refusal, f"{cell}: {answer['status']} {error_of(answer)}")
         expect(not sent, f"{cell}: F gained {len(sent)}")
         return f"{answer['status']} {error_of(answer)} in {answer['seconds']:.1f} s"
 
@@ -131,11 +146,7 @@ class LimitsProbe(KeysProbe):
 
     def cell_l1(self) -> None:
         before, digest, instance, calls = self.rows(), self.digest(), self.instance(), self.calls()
-        planned = self.apply_settings(
-            "L1",
-            "[api]\nbudget_dollars = 4\nmax_parallel_requests = 3\nperson_budget_dollars = 1.5\n"
-            "[api.hopin]\nbudget_dollars = 6\n",
-        )
+        planned = self.apply_settings("L1", L1_SETTINGS)
         default = (api_limits.APP_BUDGET_DOLLARS, api_limits.MAX_PARALLEL_REQUESTS)
         wanted = {
             self.budget_id: {"max_budget": (api_limits.PERSON_BUDGET_DOLLARS, 1.5)},
@@ -168,7 +179,7 @@ class LimitsProbe(KeysProbe):
 
     def cell_l2(self) -> None:
         digest, calls = self.digest(), self.calls()
-        self.write_settings(hal_config.config_path(self.home).read_text())
+        self.write_settings(L1_SETTINGS)
         plan = self.read_plan("L2")
         expect(plan == KeysPlan(), f"L2: planned {plan}")
         expect(self.run_step(plan) is None, "L2: the step acted")

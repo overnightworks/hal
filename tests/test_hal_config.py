@@ -21,9 +21,9 @@ def test_an_empty_file_gives_the_defaults(tmp_path: Path) -> None:
 
 
 def test_every_setting_of_the_check_is_a_known_key() -> None:
-    assert {
-        field.name for field in dataclasses.fields(CheckSettings)
-    } == hal_config.KNOWN_CHECK_KEYS
+    assert {field.name for field in dataclasses.fields(CheckSettings)} == set(
+        hal_config.CHECK_KEY_KINDS
+    )
 
 
 def test_an_alarm_table_sets_the_interval_and_the_runs_in_a_row(tmp_path: Path) -> None:
@@ -39,9 +39,9 @@ def test_a_missing_alarm_table_gives_five_minutes_and_two_runs(tmp_path: Path) -
 
 
 def test_every_setting_of_the_alarm_is_a_known_key() -> None:
-    assert {
-        field.name for field in dataclasses.fields(AlarmSettings)
-    } == hal_config.KNOWN_ALARM_KEYS
+    assert {field.name for field in dataclasses.fields(AlarmSettings)} == set(
+        hal_config.ALARM_KEY_KINDS
+    )
 
 
 def test_the_api_tables_load_as_written_with_dollars_as_floats(tmp_path: Path) -> None:
@@ -89,12 +89,12 @@ def test_zero_and_a_large_number_are_accepted(
     ("known", "record_fields"),
     [
         pytest.param(
-            hal_config.KNOWN_APP_KEYS,
+            set(hal_config.APP_KEY_KINDS),
             {field.name for field in dataclasses.fields(AppNumbers)},
             id="an app table",
         ),
         pytest.param(
-            hal_config.KNOWN_API_KEYS,
+            set(hal_config.API_KEY_KINDS),
             {field.name for field in dataclasses.fields(AppNumbers)}
             | ({field.name for field in dataclasses.fields(ApiSettings)} - {"every_app", "apps"}),
             id="the api table",
@@ -102,13 +102,14 @@ def test_zero_and_a_large_number_are_accepted(
     ],
 )
 def test_every_number_of_the_api_records_is_a_known_key(
-    known: frozenset[str], record_fields: set[str]
+    known: set[str], record_fields: set[str]
 ) -> None:
     assert known == record_fields
 
 
 DOLLARS = "a finite number of at least 0"
 COUNT = "a whole number of at least 0"
+HUGE_WHOLE_NUMBER = 10**400
 
 
 @pytest.mark.parametrize(
@@ -125,6 +126,11 @@ COUNT = "a whole number of at least 0"
         ("[api]\nperson_budget_dollars = -1\n", f"person_budget_dollars must be {DOLLARS}, got -1"),
         ("[api.hopin]\nbudget_dollars = inf\n", f"budget_dollars must be {DOLLARS}, got inf"),
         ("[api]\nbudget_dollars = nan\n", f"budget_dollars must be {DOLLARS}, got nan"),
+        pytest.param(
+            f"[api]\nbudget_dollars = {HUGE_WHOLE_NUMBER}\n",
+            f"budget_dollars must be {DOLLARS}, got {HUGE_WHOLE_NUMBER}",
+            id="a whole number beyond float range",
+        ),
         ("[api]\nmax_parallel_requests = 2.5\n", f"max_parallel_requests must be {COUNT}, got 2.5"),
         (
             "[api.hopin]\nmax_parallel_requests = -1\n",

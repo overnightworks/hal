@@ -237,9 +237,10 @@ def test_a_number_the_record_changes_is_sent_alone_and_never_with_a_period() -> 
 
 def test_an_app_table_naming_no_app_read_cannot_be_planned_and_names_the_apps_read() -> None:
     api = ApiSettings(apps={"hopn": AppNumbers(budget_dollars=1.0)})
+    rows = found()
 
     with pytest.raises(litellm_keys.UnknownApps) as raised:
-        litellm_keys.planned(found(), BUDGET_ID, api)
+        litellm_keys.planned(rows, BUDGET_ID, api)
 
     assert "[api.hopn]" in str(raised.value)
     assert all(app in str(raised.value) for app in APPS)
@@ -385,14 +386,11 @@ def test_a_config_yaml_without_the_budget_id_is_a_step_not_read(
 def test_an_app_table_naming_no_app_read_is_no_step_not_read(repository: Path) -> None:
     runner = OneOff(read_answer(found()))
     states = {litellm_keys.LITELLM_SERVICE: {"running"}}
+    stack = compose.Compose(run=runner, repository=repository)
+    api = ApiSettings(apps={"hopn": AppNumbers(budget_dollars=1.0)})
 
     with pytest.raises(litellm_keys.UnknownApps):
-        litellm_keys.plan_keys(
-            compose.Compose(run=runner, repository=repository),
-            states,
-            repository,
-            ApiSettings(apps={"hopn": AppNumbers(budget_dollars=1.0)}),
-        )
+        litellm_keys.plan_keys(stack, states, repository, api)
 
 
 def test_the_shipped_config_yaml_names_the_person_budget_id() -> None:

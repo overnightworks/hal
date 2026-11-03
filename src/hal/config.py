@@ -6,7 +6,7 @@ A missing file means defaults. hal only reads it; nothing here writes, moves or 
 
 from __future__ import annotations
 
-import math
+import sys
 import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -31,19 +31,15 @@ class Kind(Enum):
 CONFIG_PATH_IN_HOME = Path(".config") / "hal" / "config.toml"
 CHECK_TABLE = "check"
 CHECK_KEY_KINDS: Mapping[str, Kind] = {"notify": Kind.SWITCH}
-KNOWN_CHECK_KEYS = frozenset(CHECK_KEY_KINDS)
 ALARM_TABLE = "alarm"
 ALARM_KEY_KINDS: Mapping[str, Kind] = {"interval": Kind.AT_LEAST_ONE, "runs": Kind.AT_LEAST_ONE}
-KNOWN_ALARM_KEYS = frozenset(ALARM_KEY_KINDS)
 API_TABLE = "api"
 PERSON_BUDGET_KEY = "person_budget_dollars"
 APP_KEY_KINDS: Mapping[str, Kind] = {
     "budget_dollars": Kind.DOLLARS,
     "max_parallel_requests": Kind.COUNT,
 }
-KNOWN_APP_KEYS = frozenset(APP_KEY_KINDS)
 API_KEY_KINDS: Mapping[str, Kind] = {**APP_KEY_KINDS, PERSON_BUDGET_KEY: Kind.DOLLARS}
-KNOWN_API_KEYS = frozenset(API_KEY_KINDS)
 
 
 class ConfigInvalid(Exception):
@@ -85,15 +81,14 @@ def _refuse_unknown(path: Path, names: set[str], known: frozenset[str]) -> None:
 
 
 def _admits(kind: Kind, value: object) -> bool:
-    match kind:
-        case Kind.SWITCH:
-            return isinstance(value, bool)
-        case Kind.AT_LEAST_ONE:
-            return type(value) is int and value >= 1
-        case Kind.COUNT:
-            return type(value) is int and value >= 0
-        case Kind.DOLLARS:
-            return type(value) in (int, float) and math.isfinite(value) and value >= 0
+    if kind is Kind.SWITCH:
+        return isinstance(value, bool)
+    if kind is Kind.AT_LEAST_ONE:
+        return type(value) is int and value >= 1
+    if kind is Kind.COUNT:
+        return type(value) is int and value >= 0
+    # Compared as written: an int past float range converts to no float, so none is converted here.
+    return type(value) in (int, float) and 0 <= value <= sys.float_info.max
 
 
 def _table_values(
