@@ -1,0 +1,7 @@
+claim_id = "fb0745a660334741a06c65624e6b812b"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "afb9b9d3a7f3bf64c34eb799bcdc5520c3a88243"
+branch = "claude/issue-950-presentator-secret-key"
+scope = ["src/hal/workstation/secrets_manifest.toml", "tests/test_workstation_app_secrets.py"]
+opened_commit = "29f72d34bfbfefd41e46470cf9a3bb6c4d00355f"
