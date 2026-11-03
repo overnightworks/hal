@@ -889,9 +889,9 @@ def imported_client(client: object, **changes: object) -> dict[str, object]:
         pytest.param("HOPIN", {"optionalClientScopes": []}, False, id="hopin without its scope"),
         pytest.param(
             "PRESENTATOR",
-            {"optionalClientScopes": ["speech-service-audience"]},
+            {"optionalClientScopes": []},
             False,
-            id="presentator with hopin's optional scope",
+            id="presentator without its scope",
         ),
     ],
 )
