@@ -174,8 +174,13 @@ class KeysProbe(LitellmProbe):
 
     def set_key(self, app: str, assignments: str) -> None:
         table = "LiteLLM_VerificationToken"
-        statement = f"UPDATE \"{table}\" SET {assignments} WHERE key_alias = '{app}';"  # noqa: S608 - the app is this probe's literal, the assignments its numbers
+        statement = f"UPDATE \"{table}\" SET {assignments} WHERE key_alias = '{app}';"  # noqa: S608 - the app and the assignments are this probe's literals
         self.query(statement)
+
+    def change_budget(self, max_budget: float) -> None:
+        self.admin(
+            "POST", "/budget/update", {"budget_id": self.budget_id, "max_budget": max_budget}
+        )
 
     def change_by_hand(self, app: str, **settings: object) -> None:
         self.admin("POST", "/key/update", {"key": self.file_keys[app], **settings})
@@ -215,6 +220,27 @@ class KeysProbe(LitellmProbe):
             "S1: budget",
         )
         models, reset = sorted(self.models()), first_of_next_month()
+        self.expect_default_keys(models, reset)
+        fingerprint = self.fingerprint()
+        for app in APPS:
+            before = len(self.provider_requests())
+            answer = self.complete(self.file_keys[app], user=fingerprint)
+            self.served("S1", answer, self.provider_requests()[before:])
+        self.wait_for(
+            "S1", "the person's row", lambda: self.end_user_budget(fingerprint) is not None
+        )
+        expect(self.end_user_budget(fingerprint) == [""], "S1: the person's row links a budget")
+        self.wait_for(
+            "S1", "each key's spend", lambda: all(self.key_of(app)["spend"] > 0 for app in APPS)
+        )
+        self.hold(
+            "S1",
+            f"budget {self.budget_id} and three keys made by hash with the defaults, "
+            f"models as /v1/models, reset {reset:%Y-%m-%d %H:%M} UTC; each key served "
+            "through the front; the person's row keeps budget_id NULL",
+        )
+
+    def expect_default_keys(self, models: list[str], reset: datetime) -> None:
         for app in APPS:
             row = self.key_of(app)
             settings = (
@@ -242,24 +268,6 @@ class KeysProbe(LitellmProbe):
                 parsed_time(row["budget_reset_at"]) == reset,
                 f"S1: {app} resets {row['budget_reset_at']}",
             )
-        fingerprint = self.fingerprint()
-        for app in APPS:
-            before = len(self.provider_requests())
-            answer = self.complete(self.file_keys[app], user=fingerprint)
-            self.served("S1", answer, self.provider_requests()[before:])
-        self.wait_for(
-            "S1", "the person's row", lambda: self.end_user_budget(fingerprint) is not None
-        )
-        expect(self.end_user_budget(fingerprint) == [""], "S1: the person's row links a budget")
-        self.wait_for(
-            "S1", "each key's spend", lambda: all(self.key_of(app)["spend"] > 0 for app in APPS)
-        )
-        self.hold(
-            "S1",
-            f"budget {self.budget_id} and three keys made by hash with the defaults, "
-            f"models as /v1/models, reset {reset:%Y-%m-%d %H:%M} UTC; each key served "
-            "through the front; the person's row keeps budget_id NULL",
-        )
 
     def end_user_budget(self, fingerprint: str) -> list[str] | None:
         table = "LiteLLM_EndUserTable"
@@ -289,7 +297,7 @@ class KeysProbe(LitellmProbe):
         self.admin("POST", "/key/generate", {**made, "key": self.file_keys["hopin"]})
         self.set_key("hopin", "spend = 3")
         reset = self.key_of("hopin")["budget_reset_at"]
-        self.admin("POST", "/budget/update", {"budget_id": self.budget_id, "max_budget": 1.9})
+        self.change_budget(1.9)
         plan = self.read_plan("S3")
         expect([change.subject for change in plan.changes] == [self.budget_id], f"S3: {plan}")
         expect(isinstance(self.run_step(plan), KeysDone), "S3: the run failed")
@@ -303,7 +311,7 @@ class KeysProbe(LitellmProbe):
             "songmaker", max_budget=7.0, max_parallel_requests=2, rpm_limit=60, tpm_limit=1000
         )
         self.set_key("songmaker", "spend = 1.25")
-        self.admin("POST", "/budget/update", {"budget_id": self.budget_id, "max_budget": 1.5})
+        self.change_budget(1.5)
         key_reset, budget_reset = (
             self.key_of("songmaker")["budget_reset_at"],
             self.budget()["budget_reset_at"],
@@ -373,7 +381,7 @@ class KeysProbe(LitellmProbe):
         old_key = self.file_keys["hopin"]
         self.file_keys["hopin"] = self.write_app_key("hopin", replace=True)
         self.steer_fake()
-        self.admin("POST", "/budget/update", {"budget_id": self.budget_id, "max_budget": 1.5})
+        self.change_budget(1.5)
         self.change_by_hand("songmaker", max_budget=7.0)
         plan = self.read_plan("S6")
         expect(plan.name_taken == ("hopin",), f"S6: name taken {plan.name_taken}")
@@ -402,7 +410,7 @@ class KeysProbe(LitellmProbe):
         write_new(path, (key + "\n").encode(), 0o644)
 
     def cell_s7(self) -> None:
-        self.admin("POST", "/budget/update", {"budget_id": self.budget_id, "max_budget": 1.5})
+        self.change_budget(1.5)
         for app in APPS:
             self.change_by_hand(app, max_budget=7.0)
         plan = self.read_plan("S7")
@@ -448,28 +456,29 @@ class KeysProbe(LitellmProbe):
         )
 
     def cell_s8(self) -> None:
-        canary = self.make_key()
-        self.key_info(canary)  # its hash in a /key/info URL, which LA logs at INFO
+        canary = f"s8-canary-{secrets.token_hex(16)}"
+        # A 404 path: no redaction filter of LiteLLM touches it, so its log line shows
+        # that the search below sees what LA logs at INFO.
+        answer = self.call(self.master_key, "GET", f"/{canary}", front=False)
+        expect(answer["status"] == 404, f"S8: the canary path answered {answer['status']}")
         current = self.log_of(LITELLM)
         log = "\n".join((*self.earlier_logs, current))
         secret_values = [self.master_key, *self.written]
         hidden = [*secret_values, *map(hashed, secret_values)]
         resolved = self.run(
-            [*self.compose_command(guard=True), "--profile", "apply", "config",
-             litellm_keys.KEYS_SERVICE]
+            [*self.compose_command(guard=True), "--profile", "apply", "--profile", "keycloak",
+             "config", litellm_keys.KEYS_SERVICE]  # keycloak-config-cli needs its keycloak
         ).stdout  # fmt: skip
         places = (("the runner", self.seen.text()), ("LA", log), ("compose config", resolved))
         found = {where: sum(value in text for value in hidden) for where, text in places}
-        info_lines = sum("/key/info" in line for line in current.splitlines())
-        control = hashed(canary) in current
-        write_line(f"S8 measured: control hash in LA {control} ({info_lines} /key/info lines); "
-                   f"keys or hashes found {found}", flush=True)  # fmt: skip
-        expect(control, "S8: the control's hash is not in LA: the search is blind")
+        control = canary in current
+        write_line(f"S8 measured: canary in LA {control}; keys or hashes found {found}", flush=True)
+        expect(control, "S8: the canary is not in LA: the search is blind")
         expect(not any(found.values()), f"S8: keys or hashes in {found}")
         expect(len(self.seen.argv) > 10, f"S8: the runner saw {len(self.seen.argv)} one-offs")
         self.hold(
             "S8",
-            f"the control's hash found in LA; no app key, hash or master key in "
+            f"the canary of a 404 path found in LA; no app key, hash or master key in "
             f"{len(self.seen.argv)} argv and standard inputs, their output, LA or "
             "`compose config litellm-keys`",
         )
