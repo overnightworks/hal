@@ -8,7 +8,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-from support.workstation_support import Sandbox, run_hal_setup, split_at_the_prompt
+from support.workstation_support import SUDO_ANNOUNCEMENT, Sandbox, run_hal_setup, split_at_the_prompt
 
 from hal.grammar import ExitCode
 from hal.workstation.layout import Layout
@@ -16,7 +16,6 @@ from hal.workstation.path_link import PathLink
 from hal.workstation.system_step import AGENT_USER, Applied
 
 PROMPT = "Type yes to set up 2 open rows: "
-SUDO_ANNOUNCEMENT = "  › system          needs sudo     tunnel, polkit, journal, mail, agent account"
 NOT_CHECKED_UNTIL_THE_YES = "  ! system          not checked    sudo checks it after your yes"
 ABORTED = "error: aborted, nothing changed\n"
 NOT_AT_A_TERMINAL = "error: setup asks yes at a terminal · nothing changed\nnext: hal setup in your own terminal window\n"

@@ -64,6 +64,7 @@ import terms_cell  # noqa: E402
 from admin import AdminToken  # noqa: E402
 from service_audience_cell import (  # noqa: E402
     AGENT_SERVICE,
+    SPEECH_SCOPE,
     SPEECH_SERVICE,
     WORKLOAD_ROLES,
     audience_of,
@@ -108,7 +109,6 @@ PROBE_CONSTRAINTS = f"Label(`com.docker.compose.project`, `{PROJECT}`)"
 # The /24s a probe's keycloak network may take, clear of the live one (172.31.253.0/24).
 SUBNET_CANDIDATES = tuple(f"172.31.{third}.0/24" for third in range(200, 250))
 TRAEFIK_NOT_FOUND = b"404 page not found\n"
-
 
 # `roles` carries the workload role, `service_account` the client_id and the audience is the
 # service's; hopin reads no email, web origin or acr, so it has none of the three.
@@ -155,7 +155,7 @@ HOPIN = AppClient(
     (f"https://hopin.{DOMAIN}/auth/callback",),
     f"https://hopin.{DOMAIN}/login",
     default_scopes=HOPIN_CLIENT_SCOPES,
-    optional_scopes=frozenset({service_audience_cell.SPEECH_SCOPE}),
+    optional_scopes=frozenset({SPEECH_SCOPE}),
 )
 PRESENTATOR = AppClient(
     "presentator",
@@ -166,8 +166,10 @@ PRESENTATOR = AppClient(
     ),
     f"https://presentator.{DOMAIN}/login",
     default_scopes=SONGMAKER_PRESENTATOR_CLIENT_SCOPES,
+    optional_scopes=frozenset({SPEECH_SCOPE}),
 )
 APP_CLIENTS = (SONGMAKER, HOPIN, PRESENTATOR)
+SPEECH_APPS = tuple(app for app in APP_CLIENTS if SPEECH_SCOPE in app.optional_scopes)
 AGENT_WORKLOAD_ROLE = WORKLOAD_ROLES[AGENT_SERVICE]
 SECRET_FILES = (
     "db-password",
@@ -198,9 +200,9 @@ SUBFLOW_PARENT = "direct-grant-mfa-totp"
 CONSOLE_SUBFLOW = f"{CONSOLE_NAME}-subflow"
 CONSOLE_SCOPE = f"{CONSOLE_NAME}-scope"
 CONSOLE_CLIENT_ROLE = f"{CONSOLE_NAME}-client-role"
-SCOPED_CLIENT = "songmaker"  # lists its default scopes, as do hopin and presentator
-SERVICE_ACCOUNT_CLIENT = "songmaker"  # a listed service account
-ENABLED_SERVICE_ACCOUNT_CLIENT = "hopin"  # its service account, which the console turns off
+LISTED_CLIENT = "songmaker"  # lists its default scopes and a service account
+ENABLED_ACCOUNT_CLIENT = "hopin"  # its service account, which the console turns off
+SERVICE_ACCOUNT_ROLE_ADDITION = "hallucinai: addition service-account realm role service-account-"
 BACKUP_ASKED = ["backup", "keycloak", "--pre-apply", "--json"]  # what hal was asked first
 RESTORE_TEST_ASKED = ["restore", "--test", "keycloak", "--snapshot"]  # then the snapshot just made
 WAY_BACK = 'way back: docs/backup.md "Restore Keycloak" · the next apply repeats the step'
@@ -216,27 +218,23 @@ COMPOSE_PREFIX_LENGTH = 6  # docker compose --project-directory D --file F
 RESIDUE_OF_THE_APPLY = [
     # the service account a console turned off and the apply turns back on: Keycloak drops its
     # scope with the flag and the apply restores it
-    f"hallucinai: change client {ENABLED_SERVICE_ACCOUNT_CLIENT} defaultClientScopes: "
+    f"hallucinai: change client {ENABLED_ACCOUNT_CLIENT} defaultClientScopes: "
     '["agent-service-audience", "basic", "groups", "profile", "roles"] → '
     '["agent-service-audience", "basic", "groups", "profile", "roles", "service_account"]',
-    f"hallucinai: change client {ENABLED_SERVICE_ACCOUNT_CLIENT} serviceAccountsEnabled: false → "
-    "true",
-    f'hallucinai: change client {SCOPED_CLIENT} defaultClientScopes: ["acr", '
+    f"hallucinai: change client {ENABLED_ACCOUNT_CLIENT} serviceAccountsEnabled: false → true",
+    f'hallucinai: change client {LISTED_CLIENT} defaultClientScopes: ["acr", '
     '"agent-service-audience", "basic", "email", "groups", "probe-console-scope", "profile", '
     '"roles", "service_account", "web-origins"] → ["acr", "agent-service-audience", "basic", '
     '"email", "groups", "profile", "roles", "service_account", "web-origins"]',
-    f"hallucinai: change client {SCOPED_CLIENT} authenticationFlowBindingOverrides: changed",
+    f"hallucinai: change client {LISTED_CLIENT} authenticationFlowBindingOverrides: changed",
     f"hallucinai: removal protocol mapper scope groups/{CONSOLE_NAME}-mapper",
-    f"hallucinai: removal service-account client role service-account-{SERVICE_ACCOUNT_CLIENT}/"
+    f"hallucinai: removal service-account client role service-account-{LISTED_CLIENT}/"
     f"{AGENT_SERVICE}/{CONSOLE_CLIENT_ROLE}",
     # the user and the role mappings the apply recreates with the service account
-    "hallucinai: addition service-account realm role service-account-"
-    f"{ENABLED_SERVICE_ACCOUNT_CLIENT}/{AGENT_WORKLOAD_ROLE}",
-    "hallucinai: addition service-account realm role service-account-"
-    f"{ENABLED_SERVICE_ACCOUNT_CLIENT}/default-roles-hallucinai",
-    "hallucinai: addition service-account realm role service-account-"
-    f"{service_audience_cell.SPEECH_CALLER}/{WORKLOAD_ROLES[SPEECH_SERVICE]}",
-    f"hallucinai: addition service-account user service-account-{ENABLED_SERVICE_ACCOUNT_CLIENT}",
+    f"{SERVICE_ACCOUNT_ROLE_ADDITION}{ENABLED_ACCOUNT_CLIENT}/{AGENT_WORKLOAD_ROLE}",
+    f"{SERVICE_ACCOUNT_ROLE_ADDITION}{ENABLED_ACCOUNT_CLIENT}/default-roles-hallucinai",
+    f"{SERVICE_ACCOUNT_ROLE_ADDITION}{ENABLED_ACCOUNT_CLIENT}/{WORKLOAD_ROLES[SPEECH_SERVICE]}",
+    f"hallucinai: addition service-account user service-account-{ENABLED_ACCOUNT_CLIENT}",
     f"master: removal flow {CONSOLE_SUBFLOW}",
     f"master: removal flow step {FORMS_FLOW}/auth-otp-form#1",
     f"master: removal flow step {SUBFLOW_PARENT}/{CONSOLE_SUBFLOW}#1",
@@ -245,7 +243,7 @@ DROPPED_CLIENT = "hopin"
 DROPPED_GROUP = "services"
 ROLE_HOLDERS = {  # the realm roles earlier applies created, with the service accounts holding each
     AGENT_WORKLOAD_ROLE: [f"service-account-{client.client_id}" for client in APP_CLIENTS],
-    WORKLOAD_ROLES[SPEECH_SERVICE]: [f"service-account-{service_audience_cell.SPEECH_CALLER}"],
+    WORKLOAD_ROLES[SPEECH_SERVICE]: [f"service-account-{app.client_id}" for app in SPEECH_APPS],
 }
 CHANGED_CONFIG = "browser-mfa-without-passkey"
 # 6.5.1 reads the managed-role switch only when the file has a roles section, so an empty
@@ -1262,7 +1260,7 @@ class Probe:
             f"managed in full) resets the {len(removed)} console changes the observer lists above, "
             "all inside objects the file declares, and keeps the console subgroup with its member, "
             "the console flows, the console role on config-cli's service account and the console "
-            f"group on {SERVICE_ACCOUNT_CLIENT}'s, the console default scope on agent-service, the "
+            f"group on {LISTED_CLIENT}'s, the console default scope on agent-service, the "
             "console client, identity provider, component, realm roles and the agent-service "
             f"mapper, and probe-member in {MEMBER_GROUP}; a third apply lists nothing",
         )
@@ -1270,17 +1268,17 @@ class Probe:
 
     def leave_console_subgroup(self, admin: Admin) -> None:
         """A workload token carries no group (W1), so the listed service account leaves again."""
-        account = admin.service_account_user(SERVICE_ACCOUNT_CLIENT)
+        account = admin.service_account_user(LISTED_CLIENT)
         group = admin.get(f"/{REALM}/group-by-path{CONSOLE_SUBGROUP}")
         admin.must("DELETE", f"/{REALM}/users/{account['id']}/groups/{group['id']}")
 
     def service_account_is_back_with_its_role_and_no_group(self, admin: Admin) -> None:
-        account = admin.service_account_user(ENABLED_SERVICE_ACCOUNT_CLIENT)
+        account = admin.service_account_user(ENABLED_ACCOUNT_CLIENT)
         roles = admin.get(f"/{REALM}/users/{account['id']}/role-mappings/realm")
         names, groups = [role["name"] for role in roles], admin.group_paths(account["id"])
         expect(
             set(WORKLOAD_ROLES.values()) <= set(names) and groups == [],
-            f"{ENABLED_SERVICE_ACCOUNT_CLIENT}'s service account has roles {names} and groups "
+            f"{ENABLED_ACCOUNT_CLIENT}'s service account has roles {names} and groups "
             f"{groups} after the apply",
         )
 
@@ -1310,7 +1308,7 @@ class Probe:
             "the service account lost the console's extra role",
         )
         expect(
-            admin.group_paths(admin.service_account_user(SERVICE_ACCOUNT_CLIENT)["id"])
+            admin.group_paths(admin.service_account_user(LISTED_CLIENT)["id"])
             == [CONSOLE_SUBGROUP],
             f"the listed service account lost the console group {CONSOLE_SUBGROUP}",
         )
@@ -1362,14 +1360,14 @@ class Probe:
         )
         admin.create(f"/{REALM}/clients/{role_client['id']}/roles", {"name": CONSOLE_CLIENT_ROLE})
         client_role = admin.get(f"/{REALM}/clients/{role_client['id']}/roles/{CONSOLE_CLIENT_ROLE}")
-        account = admin.service_account_user(SERVICE_ACCOUNT_CLIENT)
+        account = admin.service_account_user(LISTED_CLIENT)
         admin.must(
             "POST",
             f"/{REALM}/users/{account['id']}/role-mappings/clients/{role_client['id']}",
             [client_role],
         )
         admin.join_group(account["id"], CONSOLE_SUBGROUP)
-        scoped = admin.client(SCOPED_CLIENT)
+        scoped = admin.client(LISTED_CLIENT)
         admin.must("PUT", f"/{REALM}/clients/{scoped['id']}/default-client-scopes/{scope_id}")
         flow_id = admin.create(
             f"/{REALM}/authentication/flows",
@@ -1380,7 +1378,7 @@ class Probe:
             f"/{REALM}/clients/{scoped['id']}",
             {**scoped, "authenticationFlowBindingOverrides": {"browser": flow_id}},
         )
-        enabled = admin.client(ENABLED_SERVICE_ACCOUNT_CLIENT)
+        enabled = admin.client(ENABLED_ACCOUNT_CLIENT)
         admin.must(
             "PUT",
             f"/{REALM}/clients/{enabled['id']}",
