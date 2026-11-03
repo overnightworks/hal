@@ -39,8 +39,10 @@ COMMAND_NOT_FOUND = frozenset({126, 127})
 MOUNT_TABLE = "/proc/1/mountinfo"
 DOCKER_SECONDS = 300
 FRONT, GATEWAY, LITELLM, AGENT_SERVICE = "litellm-front", "agent-egress", "litellm", "agent-service"
-# The compose services of the API route, each with whether its container holds Python.
-ROUTE_SERVICES = {FRONT: False, GATEWAY: False, LITELLM: True, AGENT_SERVICE: True}
+DATABASE = "litellm-db"
+# The compose services of the API route, each with whether its container holds Python. LiteLLM
+# cannot run without its database, so the database is searched with the rest.
+ROUTE_SERVICES = {FRONT: False, GATEWAY: False, LITELLM: True, AGENT_SERVICE: True, DATABASE: False}
 
 Entry = tuple[str, str, bool]  # mount point, filesystem type, writable
 
@@ -88,10 +90,18 @@ class Sweep:
         self.problems = (*self.problems, f"{sink}: {phrase}")
 
 
+def mounted_path(destination: str) -> str:
+    """The path the mount table shows for a destination: `/var/run` is a link to `/run` in the
+    images of the route, and the kernel lists the mount under its target."""
+    if destination == "/var/run" or destination.startswith("/var/run/"):
+        return "/run" + destination.removeprefix("/var/run")
+    return destination
+
+
 def writable_destinations(document: dict) -> frozenset[str]:
     """The destinations `docker inspect` lists as writable: read-write mounts and tmpfs."""
     mounts = {mount["Destination"] for mount in document["Mounts"] if mount["RW"]}
-    return frozenset(mounts | set(document["HostConfig"].get("Tmpfs") or {}))
+    return frozenset(map(mounted_path, mounts | set(document["HostConfig"].get("Tmpfs") or {})))
 
 
 def searched_points(table: Sequence[Entry], masked: frozenset[str]) -> list[tuple[str, str]]:
@@ -165,7 +175,7 @@ class Census:
         declared = writable_destinations(document)
         masked = frozenset(document["HostConfig"].get("MaskedPaths") or ())
         known = declared | DOCKER_OWN | masked
-        inside = self._inside(name, tokens, known, sweep) if target.has_python else None
+        inside = self._inside(name, tokens, known, masked, sweep) if target.has_python else None
         table = self._table_of(name, sweep) if not target.has_python else inside and inside[0]
         if table is not None:
             for phrase in unaccounted(table, declared, masked):
@@ -197,7 +207,12 @@ class Census:
         return [(entry.point, entry.filesystem, entry.writable) for entry in entries]
 
     def _inside(
-        self, name: str, tokens: Mapping[str, str], known: frozenset[str], sweep: Sweep
+        self,
+        name: str,
+        tokens: Mapping[str, str],
+        known: frozenset[str],
+        masked: frozenset[str],
+        sweep: Sweep,
     ) -> tuple[list[Entry], set[str]] | None:
         """The table and the walked points of a container the census searched itself."""
         settings = {
@@ -213,17 +228,24 @@ class Census:
             sweep.problem(name, "the census could not search the mounts")
             return None
         for mount in report["mounts"]:
-            self._mount(name, mount, tokens, sweep)
+            self._mount(name, mount, tokens, masked, sweep)
         table = [(point, filesystem, writable) for point, filesystem, writable in report["table"]]
         return table, {mount["mount"] for mount in report["mounts"]}
 
-    def _mount(self, name: str, mount: dict, tokens: Mapping[str, str], sweep: Sweep) -> None:
+    def _mount(
+        self,
+        name: str,
+        mount: dict,
+        tokens: Mapping[str, str],
+        masked: frozenset[str],
+        sweep: Sweep,
+    ) -> None:
         point, sink = mount["mount"], f"{name} {mount['mount']}"
         sweep.hit({label for label, count in mount["found"].items() if count}, sink)
         for reason, count in sorted(mount["skips"].items()):
             if reason not in HANDED_OVER:
                 sweep.problem(sink, f"{reason} x{count} was not resolved")
-        if Skip.FILE_MOUNT.value in mount["skips"]:
+        if Skip.FILE_MOUNT.value in mount["skips"] and point not in masked:
             self._search(name, point, self._copy(name, point), tokens, sweep)
 
     def _archive(self, name: str, point: str, tokens: Mapping[str, str], sweep: Sweep) -> None:

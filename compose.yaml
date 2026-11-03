@@ -21,6 +21,17 @@ x-egress-address: &egress-address 172.31.252.10
 # The gateway's second address, on the network LiteLLM shares with it: the entrypoint `litellm`
 # of agent-service/egress/traefik.yml. LiteLLM finds the provider through extra_hosts too.
 x-litellm-egress-address: &litellm-egress-address 172.31.239.10
+# What both Postgres databases share: one image digest and one hardening. The alpine image's
+# postgres user owns the data directory a named volume inherits.
+x-postgres: &postgres
+  image: postgres:17.11-alpine@sha256:266d3c257594e195b309ae9d1805e54c788f1d7b375f56bf6c367aac6c917e7b
+  restart: unless-stopped
+  user: "70:70"
+  read_only: true
+  tmpfs: [/var/run/postgresql, /tmp]
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+
 x-agent-attachments: &agent-attachments
   networks: [agent-songmaker, agent-presentator, agent-hopin, egress, mcp]
   extra_hosts:
@@ -79,15 +90,8 @@ services:
 
 
   keycloak-db:
+    <<: *postgres
     profiles: [keycloak]
-    image: postgres:17.11-alpine@sha256:266d3c257594e195b309ae9d1805e54c788f1d7b375f56bf6c367aac6c917e7b
-    restart: unless-stopped
-    # The alpine image's postgres user; the named volume inherits the image's ownership of the data directory.
-    user: "70:70"
-    read_only: true
-    tmpfs: [/var/run/postgresql, /tmp]
-    cap_drop: [ALL]
-    security_opt: ["no-new-privileges:true"]
     networks: [keycloak]
     environment:
       POSTGRES_DB: keycloak
@@ -404,10 +408,29 @@ services:
       - ./agent-service/litellm/front/traefik.yml:/etc/traefik/traefik.yml:ro
       - ./agent-service/litellm/front/dynamic:/litellm-front/dynamic:ro
 
+  # LiteLLM's own database: its keys and spend counters, reachable from litellm alone. Not started
+  # by any unit yet.
+  litellm-db:
+    <<: *postgres
+    profiles: [litellm]
+    networks: [litellm-db]
+    environment:
+      POSTGRES_DB: litellm
+      POSTGRES_USER: litellm
+      POSTGRES_PASSWORD_FILE: /run/secrets/litellm_db_password
+    secrets: [litellm_db_password]
+    volumes:
+      - litellm-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "--username=litellm", "--dbname=litellm"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
   # LiteLLM, the agent service's route to the paid API (agent-service/litellm/). It reads the
-  # provider key and the service credential as files, holds no database and reaches only the
-  # front and, through agent-egress, the provider. A change of its files reaches it only through
-  # a recreate. Not started by any unit yet.
+  # provider key, the database password and the service credential as files and reaches only the
+  # front, its database and, through agent-egress, the provider. A change of its files reaches it
+  # only through a recreate. Not started by any unit yet.
   litellm:
     image: ghcr.io/berriai/litellm:v1.106.6@sha256:37e2dafb088a7723beb998590682957386dfc83ffea1848486f8e0e5cfac0b06
     profiles: [litellm]
@@ -419,7 +442,10 @@ services:
     security_opt: ["no-new-privileges:true"]
     ulimits:
       core: 0
-    networks: [litellm-backend, litellm-egress]
+    depends_on:
+      litellm-db:
+        condition: service_healthy
+    networks: [litellm-backend, litellm-egress, litellm-db]
     extra_hosts:
       api.anthropic.com: *litellm-egress-address
     environment:
@@ -427,6 +453,9 @@ services:
       PYTHONPATH: /etc/litellm
       LITELLM_LOCAL_MODEL_COST_MAP: "True"
       LITELLM_TELEMETRY: "False"
+      # Prisma's version check asks checkpoint.prisma.io at every migration; the isolated network
+      # lets no answer back, and S1 allows no other name than the database's.
+      CHECKPOINT_DISABLE: "1"
       # LiteLLM logs a provider's error text at ERROR, which can echo request content (E13).
       LITELLM_LOG: CRITICAL
       # The API route's bound on parallel requests, per key and per process. A literal, not an
@@ -434,11 +463,12 @@ services:
       API_ROUTE_MAX_PARALLEL_REQUESTS: "5"
     tmpfs:
       - /tmp:uid=1000,gid=1000,mode=0700,size=64m,nosuid,nodev
-    secrets: [litellm_anthropic_key, litellm_master_key, agent_service_api_credential]
+    secrets: [litellm_anthropic_key, litellm_master_key, litellm_db_password, agent_service_api_credential]
     entrypoint:
       - /etc/litellm/start.sh
       - /run/secrets/litellm_anthropic_key
       - /run/secrets/litellm_master_key
+      - /run/secrets/litellm_db_password
     volumes:
       - ./agent-service/litellm/config.yaml:/etc/litellm/config.yaml:ro
       - ./agent-service/litellm/auth.py:/etc/litellm/auth.py:ro
@@ -575,6 +605,7 @@ volumes:
     name: edge_keycloak-db
   step-ca:
     name: edge_step-ca
+  litellm-db:
   traefik-mcp-acme:
 
 secrets:
@@ -606,6 +637,9 @@ secrets:
   # read by litellm and, once the service has an [api] table, by agent-service.
   litellm_anthropic_key:
     file: ${HOME}/.secrets/litellm/anthropic
+  # The password of LiteLLM's database user, read by litellm and litellm-db alone.
+  litellm_db_password:
+    file: ${HOME}/.secrets/litellm/db-password
   agent_service_api_credential:
     file: ${HOME}/.secrets/agent-service/api/credential.json
 
@@ -685,6 +719,10 @@ networks:
       config:
         # Pinned so agent-egress has one address on it; the probe moves it to a free /24.
         - subnet: 172.31.239.0/24
+  # LiteLLM and its database, nothing else.
+  litellm-db:
+    internal: true
+    driver_opts: *isolated-bridge
   # agent-egress alone: a plain NAT bridge, the one route to the internet.
   internet:
     driver: bridge

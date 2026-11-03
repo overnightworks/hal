@@ -997,10 +997,10 @@ def test_apps_toml_refuses_a_postgres_major_without_a_restore_image(major):
         parse_apps(text)
 
 
-def test_the_restore_image_of_major_17_is_the_pin_of_composes_keycloak_db():
-    """#107 T9: the major-17 restore pin equals compose.yaml's keycloak-db pin."""
+def test_the_restore_image_of_major_17_is_the_pin_of_composes_postgres_anchor():
+    """#107 T9: the major-17 restore pin equals the pin of compose.yaml's x-postgres anchor."""
     compose = (cli.DEFAULT_APPS.parents[1] / "compose.yaml").read_text()
-    [pinned] = re.findall(r"^  keycloak-db:\n(?:(?!  \S).*\n)*?    image: (\S+)", compose, re.M)
+    [pinned] = re.findall(r"^x-postgres: &postgres\n(?:(?!\S).*\n)*?  image: (\S+)", compose, re.M)
 
     assert RESTORE_IMAGES[PostgresMajor.SEVENTEEN] == pinned
 
