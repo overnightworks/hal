@@ -1,7 +1,6 @@
 """What a restore may take, and what a run must check before it stages anything."""
 
 import json
-import os
 
 import pytest
 from support.backup_support import (
@@ -106,8 +105,8 @@ def test_a_pinned_image_that_cannot_be_pulled_fails_early_naming_it(
     assert set(machine.labels()) == {"docker info", "docker image inspect", "docker pull"}
     assert outcome.status["exit_category"] == "configuration"
     assert (
-        not Settings.for_home(home, os.getuid(), os.getgid()).work_dir.exists()
-        or list(Settings.for_home(home, os.getuid(), os.getgid()).work_dir.iterdir()) == []
+        not Settings.for_home(home, 0, 0).work_dir.exists()
+        or list(Settings.for_home(home, 0, 0).work_dir.iterdir()) == []
     )
 
 
