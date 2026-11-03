@@ -132,7 +132,7 @@ class BackupProbe(KeysProbe, AdmissionProbe):
         """pg_restore inside litellm-db with the dump on standard input; it connects to no
         server, it only reads the archive."""
         result = subprocess.run(  # noqa: S603 - argv is built by the program itself and no shell runs
-            ["docker", "exec", "-i", self.container(DATABASE), "pg_restore", *arguments],
+            ["docker", "exec", "-i", self.container(DATABASE), "pg_restore", *arguments],  # noqa: S607 - docker is found on PATH by design
             input=dump.read_bytes(), capture_output=True, env=self.environment,
             check=False, timeout=DUMP_SECONDS,
         )  # fmt: skip
