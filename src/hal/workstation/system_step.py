@@ -36,8 +36,6 @@ RSYSLOG_FILE_NAMES = ("syslog", "auth.log", "kern.log", "mail.log", "mail.err", 
 # The line prefix the packaged `hal_events` callback writes before each event, and the shell under sudo before its first; the callback
 # runs in Ansible's own interpreter, which cannot import hal, so `system/callback_plugins/hal_events.py` states the same mark.
 EVENT_MARK = "\x1ehal_events "
-# What root's shell writes before it starts Ansible: it proves sudo ran the command, which no event of Ansible's own can.
-STARTED_LINE = EVENT_MARK + json.dumps({"event": "started"})
 SUDO_REFUSED = "sudo refused"
 # The row the system step's live line and verdict row stand under; `hal setup` names its row with the same word.
 SYSTEM_ROW = "system"
@@ -78,6 +76,10 @@ class EventKind(Enum):
     CHANGED = "changed"
     RESULT = "result"
     COUNTS = "counts"
+
+
+# What root's shell writes before it starts Ansible: it proves sudo ran the command, which no event of Ansible's own can.
+STARTED_LINE = EVENT_MARK + json.dumps({"event": EventKind.STARTED.value})
 
 
 class TaskStatus(Enum):
@@ -141,28 +143,21 @@ def _event_of(event_line: str) -> tuple[EventKind, dict[str, object]]:
     return EventKind(event["event"]), event
 
 
-def read_events(returncode: int, event_lines: Sequence[str]) -> PlaybookRun:
-    """A run whose sudo never ran the shell (no marked line at all, a non-zero exit) is `PlaybookNotStarted`.
+def _read_run_after_start(returncode: int, event_lines: Sequence[str]) -> PlaybookRun:
+    """Reads the marked lines after the started line.
 
-    Every other run reads from the started line the shell writes first; a run whose first marked line is another, or with a second started line, did not finish.
-    A run finished when Ansible exited 0 and the callback reported exactly one count without a failed or unreachable host.
-
+    A second started line, an event that is no known event, a task's name that is no string, or a count that is no non-negative integer,
+    is a run that did not finish and carries no counts; so is a run with other than one counts event.
     The reason is the message of the last failed or unreachable result, given only when the counts name a failed or unreachable host:
     inside a rescue it is the rescue's own failure that ended the play, and a rescued failure is no cause.
     `tasks` are the names of the changed tasks, in the order they changed; a task's start is read only for its name and shown by the runner.
-    An event that is no known event, a task's name that is no string, or a count that is no non-negative integer, is a run that did not finish
-    and carries no counts; so is a run with other than one counts event.
     A run that did not finish after its counts carries them, with `changed` the higher of the count and the number of changed tasks named,
     because Ansible's count leaves out a failed task, even one that changed, while the callback names it; an ignored failure is counted.
     """
-    if not event_lines and returncode != 0:
-        return PlaybookNotStarted()
     message = ""
     tasks: list[str] = []
     counts: list[tuple[int, int, int]] = []
-    if not event_lines or event_lines[0].rstrip("\n") != STARTED_LINE:
-        return PlaybookUnfinished()
-    for line in event_lines[1:]:
+    for line in event_lines:
         try:
             kind, event = _event_of(line)
             if kind is EventKind.STARTED:
@@ -184,6 +179,20 @@ def read_events(returncode: int, event_lines: Sequence[str]) -> PlaybookRun:
     if failed or unreachable:
         return PlaybookUnfinished(message, max(changed, len(tasks)))
     return PlaybookFinished(changed, tuple(tasks)) if returncode == 0 else PlaybookUnfinished(changed=max(changed, len(tasks)))
+
+
+def read_events(returncode: int, event_lines: Sequence[str]) -> PlaybookRun:
+    """A run whose sudo never ran the shell (no marked line at all, a non-zero exit) is `PlaybookNotStarted`.
+
+    Every other run reads from the started line the shell writes first; a run whose first marked line is another did not finish.
+    A run finished when Ansible exited 0 and the callback reported exactly one count without a failed or unreachable host;
+    `_read_run_after_start` reads the lines after the started line.
+    """
+    if not event_lines and returncode != 0:
+        return PlaybookNotStarted()
+    if not event_lines or event_lines[0].rstrip("\n") != STARTED_LINE:
+        return PlaybookUnfinished()
+    return _read_run_after_start(returncode, event_lines[1:])
 
 
 def _forget_the_sudo_ticket() -> StepFailed | None:
@@ -210,7 +219,7 @@ def run_playbook_as_root(argv: Sequence[str]) -> PlaybookRun:
 
     The system asks for the password at the terminal, which stays stdin and stderr's; Ansible's stderr joins its stdout inside
     sudo, and the lines the callback marks are read as events and not shown. The shell under sudo writes the started line first,
-    so a run without any marked line is one sudo refused.
+    so a run without any marked line and a non-zero exit is one sudo refused.
     No `ANSIBLE_*` variable reaches the play, so the packaged `ansible.cfg` there decides. `sudo -k` follows whatever
     the play did, and a failing `sudo -k` fails the step;
     a Ctrl-C in the play, or between the start of sudo and the reading, is a `SystemStepInterrupted`, which a failing `sudo -k` keeps;

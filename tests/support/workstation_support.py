@@ -424,11 +424,11 @@ class FakePlaybook:
 
     def __call__(self, argv: Sequence[str]) -> system_step.PlaybookRun:
         self.calls.append(list(argv))
+        if self.refused:
+            return system_step.PlaybookNotStarted()
         tasks = () if self.applied else self.tasks
         if self.succeeds and "--check" not in argv:
             self.applied = True
-        if self.refused:
-            return system_step.PlaybookNotStarted()
         if not self.succeeds:
             return system_step.PlaybookUnfinished(self.failure, self.changed_before_failing)
         return system_step.PlaybookFinished(len(tasks), tasks)

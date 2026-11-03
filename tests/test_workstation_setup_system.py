@@ -288,7 +288,7 @@ def test_the_system_steps_check_answers_with_one_of_the_three_states(
 def test_a_failed_ansible_run_fails_the_system_step_alone_and_records_nothing(
     sandbox: Sandbox, capsys: pytest.CaptureFixture[str], flags: tuple[str, ...], failure: str, changed: int | None, fact: str, leaves: str
 ) -> None:
-    """Rule 2, rule 7, cells 12, 13, 17 and B1-B4: an Ansible that stopped or a missing tunnel id fails only the last step, with exit 3; the final counts say whether /etc is unchanged."""
+    """Rule 2, rule 7, cells 12, 17 and B1-B4: an Ansible that stopped or a missing tunnel id fails only the last step, with exit 3; the final counts say whether /etc is unchanged."""
     sandbox.system.playbook.succeeds = False
     sandbox.system.playbook.failure = failure
     sandbox.system.playbook.changed_before_failing = changed
@@ -312,7 +312,7 @@ def test_a_failed_ansible_run_fails_the_system_step_alone_and_records_nothing(
 
 @pytest.mark.parametrize("flags", [(), ("-v",)], ids=["plain", "with -v"])
 def test_a_sudo_that_refuses_the_password_fails_the_system_step_with_etc_unchanged(sandbox: Sandbox, capsys: pytest.CaptureFixture[str], flags: tuple[str, ...]) -> None:
-    """Ruled S3b-3: sudo never started the play, so the error line says the system files are unchanged."""
+    """Ruled S3b-3, cell 13: sudo never started the play, so the error line says the system files are unchanged."""
     sandbox.system.playbook.refused = True
     code, lines, error = run_setup(sandbox, capsys, *flags)
 

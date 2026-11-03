@@ -27,6 +27,7 @@ FAILED_RESULT = system_step.EVENT_MARK + json.dumps({"event": "result", "status"
 CHANGED_WRITE = system_step.EVENT_MARK + json.dumps({"event": "changed", "task": "Write edge files"})
 CHANGED_RESTART = system_step.EVENT_MARK + json.dumps({"event": "changed", "task": "Restart Docker"})
 STARTED = system_step.STARTED_LINE
+STARTED_WITH_COUNTS = system_step.EVENT_MARK + json.dumps({"event": "started", "changed": 0, "failed": 0, "unreachable": 0})
 TASK_START = system_step.EVENT_MARK + json.dumps({"event": "task", "task": "Read the default log driver"})
 UNREACHABLE_RESULT = system_step.EVENT_MARK + json.dumps({"event": "result", "status": "unreachable", "msg": "no route"})
 
@@ -72,7 +73,7 @@ MALFORMED_COUNTS = [
         (0, [], PlaybookUnfinished()),
         (1, [COUNTS], PlaybookUnfinished()),
         (0, [TASK_START, COUNTS], PlaybookUnfinished()),
-        (0, [STARTED, STARTED, COUNTS], PlaybookUnfinished()),
+        (0, [STARTED, STARTED_WITH_COUNTS], PlaybookUnfinished()),
     ],
     ids=[
         "clean counts",
