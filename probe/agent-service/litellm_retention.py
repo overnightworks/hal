@@ -45,6 +45,7 @@ sys.path.insert(0, str(REPO / "agent-service"))
 
 from litellm import (  # noqa: E402
     DATABASE,
+    DEFAULT_MODEL,
     FRONT,
     FRONT_STATIC,
     GATEWAY,
@@ -199,7 +200,7 @@ class RetentionProbe(FailureProbe):
                 ]  # fmt: skip
         return "".join(f"\n  {line}" for line in shown)
 
-    def failed_with(self, cell: str, request: str, model: str = "text/opus") -> int:
+    def failed_with(self, cell: str, request: str, model: str = DEFAULT_MODEL) -> int:
         """The status of a request holding the canary `request` that does not succeed."""
         asked = [{"role": "user", "content": request}]
         answer = self.complete(self.key, model, self.fingerprint(), messages=asked)
@@ -425,7 +426,7 @@ class RetentionProbe(FailureProbe):
                 "function": {"name": tool, "arguments": arguments}}  # fmt: skip
         person = self.fingerprint()
         body = {
-            "model": "text/opus",
+            "model": DEFAULT_MODEL,
             "user": person,
             "messages": [
                 {"role": "user", "content": canaries["message"]},

@@ -247,6 +247,9 @@ def shipped_models() -> dict[str, dict]:
     }
 
 
+DEFAULT_MODEL = next(iter(shipped_models()))
+
+
 def person_budget() -> dict:
     """The scenario's person budget, under the id config.yaml names."""
     budget_id = shipped_config()["litellm_settings"]["max_end_user_budget_id"]
@@ -265,7 +268,7 @@ def error_of(answer: dict) -> str:
     return f"{error.get('type')}/{error.get('code')}" if isinstance(error, dict) else "-"
 
 
-def wire_body(model: str = "text/opus", user: str | None = None, **extra: object) -> dict:
+def wire_body(model: str = DEFAULT_MODEL, user: str | None = None, **extra: object) -> dict:
     """agent-runtime's wire body for `model` and `user` (none when None), with `extra`."""
     asked = {"model": model, "messages": [{"role": "user", "content": "probe"}]}
     return {**asked, **({"user": user} if user else {}), "tools": [], **extra}
@@ -536,7 +539,7 @@ class LitellmProbe(IssuerProbe):
     def customer_spend(self, user: str) -> float:
         return (self.customer_row(user) or {"spend": 0.0})["spend"]
 
-    def complete(self, key: str | None, model: str = "text/opus", user: str | None = None,
+    def complete(self, key: str | None, model: str = DEFAULT_MODEL, user: str | None = None,
                  path: str = ROUTE, **extra: object) -> dict:  # fmt: skip
         """A: one request of agent-runtime's wire body."""
         return self.call(key, "POST", path, wire_body(model, user, **extra))
@@ -552,7 +555,7 @@ class LitellmProbe(IssuerProbe):
             time.sleep(1)
         return time.monotonic() - started
 
-    def served(self, cell: str, answer: dict, sent: list[dict], model: str = "text/opus") -> None:
+    def served(self, cell: str, answer: dict, sent: list[dict], model: str = DEFAULT_MODEL) -> None:
         expect(answer["status"] == 200, f"{cell}: {answer['status']} {error_of(answer)}")
         expect(answer_text(answer) == self.marker, f"{cell}: the marker is not in the answer")
         wanted = shipped_models()[model]["model"].split("/", 1)[1]
@@ -600,7 +603,7 @@ class LitellmProbe(IssuerProbe):
 
     def cell_unreachable(self, cell: str, method: str, path: str, key: str) -> None:
         before = len(self.access_lines())
-        status = self.call(key, method, path, {"model": "text/opus"})["status"]
+        status = self.call(key, method, path, {"model": DEFAULT_MODEL})["status"]
         expect(status == 404, f"{cell}: status {status}")
         expect(len(self.access_lines()) == before, f"{cell}: LiteLLM's log grew")
         self.hold(cell, f"{method} {path} through the front: 404, LiteLLM saw nothing")
@@ -630,7 +633,7 @@ class LitellmProbe(IssuerProbe):
         answer = self.complete(key, user=user, fallbacks=["text/sonnet"])
         self.served("K4", answer, self.provider_requests()[before:])
         self.hold("K4", f"{'; '.join(results)}, F 0; fallbacks naming text/sonnet: served by "
-                  "text/opus")  # fmt: skip
+                  f"{DEFAULT_MODEL}")  # fmt: skip
 
     def cell_d1(self) -> None:
         """LiteLLM runs as its configured user on a read-only root, and its migrations are done."""
