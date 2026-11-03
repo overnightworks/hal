@@ -863,8 +863,8 @@ cell_a1_2() {  # runs after the second apply of cell 9
     return
 }
 
-refuses_foreign_shape() {  # refuses_foreign_shape <name> <make> <undo> [reason] [dry]: the play fails with exit 3 and nothing, not even cloudflared's files, moves
-    local name=$1 make=$2 undo=$3 reason=${4:-exists with} before after code dry_code dry_after  # NOSONAR(shelldre:S1481) read inside the condition that verdict evals
+refuses_foreign_shape() {  # refuses_foreign_shape <name> <make> <undo> [reason] [dry] [says]: the play fails with exit 3 and nothing, not even cloudflared's files, moves; <says> is the /etc line it prints, empty where hal refuses before the play
+    local name=$1 make=$2 undo=$3 reason=${4:-exists with} says=${6-/etc unchanged} before after code dry_code dry_after  # NOSONAR(shelldre:S1481) read inside the condition that verdict evals
     eval "$make"
     before=$(agent_world)
     at_terminal "a1-3-$name" "$HAL_BIN setup"
@@ -877,10 +877,10 @@ refuses_foreign_shape() {  # refuses_foreign_shape <name> <make> <undo> [reason]
     fi
     eval "$undo"
     verdict A1-3 "$name: the apply refuses with exit 3 and nothing was written" \
-        '[ $code -eq 3 ] && in_log "a1-3-$name" "$reason" && in_log "a1-3-$name" "/etc unchanged" && ! in_log "a1-3-$name" "$OPERATORS_SKIP" && [ "$before" = "$after" ]'
+        '[ $code -eq 3 ] && in_log "a1-3-$name" "$reason" && in_log "a1-3-$name" "$says" && ! in_log "a1-3-$name" "$OPERATORS_SKIP" && [ "$before" = "$after" ]'
     if [[ ${5:-} == dry ]]; then
         verdict A1-3 "$name: the dry run refuses with exit 3 and nothing was written" \
-            '[ $dry_code -eq 3 ] && in_log "a1-3-$name-dry" "$reason" && in_log "a1-3-$name-dry" "/etc unchanged" && [ "$before" = "$dry_after" ]'
+            '[ $dry_code -eq 3 ] && in_log "a1-3-$name-dry" "$reason" && in_log "a1-3-$name-dry" "$says" && [ "$before" = "$dry_after" ]'
     fi
     verdict A1-3 "$name: undone, the account is dormant again" agent_is_dormant
     return
@@ -983,9 +983,9 @@ cell_a1_3_shared_ids() {  # a uid or gid the account shares, with the shared nam
     refuses_foreign_shape "the uid of bystander, agent listed first" 'set_passwd_field agent 3 $(id -u bystander); move_entry /etc/passwd agent first' \
         'set_passwd_field agent 3 $AGENT_ID; move_entry /etc/passwd agent last' "a uid shared with"
     refuses_foreign_shape "the uid of the running user, agent listed after" 'set_passwd_field agent 3 $(id -u tester)' 'set_passwd_field agent 3 $AGENT_ID' \
-        "must have a uid of its own"
+        "must have a uid of its own" "" ""
     refuses_foreign_shape "the uid of the running user, agent listed first" 'set_passwd_field agent 3 $(id -u tester); move_entry /etc/passwd agent first' \
-        'set_passwd_field agent 3 $AGENT_ID; move_entry /etc/passwd agent last' "must have a uid of its own"
+        'set_passwd_field agent 3 $AGENT_ID; move_entry /etc/passwd agent last' "must have a uid of its own" "" ""
     refuses_foreign_shape "its gid in another group, listed after" 'groupadd --non-unique --gid $AGENT_GID sharer' 'drop_entry /etc/group sharer; drop_entry /etc/gshadow sharer' "a gid shared with sharer"
     refuses_foreign_shape "its gid in another group, listed first" 'groupadd --non-unique --gid $AGENT_GID sharer; move_entry /etc/group sharer first' \
         'drop_entry /etc/group sharer; drop_entry /etc/gshadow sharer' "a gid shared with sharer"
