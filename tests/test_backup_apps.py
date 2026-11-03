@@ -71,13 +71,16 @@ def test_count_table_admits_a_mixed_case_name_and_refuses_a_quote_a_space_a_semi
 
 
 def _shipped_stack_apps() -> list[App]:
-    services = yaml.safe_load(COMPOSE.read_text())["services"]
+    compose = yaml.safe_load(COMPOSE.read_text())
     apps = [
         app
         for app in parse_apps(DEFAULT_APPS.read_text())
-        if isinstance(app.database, PostgresDatabase) and app.database.db_service in services
+        if isinstance(app.database, PostgresDatabase)
+        and (
+            app.compose_project == compose["name"] or app.database.db_service in compose["services"]
+        )
     ]
-    assert apps, "no shipped Postgres record names a service of compose.yaml"
+    assert apps, "no shipped Postgres record belongs to compose.yaml"
     return apps
 
 
