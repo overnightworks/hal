@@ -12,10 +12,9 @@ import re
 import secrets
 import stat
 import subprocess
-import tomllib
 from collections.abc import Iterator
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
+from types import ModuleType
 
 import pytest
 import yaml
@@ -31,7 +30,7 @@ ISOLATED_MODE = {"com.docker.network.bridge.gateway_mode_ipv4": "isolated"}
 DIGEST_PINNED = re.compile(r"^[^@\s]+:[^@\s]+@sha256:[0-9a-f]{64}$")
 KEY_SECRET, CREDENTIAL_SECRET = "litellm_anthropic_key", "agent_service_api_credential"
 MASTER_SECRET, PASSWORD_SECRET = "litellm_master_key", "litellm_db_password"
-API_ROUTE_BOUND = "API_ROUTE_MAX_PARALLEL_REQUESTS"
+CLAUDE_ID = re.compile(r"anthropic/claude-(?P<family>[a-z]+)-[\w.-]+")
 START_SCRIPT = (LITELLM_DIRECTORY / "start.sh").read_text()
 START_LISTENER = re.compile(r"--port (?P<port>\d+)")
 
@@ -111,12 +110,6 @@ def test_litellm_keeps_telemetry_off_and_uses_the_local_cost_map(compose):
     assert "LITELLM_DISABLE_LAZY_ROUTES" not in environment
 
 
-def test_the_api_route_bound_is_a_whole_number_of_at_least_one_written_out_in_compose(compose):
-    declared = compose["services"][LITELLM]["environment"][API_ROUTE_BOUND]
-
-    assert re.fullmatch(r"[1-9]\d*", str(declared))
-
-
 def test_the_front_shares_the_public_traefiks_image_and_hardening_and_reads_no_secret(compose):
     shared = ("image", "user", "read_only", "cap_drop", "security_opt")
     front = compose["services"][FRONT]
@@ -154,18 +147,24 @@ def test_the_database_keeps_keycloaks_postgres_image_and_hardening_and_its_volum
     assert DATABASE in compose["volumes"]
 
 
-def test_only_litellm_reads_the_provider_key_and_only_it_and_later_the_service_the_credential(
-    compose,
-):
+def test_only_litellm_reads_the_provider_key_and_the_master_key(compose):
     holders = {
         secret: [n for n, s in compose["services"].items() if secret in s.get("secrets", [])]
-        for secret in (KEY_SECRET, MASTER_SECRET, CREDENTIAL_SECRET)
+        for secret in (KEY_SECRET, MASTER_SECRET)
     }
 
-    assert holders[KEY_SECRET] == [LITELLM]
-    assert holders[MASTER_SECRET] == [LITELLM]
-    assert set(holders[CREDENTIAL_SECRET]) <= {LITELLM, SERVICE}
-    assert LITELLM in holders[CREDENTIAL_SECRET]
+    assert holders == {KEY_SECRET: [LITELLM], MASTER_SECRET: [LITELLM]}
+
+
+def test_no_service_of_profile_litellm_reads_the_credential(compose):
+    readers = [
+        name
+        for name, service in compose["services"].items()
+        if LITELLM in service.get("profiles", [])
+        and CREDENTIAL_SECRET in service.get("secrets", [])
+    ]
+
+    assert readers == []
 
 
 def test_the_fronts_http_block_global_and_log_are_those_of_the_public_traefik(front_static):
@@ -198,33 +197,43 @@ def test_the_fronts_directories_are_mounted_where_its_static_file_reads_them(com
     assert "/etc/traefik/traefik.yml" in mounted
 
 
-def test_the_three_model_names_map_to_the_family_of_the_service_configurations_cli_models(config):
-    cli_models = tomllib.loads((ROOT / "agent-service/service.toml").read_text())["cli"][
-        "anthropic"
-    ]["models"]
+def test_each_text_name_maps_to_a_claude_id_of_its_own_family_and_retries_nothing(config):
     entries = {e["model_name"]: e["litellm_params"] for e in config["model_list"]}
+    families = {name: CLAUDE_ID.fullmatch(p["model"])["family"] for name, p in entries.items()}
 
-    assert set(entries) == {f"anthropic/{model}" for model in cli_models}
-    for name, parameters in entries.items():
-        family = name.removeprefix("anthropic/")
-        assert parameters["model"].startswith("anthropic/claude-")
-        assert family in parameters["model"]
-        assert parameters["max_retries"] == 0
+    assert all(name == f"text/{family}" for name, family in families.items())
+    assert len(set(families.values())) == 3
+    assert all(parameters["max_retries"] == 0 for parameters in entries.values())
+
+
+def test_each_text_name_carries_a_positive_whole_max_tokens(config):
+    ceilings = [entry["litellm_params"]["max_tokens"] for entry in config["model_list"]]
+
+    assert all(type(ceiling) is int and ceiling > 0 for ceiling in ceilings)
 
 
 def test_litellm_retries_nothing_logs_no_messages_and_has_no_callback_cache_or_spend_log(config):
     assert config["router_settings"] == {"num_retries": 0}
-    assert config["litellm_settings"] == {
-        "turn_off_message_logging": True,
-        "redact_messages_in_exceptions": True,
+    assert config["litellm_settings"].keys() - {"max_end_user_budget_id"} == {
+        "turn_off_message_logging",
+        "redact_messages_in_exceptions",
     }
+    assert config["litellm_settings"]["turn_off_message_logging"] is True
+    assert config["litellm_settings"]["redact_messages_in_exceptions"] is True
     assert set(config) == {"model_list", "router_settings", "litellm_settings", "general_settings"}
-    assert config["general_settings"] == {
-        "custom_auth": "auth.user_api_key_auth",
-        "disable_spend_logs": True,
-        "disable_error_logs": True,
-        "store_prompts_in_spend_logs": False,
+    assert config["general_settings"].keys() - {"enforce_user_param"} == {
+        "disable_spend_logs",
+        "disable_error_logs",
+        "store_prompts_in_spend_logs",
     }
+    assert config["general_settings"]["disable_spend_logs"] is True
+    assert config["general_settings"]["disable_error_logs"] is True
+    assert config["general_settings"]["store_prompts_in_spend_logs"] is False
+
+
+def test_litellm_demands_a_user_and_loads_no_auth_hook(config):
+    assert config["general_settings"]["enforce_user_param"] is True
+    assert "custom_auth" not in config["general_settings"]
 
 
 def test_litellm_holds_no_license_and_none_of_the_settings_behind_the_premium_check(
@@ -241,16 +250,22 @@ def test_litellm_holds_no_license_and_none_of_the_settings_behind_the_premium_ch
     assert "LITELLM_LICENSE" not in START_SCRIPT
 
 
-def test_litellm_finds_its_config_hook_and_start_script_where_compose_mounts_them(compose, config):
+def test_litellm_names_one_person_budget_for_every_fingerprint(config):
+    budget_id = config["litellm_settings"]["max_end_user_budget_id"]
+
+    assert isinstance(budget_id, str)
+    assert budget_id.strip()
+
+
+def test_litellm_mounts_only_its_config_and_start_script_and_loads_no_hal_code(compose):
     service = compose["services"][LITELLM]
     mounts = dict(volume.split(":")[:2] for volume in service["volumes"])
     target = {Path(source).name: Path(mounted) for source, mounted in mounts.items()}
-    hook_module = config["general_settings"]["custom_auth"].split(".")[0]
 
     for source in mounts:
         assert (ROOT / source).resolve().parent == LITELLM_DIRECTORY
-    assert target[f"{hook_module}.py"].parent == Path(service["environment"]["PYTHONPATH"])
-    assert target["gate.py"].parent == target[f"{hook_module}.py"].parent
+    assert set(target) == {"config.yaml", "start.sh"}
+    assert "PYTHONPATH" not in service["environment"]
     assert service["entrypoint"][0] == str(target["start.sh"])
     assert f"--config {target['config.yaml']} " in START_SCRIPT
 
@@ -645,16 +660,10 @@ PROXY_SOCKET = {"address": "00000000:0FA0", "version": 4}
 ENGINE_SOCKET = {"address": "0100007F:15B3", "version": 4}
 
 
-def snapshot_of(litellm, monkeypatch, processes: dict, listeners: list[dict]):
-    """`proxy_snapshot` over one scan of a LiteLLM container, without a container."""
-    probe = object.__new__(litellm.LitellmProbe)
-    probe.__dict__.update(proxy_address="0.0.0.0:4000", engine_executable=ENGINE_BINARY)
+def snapshot_of(litellm, processes: dict, listeners: list[dict]):
+    """The probe's reading of one scan of a LiteLLM container."""
     scan = {"processes": processes, "listeners": listeners}
-    monkeypatch.setattr(probe, "container", lambda _service: "litellm-1", raising=False)
-    monkeypatch.setattr(
-        probe, "run", lambda *_, **__: SimpleNamespace(stdout=json.dumps(scan)), raising=False
-    )
-    return probe.proxy_snapshot()
+    return litellm.snapshot_of(scan, "0.0.0.0:4000", ENGINE_BINARY)
 
 
 @pytest.fixture(scope="module")
@@ -679,14 +688,13 @@ def litellm() -> Iterator[ModuleType]:
 def test_only_the_images_engine_binary_under_the_proxy_is_the_query_engine(
     litellm, executable, parent, is_engine
 ):
-    probe = object.__new__(litellm.LitellmProbe)
-    probe.__dict__["engine_executable"] = ENGINE_BINARY
+    row = {"parent": parent, "executable": executable}
 
-    assert probe.is_engine({"parent": parent, "executable": executable}, 7) is is_engine
+    assert litellm.is_engine(row, 7, ENGINE_BINARY) is is_engine
 
 
 def test_the_proxy_listens_once_it_owns_the_declared_address_and_the_engine_is_told_apart(
-    litellm, monkeypatch
+    litellm,
 ):
     processes = {
         "7": {"parent": 1, "executable": "/app/python"},
@@ -694,7 +702,7 @@ def test_the_proxy_listens_once_it_owns_the_declared_address_and_the_engine_is_t
     }
     listeners = [{**PROXY_SOCKET, "owners": [7]}, {**ENGINE_SOCKET, "owners": [9]}]
 
-    snapshot = snapshot_of(litellm, monkeypatch, processes, listeners)
+    snapshot = snapshot_of(litellm, processes, listeners)
 
     assert (snapshot.listening, snapshot.engines, snapshot.outside) == (
         True,
@@ -703,24 +711,24 @@ def test_the_proxy_listens_once_it_owns_the_declared_address_and_the_engine_is_t
     )
 
 
-def test_a_lone_engine_socket_is_no_listening_proxy(litellm, monkeypatch):
+def test_a_lone_engine_socket_is_no_listening_proxy(litellm):
     processes = {
         "7": {"parent": 1, "executable": "/app/python"},
         "9": {"parent": 7, "executable": ENGINE_BINARY},
     }
 
-    snapshot = snapshot_of(litellm, monkeypatch, processes, [{**ENGINE_SOCKET, "owners": [9]}])
+    snapshot = snapshot_of(litellm, processes, [{**ENGINE_SOCKET, "owners": [9]}])
 
     assert (snapshot.listening, snapshot.engines) == (False, {})
 
 
-def test_a_listener_of_a_look_alike_engine_stays_outside_the_engine(litellm, monkeypatch):
+def test_a_listener_of_a_look_alike_engine_stays_outside_the_engine(litellm):
     processes = {
         "7": {"parent": 1, "executable": "/app/python"},
         "9": {"parent": 7, "executable": "/opt/other/query-engine-other"},
     }
     listeners = [{**PROXY_SOCKET, "owners": [7]}, {**ENGINE_SOCKET, "owners": [9]}]
 
-    snapshot = snapshot_of(litellm, monkeypatch, processes, listeners)
+    snapshot = snapshot_of(litellm, processes, listeners)
 
     assert (snapshot.engines, snapshot.outside) == ({}, ["0.0.0.0:4000", "127.0.0.1:5555"])

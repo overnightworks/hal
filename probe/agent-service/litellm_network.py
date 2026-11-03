@@ -72,7 +72,6 @@ from litellm import (  # noqa: E402
     LITELLM,
     PROVIDER_HOST,
     START_DATABASE,
-    START_LISTENER,
     TLS_PROGRAM,
     LitellmProbe,
     mounted_file,
@@ -135,9 +134,8 @@ class NetworkProbe(LitellmProbe):
         self.gate.mkdir()
         self.gate.chmod(0o755)
         resolved = self.resolved()["services"]
-        # LiteLLM's port as its shipped start.sh declares it, read the way L3 reads it.
+        self.litellm_port = int(self.proxy_address.rsplit(":", 1)[1])
         start = mounted_file(resolved[LITELLM], resolved[LITELLM]["entrypoint"][0]).read_text()
-        self.litellm_port = int(START_LISTENER.search(start).group(2))
         # Its database as start.sh's DATABASE_URL names it: the one other name and address
         # LiteLLM's start may ask for.
         database = START_DATABASE.search(start)
@@ -256,7 +254,7 @@ class NetworkProbe(LitellmProbe):
         def start() -> None:
             (self.gate / GATE_FILE).write_text("", encoding="utf-8")
             (self.gate / GATE_FILE).chmod(0o644)
-            self.wait_until(LITELLM, LISTENING)
+            self.wait_until_listening()
             answer = self.client_in_namespace_of(
                 self.container(LITELLM), "resolve", f"{asked}.example.com"
             )

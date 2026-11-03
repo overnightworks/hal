@@ -1,23 +1,24 @@
-"""Probe of the API route's failures, keys and rotation (#807 S1b cells F0-F21): the stack of
-litellm.py (the real service, the one-route front, LiteLLM and the gateway's second entrypoint,
-against a fake Anthropic) with the fake steered through its control file. Nothing live and nothing
-paid: the probe refuses to start unless `internet` is internal and holds only the fakes.
+"""Probe of the API route's failures, keys and rotation (#807 S1b cells F6-F11, F13-F17, F19, D6,
+and K10): the stack of litellm.py (the service, the one-route front, LiteLLM and the
+gateway's second entrypoint, against a fake Anthropic) with the fake steered through its control
+file and the caller of litellm.py, a throwaway with an app key. Nothing live and nothing paid: the
+probe refuses to start unless `internet` is internal and holds only the fakes.
 
     flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \\
         python3 probe/agent-service/litellm_failures.py --scratch DIR
 
-Measured: a run takes about 8 minutes (F10 waits for the fake's 120 s hold limit) and its
-teardown a few seconds (K 30 s, CAP 1800 s).
+Measured: a run takes about eight minutes (F10 waits for the fake's 120 s hold limit, K10 for
+LiteLLM's caches) and its teardown a few seconds (K 30 s, CAP 1800 s).
 
-Evidence: F is the fake provider's request log, R the canary's verdict lines, I `docker inspect`,
-L the container logs, LA LiteLLM's access log. F0 is the baseline run that proves the zero
-observations of F2 and F21 could have been something else. The probe differs from production as
-litellm.py does, plus: the fake's control file; F5 only, LiteLLM's lower `request_timeout`;
-F9 only, the fake's certificate from a second scratch CA. Exit 0: every cell held.
+Evidence: F is the fake provider's request log, A the caller's status and LiteLLM's error type, I
+`docker inspect`, L the container logs, LA LiteLLM's access log. The probe differs from production
+as litellm.py does, plus the fake's control file and, for F9 only, the fake's certificate from a
+second scratch CA. Exit 0: every cell held.
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 import secrets
@@ -29,20 +30,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "agent-service"))
 
-from api_canary import verdicts
 from litellm import (
-    CANARY_SECONDS,
-    CREDENTIAL_FILE,
     DATABASE,
     DATABASE_PASSWORD_FILE,
-    DEFAULT_APP,
     FAKE_PROVIDER,
-    FRONT,
-    GATEWAY,
     LABEL,
     LISTENING,
     LITELLM,
-    MASTER_KEY_FILE,
     PROJECT,
     PROVIDER_HOST,
     PROVIDER_KEY_FILE,
@@ -51,14 +45,17 @@ from litellm import (
     SERVICE,
     LitellmProbe,
     ProbeFailed,
+    error_of,
     expect,
+    is_engine,
+    person_budget,
     run_scratch_probe,
+    wire_body,
 )
-from scratch_secrets import issue_certificate, write_new, write_scratch_secrets
+from scratch_secrets import ScratchSecrets, issue_certificate, write_new, write_scratch_secrets
 
-UNAVAILABLE = "provider_unavailable"
-LOWER_TIMEOUT_SECONDS = 5
 HOLD_END_SECONDS = 150
+CACHE_SECONDS = 300
 DATABASE_WAIT_SECONDS = 600
 CENSUS_PROGRAM = """\
 import json, os, sys
@@ -92,7 +89,7 @@ class FailureProbe(LitellmProbe):
         super().__init__(scratch)
         self.scratch = scratch
         self.home = Path(self.environment["HOME"])
-        self.master_key = (self.home / MASTER_KEY_FILE).read_text().strip()
+        self.key = ""
         self.every_value = [
             self.provider_key,
             self.credential,
@@ -119,6 +116,14 @@ class FailureProbe(LitellmProbe):
     def hold(self, cell: str, how: str) -> None:
         super().hold(cell, how)
         self.record(f"{cell} held: {how}")
+
+    def call_command(self, name: str, bearer: str | None, method: str, path: str,
+                     body: dict | None, *, front: bool):  # fmt: skip
+        """Every caller's argv enters the corpus, the command line its container's Config.Cmd
+        comes from, so F15 sees a key that reached it."""
+        argv, program = super().call_command(name, bearer, method, path, body, front=front)
+        self.record(" ".join(argv))
+        return argv, program
 
     def containers_of(self, service: str) -> list[str]:
         """Every container of `service`, stopped ones included."""
@@ -155,20 +160,13 @@ class FailureProbe(LitellmProbe):
         self.harvest(LITELLM)
         super().recreate_litellm()
 
-    def recreate(self, service: str) -> None:
-        self.harvest(service)
-        self.compose("up", "--detach", "--wait", "--force-recreate", "--no-deps", service)
-
-    def start_again(self, service: str) -> None:
-        self.compose("up", "--detach", "--no-deps", service)
-
     def wait_for_front(self) -> None:
         """The front answers and a request through it reaches LiteLLM: LiteLLM refuses one without a
-        bearer. A 401 proves no more: not the hook, the database or the provider."""
+        bearer. A 401 proves no more: not the keys, the database or the provider."""
         deadline = time.monotonic() + 60
         while True:
             try:
-                if self.http("POST", ROUTE, None, self.good_body()) == 401:
+                if self.complete(None, user=self.fingerprint())["status"] == 401:
                     return
             except ProbeFailed:
                 pass
@@ -182,122 +180,78 @@ class FailureProbe(LitellmProbe):
         write_new(draft, contents.encode(), mode)
         draft.replace(target)
 
-    def credential_document(self, value: str) -> str:
-        return json.dumps({"shared_key": value})
-
-    def counts(self) -> tuple[int, int]:
-        return len(self.provider_requests()), len(self.access_lines())
-
-    def failed_run(self, cell: str, *, provider_sees: int | None) -> None:
-        """A run that ends `failed: provider_unavailable` on route api; the fake got
-        `provider_sees` requests when that is given."""
+    def failed_answer(self, cell: str) -> str:
+        """One request the provider answers with a failure: not 200, F 1; returns its status."""
         before = len(self.provider_requests())
-        run = self.canary(DEFAULT_APP)
-        expect(run.get("route") == "api" and run.get("code") == UNAVAILABLE, f"{cell}: {run}")
-        expect(run["exit"] != "0", f"{cell}: the failed run exited 0")
-        seen = len(self.provider_requests()) - before
-        expect(provider_sees in (None, seen), f"{cell}: the fake provider got {seen} requests")
+        answer = self.complete(self.key, user=self.fingerprint())
+        expect(answer["status"] != 200, f"{cell}: the failure was answered 200")
+        sent = len(self.provider_requests()) - before
+        expect(sent == 1, f"{cell}: the fake provider got {sent} requests")
+        return f"{answer['status']} {error_of(answer)}"
 
     # --- the cells ----------------------------------------------------------------------------
 
     def drive(self) -> None:
         self.wait_until(SERVICE, LISTENING)
-        self.wait_until(LITELLM, LISTENING)
+        self.wait_until_listening()
+        self.admin("POST", "/budget/new", person_budget())
+        self.key = self.make_key()
         self.steer()
-        self.cell_f0()
-        self.cells_stopped_hops()
         self.cells_provider_failures()
         self.cell_f9()
         self.cell_f10()
-        self.cells_f11_f12_f18()
+        self.cell_f11()
         self.cell_f17()
         self.cells_f13_f14()
-        self.cell_f20()
+        self.cell_k10()
         self.cell_d6()
         self.cells_f15_f16()
         self.cell_f19()
 
-    def cell_f0(self) -> None:
-        before_f, before_la = self.counts()
-        run = self.canary(DEFAULT_APP)
-        expect(run.get("exit") == "0" and run.get("route") == "api", f"F0: {run}")
-        sent, lines = self.counts()
-        expect((sent - before_f, lines - before_la) == (1, 1), f"F0: F {sent - before_f}, LA")
-        self.hold("F0", "succeeded on route api, F 1, LA one line")
-
-    def cells_stopped_hops(self) -> None:
-        """F1, F2 and F21: a hop of the path stopped, then brought back."""
-        self.compose("stop", LITELLM)
-        self.failed_run("F1", provider_sees=0)
-        self.hold("F1", "LiteLLM stopped: route api, provider_unavailable")
-        self.recreate(LITELLM)
-        self.wait_until(LITELLM, LISTENING)
-        self.compose("stop", FRONT)
-        _, before = self.counts()
-        self.failed_run("F21", provider_sees=0)
-        expect(self.counts()[1] == before, "F21: LiteLLM's log grew")
-        self.hold("F21", "the front stopped: provider_unavailable, LiteLLM's log has 0 new lines")
-        self.start_again(FRONT)
-        self.wait_for_front()
-        self.compose("stop", GATEWAY)
-        self.failed_run("F2", provider_sees=0)
-        self.hold("F2", "the gateway stopped: provider_unavailable, F 0")
-        self.start_again(GATEWAY)
-        self.wait_until_the_gateway_answers()
-        run = self.canary(DEFAULT_APP)
-        expect(run["exit"] == "0", f"F2: the stack did not recover: {run}")
-
     def cells_provider_failures(self) -> None:
-        """F3, F4 and F6 to F8: one run per answer of the fake, F7 with both answers of a used-up
-        balance."""
+        """F6 to F8: one request per answer of the fake, F7 with both answers of a used-up
+        balance; the caller's status is recorded for agent-runtime."""
         for cell, steerings, how in (
-            ("F3", ({"mode": "status", "status": 500},), "upstream 500"),
-            ("F4", ({"mode": "status", "status": 529},), "upstream 529"),
             ("F6", ({"mode": "reset"},), "connection reset"),
             ("F7", ({"mode": "billing"}, {"mode": "low_credit"}),
              "a used-up balance as 402 billing_error and as 400 credit balance too low"),
             ("F8", ({"mode": "broken"},), "200 with a broken body"),
         ):  # fmt: skip
+            statuses = []
             for steering in steerings:
                 self.steer(**steering)
-                self.failed_run(cell, provider_sees=1)
-            self.hold(cell, f"{how}: F 1 per answer, provider_unavailable")
-        self.cell_f5()
-
-    def cell_f5(self) -> None:
-        shipped = self.litellm_config.read_text(encoding="utf-8")
-        lower = f"litellm_settings:\n  request_timeout: {LOWER_TIMEOUT_SECONDS}\n"
-        self.litellm_config.write_text(
-            shipped.replace("litellm_settings:\n", lower, 1), encoding="utf-8"
-        )
-        self.recreate_litellm()
-        self.steer(mode="hold")
-        already = len(self.hold_ends())
-        self.failed_run("F5", provider_sees=1)
-        ended = self.wait_for_hold_end("F5", already)
-        expect(ended == "disconnected", "F5: LiteLLM kept the request")
-        self.hold("F5", "upstream timeout: F 1, provider_unavailable")
-        self.litellm_config.write_text(shipped, encoding="utf-8")
-        self.recreate_litellm()
+                statuses.append(self.failed_answer(cell))
+            self.hold(cell, f"{how}: F 1 per answer, the caller got {statuses}")
         self.steer()
 
-    def cell_f9(self) -> None:
-        other_home = self.scratch / "other-home"
-        other_home.mkdir()
-        other = write_scratch_secrets(other_home, self.scratch / "other-ca")
+    def serve_provider_certificate_of(self, authority: ScratchSecrets) -> None:
+        """The fake provider recreated with a certificate of `authority`, once it listens."""
         folder = self.fake / PROVIDER_HOST
-        issue_certificate(other, PROVIDER_HOST, folder)
+        issue_certificate(authority, PROVIDER_HOST, folder)
         for file in folder.iterdir():
             file.chmod(0o644)
-        self.recreate(FAKE_PROVIDER)
-        self.failed_run("F9", provider_sees=0)
-        self.hold("F9", "a certificate of an untrusted CA: F 0, provider_unavailable")
-        issue_certificate(self.scratch_secrets, PROVIDER_HOST, folder)
-        for file in folder.iterdir():
-            file.chmod(0o644)
-        self.recreate(FAKE_PROVIDER)
-        run = self.canary(DEFAULT_APP)
-        expect(run["exit"] == "0", f"F9: the stack did not recover: {run}")
+        self.harvest(FAKE_PROVIDER)
+        self.compose("up", "--detach", "--wait", "--force-recreate", "--no-deps", FAKE_PROVIDER)
+        connect = "import socket; socket.create_connection(('127.0.0.1', 443), timeout=1)"
+        self.wait_for("F9", "the fake provider's listener", lambda: self.run(
+            ["docker", "exec", self.container(FAKE_PROVIDER), "python", "-I", "-c", connect],
+            check=False,
+        ).returncode == 0, seconds=30)  # fmt: skip
+
+    def cell_f9(self) -> None:
+        """A provider certificate from a CA LiteLLM does not trust: refused before any request
+        reaches F, and served again once the trusted certificate is back."""
+        (self.scratch / "other-home").mkdir()
+        other = write_scratch_secrets(self.scratch / "other-home", self.scratch / "other-ca")
+        self.serve_provider_certificate_of(other)
+        answer = self.complete(self.key, user=self.fingerprint())
+        expect(answer["status"] != 200, "F9: an untrusted certificate was answered 200")
+        expect(not self.provider_requests(), "F9: a request reached the untrusted provider")
+        self.serve_provider_certificate_of(self.scratch_secrets)
+        recovered = self.complete(self.key, user=self.fingerprint())
+        self.served("F9", recovered, self.provider_requests())
+        self.hold("F9", f"a provider certificate of an untrusted CA: {answer['status']} "
+                  f"{error_of(answer)}, F 0; the trusted one back, served")  # fmt: skip
 
     def hold_ends(self) -> list[str]:
         return re.findall(r"^held (disconnected|timed out)$", self.log_of(FAKE_PROVIDER), re.M)
@@ -314,54 +268,40 @@ class FailureProbe(LitellmProbe):
         raise ProbeFailed(f"{cell}: the held request never ended")
 
     def cell_f10(self) -> None:
+        """A caller that leaves while its request is held at the provider."""
         self.steer(mode="hold")
         before, already = len(self.provider_requests()), len(self.hold_ends())
-        run = self.canary(DEFAULT_APP, ("--cancel",))
-        expect(run.get("route") == "api" and run.get("status") == "cancelled", f"F10: {run}")
-        sent = len(self.provider_requests()) - before
-        expect(sent == 1, f"F10: the provider got {sent} requests")
+        name = f"{PROJECT}-leaving-caller"
+        body = wire_body(user=self.fingerprint())
+        argv, program = self.call_command(name, self.key, "POST", ROUTE, body, front=True)
+        process = subprocess.Popen(  # noqa: S603 - argv is built by the program itself
+            argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, env=self.environment, cwd=REPO,
+        )  # fmt: skip
+        process.stdin.write(program)
+        process.stdin.close()
+        deadline = time.monotonic() + 60
+        while len(self.provider_requests()) == before:
+            expect(time.monotonic() < deadline, "F10: the request never reached the provider")
+            time.sleep(1)
+        self.run(["docker", "inspect", name])  # I of a key-bearing caller while it runs, for F15
+        self.run(["docker", "rm", "--force", name])
+        process.communicate(timeout=60)
         ended = self.wait_for_hold_end("F10", already)
         self.steer()
         after = len(self.provider_requests()) - before
         expect(after == 1, f"F10: the provider got {after} requests by the end of the hold")
-        self.hold(
-            "F10",
-            f"status cancelled, F 1 request and none after; observed: its request ended {ended}",
-        )
+        self.hold("F10", f"the caller left: F 1 request and none after; its request ended {ended}")
 
-    def cells_f11_f12_f18(self) -> None:
-        malformed = secrets.token_hex(12)
+    def cell_f11(self) -> None:
+        malformed = f"not a key {secrets.token_hex(12)}"
         self.every_value.append(malformed)
-        for cell, value, contents, mode, how in (
-            ("F11", malformed, f"not a credential {malformed}", 0o600, "a malformed credential"),
-            ("F12", self.credential, self.credential_document(self.credential), 0o000,
-             "the valid credential made unreadable"),
-        ):  # fmt: skip
-            self.replace_by_rename(CREDENTIAL_FILE, contents, mode)
-            self.recreate_litellm()
-            status = self.http("POST", ROUTE, self.credential, self.good_body())
-            expect(status == 401, f"{cell}: the front answered {status}")
-            self.failed_run(cell, provider_sees=0)
-            expect(value not in self.log_of(LITELLM), f"{cell}: a log line holds a value")
-            self.hold(cell, f"{how}: 401, provider_unavailable, F 0, no value in LiteLLM's log")
-        self.cell_f18()
-
-    def cell_f18(self) -> None:
-        old, new = self.credential, secrets.token_urlsafe(32)
-        self.every_value.append(new)
-        self.replace_by_rename(CREDENTIAL_FILE, self.credential_document(new))
-        self.recreate_litellm()
-        self.credential = new
-        expect(self.http("POST", ROUTE, old, self.good_body()) == 401, "F18: the old one passed")
-        self.steer()
-        self.failed_run("F18", provider_sees=0)
-        self.recreate(SERVICE)
-        self.wait_until(SERVICE, LISTENING)
-        run = self.canary(DEFAULT_APP)
-        expect(run["exit"] == "0", f"F18: after the service's recreate: {run}")
-        self.hold(
-            "F18", "old credential 401 after LiteLLM's recreate; the service fails until its own"
-        )
+        before = len(self.provider_requests())
+        status = self.complete(malformed, user=self.fingerprint())["status"]
+        expect(status == 401, f"F11: a malformed bearer got {status}")
+        expect(len(self.provider_requests()) == before, "F11: the provider was reached")
+        expect(malformed not in self.log_of(LITELLM), "F11: a log line holds the bearer")
+        self.hold("F11", "a malformed bearer: 401, F 0, the value in no line of LiteLLM's log")
 
     def cell_f17(self) -> None:
         new = secrets.token_urlsafe(32)
@@ -370,14 +310,14 @@ class FailureProbe(LitellmProbe):
         self.provider_key = new
         self.steer()
         before = len(self.provider_requests())
-        self.canary(DEFAULT_APP)
+        self.complete(self.key, user=self.fingerprint())
         stale = self.provider_requests()[before:]
         expect([r["key_ok"] for r in stale] == [False], "F17: the old inode did not hold")
         self.recreate_litellm()
         before = len(self.provider_requests())
-        run = self.canary(DEFAULT_APP)
-        sent = self.provider_requests()[before:]
-        expect(run["exit"] == "0" and [r["key_ok"] for r in sent] == [True], f"F17: {run} {sent}")
+        status = self.complete(self.key, user=self.fingerprint())["status"]
+        sent = [r["key_ok"] for r in self.provider_requests()[before:]]
+        expect(status == 200 and sent == [True], f"F17: {status} {sent}")
         self.hold("F17", "only the new key reaches the provider, after the recreate")
 
     def cells_f13_f14(self) -> None:
@@ -413,37 +353,40 @@ class FailureProbe(LitellmProbe):
         write_new(key, kept.encode(), 0o600)
         self.recreate_litellm()
 
-    def cell_f20(self) -> None:
-        self.steer(mode="hold")
-        before = len(self.provider_requests())
-        process = subprocess.Popen(  # noqa: S603 - argv is built by the program itself
-            self.canary_command(), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE, text=True, env=self.environment, cwd=REPO,
-        )  # fmt: skip
-        process.stdin.write(self.canary_input(DEFAULT_APP))
-        process.stdin.close()
-        deadline = time.monotonic() + 60
-        while len(self.provider_requests()) == before:
-            expect(time.monotonic() < deadline, "F20: the run never reached the provider")
+    def cell_k10(self) -> None:
+        """The database stopped under a running proxy: a key it has cached passes until the cache
+        expires, then every request is refused before the provider."""
+        key, served, refused = self.make_key(), [], None
+        expect(self.complete(key, user=self.fingerprint())["status"] == 200, "K10: not served")
+        self.compose("stop", DATABASE)
+        stopped = time.monotonic()
+        while refused is None:
+            expect(time.monotonic() - stopped < CACHE_SECONDS, f"K10: served {len(served)} times")
+            before = len(self.provider_requests())
+            answer = self.complete(key, user=self.fingerprint())
+            if answer["status"] == 200:
+                served.append(time.monotonic() - stopped)
+            else:
+                expect(len(self.provider_requests()) == before, "K10: the refusal reached F")
+                refused = (time.monotonic() - stopped, f"{answer['status']} {error_of(answer)}")
             time.sleep(1)
+        expect(self.database_password not in self.log_of(LITELLM), "K10: the password is logged")
+        self.compose("up", "--detach", "--wait", "--no-deps", DATABASE)
         self.recreate_litellm()
-        out, err = process.communicate(timeout=CANARY_SECONDS)
-        self.record(out, err)
-        run = verdicts(out, process.returncode)
-        expect(run.get("code") == UNAVAILABLE, f"F20: {run}")
-        self.steer()
-        again = self.canary(DEFAULT_APP)
-        expect(again["exit"] == "0", f"F20: the next run: {again}")
-        self.hold("F20", "the run in flight is provider_unavailable, the next one succeeds")
+        last = f"{served[-1]:.0f} s" if served else "none"
+        self.hold("K10", f"litellm-db stopped: served {len(served)} times, the last at {last}; "
+                  f"refused at {refused[0]:.0f} s with {refused[1]}, F 0; no password in "
+                  "L")  # fmt: skip
 
     def cells_f15_f16(self) -> None:
+        self.every_value += self.app_keys
         found = self.values_in_corpus(self.every_value)
         expect(not found, f"F15: {len(found)} secret values found in I, L, R or the output")
         size = sum(len(text) for text in self.corpus)
         self.hold(
             "F15",
             f"{len(self.every_value)} values absent from {size} characters of every command's"
-            " output and every container's I and L",
+            " output, every caller's argv and every container's I and L",
         )
         planted = self.every_value[0]
         plant = self.run([
@@ -489,7 +432,7 @@ class FailureProbe(LitellmProbe):
     def expect_holders(self, rows: dict, holders: set[int], proxy: int, container: str) -> int:
         """The proxy and its one query engine are the only holders, all as the configured user with
         core size 0; returns that user."""
-        engines = [pid for pid in holders if self.is_engine(rows[pid], proxy)]
+        engines = [pid for pid in holders if is_engine(rows[pid], proxy, self.engine_executable)]
         strays = [rows[pid]["name"] for pid in holders - {proxy, *engines}]
         expect(len(engines) == 1, f"F19: {len(engines)} query engines hold the secrets")
         expect(not strays, f"F19: holders outside the proxy and its query engine: {strays}")
@@ -524,8 +467,9 @@ class FailureProbe(LitellmProbe):
         self.recreate_litellm()
 
     def ended_start(self, how: str, password: str) -> str:
-        """Starts LiteLLM alone and waits for its end: non-zero, never listening, the `password`
-        it got not in its log. The text is what the cell holds, with the time measured."""
+        """Starts LiteLLM alone and waits for its end: non-zero, never listening in any snapshot
+        while it ran, the `password` it got not in its log. The text is what the cell holds, with
+        the time measured."""
         self.compose("rm", "--stop", "--force", LITELLM)
         started = time.monotonic()
         self.compose("up", "--detach", "--no-deps", LITELLM)
@@ -536,6 +480,10 @@ class FailureProbe(LitellmProbe):
             state = json.loads(self.run(["docker", "inspect", container]).stdout)[0]["State"]
             if not state["Running"]:
                 break
+            listening = False
+            with contextlib.suppress(ProbeFailed):  # it may end between inspect and the scan
+                listening = self.proxy_snapshot().listening
+            expect(not listening, f"D6: {how}: LiteLLM listened")
             expect(time.monotonic() - started < DATABASE_WAIT_SECONDS, f"D6: still up {how}")
             time.sleep(2)
         seconds = time.monotonic() - started
@@ -544,9 +492,8 @@ class FailureProbe(LitellmProbe):
         text = logs.stdout + logs.stderr
         tail = " | ".join(text.strip().splitlines()[-8:])[-1200:]
         expect(state["ExitCode"] != 0, f"D6: {how}: exit code {state['ExitCode']}: {tail}")
-        expect(LISTENING not in text, f"D6: {how}: LiteLLM listened")
         expect(password not in text, f"D6: {how}: the password is in the log")
-        return f"exit code {state['ExitCode']} after {seconds:.0f} s, no listening line"
+        return f"exit code {state['ExitCode']} after {seconds:.0f} s, never listening"
 
 
 def main() -> int:

@@ -256,12 +256,7 @@ def dns_reading(message: bytes) -> tuple[str, bool]:
 
 def dns_question(message: bytes) -> str:
     """The first question's name, lower-cased and dotted; empty for anything else."""
-    labels, at = [], DNS_HEADER_BYTES
-    while at < len(message) and message[at]:
-        length = message[at]
-        labels.append(message[at + 1 : at + 1 + length].decode("ascii", errors="replace"))
-        at += 1 + length
-    return ".".join(labels).lower()
+    return question_name(message)[0]
 
 
 def has_one_question(message: bytes) -> bool:
@@ -269,12 +264,21 @@ def has_one_question(message: bytes) -> bool:
     message with no compression pointer, and its type and class follow."""
     if len(message) < DNS_HEADER_BYTES or struct.unpack_from("!H", message, 4)[0] != 1:
         return False
-    at = DNS_HEADER_BYTES
+    root = question_name(message)[1]
+    return root is not None and root + 1 + DNS_QUESTION_TAIL_BYTES <= len(message)
+
+
+def question_name(message: bytes) -> tuple[str, int | None]:
+    """The first question's name, lower-cased and dotted, and the offset of its root byte: None when
+    the name runs past the message or reaches a compression pointer, where its labels stop."""
+    labels, at = [], DNS_HEADER_BYTES
     while at < len(message) and message[at]:
         if message[at] & DNS_POINTER_BITS:
-            return False
-        at += 1 + message[at]
-    return at + 1 + DNS_QUESTION_TAIL_BYTES <= len(message)
+            return ".".join(labels).lower(), None
+        length = message[at]
+        labels.append(message[at + 1 : at + 1 + length].decode("ascii", errors="replace"))
+        at += 1 + length
+    return ".".join(labels).lower(), at if at < len(message) else None
 
 
 # (label, opcode, operand, jump to this label if true, if false); no label: the next instruction.
