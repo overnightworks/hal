@@ -48,8 +48,8 @@ from hal.stack.plan_rows import (
     checkout_row,
     update_rows,
 )
-from hal.stack.realm.reconcile import REALM_UNIT, RealmAction, RealmPlan, RealmRestart
-from hal.stack.unit_plans import Action, ImageReference, KeptImage, Recreate
+from hal.stack.realm.reconcile import REALM_UNIT, RealmAction, RealmPlan
+from hal.stack.unit_plans import Action, ImageReference, KeptImage, Recreate, Restart
 
 
 def rows_of(**parts: object) -> tuple[Row, ...]:
@@ -203,7 +203,17 @@ def test_a_kept_image_is_one_needs_you_row_with_both_versions(image: KeptImage, 
             id="held",
         ),
         pytest.param(
-            RealmPlan(RealmAction.NOT_CHECKED, restart=RealmRestart.DATABASE),
+            RealmPlan(RealmAction.NOT_CHECKED, restart=Restart.SERVICE),
+            Row(
+                Glyph.UNCHANGED,
+                REALM_UNIT,
+                PlanEvent.REALM_LATER,
+                "Keycloak starts now · next apply checks it",
+            ),
+            id="not checked while Keycloak starts",
+        ),
+        pytest.param(
+            RealmPlan(RealmAction.NOT_CHECKED, restart=Restart.DATABASE),
             Row(
                 Glyph.UNCHANGED,
                 REALM_UNIT,

@@ -129,6 +129,7 @@ from hal.stack.unit_plans import (
     plan_switches,
     plan_unit_services,
     read_fleet,
+    restart_of,
     switch,
     switched_off_units,
     unit_gates,
@@ -210,7 +211,7 @@ def _plan(
         fleet.config,
         tracked,
         gates.get(reconcile.REALM_UNIT),
-        reconcile.restart_of(plans, unit_services.recreates),
+        restart_of(plans, unit_services.recreates, reconcile.REALM),
     )
     keys = litellm_keys.plan_keys(engine, states, repository)
     app_plans = plan_apps(repository, fleet, app_runtime, marks)

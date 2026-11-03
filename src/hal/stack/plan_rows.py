@@ -14,8 +14,16 @@ from hal.stack.built_image import ENDS_RUNS, BuiltRecreate
 from hal.stack.legal_step import LEGAL_UNIT, BlockChange, LegalPlan, PageChange
 from hal.stack.litellm_keys import LITELLM_SERVICE, Change, FieldChange, KeysPlan, Target, Value
 from hal.stack.plan import Plan
-from hal.stack.realm.reconcile import REALM_UNIT, RealmAction, RealmPlan
-from hal.stack.unit_plans import Action, ImageReference, KeptImage, Recreate, UnitPlan
+from hal.stack.realm.reconcile import REALM, REALM_UNIT, RealmAction, RealmPlan
+from hal.stack.unit_plans import (
+    Action,
+    DatabaseUnit,
+    ImageReference,
+    KeptImage,
+    Recreate,
+    Restart,
+    UnitPlan,
+)
 
 _SEPARATOR = " · "
 _DIGEST_SHOWN = 4
@@ -388,6 +396,10 @@ def _image_text(image: ImageReference, shows_name: bool = True) -> str:
     return f"{image.name if shows_name else ''}{digest}"
 
 
+def restart_text(restart: Restart, unit: DatabaseUnit) -> str:
+    return f"{unit.name} starts now" if restart is Restart.SERVICE else "its database restarts now"
+
+
 def _realm_row(realm: RealmPlan) -> Row | None:
     match realm.action:
         case RealmAction.RUN:
@@ -397,7 +409,7 @@ def _realm_row(realm: RealmPlan) -> Row | None:
             fact = f"{realm.why}{_SEPARATOR}Keycloak is {realm.gate}"
             return Row(Glyph.UNCHANGED, REALM_UNIT, PlanEvent.REALM_HELD, fact)
         case RealmAction.NOT_CHECKED:
-            fact = f"{realm.restart}{_SEPARATOR}next apply checks it"
+            fact = f"{restart_text(realm.restart, REALM)}{_SEPARATOR}next apply checks it"
             return Row(Glyph.UNCHANGED, REALM_UNIT, PlanEvent.REALM_LATER, fact)
         case RealmAction.UNREADABLE:
             return Row(Glyph.NEEDS_YOU, REALM_UNIT, PlanEvent.REALM_SKIPPED, realm.error)

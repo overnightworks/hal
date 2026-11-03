@@ -1,6 +1,6 @@
 """What each unit needs to become what the catalog says, and how one unit is switched."""
 
-from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -200,6 +200,37 @@ class Recreate:
 
     unit: str
     service: str
+
+
+@dataclass(frozen=True)
+class DatabaseUnit:
+    """A unit whose service reads its own database; `name` is the service as a line says it."""
+
+    unit: str
+    service: str
+    database: str
+    name: str
+
+
+class Restart(StrEnum):
+    SERVICE = "service"
+    DATABASE = "database"
+
+
+def restart_of(
+    plans: Iterable[UnitPlan], recreates: Iterable[Recreate], unit: DatabaseUnit
+) -> Restart | None:
+    """What this run starts of `unit`, None when nothing: its service when the unit is switched
+    on or the service recreated, else its database when only that is recreated. Any other service
+    of the unit counts as neither."""
+    if any(plan.unit.key == unit.unit and plan.action is Action.ON for plan in plans):
+        return Restart.SERVICE
+    services = {recreate.service for recreate in recreates if recreate.unit == unit.unit}
+    if unit.service in services:
+        return Restart.SERVICE
+    if unit.database in services:
+        return Restart.DATABASE
+    return None
 
 
 class RecreatePlans(NamedTuple):
