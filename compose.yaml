@@ -634,10 +634,6 @@ secrets:
   # The password of LiteLLM's database user, read by litellm and litellm-db alone.
   litellm_db_password:
     file: ${HOME}/.secrets/litellm/db-password
-  # The service credential (JSON with `shared_key`): agent-service/setup writes it, and no
-  # service reads it.
-  agent_service_api_credential:
-    file: ${HOME}/.secrets/agent-service/api/credential.json
 
 networks:
   hal-probe:

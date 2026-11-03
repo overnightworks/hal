@@ -3,7 +3,7 @@ through the signing folder's verified descriptor. `setup` is the only caller.
 
 The setup contract is docs/agent-service.md, "The signing key". Key bytes travel only over pipes to
 openssl and are never printed. Reading the files, their leftovers and the folder's lock are
-secret_entry.py's, as they are for the API credential.
+secret_entry.py's.
 """
 
 from __future__ import annotations

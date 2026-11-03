@@ -92,7 +92,6 @@ class FailureProbe(LitellmProbe):
         self.key = ""
         self.every_value = [
             self.provider_key,
-            self.credential,
             self.master_key,
             self.database_password,
         ]
@@ -100,7 +99,7 @@ class FailureProbe(LitellmProbe):
     # --- plumbing -----------------------------------------------------------------------------
 
     def steer(self, **steering: object) -> None:
-        self.steer_fake(provider_key=self.provider_key, credential=self.credential, **steering)
+        self.steer_fake(provider_key=self.provider_key, **steering)
 
     def record(self, *texts: str) -> None:
         """The one way into the corpus F15 and F16 search."""
