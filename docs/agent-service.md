@@ -244,7 +244,7 @@ An app that calls LiteLLM directly holds only its own key, the file `~/.secrets/
 `hopin`, `presentator`). `hal setup` creates a missing one with the prefix `sk-` that LiteLLM requires of a custom
 key, mode 0644 in a 0700 folder so the app's container reads it as its own user. `hal apply`'s key step reads it to
 make the app's key in LiteLLM (see "The API route"). On the same agent network the app posts to
-`http://litellm-front:4000/v1/chat/completions` with that key as bearer.
+`http://litellm-front:4000/v1/chat/completions` with that key as bearer; nothing starts the front yet.
 
 ## The API route
 

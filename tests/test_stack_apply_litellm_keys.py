@@ -1,4 +1,4 @@
-"""`hal apply`'s key step (#964): its rows in the one question, its run after the realm step and
+"""`hal apply`'s key step (#964): its rows in the one question, its run
 before the apps, and every ending of the item's table "How the run ends"."""
 
 import re
