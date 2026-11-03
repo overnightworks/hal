@@ -1,8 +1,0 @@
-claim_id = "476a38650da74404aaecf5ac715d70e9"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "c6f26423bbcfd03818c2229414b4afd84f185e39"
-branch = "claude/issue-948-sigterm-owner"
-scope = ["src/hal/backup_commands.py", "src/hal/expire_commands.py", "src/hal/stack/external/apply.py", "tests/test_expire_commands.py", "tests/test_hal_backup.py"]
-opened_commit = "52558310e5182459b5d18d511760815656b75ce0"
-whole_reason = "One rule and its three users: moving the users without the owner, or the owner without the users, leaves two copies."
