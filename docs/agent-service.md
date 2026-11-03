@@ -211,8 +211,9 @@ table. Both containers read the file at create time, and the old credential gets
 after its recreate, so the order is LiteLLM first. A lost credential needs no backup: it protects no
 stored data.
 
-The master key `~/.secrets/litellm/master-key` is not made here: `hal setup` generates it (a
-`service-password`, never shown) and creates only a missing file.
+The master key `~/.secrets/litellm/master-key` and the database password
+`~/.secrets/litellm/db-password` are not made here: `hal setup` generates each (a `service-password`,
+never shown) and creates only a missing file.
 
 ## What a turn leaves behind
 
@@ -231,7 +232,9 @@ a turn leaves this PC for Anthropic, which generates the answer.
 **The API route keeps no content, as evidence for the paths exercised only.** LiteLLM logs no
 message and redacts the `Messages:` suffix of its exceptions, and neither it nor the front
 configures a callback, cache or spend log; LiteLLM's database holds keys, budgets and tool names but no
-spend or error row and no prompt (`disable_spend_logs`, `disable_error_logs`, `store_prompts_in_spend_logs`).
+spend-log or error-log row and no prompt (`disable_spend_logs`, `disable_error_logs`,
+`store_prompts_in_spend_logs`). Only the per-request logs stop: the daily and the key, user and team
+spend aggregates are written whatever `disable_spend_logs` says, and they hold amounts, never content.
 The census also searches the database's volume and a `pg_dump` of it; the front logs at INFO without an access log.
 The retention census (`agent-service/retention_census.py`, driven by
 `probe/agent-service/litellm_retention.py` on the fake-only stack) searches a request and an answer canary in every writable mount and every log of
@@ -308,8 +311,9 @@ has no `[api]` table.
   `hal setup` generates and no client holds, so its admin routes stay closed.
 - **The database.** `litellm-db` is Postgres 17 at the image and hardening of `keycloak-db` (one
   `x-postgres` anchor in `compose.yaml`), with its own volume and the file secret `litellm/db-password`,
-  which `start.sh` turns into `DATABASE_URL`. LiteLLM stays the official image by its digest and runs
-  with no `LITELLM_LICENSE` and none of the settings behind its premium check (`enforced_params`,
+  which `start.sh` turns into `DATABASE_URL`. LiteLLM stays the official image by its digest: BerriAI ships one
+  image whose enterprise part a licence key switches on, and hal sets no key and uses no enterprise
+  function, so it builds no image of its own. It runs with no `LITELLM_LICENSE` and none of the settings behind its premium check (`enforced_params`,
   `allowed_ips`, global `allowed_routes`, key `tags`, `model_max_budget`, `/key/regenerate`). It
   waits for the database to be healthy at the start only; with the database gone or the password
   wrong it ends non-zero after Prisma's retries, and what a running proxy does when the database
@@ -317,8 +321,8 @@ has no `[api]` table.
   of the proxy and its Prisma processes, the same holders as the provider key.
 - **What stays reachable.** The front sees every message and the service credential in memory; a
   compromised front could spend credit through LiteLLM, bounded by the prepaid credit and, for the
-  burn rate, by the route's concurrency bound. LiteLLM reaches only the front and, through
-  the gateway's `litellm` entrypoint, the provider's name.
+  burn rate, by the route's concurrency bound. LiteLLM reaches only the front, its database
+  and, through the gateway's `litellm` entrypoint, the provider's name.
 - **The bound.** LiteLLM refuses the next request over a bound on the API route at once with 429
   and `Retry-After`, before the provider; nothing waits, and the run ends
   `failed: provider_unavailable` on route `api`. The bound is the fixed number
@@ -392,10 +396,10 @@ songmaker's own call is the proof.
 to let people in; it has not been run. It makes a paid call, so it runs only when the operator says so, as a
 person of the API group outside the subscription group: you sign in as for the live smoke, but the
 prompt is the only thing on standard error and no browser starts, you open its link yourself. It
-checks that the route's four containers run and that the running service's `[api]` names
+checks that the route's five containers run and that the running service's `[api]` names
 `litellm-front` as its gateway and that the service started after that file last changed (C0), runs `agent-canary` once with a random value as both the request
 and the answer it asks for (C1; any route but `api` fails), waits a few seconds, and runs the retention census
-over the four containers for that value (C2). Nothing is recreated; a failed canary ends the run, and a
+over the five containers for that value (C2). Nothing is recreated; a failed canary ends the run, and a
 new run uses a new value. It prints only verdict lines of a closed grammar and a last line,
 `canary and census held` or `canary and census FAILED`, matching the exit code; no exception text, token or
 container output reaches the terminal. The probe `probe/agent-service/litellm_live_canary.py` runs it

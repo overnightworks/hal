@@ -224,23 +224,17 @@ def test_litellm_retries_nothing_logs_no_messages_and_has_no_callback_cache_or_s
     }
 
 
-PREMIUM_SETTINGS = (
-    "LITELLM_LICENSE",
-    "enforced_params",
-    "allowed_ips",
-    "allowed_routes",
-    "model_max_budget",
-    "regenerate",
-)
-
-
 def test_litellm_holds_no_license_and_none_of_the_settings_behind_the_premium_check(
     compose, config
 ):
+    premium_settings = (
+        "LITELLM_LICENSE", "enforced_params", "allowed_ips", "allowed_routes", "tags",
+        "model_max_budget", "regenerate",
+    )  # fmt: skip
     environment = compose["services"][LITELLM]["environment"]
     configured = json.dumps(config) + json.dumps(environment)
 
-    assert not [name for name in PREMIUM_SETTINGS if name in configured]
+    assert not [name for name in premium_settings if name in configured]
     assert "LITELLM_LICENSE" not in START_SCRIPT
 
 

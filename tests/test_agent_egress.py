@@ -482,11 +482,14 @@ def test_a_window_lasts_for_its_bound_in_seconds(capture, monkeypatch, bound):
         (["--seconds", "90"], None),
         (["--seconds", "90", "syn", "label"], None),
         (["dns"], None),
+        (["dns", "litellm-db"], (None, "dns", ["litellm-db"])),
+        (["dns", "-db"], None),
     ],
     ids=[
         "no bound", "a bound on syn", "a bound on dns", "a bound without a number",
         "a bound of zero", "a bound that is no number", "a bound without a mode",
-        "syn with a label", "dns without a label",
+        "syn with a label", "dns without a label", "a label with a hyphen",
+        "a label that starts with a hyphen",
     ],
 )  # fmt: skip
 def test_the_window_arguments_name_the_bound_the_mode_and_the_labels(capture, arguments, parsed):
@@ -601,6 +604,32 @@ def test_the_dns_window_counts_a_query_to_the_embedded_resolver_apart_from_its_r
     window.see(segment, ["label"])
 
     assert (window.label_frames, window.query_frames) == ({"label": 1}, queries)
+
+
+@pytest.mark.parametrize(
+    ("name", "matched"),
+    [
+        ("litellm-db.example.com", {"litellm-db": 1}),
+        ("litellm-db", {"litellm-db": 1}),
+        ("license.litellm.ai", {}),
+        ("litellm-dbx.example.com", {}),
+        ("x.litellm-db.example.com", {}),
+    ],
+    ids=["the label with a domain", "the label alone", "another host of litellm",
+         "a longer first label", "the label deeper in the name"],
+)  # fmt: skip
+def test_the_dns_window_matches_the_first_label_of_the_question_and_counts_every_dns_message(
+    capture, name, matched
+):
+    """S1: `litellm-db` is told from other names that contain it, and an unmatched message still
+    counts."""
+    body = udp(40000, 53, dns_message(name))
+    segment = parse(capture, ethernet(0x0800, ipv4_header(17, body, destination="127.0.0.1")))
+    window = capture.Window()
+
+    window.see(segment, ["litellm-db"])
+
+    assert (window.label_frames, window.dns_messages) == (matched, 1)
 
 
 # --- the unit probe's refused-start decision, on synthetic state and logs ----------------------

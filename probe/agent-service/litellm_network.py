@@ -142,10 +142,6 @@ class NetworkProbe(LitellmProbe):
         # LiteLLM's start may ask for.
         database = START_DATABASE.search(start)
         self.database, self.database_port = database["service"], int(database["port"])
-        # capture.py takes alphanumeric labels and matches a frame whose question contains one, so
-        # the database's name is asked for by its first label: every question that names
-        # `litellm...` counts as the database's.
-        self.database_label = self.database.split("-")[0]
         self.overlays.append(self.write_network_overlay(scratch, resolved))
         self.expect_fake_only()
 
@@ -273,7 +269,7 @@ class NetworkProbe(LitellmProbe):
 
         def inside_syn_window() -> None:
             observed["s1"] = self.bounded_window(
-                CAPTURE_LITELLM, ["dns", asked, self.database_label], START_SECONDS, start
+                CAPTURE_LITELLM, ["dns", asked, self.database], START_SECONDS, start
             )
 
         observed["s2"] = self.bounded_window(
@@ -291,16 +287,17 @@ class NetworkProbe(LitellmProbe):
         seen, queries = result["labels"].get(asked, 0), result["queries"].get(asked, 0)
         if not queries:
             raise NotDriven("S1: not driven: the control's query is not in LiteLLM's DNS window")
-        database = result["labels"].get(self.database_label, 0)
+        database = result["labels"].get(self.database, 0)
+        # `frames` also holds the kernel's IPv6 multicast reports, which are no DNS.
         expect(
-            result["frames"] == seen + database,
-            f"S1: {result['frames'] - seen - database} DNS frames are neither the control's nor "
-            f"for {self.database_label}...",
+            result["dns_messages"] == seen + database,
+            f"S1: {result['dns_messages'] - seen - database} DNS messages are neither the "
+            f"control's nor for {self.database}",
         )
         self.hold(
             "S1",
-            f"LiteLLM's DNS window holds only the control's {seen} frames, {queries} queries, and "
-            f"{database} frames naming {self.database_label}...",
+            f"LiteLLM's DNS window holds only the control's {seen} messages, {queries} queries, "
+            f"and {database} messages for {self.database}",
         )
 
     def cell_s2(self, result: dict, control_ended: float) -> None:

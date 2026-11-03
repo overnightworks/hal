@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import re
 import secrets
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -38,6 +39,7 @@ sys.path.insert(0, str(REPO / "agent-service"))
 from agent_networks import gateway_listeners, listeners_of  # noqa: E402
 from api_canary import verdicts  # noqa: E402
 from egress import LABEL, PROJECT, ProbeFailed, expect, run_scratch_probe  # noqa: E402
+from egress_observe import socket_name  # noqa: E402
 from issuer import ISSUER_ORIGIN, ISSUER_SERVICE, SERVICE, IssuerProbe  # noqa: E402
 from refusals import API_GROUP  # noqa: E402
 from retention_census import DATABASE, FRONT, GATEWAY, LITELLM  # noqa: E402
@@ -67,6 +69,30 @@ PROVIDER_KEY_FILE = Path(".secrets/litellm/anthropic")
 MASTER_KEY_FILE = Path(".secrets/litellm/master-key")
 DATABASE_PASSWORD_FILE = Path(".secrets/litellm/db-password")
 CREDENTIAL_FILE = Path(".secrets/agent-service/api/credential.json")
+# The listening TCP sockets of each query-engine process of the container, by the executable behind
+# `/proc/<pid>/exe`: argv: none; prints {pid: [[hexadecimal address, IP version], ...]}.
+ENGINE_SOCKETS_PROGRAM = """\
+import json, os
+engines = {}
+for entry in filter(str.isdigit, os.listdir("/proc")):
+    try:
+        if not os.path.basename(os.readlink(f"/proc/{entry}/exe")).startswith("query-engine"):
+            continue
+        engines[entry] = {
+            os.readlink(f"/proc/{entry}/fd/{fd}")[8:-1]
+            for fd in os.listdir(f"/proc/{entry}/fd")
+            if os.readlink(f"/proc/{entry}/fd/{fd}").startswith("socket:[")
+        }
+    except OSError:
+        continue
+found = {pid: [] for pid in engines}
+for table, version in (("tcp", 4), ("tcp6", 6)):
+    for row in (line.split() for line in open(f"/proc/net/{table}").read().splitlines()[1:]):
+        for pid, inodes in engines.items():
+            if row[3] == "0A" and row[9] in inodes:
+                found[pid].append([row[1], version])
+print(json.dumps(found))
+"""
 HTTP_PROGRAM = """\
 import json, socket, sys
 method, path, bearer, body = sys.argv[1:5]
@@ -450,15 +476,30 @@ class LitellmProbe(IssuerProbe):
             f"D1: LiteLLM runs as {container['Config']['User']}",
         )
         expect(container["HostConfig"]["ReadonlyRootfs"] is True, "D1: the root is writable")
-        counted = self.run([
-            "docker", "exec", self.container(DATABASE), "psql", "--username=litellm",
-            "--dbname=litellm", "--tuples-only", "--no-align", "--command",
+        counted = self.sql(
             "SELECT count(finished_at), count(*) FROM _prisma_migrations",
-        ]).stdout.strip()  # fmt: skip
+            "--tuples-only", "--no-align",
+        ).stdout.strip()  # fmt: skip
         finished, total = (int(number) for number in counted.split("|"))
         expect(total > 0 and finished == total, f"D1: {finished} of {total} migrations finished")
         self.hold("D1", f"LiteLLM runs as {user} on a read-only root; {finished} of {total} "
                   "migrations finished")  # fmt: skip
+
+    def database_options(self) -> list[str]:
+        """The user and database `compose.yaml` gives `litellm-db`, as the options of psql and
+        pg_dump."""
+        resolved = json.loads(self.compose("config", "--format", "json").stdout)["services"]
+        environment = resolved[DATABASE]["environment"]
+        return [
+            f"--username={environment['POSTGRES_USER']}",
+            f"--dbname={environment['POSTGRES_DB']}",
+        ]
+
+    def sql(self, statement: str, *options: str) -> subprocess.CompletedProcess:
+        return self.run([
+            "docker", "exec", self.container(DATABASE), "psql", *self.database_options(),
+            *options, "--command", statement,
+        ])  # fmt: skip
 
     def cell_n1(self) -> None:
         resolved = json.loads(self.compose("config", "--format", "json").stdout)
@@ -515,11 +556,19 @@ class LitellmProbe(IssuerProbe):
         declared = {FRONT: front_address, LITELLM: ":".join(START_LISTENER.search(start).groups())}
         for cell, service in (("L2", FRONT), ("L3", LITELLM)):
             found = listeners_of(self, service)
-            tcp = [name for name in found["tcp"] if not self.is_prisma_engine(service, name)]
-            engine = [name for name in found["tcp"] if name not in tcp]
+            tcp, engines = (found["tcp"], {}) if service != LITELLM else self.proxy_listeners()
+            engine = [name for names in engines.values() for name in names]
             expect(
                 tcp in bound_names(declared[service]) and found["udp"] == [],
                 f"{cell}: {service} declares {declared[service]} and listens on {found}",
+            )
+            expect(
+                service != LITELLM or (len(engines) == 1 and len(engine) == 1),
+                f"{cell}: {len(engines)} query engines with sockets {engine}",
+            )
+            expect(
+                all(name.startswith(f"{LOOPBACK_ADDRESS}:") for name in engine),
+                f"{cell}: the query engine listens beyond loopback: {engine}",
             )
             self.hold(
                 cell,
@@ -527,11 +576,22 @@ class LitellmProbe(IssuerProbe):
                 + (f"; its Prisma engine on {engine}" if engine else ""),
             )
 
-    @staticmethod
-    def is_prisma_engine(service: str, name: str) -> bool:
-        """LiteLLM's Prisma query engine listens on one ephemeral loopback port of its namespace,
-        which no other container reaches."""
-        return service == LITELLM and name.startswith(f"{LOOPBACK_ADDRESS}:")
+    def proxy_listeners(self) -> tuple[list[str], dict[str, list[str]]]:
+        """LiteLLM's TCP listeners outside its Prisma query engine, and the sockets of each query
+        engine process, told by the executable and the owner of the socket. The engine listens on
+        one ephemeral loopback port, before the proxy binds its own."""
+        sockets = json.loads(
+            self.run(
+                ["docker", "exec", "-i", self.container(LITELLM), "python3", "-"],
+                stdin=ENGINE_SOCKETS_PROGRAM,
+            ).stdout
+        )
+        engines = {
+            pid: [socket_name(address, version) for address, version in owned]
+            for pid, owned in sockets.items()
+        }
+        owned = {name for names in engines.values() for name in names}
+        return [n for n in listeners_of(self, LITELLM)["tcp"] if n not in owned], engines
 
     def cells_r1_r2(self) -> None:
         for cell, name in (("R1", PROVIDER_HOST), ("R2", ISSUER_HOST)):

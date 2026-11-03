@@ -723,13 +723,16 @@ def test_a_value_prefix_on_another_kind_is_refused_at_load_naming_the_entry(tmp_
 
 
 def test_the_litellm_keys_without_a_prefix_keep_their_unprefixed_value_form(home: Path, use_manifest, boundaries: Boundaries) -> None:
-    """K5: only entries that declare a value_prefix get one; the database password is such a key and is read by LiteLLM and its database."""
+    """K5: only entries that declare a value_prefix get one."""
     _use_packaged_entries(use_manifest, ("litellm/master-key", "litellm/db-password"))
 
     run_wizard(home, boundaries)
 
     assert not (home / ".secrets/litellm/master-key").read_text().startswith("sk-")
     assert not (home / ".secrets/litellm/db-password").read_text().startswith("sk-")
+
+
+def test_the_database_password_is_read_by_the_services_that_mount_it() -> None:
     readers = {entry.name: entry.read_by for entry in load_manifest(PACKAGED_MANIFEST)}
     compose = yaml.safe_load((Path(__file__).resolve().parents[1] / "compose.yaml").read_text())["services"]
     mounting = {name for name, service in compose.items() if "litellm_db_password" in service.get("secrets", [])}

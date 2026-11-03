@@ -438,6 +438,19 @@ def test_a_file_mount_of_a_container_with_python_is_copied_out_and_searched(rete
     assert sweep.found == {"answer": ("service /etc/hosts",)}
 
 
+def test_a_masked_file_mount_of_a_container_with_python_is_not_copied_out(retention) -> None:
+    report = census_report(
+        [mount_report("/work"), mount_report("/proc/kcore", file_mount=1)],
+        [["/work", "tmpfs", True], ["/proc/kcore", "tmpfs", True]],
+    )
+    answers = python_answers(report)
+
+    sweep, docker = sweep_of(retention, answers, retention.Target("service", has_python=True))
+
+    assert sweep.problems == ()
+    assert not [command for command, _ in docker.calls if command[:2] == ("docker", "cp")]
+
+
 @pytest.mark.parametrize("reason", ["refused", "replaced", "too_deep", "vanished", "not_regular"])
 def test_an_unresolved_skip_of_the_census_fails_the_container(retention, reason) -> None:
     report = census_report([mount_report("/work", **{reason: 1})])

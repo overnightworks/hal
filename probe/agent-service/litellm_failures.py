@@ -75,14 +75,14 @@ for entry in os.listdir("/proc"):
         core = next(line for line in limits if line.startswith("Max core file size"))
         rows[entry] = {
             "parent": int(fields[1]), "holds": holds, "uid": int(uid),
-            "name": open(f"/proc/{entry}/comm").read().strip(), "core": core.split()[-3:-1],
+            "name": open(f"/proc/{entry}/comm").read().strip(),
+            "executable": os.path.basename(os.readlink(f"/proc/{entry}/exe")),
+            "core": core.split()[-3:-1],
         }
 print(json.dumps({"processes": rows}))
 """
 SECRET_NAMES = ("ANTHROPIC_API_KEY", "LITELLM_MASTER_KEY", "DATABASE_URL")
-# What may hold them: the proxy itself and the Prisma processes it spawns (the query engine for
-# its whole life, the one-shot `prisma` and `node` at boot).
-PRISMA_PROCESSES = ("query-engine", "prisma", "node")
+ENGINE_EXECUTABLE = "query-engine"
 
 
 class FailureProbe(LitellmProbe):
@@ -212,9 +212,9 @@ class FailureProbe(LitellmProbe):
         self.cell_f17()
         self.cells_f13_f14()
         self.cell_f20()
+        self.cell_d6()
         self.cells_f15_f16()
         self.cell_f19()
-        self.cell_d6()
 
     def cell_f0(self) -> None:
         before_f, before_la = self.counts()
@@ -477,14 +477,16 @@ class FailureProbe(LitellmProbe):
         expect(not outside, f"F19: {len(outside)} processes outside the main tree")
         expect(proxy in holders and 1 not in holders, f"F19: holders {sorted(holders)}")
         expect(set(rows[proxy]["holds"]) == set(SECRET_NAMES), f"F19: proxy {rows[proxy]['holds']}")
-        strays = [rows[pid]["name"] for pid in holders if not self.may_hold(pid, rows[pid], proxy)]
-        expect(not strays, f"F19: holders outside the proxy and its Prisma processes: {strays}")
+        engines = [pid for pid in holders if self.is_engine(rows[pid], proxy)]
+        strays = [rows[pid]["name"] for pid in holders - {proxy, *engines}]
+        expect(len(engines) == 1, f"F19: {len(engines)} query engines hold the secrets")
+        expect(not strays, f"F19: holders outside the proxy and its query engine: {strays}")
         user = self.configured_user(container)
         expect(
             all(rows[pid]["uid"] == user and rows[pid]["core"] == ["0", "0"] for pid in holders),
             "F19: a holder is not the configured user or has a core size",
         )
-        names = sorted(rows[pid]["name"] for pid in holders)
+        names = sorted(rows[pid]["executable"] for pid in holders)
         self.hold(
             "F19",
             f"init and a main tree of {len(rows) - 1}; holders {names}, all uid {user} with core"
@@ -492,8 +494,8 @@ class FailureProbe(LitellmProbe):
         )
 
     @staticmethod
-    def may_hold(pid: int, row: dict, proxy: int) -> bool:
-        return pid == proxy or row["name"].startswith(PRISMA_PROCESSES)
+    def is_engine(row: dict, proxy: int) -> bool:
+        return row["parent"] == proxy and row["executable"].startswith(ENGINE_EXECUTABLE)
 
     def configured_user(self, container: str) -> int:
         configured = json.loads(self.run(["docker", "inspect", container]).stdout)[0]["Config"]
@@ -505,22 +507,22 @@ class FailureProbe(LitellmProbe):
         self.harvest(LITELLM)
         self.compose("stop", LITELLM, DATABASE)
         before = len(self.provider_requests())
-        away = self.ended_start("without the database")
+        away = self.ended_start("without the database", self.database_password)
         self.hold("D6", f"litellm-db stopped: {away}")
         self.compose("up", "--detach", "--wait", "--no-deps", DATABASE)
         wrong = secrets.token_urlsafe(32)
         self.every_value.append(wrong)
         kept = (self.home / DATABASE_PASSWORD_FILE).read_text()
         self.replace_by_rename(DATABASE_PASSWORD_FILE, wrong + "\n", 0o644)
-        mistaken = self.ended_start("with a wrong password")
+        mistaken = self.ended_start("with a wrong password", wrong)
         expect(len(self.provider_requests()) == before, "D6: the fake provider got a request")
         self.hold("D6", f"a wrong password: {mistaken}")
         self.replace_by_rename(DATABASE_PASSWORD_FILE, kept, 0o644)
         self.recreate_litellm()
 
-    def ended_start(self, how: str) -> str:
-        """Starts LiteLLM alone and waits for its end: non-zero, never listening, no password in
-        its log. The text is what the cell holds, with the time measured."""
+    def ended_start(self, how: str, password: str) -> str:
+        """Starts LiteLLM alone and waits for its end: non-zero, never listening, the `password`
+        it got not in its log. The text is what the cell holds, with the time measured."""
         self.compose("rm", "--stop", "--force", LITELLM)
         started = time.monotonic()
         self.compose("up", "--detach", "--no-deps", LITELLM)
@@ -540,7 +542,7 @@ class FailureProbe(LitellmProbe):
         tail = " | ".join(text.strip().splitlines()[-8:])[-1200:]
         expect(state["ExitCode"] != 0, f"D6: {how}: exit code {state['ExitCode']}: {tail}")
         expect(LISTENING not in text, f"D6: {how}: LiteLLM listened")
-        expect(self.database_password not in text, f"D6: {how}: the password is in the log")
+        expect(password not in text, f"D6: {how}: the password is in the log")
         return f"exit code {state['ExitCode']} after {seconds:.0f} s, no listening line"
 
 

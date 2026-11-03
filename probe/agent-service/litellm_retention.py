@@ -56,7 +56,6 @@ from litellm import (  # noqa: E402
     SERVICE,
     ProbeFailed,
     expect,
-    listeners_of,
     mounted_file,
     run_scratch_probe,
 )
@@ -150,12 +149,11 @@ class RetentionProbe(FailureProbe):
     def targets(self) -> list[Target]:
         return [
             Target(self.container_name(service), has_python)
-            for service, has_python in {**ROUTE_SERVICES, DATABASE: False}.items()
+            for service, has_python in ROUTE_SERVICES.items()
         ]
 
     def sweep(self, tokens: Mapping[str, str]) -> Sweep:
-        """C: the census over the route's containers and LiteLLM's database for the canaries
-        `tokens` (label -> value)."""
+        """C: the census over the route's containers for the canaries `tokens` (label -> value)."""
         result = self.census.sweep(self.targets(), tokens)
         expect(not result.problems, f"C: sinks not examined: {list(result.problems)}")
         return result
@@ -195,7 +193,7 @@ class RetentionProbe(FailureProbe):
         deadline = time.monotonic() + seconds
         while True:
             try:
-                if listeners_of(self, LITELLM)["tcp"]:
+                if self.proxy_listeners()[0]:
                     return
             except ProbeFailed:
                 pass  # the container is not up yet
@@ -407,14 +405,18 @@ class RetentionProbe(FailureProbe):
 
     def cell_d9(self) -> None:
         """D9: no canary of a request or an answer in a `pg_dump`, with a planted row as the
-        search's control; a request tool name appears in the tool table alone."""
+        search's control; a request and a response tool name appear in the tool table alone."""
         canaries = {
             label: canary(f"d9-{label}")
-            for label in ("message", "description", "arguments", "result", "answer")
+            for label in ("message", "description", "arguments", "result", "answer", "call")
         }
         tool = canary("d9-tool").replace("-", "_")
+        answered = canary("d9-answered").replace("-", "_")
         planted = canary("d9-planted")
-        self.steer(marker=canaries["answer"])
+        self.steer(
+            marker=canaries["answer"],
+            tool_use={"name": answered, "input": {"q": canaries["call"]}},
+        )
         function = {"name": tool, "description": canaries["description"],
                     "parameters": {"type": "object", "properties": {}}}  # fmt: skip
         arguments = json.dumps({"q": canaries["arguments"]})
@@ -432,7 +434,8 @@ class RetentionProbe(FailureProbe):
         status = self.http("POST", ROUTE, self.credential, body)
         expect(status == 200, f"D9: the route answered {status}")
         self.steer()
-        self.wait_for_tool(tool)
+        for name in (tool, answered):
+            self.wait_for_tool(name)
         self.sql(
             f"CREATE TABLE d9_control (value text); INSERT INTO d9_control VALUES ('{planted}')"  # noqa: S608 - the value is a token this probe generated
         )
@@ -443,13 +446,14 @@ class RetentionProbe(FailureProbe):
         expect(planted in dump, "D9: the planted row is not in the dump")
         held = [label for label, value in canaries.items() if value in dump]
         expect(not held, f"D9: the dump holds the canaries of {held}")
-        tables = self.tables_naming(dump, tool)
-        expect(tables == {TOOL_TABLE}, f"D9: the request tool name is in {sorted(tables)}")
+        for kind, name in (("request", tool), ("response", answered)):
+            tables = self.tables_naming(dump, name)
+            expect(tables == {TOOL_TABLE}, f"D9: the {kind} tool name is in {sorted(tables)}")
         self.expect_nothing_retained("D9", canaries)
         self.hold(
             "D9",
             f"the dump of {len(dump)} characters holds none of {len(canaries)} canaries and the"
-            f" planted row; the request tool name is in {TOOL_TABLE} alone",
+            f" planted row; the request and the response tool name are in {TOOL_TABLE} alone",
         )
 
     def wait_for_tool(self, tool: str) -> None:
@@ -460,18 +464,12 @@ class RetentionProbe(FailureProbe):
             counted = self.sql(query, "--tuples-only", "--no-align").stdout.strip()
             if counted == "1":
                 return
-            expect(time.monotonic() < deadline, f"D9: the request tool name is not in {TOOL_TABLE}")
+            expect(time.monotonic() < deadline, f"D9: the tool name {tool} is not in {TOOL_TABLE}")
             time.sleep(3)
 
-    def sql(self, statement: str, *options: str) -> subprocess.CompletedProcess:
-        return self.run([
-            "docker", "exec", self.container_name(DATABASE), "psql", "--username=litellm",
-            "--dbname=litellm", *options, "--command", statement,
-        ])  # fmt: skip
-
     def dump(self) -> str:
-        return self.run(["docker", "exec", self.container_name(DATABASE), "pg_dump",
-                         "--username=litellm", "--dbname=litellm"]).stdout  # fmt: skip
+        return self.run(["docker", "exec", self.container(DATABASE), "pg_dump",
+                         *self.database_options()]).stdout  # fmt: skip
 
     @staticmethod
     def tables_naming(dump: str, name: str) -> set[str]:
