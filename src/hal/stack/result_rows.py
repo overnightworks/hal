@@ -136,22 +136,22 @@ def partial_error(result: StepResult) -> str | None:
 def keys_rows(result: KeysResult) -> tuple[Row, ...]:
     """The key step's rows: each change done, the failed one with its cause and each one not made
     after it, then each app whose name another key holds."""
+    rows: list[Row] = []
     match result:
         case KeysSkipped(reason):
-            return (
-                Row(Glyph.NEEDS_YOU, LITELLM_SERVICE, ResultEvent.KEYS_SKIPPED, printable(reason)),
+            rows.append(
+                Row(Glyph.NEEDS_YOU, LITELLM_SERVICE, ResultEvent.KEYS_SKIPPED, printable(reason))
             )
         case KeysDone(done, name_taken):
-            return (*_done_rows(done), *map(name_taken_row, name_taken))
+            rows += [*_done_rows(done), *map(name_taken_row, name_taken)]
         case KeysFailed(done, failed, cause, not_made, name_taken):
-            return (
+            rows += [
                 *_done_rows(done),
                 _failed_keys_row(failed, cause),
                 *(_not_made_row(change) for change in not_made),
                 *map(name_taken_row, name_taken),
-            )
-        case _:
-            return ()
+            ]
+    return tuple(rows)
 
 
 def keys_partial(result: KeysResult) -> tuple[str, str | None] | None:

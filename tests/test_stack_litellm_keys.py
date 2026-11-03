@@ -15,6 +15,7 @@ from hal.stack.litellm_keys import Change, FieldChange, Found, KeysPlan, Target
 APPS = ("hopin", "presentator", "songmaker")
 MODELS = ("text/haiku", "text/opus", "text/sonnet")
 BUDGET_ID = "scenario-budget"
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def found_key(app: str, **overrides: object) -> dict:
@@ -314,7 +315,8 @@ def test_a_read_that_fails_while_litellm_runs_plans_nothing_and_says_why(
     )
 
     assert plan.changes == ()
-    assert plan.not_read is not None and reason in plan.not_read
+    assert plan.not_read is not None
+    assert reason in plan.not_read
 
 
 @pytest.mark.parametrize("settings", [{}, {litellm_keys.BUDGET_ID_SETTING: ""}])
@@ -329,8 +331,13 @@ def test_a_config_yaml_without_the_budget_id_is_a_step_not_read(
         compose.Compose(run=runner, repository=repository), states, repository
     )
 
-    assert plan.not_read is not None and litellm_keys.BUDGET_ID_SETTING in plan.not_read
+    assert plan.not_read is not None
+    assert litellm_keys.BUDGET_ID_SETTING in plan.not_read
     assert runner.one_offs == []
+
+
+def test_the_shipped_config_yaml_names_the_person_budget_id() -> None:
+    assert litellm_keys.read_budget_id(ROOT)
 
 
 # --- what the run makes of the one-off's answer ------------------------------------------------

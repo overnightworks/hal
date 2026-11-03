@@ -35,6 +35,7 @@ import json
 import signal
 import sys
 from dataclasses import dataclass, field
+from http.client import HTTPException
 from pathlib import Path
 from typing import Any, TextIO
 from urllib.error import HTTPError
@@ -117,7 +118,7 @@ class Admin:
                 return error.code, parsed(error.read())
             finally:
                 error.close()
-        except OSError as error:
+        except (OSError, HTTPException) as error:
             timed_out = isinstance(error, TimeoutError) or isinstance(
                 getattr(error, "reason", None), TimeoutError
             )
@@ -276,6 +277,9 @@ def main(
     except KeyboardInterrupt:
         print(f"{PROGRAM}: stopped", file=sys.stderr, flush=True)  # noqa: T201 - this container program imports nothing of hal and prints itself
         return 130
+    except Exception as error:  # its text may quote the master key; only its type is printed
+        print(f"{PROGRAM}: unexpected {type(error).__name__}", file=sys.stderr, flush=True)  # noqa: T201 - this container program imports nothing of hal and prints itself
+        return 1
     json.dump(result, sys.stdout, sort_keys=True)
     sys.stdout.write("\n")
     return 0
@@ -283,9 +287,12 @@ def main(
 
 def read_secret(path: Path) -> str:
     try:
-        return path.read_text().strip()
+        value = path.read_text().strip()
     except OSError as error:
         raise AdminError(f"cannot read the key file {path}") from error
+    if not value.isprintable():  # a line break or control character cannot be a header value
+        raise AdminError(f"the key file {path} holds no single line")
+    return value
 
 
 def read_app_keys(directory: Path) -> dict[str, str]:

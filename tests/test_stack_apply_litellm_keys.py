@@ -22,6 +22,10 @@ from support.stack_apply import (
     switch,  # noqa: F401 the fixture, requested by name below
     write_fleet,
 )
+from support.stack_apply_apps import (
+    RELEASE,
+    app_world,  # noqa: F401 the fixture, requested by name below
+)
 from support.stack_apply_fakes import ScriptedCompose
 from support.stack_plan_rows import find_row, plain
 
@@ -114,7 +118,9 @@ def test_a_changed_number_shows_its_old_and_new_value(switch, keys):  # noqa: F8
 
     assert exit_code == 0
     row = find_row(plain(out).partition("Type yes")[0], "songmaker", KeysEvent.KEY_CHANGED)
-    assert row and "7 → 10" in row.group(0) and "60 → none" in row.group(0)
+    assert row
+    assert f"7 → {litellm_keys.APP_BUDGET_DOLLARS:g}" in row.group(0)
+    assert "60 → none" in row.group(0)
     assert keys.writes == [
         [
             {
@@ -180,6 +186,47 @@ def test_a_taken_name_beside_another_change_writes_nothing_for_that_app_and_ends
     assert [change["subject"] for change in keys.writes[0]] == ["songmaker"]
     assert re.search(r"^  ! hopin +name taken", result, re.M)
     assert lines_of(err) == ["error: partial, hopin name taken"]
+
+
+def test_a_taken_name_beside_a_unit_switch_alone_is_a_partial_end_with_nothing_written(
+    switch,  # noqa: F811
+    keys,
+    repository,  # noqa: F811
+):
+    keys.rows["hopin"] = None
+    keys.taken = {"hopin"}
+    with_other_change(repository)
+
+    exit_code, out, err = switch()
+
+    assert exit_code == 1
+    assert re.search(r"^  ! hopin +name taken", plain(out).partition("Type yes")[2], re.M)
+    assert keys.writes == []
+    assert lines_of(err) == ["error: partial, hopin name taken"]
+
+
+def test_the_key_step_writes_after_the_realm_step_and_before_the_apps_are_started(
+    keys,
+    app_world,  # noqa: F811
+):
+    app_world.origin.release(RELEASE)
+    keys.rows["hopin"] = None
+    started_before_the_write = []
+    keyed = keys.run
+
+    def recording(command, arguments, stdin):
+        if "--write" in arguments:
+            started_before_the_write.extend(app_world.docker.verbs)
+        return keyed(command, arguments, stdin)
+
+    keys.run = recording
+
+    exit_code, _, err = app_world.apply()
+
+    assert (exit_code, err) == (0, "")
+    assert keys.writes
+    assert "create" not in started_before_the_write
+    assert "create" in app_world.docker.verbs
 
 
 def test_a_taken_name_with_nothing_else_to_change_asks_nothing_and_names_it(switch, keys):  # noqa: F811

@@ -450,12 +450,9 @@ _FIELD_LABELS = {
 _LIST_NOUNS = {"models": ListNoun.MODEL, "allowed_routes": ListNoun.ROUTE}
 # A new row's value without its label where the value says what it is.
 _NEW_FIELD_FORMS = {
-    "key_alias": "name {}",
     "max_budget": "{} dollars",
     "budget_duration": "{}",
     "max_parallel_requests": "{} parallel",
-    "rpm_limit": "rpm {}",
-    "tpm_limit": "tpm {}",
 }
 
 
@@ -466,7 +463,7 @@ def _new_field_text(field: FieldChange) -> str:
 
 
 def _changed_field_text(field: FieldChange) -> str:
-    label = _FIELD_LABELS.get(field.name, field.name)
+    label = _FIELD_LABELS[field.name]
     if isinstance(field.new, tuple):
         old = field.old if isinstance(field.old, tuple) else ()
         added = (f"+{printable(item)}" for item in field.new if item not in old)

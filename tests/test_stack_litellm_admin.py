@@ -2,20 +2,22 @@
 admin API, as the realm observer's tests drive it, and the compose service that runs it."""
 
 import hashlib
+import importlib.util
 import io
 import json
 import re
 import secrets
 import signal
+import sys
 import threading
-import time
 from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path, PurePosixPath
+from pathlib import Path
+from types import ModuleType
 
 import pytest
-import yaml
 
 from hal.stack import litellm_admin as admin
 from hal.stack import litellm_keys
@@ -42,7 +44,7 @@ def hashed(key: str) -> str:
 class FakeLitellm:
     """The admin routes the one-off sends to, over rows of `LiteLLM_VerificationToken` and
     `LiteLLM_BudgetTable`; `statuses` answer a path with a status and `body`, `slow` holds a path's
-    answer longer than the one-off waits."""
+    answer until `release` is set, `redirects` answer a path with a 302 to a location."""
 
     master_key: str
     keys: dict[str, dict] = field(default_factory=dict)  # token -> row
@@ -50,12 +52,20 @@ class FakeLitellm:
     models: tuple[str, ...] = MODELS
     statuses: dict[str, tuple[int, dict]] = field(default_factory=dict)
     slow: set[str] = field(default_factory=set)
+    release: threading.Event = field(default_factory=threading.Event)
+    redirects: dict[str, str] = field(default_factory=dict)
+    garbage: set[str] = field(default_factory=set)  # paths answered with no HTTP at all
+    interrupt: set[str] = field(default_factory=set)  # paths whose request SIGTERMs the program
+    arrivals: list[tuple[str, str]] = field(default_factory=list)  # every request, answered or not
     requests: list[tuple[str, str, dict | None]] = field(default_factory=list)
 
     def answer(self, method: str, path: str, body: dict | None) -> tuple[int, object]:
         self.requests.append((method, path, body))
         if path in self.slow:
-            time.sleep(0.5)
+            self.release.wait(timeout=30)
+        if path in self.interrupt:
+            signal.pthread_kill(threading.main_thread().ident, signal.SIGTERM)
+            self.release.wait(timeout=30)
         if path in self.statuses:
             return self.statuses[path]
         if (method, path) == ("GET", "/v1/models"):
@@ -123,8 +133,18 @@ class Handler(BaseHTTPRequestHandler):
 
     def reply(self, body: dict | None) -> None:
         fake = self.server.fake
+        fake.arrivals.append((self.command, self.path))
         if self.headers.get("Authorization") != f"Bearer {fake.master_key}":
             status, document = 401, {"error": {"message": "no"}}
+        elif self.path in fake.garbage:
+            self.wfile.write(b"not http\r\n\r\n")
+            return
+        elif self.path in fake.redirects:
+            self.send_response(302)
+            self.send_header("Location", fake.redirects[self.path])
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         else:
             status, document = fake.answer(self.command, self.path, body)
         encoded = json.dumps(document).encode()
@@ -171,16 +191,49 @@ class Scene:
         ]
 
 
-@pytest.fixture
-def scene(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
-) -> Iterator[Scene]:
-    monkeypatch.setattr(admin, "REQUEST_SECONDS", 0.2)
-    terminate = signal.getsignal(signal.SIGTERM)  # the program handles SIGTERM as PID 1 does
-    fake = FakeLitellm(master_key=f"sk-{secrets.token_hex(16)}")
+@contextmanager
+def serving(fake: FakeLitellm) -> Iterator[str]:
+    """The fake on a loopback port; a held answer is released before the server stops."""
     server = Server(("127.0.0.1", 0), Handler)
     server.fake = fake
     threading.Thread(target=server.serve_forever, args=(0.05,), daemon=True).start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}"
+    finally:
+        fake.release.set()
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.fixture
+def bystander() -> Iterator[tuple[FakeLitellm, str]]:
+    """A second fake that stands in for a proxy Docker injects, or the other origin of a redirect:
+    whatever reaches it is logged."""
+    fake = FakeLitellm(master_key="sk-bystander")
+    with serving(fake) as url:
+        yield fake, url
+
+
+@pytest.fixture
+def short_requests(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(admin, "REQUEST_SECONDS", 0.2)
+
+
+@pytest.fixture
+def scene(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> Iterator[Scene]:
+    terminate = signal.getsignal(signal.SIGTERM)  # the program handles SIGTERM as PID 1 does
+    fake = FakeLitellm(master_key=f"sk-{secrets.token_hex(16)}")
+    with serving(fake) as base_url:
+        yield from scene_on(fake, base_url, tmp_path, capsys, terminate)
+
+
+def scene_on(
+    fake: FakeLitellm,
+    base_url: str,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    terminate: object,
+) -> Iterator[Scene]:
     master_file = tmp_path / "litellm_master_key"
     master_file.write_text(fake.master_key + "\n")
     apps_directory = tmp_path / "apps"
@@ -188,20 +241,19 @@ def scene(
     app_keys = {app: f"sk-{secrets.token_urlsafe(24)}" for app in APPS}
     for app, key in app_keys.items():
         (apps_directory / app).write_text(key + "\n")
-    base_url = f"http://127.0.0.1:{server.server_address[1]}"
 
-    def run(*flags: str, changes: object = None, at: str = base_url) -> Run:
+    def run(
+        *flags: str, changes: object = None, at: str = base_url, program: ModuleType = admin
+    ) -> Run:
         stdin = io.StringIO(
             changes if isinstance(changes, str) else "" if changes is None else json.dumps(changes)
         )
-        code = admin.main(["--base-url", at, *flags], stdin, master_file, apps_directory)
+        code = program.main(["--base-url", at, *flags], stdin, master_file, apps_directory)
         captured = capsys.readouterr()
         return Run(code, captured.out, captured.err)
 
     yield Scene(fake, base_url, master_file, apps_directory, app_keys, run)
     signal.signal(signal.SIGTERM, terminate)
-    server.shutdown()
-    server.server_close()
 
 
 def desired_row(app: str) -> dict:
@@ -314,14 +366,29 @@ def test_the_read_carries_no_token_hash_key_name_or_echoed_request(scene: Scene)
             id="an empty model list",
         ),
         pytest.param(
+            lambda fake: fake.statuses.update({"/v2/key/info": (200, {"info": [{}, {}]})}),
+            "/v2/key/info answers 2 keys for the hash of hopin",
+            id="two keys for one hash",
+        ),
+        pytest.param(
+            lambda fake: fake.statuses.update({"/v2/key/info": (200, {"info": "none"})}),
+            "no key rows at /v2/key/info",
+            id="key rows that are no list",
+        ),
+        pytest.param(
+            lambda fake: fake.statuses.update({"/budget/info": (200, {"budgets": []})}),
+            "no budget rows at /budget/info",
+            id="budget rows that are no list",
+        ),
+        pytest.param(
+            lambda fake: fake.statuses.update({"/v1/models": (200, {"data": "none"})}),
+            "no model list at /v1/models",
+            id="a model list that is no list",
+        ),
+        pytest.param(
             lambda fake: fake.statuses.update({"/v2/key/info": (502, {"error": "migrating"})}),
             "status 502 at /v2/key/info",
             id="502 while LiteLLM migrates",
-        ),
-        pytest.param(
-            lambda fake: fake.slow.add("/budget/info"),
-            "LiteLLM does not answer /budget/info (timed out)",
-            id="a timed-out request",
         ),
     ],
 )
@@ -333,6 +400,21 @@ def test_a_failed_read_is_one_named_line_on_stderr_nothing_on_stdout_and_exit_1(
     run = scene.run("--read", BUDGET_ID)
 
     assert (run.exit_code, run.stdout, run.stderr) == (1, "", f"litellm-keys: {line}\n")
+
+
+@pytest.mark.usefixtures("short_requests")
+def test_a_timed_out_read_is_one_named_line_on_stderr_nothing_on_stdout_and_exit_1(
+    scene: Scene,
+) -> None:
+    plant_keys(scene)
+    scene.fake.slow.add("/budget/info")
+    run = scene.run("--read", BUDGET_ID)
+
+    assert (run.exit_code, run.stdout, run.stderr) == (
+        1,
+        "",
+        "litellm-keys: LiteLLM does not answer /budget/info (timed out)\n",
+    )
 
 
 def test_a_master_key_litellm_refuses_is_its_status_alone(scene: Scene) -> None:
@@ -356,18 +438,141 @@ def test_litellm_that_does_not_answer_is_one_line(scene: Scene) -> None:
     )
 
 
+def test_an_answer_that_is_no_http_is_litellm_not_answering(scene: Scene) -> None:
+    scene.fake.garbage.add("/v2/key/info")
+    run = scene.run("--read", BUDGET_ID)
+
+    assert (run.exit_code, run.stdout, run.stderr) == (
+        1,
+        "",
+        "litellm-keys: LiteLLM does not answer /v2/key/info (unreachable)\n",
+    )
+
+
+@pytest.mark.parametrize(
+    "content",
+    ["sk-first\nsk-second", "sk-\x07bell"],
+    ids=["a line break inside", "a control character"],
+)
+def test_a_master_key_file_that_is_no_single_printable_line_is_refused_naming_the_path_only(
+    scene: Scene, content: str
+) -> None:
+    scene.master_file.write_text(content + "\n")
+    run = scene.run("--read", BUDGET_ID)
+
+    assert (run.exit_code, run.stdout) == (1, "")
+    assert run.stderr == f"litellm-keys: the key file {scene.master_file} holds no single line\n"
+    assert scene.fake.arrivals == []
+    assert "sk-first" not in run.stderr
+
+
+def test_an_error_nobody_expected_ends_in_one_fixed_line_that_quotes_nothing(
+    scene: Scene,
+) -> None:
+    scene.master_file.write_text("sk-key-\u0416\u0416\n")  # printable, yet no HTTP header value
+    run = scene.run("--read", BUDGET_ID)
+
+    assert (run.exit_code, run.stdout) == (1, "")
+    assert run.stderr == "litellm-keys: unexpected UnicodeEncodeError\n"
+    assert "\u0416" not in run.stderr
+
+
+@pytest.mark.parametrize("path", ["/v2/key/info", "/budget/info"])
+def test_a_stop_by_sigterm_mid_request_is_exit_130_with_nothing_on_stdout(
+    scene: Scene, path: str
+) -> None:
+    scene.fake.interrupt.add(path)
+    run = scene.run("--read", BUDGET_ID)
+
+    assert (run.exit_code, run.stdout, run.stderr) == (130, "", "litellm-keys: stopped\n")
+
+
+def test_an_app_key_directory_it_cannot_list_is_one_line(scene: Scene) -> None:
+    for entry in scene.apps_directory.iterdir():
+        entry.unlink()
+    scene.apps_directory.rmdir()
+    run = scene.run("--read", BUDGET_ID)
+
+    assert (run.exit_code, run.stdout, run.stderr) == (
+        1,
+        "",
+        f"litellm-keys: cannot list {scene.apps_directory}\n",
+    )
+
+
+# --- the master key's transport ---------------------------------------------------------------
+
+
+def fresh_program(name: str) -> ModuleType:
+    """litellm_admin.py loaded anew from its file, so its opener is built under the current
+    environment rather than the one the test session imported it in."""
+    spec = importlib.util.spec_from_file_location(name, Path(admin.__file__))
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        del sys.modules[name]
+    return module
+
+
+def test_a_proxy_in_the_environment_never_sees_the_master_key(
+    scene: Scene, bystander: tuple[FakeLitellm, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Docker may inject HTTP(S)_PROXY; the master key still goes to LiteLLM alone."""
+    proxy, proxy_url = bystander
+    for variable in ("http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY", "ALL_PROXY"):
+        monkeypatch.setenv(variable, proxy_url)
+    for variable in ("no_proxy", "NO_PROXY"):
+        monkeypatch.delenv(variable, raising=False)
+    expected = scene.run("--read", BUDGET_ID)
+    scene.fake.requests.clear()
+
+    run = scene.run("--read", BUDGET_ID, program=fresh_program("litellm_admin_under_a_proxy"))
+
+    assert (run.exit_code, run.stdout) == (0, expected.stdout)
+    assert proxy.arrivals == []
+    assert scene.fake.requests
+
+
+@pytest.mark.parametrize(
+    "location",
+    ["{own}/elsewhere", "{other}/v2/key/info"],
+    ids=["another path of LiteLLM", "another origin"],
+)
+def test_a_redirect_is_refused_as_its_status_and_never_followed(
+    scene: Scene, bystander: tuple[FakeLitellm, str], location: str
+) -> None:
+    """urllib would send the master key along to the redirect's target."""
+    other, other_url = bystander
+    scene.fake.redirects["/v2/key/info"] = location.format(own=scene.base_url, other=other_url)
+    run = scene.run("--read", BUDGET_ID)
+
+    assert (run.exit_code, run.stdout, run.stderr) == (
+        1,
+        "",
+        "litellm-keys: status 302 at /v2/key/info\n",
+    )
+    assert other.arrivals == []
+    assert [path for _, path in scene.fake.arrivals] == ["/v2/key/info"]
+
+
 # --- the write --------------------------------------------------------------------------------
 
 
 def test_the_write_makes_the_changes_in_their_given_order_and_reports_each_done(
     scene: Scene,
 ) -> None:
+    budget_fields = {"max_budget": 2.0, "budget_duration": "1mo"}
+    key_fields = {
+        app: {name: value for name, value in desired_row(app).items() if value is not None}
+        for app in APPS
+    }
     changes = [
-        budget_change(True, max_budget=2.0, budget_duration="1mo"),
-        *(
-            key_change(app, True, **{n: v for n, v in desired_row(app).items() if v is not None})
-            for app in APPS
-        ),
+        budget_change(True, **budget_fields),
+        *(key_change(app, True, **key_fields[app]) for app in APPS),
     ]
     run = scene.run("--write", changes=changes)
 
@@ -376,11 +581,9 @@ def test_the_write_makes_the_changes_in_their_given_order_and_reports_each_done(
         {"target": change["target"], "subject": change["subject"], "outcome": "done"}
         for change in changes
     ]
-    assert [path for _, path, _ in scene.fake.requests] == [
-        "/budget/new",
-        "/key/generate",
-        "/key/generate",
-        "/key/generate",
+    assert [(path, body) for _, path, body in scene.fake.requests] == [
+        ("/budget/new", {"budget_id": BUDGET_ID, **budget_fields}),
+        *(("/key/generate", {"key": scene.app_keys[app], **key_fields[app]}) for app in APPS),
     ]
     assert {hashed(key) for key in scene.app_keys.values()} == set(scene.fake.keys)
     assert all(
@@ -467,6 +670,7 @@ def test_a_refusal_that_is_not_the_alias_rule_is_its_status_alone(
     assert run.document[0]["cause"] == f"status {status}"
 
 
+@pytest.mark.usefixtures("short_requests")
 def test_a_timed_out_write_is_the_cause_timed_out(scene: Scene) -> None:
     scene.fake.slow.add("/key/generate")
     run = scene.run(
@@ -479,6 +683,25 @@ def test_a_timed_out_write_is_the_cause_timed_out(scene: Scene) -> None:
 
     assert [(entry["outcome"], entry.get("cause")) for entry in run.document] == [
         ("failed", "timed out"),
+        ("not made", None),
+    ]
+
+
+def test_a_write_answered_with_no_http_is_failed_unreachable_and_the_rest_not_made(
+    scene: Scene,
+) -> None:
+    scene.fake.garbage.add("/key/generate")
+    run = scene.run(
+        "--write",
+        changes=[
+            key_change("hopin", True, key_alias="hopin"),
+            key_change("songmaker", True, key_alias="songmaker"),
+        ],
+    )
+
+    assert run.exit_code == 0
+    assert [(entry["outcome"], entry.get("cause")) for entry in run.document] == [
+        ("failed", "unreachable"),
         ("not made", None),
     ]
 
@@ -496,13 +719,22 @@ def test_a_timed_out_write_is_the_cause_timed_out(scene: Scene) -> None:
             "a change of an unknown kind",
             id="an unknown target",
         ),
+        pytest.param(
+            [{"target": "key", "subject": "songmaker", "new": True, "fields": "max_budget"}],
+            "a change of an unknown kind",
+            id="fields that are no object",
+        ),
         pytest.param("not json", "no changes as JSON on stdin", id="no JSON"),
+        pytest.param('{"target": "key"}', "no changes as JSON on stdin", id="JSON that is no list"),
     ],
 )
 def test_a_change_list_it_cannot_make_is_refused_before_any_write(
     scene: Scene, changes: object, line: str
 ) -> None:
-    run = scene.run("--write", changes=changes)
+    valid_first = [key_change("hopin", True, key_alias="hopin")]
+    run = scene.run(
+        "--write", changes=valid_first + changes if isinstance(changes, list) else changes
+    )
 
     assert (run.exit_code, run.stdout, run.stderr) == (1, "", f"litellm-keys: {line}\n")
     assert scene.fake.requests == []
@@ -515,78 +747,3 @@ def test_an_unreadable_master_key_is_one_line_before_any_request(scene: Scene) -
     assert (run.exit_code, run.stdout) == (1, "")
     assert run.stderr == f"litellm-keys: cannot read the key file {scene.master_file}\n"
     assert scene.fake.requests == []
-
-
-# --- the compose service ----------------------------------------------------------------------
-
-
-@pytest.fixture(scope="module")
-def services() -> dict:
-    return yaml.safe_load((ROOT / "compose.yaml").read_text())["services"]
-
-
-@pytest.fixture(scope="module")
-def secrets_declared() -> dict:
-    return yaml.safe_load((ROOT / "compose.yaml").read_text())["secrets"]
-
-
-def test_the_one_off_shares_the_realm_observers_profile_image_logging_and_hardening(
-    services: dict,
-) -> None:
-    one_off, observer = services[litellm_keys.KEYS_SERVICE], services["realm-observer"]
-
-    for key in ("profiles", "image", "logging", "read_only", "cap_drop", "security_opt"):
-        assert one_off[key] == observer[key]
-    assert one_off["user"] == services[litellm_keys.LITELLM_SERVICE]["user"]
-
-
-def test_the_one_off_is_on_litellm_backend_alone_with_no_port_dependency_or_other_environment(
-    services: dict,
-) -> None:
-    one_off = services[litellm_keys.KEYS_SERVICE]
-
-    assert one_off["networks"] == ["litellm-backend"]
-    assert (
-        not {"ports", "expose", "depends_on", "extra_hosts", "network_mode", "cap_add", "restart"}
-        & one_off.keys()
-    )
-    assert one_off["environment"] == {"PYTHONDONTWRITEBYTECODE": "1"}
-
-
-def test_the_one_off_runs_the_mounted_program_against_litellms_own_port(services: dict) -> None:
-    one_off = services[litellm_keys.KEYS_SERVICE]
-    (mount,) = one_off["volumes"]
-    source, target, mode = mount.split(":")
-    port = re.search(r"--port (\d+)", (ROOT / "agent-service/litellm/start.sh").read_text()).group(
-        1
-    )
-
-    assert (ROOT / source).resolve() == Path(admin.__file__).resolve()
-    assert mode == "ro"
-    assert one_off["entrypoint"] == [
-        "python",
-        "-I",
-        "-B",
-        target,
-        "--base-url",
-        f"http://{litellm_keys.LITELLM_SERVICE}:{port}",
-    ]
-
-
-def test_the_one_off_reads_the_master_key_and_one_secret_per_app_key_file_where_the_program_looks(
-    services: dict, secrets_declared: dict
-) -> None:
-    mounted = services[litellm_keys.KEYS_SERVICE]["secrets"]
-    master = [entry for entry in mounted if isinstance(entry, str)]
-    apps = {
-        PurePosixPath("/run/secrets", entry["target"]): secrets_declared[entry["source"]]["file"]
-        for entry in mounted
-        if isinstance(entry, dict)
-    }
-
-    assert [PurePosixPath("/run/secrets", name) for name in master] == [
-        PurePosixPath(admin.MASTER_KEY_FILE)
-    ]
-    assert {path.parent for path in apps} == {PurePosixPath(admin.APP_KEYS_DIRECTORY)}
-    assert all(path.name == PurePosixPath(file).name for path, file in apps.items())
-    assert len(apps) == len(mounted) - 1

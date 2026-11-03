@@ -738,7 +738,9 @@ def test_a_litellm_secret_is_read_by_exactly_the_services_of_compose_that_mount_
     compose = yaml.safe_load((Path(__file__).resolve().parents[1] / "compose.yaml").read_text())
     (secret,) = [key for key, declared in compose["secrets"].items() if declared["file"].removeprefix("${HOME}/") in map(str, entry.paths)]
     mounting = {service for service, declared in compose["services"].items() if secret in {mount if isinstance(mount, str) else mount["source"] for mount in declared.get("secrets", [])}}
-    assert set(entry.read_by) & compose["services"].keys() == mounting
+    # an app reads its key from the app's own checkout, not from compose
+    readers = set(entry.read_by) & compose["services"].keys() if name in APP_KEYS else set(entry.read_by)
+    assert readers == mounting
 
 
 def test_each_apps_litellm_key_is_listed_with_its_readers_and_mode_0644_is_no_finding(tmp_path: Path, probe: FakeProbe, capsys) -> None:
