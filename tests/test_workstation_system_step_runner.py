@@ -74,6 +74,7 @@ MALFORMED_COUNTS = [
         (1, [COUNTS], PlaybookUnfinished()),
         (0, [TASK_START, COUNTS], PlaybookUnfinished()),
         (0, [STARTED, STARTED_WITH_COUNTS], PlaybookUnfinished()),
+        (0, [STARTED, STARTED, COUNTS], PlaybookUnfinished()),
     ],
     ids=[
         "clean counts",
@@ -101,6 +102,7 @@ MALFORMED_COUNTS = [
         "counts without the started line",
         "an event before the started line",
         "a second started line",
+        "a second started line before the counts",
     ],
 )
 def test_a_run_finishes_only_with_exit_0_and_one_counts_event_without_failures(returncode: int, events: list[str], expected: PlaybookRun) -> None:
