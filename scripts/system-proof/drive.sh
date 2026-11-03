@@ -98,6 +98,14 @@ row_in_log() {  # row_in_log <log> <row> <event regex>: a row of hal setup's run
     return
 }
 
+docker_row_before_sudo_row() {  # docker_row_before_sudo_row <log> <consequence regex>: after the yes, the docker row stands above the `›` row, which stands above the prompt
+    local log=$1 consequence=$2 docker sudo
+    docker=$(after_the_yes "$log" | grep -nP -- "(^|\\x1b\\[K)  ! docker +restarts +$consequence\\r?$" | head -1 | cut -d: -f1)
+    sudo=$(after_the_yes "$log" | grep -nP -- "(^|\\x1b\\[K)  › system +needs sudo" | head -1 | cut -d: -f1)
+    [[ -n $docker && -n $sudo ]] && ((docker < sudo))
+    return
+}
+
 system_row_details() {  # system_row_details <log>: the detail lines under the system row, without their indent
     local log=$1
     awk '/^  [^ ]+ system +/ { under = 1; next } under && /^    [^ ]/ { sub(/\r$/, ""); sub(/^    /, ""); print; next } { under = 0 }' "$EVIDENCE/$log.log"
@@ -428,6 +436,7 @@ cell_9() {
     code=$?
     verdict DK4 "a second apply restarts nothing: Docker's start time is unchanged" \
         '[ "$(docker_started_at)" = "$(cat "$EVIDENCE/dk4-started-after-cell1.txt")" ]'
+    verdict DK4 "a second apply on the journal prints no docker row" '! after_the_yes cell9 | grep -qP "(^|\\x1b\\[K)  ! docker "'
     verdict 9 "a second apply: System unchanged" \
         '[ $code -eq 0 ] && row_in_log cell9 system unchanged'
     verdict 9 "Ansible left nothing in the home" '[ ! -e /home/tester/.ansible ]'
@@ -1696,6 +1705,7 @@ cell_dk4_and_dk5() {  # a merged file with Docker still on json-file: one restar
     docker run --detach --restart unless-stopped --network none --name dk5-running proof-rootfs /bin/busybox sleep 100000 >"$EVIDENCE/dk5-run.log" 2>&1
     docker run --detach --restart unless-stopped --network none --name dk5-stopped proof-rootfs /bin/busybox sleep 100000 >>"$EVIDENCE/dk5-run.log" 2>&1
     docker stop dk5-stopped >>"$EVIDENCE/dk5-run.log" 2>&1
+    docker run --detach --network none --name dk5-bare proof-rootfs /bin/busybox sleep 100000 >>"$EVIDENCE/dk5-run.log" 2>&1
     backups_before=$(backups_of_daemon_json)
     checksum_before=$(sha256sum <"$DAEMON_JSON")
     started=$(docker_started_at)
@@ -1706,11 +1716,13 @@ cell_dk4_and_dk5() {  # a merged file with Docker still on json-file: one restar
         '[ $code -eq 0 ] && [ "$(docker_default_driver)" = "$WANTED_DRIVER" ] && [ "$started" != "$(docker_started_at)" ]'
     verdict DK4 "that apply leaves the file and the backups alone" \
         '[ "$checksum_before" = "$(sha256sum <"$DAEMON_JSON")" ] && [ "$backups_before" = "$(backups_of_daemon_json)" ]'
-    verdict DK5 "after the restart the unless-stopped container runs and the one stopped by hand stays exited" \
-        '[ "$(docker inspect --format "{{.State.Status}}" dk5-running)" = running ] && [ "$(docker inspect --format "{{.State.Status}}" dk5-stopped)" = exited ]'
+    verdict DK4 "the apply names the restart before the sudo row: one container without a policy stays down" \
+        'docker_row_before_sudo_row dk4-restart "all containers stop · 1 stays down"'
+    verdict DK5 "after the restart the unless-stopped container runs, the one stopped by hand and the one without a policy stay exited" \
+        '[ "$(docker inspect --format "{{.State.Status}}" dk5-running)" = running ] && [ "$(docker inspect --format "{{.State.Status}}" dk5-stopped)" = exited ] && [ "$(docker inspect --format "{{.State.Status}}" dk5-bare)" = exited ]'
     verdict DK5 "both keep json-file" \
         '[ "$(docker inspect --format "{{.HostConfig.LogConfig.Type}}" dk5-running dk5-stopped | sort -u)" = json-file ]'
-    docker rm --force dk5-running dk5-stopped >/dev/null 2>&1
+    docker rm --force dk5-running dk5-stopped dk5-bare >/dev/null 2>&1
     return
 }
 
