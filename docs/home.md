@@ -691,8 +691,9 @@ below and rsyslog's conffiles are home's own and are not backed up. `/etc/docker
   `log-opts` key, another `log-driver`, and a Docker that does not answer `docker info` are refused before anything is
   written, edge's files included (hal reads `docker info` as the operator before the password and stops there; the play refuses as root too, for a Docker that stopped meanwhile); the dry run names the restart as a change, shows the diff with `-v`, and writes nothing.
   Docker restarts whenever `docker info` does not say `journald`, never while it does, so a run interrupted after the write
-  restarts on the next. `live-restore` is off: every container stops with Docker, and one with `unless-stopped` or `always`
-  starts again, one without a restart policy (`no` or `on-failure` included) or stopped by hand stays down; the apps are unreachable meanwhile and running work
+  restarts on the next. `live-restore` is off: every container stops with Docker. Docker promises a start only for `always`
+  and `unless-stopped`; an `on-failure` container comes back only when its stop left a non-zero exit code, so the count of
+  containers that stay down can name it although it returns, and one without a restart policy (`no`) stays down. The apps are unreachable meanwhile and running work
   is cut. `hal setup` does not wait for it, so run `hal setup` at a quiet time. Existing containers keep `json-file` until they are recreated.
   **Rescue.** When the restart fails or Docker does not report `journald`, the run writes `daemon.json` back without `log-driver`
   (`{}` when nothing else remains; the same JSON as before the run, unless the file already carried `journald`), clears the
@@ -716,7 +717,7 @@ below and rsyslog's conffiles are home's own and are not backed up. `/etc/docker
   The container runs a real Docker engine (its images and snapshots live in anonymous volumes that `run.sh` removes with the container);
   cell DK1 proves, before the first apply, that it answers with the default `json-file` log driver, runs an imported rootfs
   offline and starts without `/etc/docker/daemon.json`. DK2 proves the merge (no file, and the PC's 128-byte file with its
-  backup), DK3 the refusals and a Docker that does not answer (without a password prompt, in the run and the dry run; the image's operator is in the `docker` group), DK4 the dry run and the restart on need only, DK5 that a
+  backup), DK3 the refusals and a Docker that does not answer (without a password prompt, in the run and the dry run; the image's operator is in the `docker` group), DK4 the dry run and the restart on need only, and that the restart row names the containers that stay down before the password, DK5 (and `dk5-bare`, a Docker with no running container) that a
   running `unless-stopped` container comes back, one stopped by hand stays down and both keep `json-file`, DK6 that a
   container created afterwards is read by `docker logs`, `docker compose logs` and `journalctl CONTAINER_NAME=`, and DK7 the
   rescue, against a proof-only `docker.service` drop-in whose flag contradicts the file. The proof runs the same 26.04 Docker

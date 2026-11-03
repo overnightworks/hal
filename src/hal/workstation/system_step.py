@@ -308,27 +308,29 @@ class RestartForecast:
     stay_down: int | None
 
 
-def _docker_driver() -> str | None:
-    """The log driver `docker info` tells the operator; None for a Docker that cannot be run or does not answer (a `docker` that is not executable raises `PermissionError`)."""
+def _docker_output(command: list[str]) -> str | None:
+    """What a docker command prints; None when it cannot be run or does not answer (a `docker` that is not executable raises `PermissionError`)."""
     try:
-        output = run_command(DOCKER_DEFAULT_DRIVER)
+        return run_command(command)
     except OSError:
         return None
+
+
+def _docker_driver() -> str | None:
+    """The log driver `docker info` tells the operator; None for a Docker that cannot be run or does not answer."""
+    output = _docker_output(DOCKER_DEFAULT_DRIVER)
     return None if output is None else output.strip()
 
 
 def _running_restart_policies() -> tuple[str, ...] | None:
     """The restart policy of each running container as the operator reads it; None when `docker ps` or `docker inspect` fails."""
-    try:
-        listing = run_command(DOCKER_RUNNING_CONTAINERS)
-        if listing is None:
-            return None
-        container_ids = listing.split()
-        if not container_ids:
-            return ()
-        policies = run_command([*DOCKER_RESTART_POLICY, *container_ids])
-    except OSError:
+    listing = _docker_output(DOCKER_RUNNING_CONTAINERS)
+    if listing is None:
         return None
+    container_ids = listing.split()
+    if not container_ids:
+        return ()
+    policies = _docker_output([*DOCKER_RESTART_POLICY, *container_ids])
     return None if policies is None else tuple(policies.splitlines())
 
 

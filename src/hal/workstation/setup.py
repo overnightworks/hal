@@ -599,12 +599,18 @@ def _system_steps(layout: Layout, ports: Ports) -> tuple[Step, ...]:
     )
 
 
+def _restart_consequence(stay_down: int | None) -> str:
+    if stay_down is None:
+        return ALL_CONTAINERS_STOP
+    verb = "stays" if stay_down == 1 else "stay"
+    return f"{ALL_CONTAINERS_STOP} · {stay_down} {verb} down"
+
+
 def _announce_sudo(system: SystemStep) -> tuple[Outcome, ...]:
     sudo = Outcome(SetupEvent.NEEDS_SUDO, SUDO_WILL_BE_ASKED_FOR)
-    if (forecast := system.restart_forecast()) is None:
-        return (sudo,)
-    stay_down = "" if forecast.stay_down is None else f" · {forecast.stay_down} {'stays' if forecast.stay_down == 1 else 'stay'} down"
-    return (Outcome(SetupEvent.RESTARTS, ALL_CONTAINERS_STOP + stay_down, subject=DOCKER_SUBJECT), sudo)
+    forecast = system.restart_forecast()
+    restart = () if forecast is None else (Outcome(SetupEvent.RESTARTS, _restart_consequence(forecast.stay_down), subject=DOCKER_SUBJECT),)
+    return (*restart, sudo)
 
 
 def _steps(layout: Layout, ports: Ports) -> tuple[Step, ...]:
