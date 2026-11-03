@@ -1,0 +1,8 @@
+claim_id = "d14b9e9fa38e46a39cca25ee880a8ec9"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "32182080790eedb80368a920e7e685e8bea3bdfe"
+branch = "claude/issue-920-s3b-2-failed-task-counts"
+scope = ["docs/design/hal-output.html", "docs/home.md", "scripts/system-proof/drive.sh", "src/hal/workstation/setup.py", "src/hal/workstation/system/callback_plugins/hal_events.py", "src/hal/workstation/system/playbook.yml", "src/hal/workstation/system_step.py", "tests/support/workstation_support.py", "tests/test_hal_setup.py", "tests/test_workstation_setup_system.py", "tests/test_workstation_setup_yes.py", "tests/test_workstation_system_callback.py", "tests/test_workstation_system_step_runner.py"]
+opened_commit = "341cb921f4b1dd9c69278c4112fb372d02e78e45"
+whole_reason = "The tail may leave the play's messages only in the commit in which the counts say what it said, and the proof reads both, so messages, reader, row, pins and picture move as one."
