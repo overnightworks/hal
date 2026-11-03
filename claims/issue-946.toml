@@ -1,8 +1,0 @@
-claim_id = "ff7e5b62e36b4a33b825bb626b4549ad"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "afb9b9d3a7f3bf64c34eb799bcdc5520c3a88243"
-branch = "claude/issue-946-s3b-3-sudo-refused"
-scope = ["docs/design/hal-output.html", "docs/home.md", "scripts/system-proof/drive.sh", "src/hal/workstation/setup.py", "src/hal/workstation/system_step.py", "tests/support/workstation_support.py", "tests/test_workstation_setup_system.py", "tests/test_workstation_system_step_runner.py"]
-opened_commit = "020587670b6fe4d5db4d3ec05b70e7569275ee88"
-whole_reason = "The mark, the reader that reads it, the printed fact, the pins that name a refusal and the proof cells that read it are one sentence of the card, and a part alone either prints nothing new or leaves a pin naming the old fact."
