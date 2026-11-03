@@ -68,6 +68,8 @@ SYSTEM_WHY = (
     "without it the tunnel ignores edge's global stop after a reboot, and only root may stop it"
 )
 SUDO_WILL_BE_ASKED_FOR = "tunnel, polkit, journal, mail, agent account"
+DOCKER_SUBJECT = "docker"
+ALL_CONTAINERS_STOP = "all containers stop"
 SKIPPED_FOR_THE_AGENT = "the operator's step"
 RERUN = command(Verb.SETUP)
 SUDO_CHECKS_AFTER_THE_YES = "sudo checks it after your yes"
@@ -97,6 +99,7 @@ class SetupEvent(StrEnum):
     INTERRUPTED = "interrupted"
     NOT_RUN = "not run"
     NEEDS_SUDO = "needs sudo"
+    RESTARTS = "restarts"
     OPEN = "open"
 
 
@@ -132,6 +135,7 @@ EVENT_LOOK: dict[SetupEvent, EventLook] = {
     SetupEvent.SKIPPED: EventLook(Glyph.UNCHANGED, 1, Tally.SKIPPED),
     SetupEvent.NOT_RUN: EventLook(Glyph.UNCHANGED, 0, None),
     SetupEvent.NEEDS_SUDO: EventLook(Glyph.ANNOUNCE, 0, None),
+    SetupEvent.RESTARTS: EventLook(Glyph.NEEDS_YOU, 0, None),
 }
 
 
@@ -185,9 +189,10 @@ class Outcome:
     fact: str = ""
     count: int | None = None
     details: tuple[str, ...] = ()
+    subject: str | None = None  # a row of its own before the step's: the step's row is the default
 
     def row(self, subject: SetupRow) -> Row:
-        return Row(EVENT_LOOK[self.event].glyph, subject, self.event, self.fact, self.count, self.details)
+        return Row(EVENT_LOOK[self.event].glyph, self.subject or subject, self.event, self.fact, self.count, self.details)
 
 
 @dataclass(frozen=True)
@@ -240,7 +245,7 @@ class Step:
     `open_fact` names what a dry run that found something to change shows on its row.
     `check` may return `TasksWouldChange`, which adds the count and, without `-v`, the names the row of a step that would change shows.
     `apply` may return `UnitsApplied`, which adds the fact the row of a changed step shows.
-    `before_apply` is the row printed before an apply that waits on the operator (the wizard, sudo's password), or nothing; it may refuse, which prints no row.
+    `before_apply` is the rows printed before an apply that waits on the operator (the wizard, sudo's password), or none; it may refuse, which prints no row.
     `operators_only` marks a step the agents' account skips: it needs sudo, the operator's units or the operator's secrets.
     `may_leave_system_partial` marks the step that runs as root, whose failed apply leaves /etc half written unless sudo never started the play or its counts show no change.
     """
@@ -254,7 +259,7 @@ class Step:
     next_step: str = RERUN
     needs_first: Callable[[], str] = lambda: ""
     open_fact: Callable[[], str] = lambda: ""
-    before_apply: Callable[[], Outcome | None] = lambda: None
+    before_apply: Callable[[], tuple[Outcome, ...]] = lambda: ()
     events: StepEvents = field(default_factory=StepEvents)
     operators_only: bool = False
     may_leave_system_partial: bool = False
@@ -341,9 +346,9 @@ def _secrets_step(layout: Layout, ports: Ports) -> Step:
     def open_names() -> str:
         return ", ".join(_open_names(open_secrets()))
 
-    def announce_missing() -> Outcome | None:
+    def announce_missing() -> tuple[Outcome, ...]:
         missing = open_secrets()
-        return Outcome(SetupEvent.MISSING, ", ".join(_open_names(missing)), count=len(missing)) if missing else None
+        return (Outcome(SetupEvent.MISSING, ", ".join(_open_names(missing)), count=len(missing)),) if missing else ()
 
     return Step(
         "Geheimnisse",
@@ -594,9 +599,12 @@ def _system_steps(layout: Layout, ports: Ports) -> tuple[Step, ...]:
     )
 
 
-def _announce_sudo(system: SystemStep) -> Outcome:
-    system.refuse_unless_docker_answers()
-    return Outcome(SetupEvent.NEEDS_SUDO, SUDO_WILL_BE_ASKED_FOR)
+def _announce_sudo(system: SystemStep) -> tuple[Outcome, ...]:
+    sudo = Outcome(SetupEvent.NEEDS_SUDO, SUDO_WILL_BE_ASKED_FOR)
+    if (forecast := system.restart_forecast()) is None:
+        return (sudo,)
+    stay_down = "" if forecast.stay_down is None else f" · {forecast.stay_down} {'stays' if forecast.stay_down == 1 else 'stay'} down"
+    return (Outcome(SetupEvent.RESTARTS, ALL_CONTAINERS_STOP + stay_down, subject=DOCKER_SUBJECT), sudo)
 
 
 def _steps(layout: Layout, ports: Ports) -> tuple[Step, ...]:
@@ -635,8 +643,9 @@ def _run_row(row: SetupRow, steps: tuple[Step, ...], role: ExecutionRole, mode: 
             outcomes.append(Outcome(SetupEvent.NOT_CHECKED, SUDO_CHECKS_AFTER_THE_YES))
             continue
         try:
-            if mode is Pass.RUN and (announced := step.before_apply()):
-                write_row(announced.row(row))
+            if mode is Pass.RUN:
+                for announced in step.before_apply():
+                    write_row(announced.row(row))
             outcomes.append(step.run(mode is Pass.RUN))
         except (OSError, StepFailed) as error:
             raise _RowStopped(step, error) from error

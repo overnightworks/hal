@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import re
 import subprocess
 import sys
@@ -415,7 +416,7 @@ def a_play_under_stub_sudo(
     monkeypatch.setattr(
         system_step,
         "TERMINAL_BOUNDARIES",
-        system_step.Boundaries(lambda: True, lambda _argv: system_step.run_playbook_as_root([str(playbook)]), lambda: "operator", lambda: "journald"),
+        system_step.Boundaries(lambda: True, lambda _argv: system_step.run_playbook_as_root([str(playbook)]), lambda: "operator", lambda: "journald", lambda: ()),
     )
     return stub
 
@@ -635,3 +636,26 @@ def test_the_plays_docker_refusal_says_what_the_step_prints_before_the_password(
     refusals = [task["ansible.builtin.assert"]["fail_msg"] for task in plays[0]["tasks"] if "Docker does not answer" in task.get("name", "")]
 
     assert refusals == [system_step.DOCKER_DOES_NOT_ANSWER]
+
+
+@pytest.mark.parametrize(
+    ("ps", "inspect", "expected"),
+    [
+        ("printf 'aaa\\nbbb\\n'", "printf 'no\\nalways\\n'", ("no", "always")),
+        ("true", "exit 1", ()),
+        ("exit 1", "true", None),
+        ("printf 'aaa\\n'", "exit 1", None),
+    ],
+    ids=["ids and policies", "no running container", "ps fails", "inspect fails"],
+)
+def test_the_restart_policies_of_the_running_containers_are_read_as_the_operator_or_not_at_all(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ps: str, inspect: str, expected: tuple[str, ...] | None
+) -> None:
+    """Ruled S3b-5, cell R10: a `docker` first on PATH answers `ps` and `inspect` with the given shell commands."""
+    stub = tmp_path / "docker-bin" / "docker"
+    stub.parent.mkdir()
+    stub.write_text(f'#!/bin/sh\ncase "$1" in\n  ps) {ps} ;;\n  inspect) {inspect} ;;\nesac\n')
+    stub.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{stub.parent}:{os.environ['PATH']}")
+
+    assert system_step.TERMINAL_BOUNDARIES.running_restart_policies() == expected
