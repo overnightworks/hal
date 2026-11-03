@@ -164,7 +164,7 @@ def move(plan: SourcePlan) -> None:
         for action, path in plan.entries:
             if action is Action.MOVE:
                 _move_file(path, plan.target_of(path))
-            else:
+            elif action is Action.CLOSE or os.path.lexists(plan.target_of(path)):
                 with suppress(FileNotFoundError):
                     os.unlink(path)
         for directory, _ in reversed(plan.directories):

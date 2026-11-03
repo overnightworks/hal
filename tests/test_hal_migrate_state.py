@@ -445,6 +445,34 @@ def test_a_target_published_after_the_plan_stays_and_the_rerun_removes_the_sourc
     assert not source.exists()
 
 
+def test_a_copy_that_vanishes_after_the_plan_leaves_its_remove_source_for_the_rerun(home, migrate):
+    edge = plant(home / state_move.OLD_STATE / "z", "edge\n")
+    kept = plant(home / state_move.OLD_HOME_STATE / "z", "home\n")
+
+    code, _, err = migrate(while_waiting=edge.unlink)
+
+    assert code == ExitCode.FAILURE
+    assert err.splitlines()[-1] == AGAIN
+    assert kept.read_text() == "home\n"
+    assert migrate()[0] == ExitCode.OK
+    assert (hal_state(home) / "z").read_text() == "home\n"
+
+
+def test_a_target_that_vanishes_after_the_plan_leaves_its_remove_source_for_the_rerun(
+    home, migrate
+):
+    target = plant(hal_state(home) / "z", "target\n")
+    source = plant(home / state_move.OLD_STATE / "z", "edge\n")
+
+    code, _, err = migrate(while_waiting=target.unlink)
+
+    assert code == ExitCode.FAILURE
+    assert err.splitlines()[-1] == AGAIN
+    assert source.read_text() == "edge\n"
+    assert migrate()[0] == ExitCode.OK
+    assert (hal_state(home) / "z").read_text() == "edge\n"
+
+
 def test_a_crash_between_link_and_unlink_is_finished_by_the_rerun(home, migrate, steps):
     source = plant(home / state_move.OLD_STATE / "applied.json", "old\n")
     inode = source.stat().st_ino
