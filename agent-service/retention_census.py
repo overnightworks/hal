@@ -39,7 +39,9 @@ COMMAND_NOT_FOUND = frozenset({126, 127})
 MOUNT_TABLE = "/proc/1/mountinfo"
 DOCKER_SECONDS = 300
 FRONT, GATEWAY, LITELLM, AGENT_SERVICE = "litellm-front", "agent-egress", "litellm", "agent-service"
-# The compose services of the API route, each with whether its container holds Python.
+DATABASE = "litellm-db"
+# The compose services of the API route, each with whether its container holds Python. LiteLLM's
+# database is no member: the live stack does not run it, and the probe adds it where it does.
 ROUTE_SERVICES = {FRONT: False, GATEWAY: False, LITELLM: True, AGENT_SERVICE: True}
 
 Entry = tuple[str, str, bool]  # mount point, filesystem type, writable
@@ -88,10 +90,18 @@ class Sweep:
         self.problems = (*self.problems, f"{sink}: {phrase}")
 
 
+def mounted_path(destination: str) -> str:
+    """The path the mount table shows for a destination: `/var/run` is a link to `/run` in the
+    images of the route, and the kernel lists the mount under its target."""
+    if destination == "/var/run" or destination.startswith("/var/run/"):
+        return "/run" + destination.removeprefix("/var/run")
+    return destination
+
+
 def writable_destinations(document: dict) -> frozenset[str]:
     """The destinations `docker inspect` lists as writable: read-write mounts and tmpfs."""
     mounts = {mount["Destination"] for mount in document["Mounts"] if mount["RW"]}
-    return frozenset(mounts | set(document["HostConfig"].get("Tmpfs") or {}))
+    return frozenset(map(mounted_path, mounts | set(document["HostConfig"].get("Tmpfs") or {})))
 
 
 def searched_points(table: Sequence[Entry], masked: frozenset[str]) -> list[tuple[str, str]]:

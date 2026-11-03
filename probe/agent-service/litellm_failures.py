@@ -33,6 +33,8 @@ from api_canary import verdicts
 from litellm import (
     CANARY_SECONDS,
     CREDENTIAL_FILE,
+    DATABASE,
+    DATABASE_PASSWORD_FILE,
     DEFAULT_APP,
     FAKE_PROVIDER,
     FRONT,
@@ -57,6 +59,7 @@ from scratch_secrets import issue_certificate, write_new, write_scratch_secrets
 UNAVAILABLE = "provider_unavailable"
 LOWER_TIMEOUT_SECONDS = 5
 HOLD_END_SECONDS = 150
+DATABASE_WAIT_SECONDS = 600
 CENSUS_PROGRAM = """\
 import json, os, sys
 names = [name.encode() + b"=" for name in sys.argv[1:]]
@@ -66,11 +69,20 @@ for entry in os.listdir("/proc"):
         fields = open(f"/proc/{entry}/stat").read().rpartition(")")[2].split()
         environ = open(f"/proc/{entry}/environ", "rb").read().split(b"\\0")
         holds = [n[:-1].decode() for n in names if any(item.startswith(n) for item in environ)]
-        rows[entry] = {"parent": int(fields[1]), "holds": holds}
-core = [line for line in open("/proc/1/limits") if line.startswith("Max core file size")]
-print(json.dumps({"processes": rows, "core": core[0].split()[-3:-1]}))
+        status = open(f"/proc/{entry}/status").read().splitlines()
+        uid = next(line for line in status if line.startswith("Uid:")).split()[1]
+        limits = open(f"/proc/{entry}/limits").read().splitlines()
+        core = next(line for line in limits if line.startswith("Max core file size"))
+        rows[entry] = {
+            "parent": int(fields[1]), "holds": holds, "uid": int(uid),
+            "name": open(f"/proc/{entry}/comm").read().strip(), "core": core.split()[-3:-1],
+        }
+print(json.dumps({"processes": rows}))
 """
-SECRET_NAMES = ("ANTHROPIC_API_KEY", "LITELLM_MASTER_KEY")
+SECRET_NAMES = ("ANTHROPIC_API_KEY", "LITELLM_MASTER_KEY", "DATABASE_URL")
+# What may hold them: the proxy itself and the Prisma processes it spawns (the query engine for
+# its whole life, the one-shot `prisma` and `node` at boot).
+PRISMA_PROCESSES = ("query-engine", "prisma", "node")
 
 
 class FailureProbe(LitellmProbe):
@@ -82,7 +94,12 @@ class FailureProbe(LitellmProbe):
         self.scratch = scratch
         self.home = Path(self.environment["HOME"])
         self.master_key = (self.home / MASTER_KEY_FILE).read_text().strip()
-        self.every_value = [self.provider_key, self.credential, self.master_key]
+        self.every_value = [
+            self.provider_key,
+            self.credential,
+            self.master_key,
+            self.database_password,
+        ]
 
     # --- plumbing -----------------------------------------------------------------------------
 
@@ -197,6 +214,7 @@ class FailureProbe(LitellmProbe):
         self.cell_f20()
         self.cells_f15_f16()
         self.cell_f19()
+        self.cell_d6()
 
     def cell_f0(self) -> None:
         before_f, before_la = self.counts()
@@ -444,23 +462,86 @@ class FailureProbe(LitellmProbe):
             ["docker", "exec", "-i", container, "python3", "-", *SECRET_NAMES],
             stdin=CENSUS_PROGRAM,
         )  # fmt: skip
-        census = json.loads(result.stdout)
-        rows = {int(pid): row for pid, row in census["processes"].items()}
+        rows = {int(pid): row for pid, row in json.loads(result.stdout)["processes"].items()}
         init_children = [pid for pid, row in rows.items() if row["parent"] == 1]
         expect(len(init_children) == 1, f"F19: init has {len(init_children)} children")
+        proxy = init_children[0]
 
         def in_main_tree(pid: int) -> bool:
-            while pid not in {1, init_children[0]}:
+            while pid not in {1, proxy}:
                 pid = rows[pid]["parent"]
-            return pid == init_children[0]
+            return pid == proxy
 
         outside = [pid for pid in rows if pid != 1 and not in_main_tree(pid)]
         holders = {pid for pid, row in rows.items() if row["holds"]}
         expect(not outside, f"F19: {len(outside)} processes outside the main tree")
-        expect(1 not in holders and holders, f"F19: holders {sorted(holders)}")
-        expect(holders <= {pid for pid in rows if in_main_tree(pid)}, "F19: a holder is outside")
-        expect(census["core"] == ["0", "0"], f"F19: core {census['core']}")
-        self.hold("F19", f"init and a main tree of {len(rows) - 1}; core size 0; holders inside it")
+        expect(proxy in holders and 1 not in holders, f"F19: holders {sorted(holders)}")
+        expect(set(rows[proxy]["holds"]) == set(SECRET_NAMES), f"F19: proxy {rows[proxy]['holds']}")
+        strays = [rows[pid]["name"] for pid in holders if not self.may_hold(pid, rows[pid], proxy)]
+        expect(not strays, f"F19: holders outside the proxy and its Prisma processes: {strays}")
+        user = self.configured_user(container)
+        expect(
+            all(rows[pid]["uid"] == user and rows[pid]["core"] == ["0", "0"] for pid in holders),
+            "F19: a holder is not the configured user or has a core size",
+        )
+        names = sorted(rows[pid]["name"] for pid in holders)
+        self.hold(
+            "F19",
+            f"init and a main tree of {len(rows) - 1}; holders {names}, all uid {user} with core"
+            " size 0",
+        )
+
+    @staticmethod
+    def may_hold(pid: int, row: dict, proxy: int) -> bool:
+        return pid == proxy or row["name"].startswith(PRISMA_PROCESSES)
+
+    def configured_user(self, container: str) -> int:
+        configured = json.loads(self.run(["docker", "inspect", container]).stdout)[0]["Config"]
+        return int(configured["User"].split(":")[0])
+
+    def cell_d6(self) -> None:
+        """LiteLLM without its database and with a wrong password: it ends non-zero after
+        Prisma's retries, never listens, and the provider gets nothing."""
+        self.harvest(LITELLM)
+        self.compose("stop", LITELLM, DATABASE)
+        before = len(self.provider_requests())
+        away = self.ended_start("without the database")
+        self.hold("D6", f"litellm-db stopped: {away}")
+        self.compose("up", "--detach", "--wait", "--no-deps", DATABASE)
+        wrong = secrets.token_urlsafe(32)
+        self.every_value.append(wrong)
+        kept = (self.home / DATABASE_PASSWORD_FILE).read_text()
+        self.replace_by_rename(DATABASE_PASSWORD_FILE, wrong + "\n", 0o644)
+        mistaken = self.ended_start("with a wrong password")
+        expect(len(self.provider_requests()) == before, "D6: the fake provider got a request")
+        self.hold("D6", f"a wrong password: {mistaken}")
+        self.replace_by_rename(DATABASE_PASSWORD_FILE, kept, 0o644)
+        self.recreate_litellm()
+
+    def ended_start(self, how: str) -> str:
+        """Starts LiteLLM alone and waits for its end: non-zero, never listening, no password in
+        its log. The text is what the cell holds, with the time measured."""
+        self.compose("rm", "--stop", "--force", LITELLM)
+        started = time.monotonic()
+        self.compose("up", "--detach", "--no-deps", LITELLM)
+        (container,) = self.containers_of(LITELLM)
+        # The shipped policy restarts it, which would hide its first exit code.
+        self.run(["docker", "update", "--restart=no", container])
+        while True:
+            state = json.loads(self.run(["docker", "inspect", container]).stdout)[0]["State"]
+            if not state["Running"]:
+                break
+            expect(time.monotonic() - started < DATABASE_WAIT_SECONDS, f"D6: still up {how}")
+            time.sleep(2)
+        seconds = time.monotonic() - started
+        self.compose("stop", LITELLM)
+        logs = self.run(["docker", "logs", container], check=False)
+        text = logs.stdout + logs.stderr
+        tail = " | ".join(text.strip().splitlines()[-8:])[-1200:]
+        expect(state["ExitCode"] != 0, f"D6: {how}: exit code {state['ExitCode']}: {tail}")
+        expect(LISTENING not in text, f"D6: {how}: LiteLLM listened")
+        expect(self.database_password not in text, f"D6: {how}: the password is in the log")
+        return f"exit code {state['ExitCode']} after {seconds:.0f} s, no listening line"
 
 
 def main() -> int:

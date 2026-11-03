@@ -40,12 +40,12 @@ from api_canary import verdicts  # noqa: E402
 from egress import LABEL, PROJECT, ProbeFailed, expect, run_scratch_probe  # noqa: E402
 from issuer import ISSUER_ORIGIN, ISSUER_SERVICE, SERVICE, IssuerProbe  # noqa: E402
 from refusals import API_GROUP  # noqa: E402
-from retention_census import FRONT, GATEWAY, LITELLM  # noqa: E402
+from retention_census import DATABASE, FRONT, GATEWAY, LITELLM  # noqa: E402
 from scratch_secrets import issue_certificate, write_new  # noqa: E402
 
 FAKE_PROVIDER, FAKE_ISSUER, CANARY = "fake-anthropic", "fake-issuer", "agent-canary"
 PROVIDER_HOST, ISSUER_HOST = "api.anthropic.com", "auth.hallucinai.de"
-NEW_NETWORKS = ("litellm-api", "litellm-backend", "litellm-egress")
+NEW_NETWORKS = ("litellm-api", "litellm-backend", "litellm-egress", "litellm-db")
 ISOLATED = "isolated"
 LISTEN_SECONDS = 60
 CANARY_SECONDS = 240
@@ -58,10 +58,14 @@ LISTENING = "Uvicorn running"
 FRONT_STATIC = "/etc/traefik/traefik.yml"
 ENTRYPOINT_ADDRESS = re.compile(r'address:\s*"([^"]+)"')
 START_LISTENER = re.compile(r"--host (\S+) --port (\d+)")
+# The database service and port as start.sh's DATABASE_URL names them.
+START_DATABASE = re.compile(r"@(?P<service>[\w-]+):(?P<port>\d+)/")
 WILDCARD_SOCKETS = ("0.0.0.0", "[::]")
+LOOPBACK_ADDRESS = "127.0.0.1"
 # The secret files under the scratch HOME, where compose.yaml's `secrets` read them.
 PROVIDER_KEY_FILE = Path(".secrets/litellm/anthropic")
 MASTER_KEY_FILE = Path(".secrets/litellm/master-key")
+DATABASE_PASSWORD_FILE = Path(".secrets/litellm/db-password")
 CREDENTIAL_FILE = Path(".secrets/agent-service/api/credential.json")
 HTTP_PROGRAM = """\
 import json, socket, sys
@@ -127,6 +131,7 @@ class LitellmProbe(IssuerProbe):
         self.identity = {
             name: f"{name}-{secrets.token_hex(6)}" for name in ("sub", "username", "email")
         }
+        self.database_password = secrets.token_urlsafe(32)
         self.write_secrets(home)
         self.fake = scratch / "fake"
         self.write_fakes(self.fake)
@@ -145,13 +150,17 @@ class LitellmProbe(IssuerProbe):
             (PROVIDER_KEY_FILE, self.provider_key + "\n"),
             (MASTER_KEY_FILE, f"sk-{secrets.token_hex(32)}\n"),
             (CREDENTIAL_FILE, json.dumps({"shared_key": self.credential})),
+            (DATABASE_PASSWORD_FILE, self.database_password + "\n"),
         ):
             folder = home
             for part in relative.parent.parts:
                 folder /= part
                 folder.mkdir(exist_ok=True)
                 folder.chmod(0o700)
-            write_new(home / relative, text.encode(), 0o600)
+            # The database user is not the probe's: it reads the password as the live file's
+            # loosest_mode allows, inside the 0700 folder.
+            mode = 0o644 if relative == DATABASE_PASSWORD_FILE else 0o600
+            write_new(home / relative, text.encode(), mode)
 
     def write_fakes(self, directory: Path) -> None:
         """One directory per fake host: its certificate and key, what it checks and its program."""
@@ -259,7 +268,16 @@ class LitellmProbe(IssuerProbe):
     # --- life cycle ---------------------------------------------------------------------------
 
     def services_to_start(self) -> tuple[str, ...]:
-        return (GATEWAY, SERVICE, ISSUER_SERVICE, FAKE_PROVIDER, FAKE_ISSUER, FRONT, LITELLM)
+        return (
+            GATEWAY,
+            SERVICE,
+            ISSUER_SERVICE,
+            FAKE_PROVIDER,
+            FAKE_ISSUER,
+            FRONT,
+            DATABASE,
+            LITELLM,
+        )
 
     def log_of(self, service: str) -> str:
         return self.container_log(service, container=self.container(service))
@@ -339,6 +357,7 @@ class LitellmProbe(IssuerProbe):
     def drive(self) -> None:
         self.wait_until(SERVICE, LISTENING)
         self.wait_until(LITELLM, LISTENING)
+        self.cell_d1()
         self.cell_n1()
         self.cells_listeners()
         self.cells_r1_r2()
@@ -421,9 +440,29 @@ class LitellmProbe(IssuerProbe):
         expect(run.get("exit") == "0" and [r["model"] for r in sent] == [new], f"G4: {run} {sent}")
         self.hold("G4", "a remapped config reaches LiteLLM after its recreate")
 
+    def cell_d1(self) -> None:
+        """LiteLLM runs as its configured user on a read-only root, and its migrations are done."""
+        resolved = json.loads(self.compose("config", "--format", "json").stdout)["services"]
+        container = json.loads(self.run(["docker", "inspect", self.container(LITELLM)]).stdout)[0]
+        user = resolved[LITELLM]["user"]
+        expect(
+            container["Config"]["User"] == user,
+            f"D1: LiteLLM runs as {container['Config']['User']}",
+        )
+        expect(container["HostConfig"]["ReadonlyRootfs"] is True, "D1: the root is writable")
+        counted = self.run([
+            "docker", "exec", self.container(DATABASE), "psql", "--username=litellm",
+            "--dbname=litellm", "--tuples-only", "--no-align", "--command",
+            "SELECT count(finished_at), count(*) FROM _prisma_migrations",
+        ]).stdout.strip()  # fmt: skip
+        finished, total = (int(number) for number in counted.split("|"))
+        expect(total > 0 and finished == total, f"D1: {finished} of {total} migrations finished")
+        self.hold("D1", f"LiteLLM runs as {user} on a read-only root; {finished} of {total} "
+                  "migrations finished")  # fmt: skip
+
     def cell_n1(self) -> None:
         resolved = json.loads(self.compose("config", "--format", "json").stdout)
-        members = (SERVICE, FRONT, LITELLM, GATEWAY)
+        members = (SERVICE, FRONT, LITELLM, GATEWAY, DATABASE)
         for service in members:
             container = json.loads(self.run(["docker", "inspect", self.container(service)]).stdout)[
                 0
@@ -443,8 +482,10 @@ class LitellmProbe(IssuerProbe):
             declared[FRONT] == {"litellm-api", "litellm-backend"}, f"N1: front {declared[FRONT]}"
         )
         expect(
-            declared[LITELLM] == {"litellm-backend", "litellm-egress"}, f"N1: {declared[LITELLM]}"
+            declared[LITELLM] == {"litellm-backend", "litellm-egress", "litellm-db"},
+            f"N1: {declared[LITELLM]}",
         )
+        expect(declared[DATABASE] == {"litellm-db"}, f"N1: database {declared[DATABASE]}")
         for network in NEW_NETWORKS:
             inspected = self.inspect_network(network)
             expect(inspected["Internal"] is True, f"N1: {network} is not internal")
@@ -455,9 +496,7 @@ class LitellmProbe(IssuerProbe):
             members = {c["Name"] for c in inspected["Containers"].values()}
             wanted = {self.container_name(s) for s, n in declared.items() if network in n}
             expect(members == wanted, f"N1: {network} holds {sorted(members)}")
-        self.hold(
-            "N1", "members as declared; the three new networks internal and isolated; no port"
-        )
+        self.hold("N1", "members as declared; the four new networks internal and isolated; no port")
 
     def container_name(self, service: str) -> str:
         found = json.loads(self.run(["docker", "inspect", self.container(service)]).stdout)[0]
@@ -476,11 +515,23 @@ class LitellmProbe(IssuerProbe):
         declared = {FRONT: front_address, LITELLM: ":".join(START_LISTENER.search(start).groups())}
         for cell, service in (("L2", FRONT), ("L3", LITELLM)):
             found = listeners_of(self, service)
+            tcp = [name for name in found["tcp"] if not self.is_prisma_engine(service, name)]
+            engine = [name for name in found["tcp"] if name not in tcp]
             expect(
-                found["tcp"] in bound_names(declared[service]) and found["udp"] == [],
+                tcp in bound_names(declared[service]) and found["udp"] == [],
                 f"{cell}: {service} declares {declared[service]} and listens on {found}",
             )
-            self.hold(cell, f"{service} declares {declared[service]} and listens on {found['tcp']}")
+            self.hold(
+                cell,
+                f"{service} declares {declared[service]} and listens on {tcp}"
+                + (f"; its Prisma engine on {engine}" if engine else ""),
+            )
+
+    @staticmethod
+    def is_prisma_engine(service: str, name: str) -> bool:
+        """LiteLLM's Prisma query engine listens on one ephemeral loopback port of its namespace,
+        which no other container reaches."""
+        return service == LITELLM and name.startswith(f"{LOOPBACK_ADDRESS}:")
 
     def cells_r1_r2(self) -> None:
         for cell, name in (("R1", PROVIDER_HOST), ("R2", ISSUER_HOST)):

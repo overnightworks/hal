@@ -1,5 +1,6 @@
-"""Probe of the isolation between the three API-route networks (#808 S1d cells X1-X11, R3, S1, S2,
-G20): LiteLLM, its front and the agent service reach each other and the outside only along the
+"""Probe of the isolation between the API-route networks (#808 S1d cells X1-X12, R3, S1, S2, G20;
+D3, S1 and S2 with the database of #937): LiteLLM, its front, its database and the agent service
+reach each other and the outside only along the
 declared topology, each exclusion with the control that proves the same observer connects when a
 path exists. It runs on the stack of litellm.py: the real service, the front, LiteLLM and the
 gateway's second entrypoint against a fake Anthropic. Nothing live and nothing paid: the probe
@@ -21,8 +22,10 @@ stand-in client in a throwaway that joins that container's namespace, so the fro
 S1 and S2 need LiteLLM's namespace before LiteLLM starts. This probe's overlay replaces LiteLLM's
 entrypoint with a start gate that waits for a file in a bind-mounted scratch directory and then
 runs the shipped entrypoint with the shipped arguments; the windows open first, then the file is
-dropped. S1 and S2 claim LiteLLM's behaviour from the moment `start.sh` runs, not Docker's own start
-of the container. G20 is one gateway SYN window over the start and every driving cell, not over the
+dropped. The one name LiteLLM's start may ask the resolver for beside the control's, and the one
+address it may open a connection to beside entrypoint 2, is its database, read from start.sh. S1
+and S2 claim LiteLLM's behaviour from the moment `start.sh` runs, not Docker's own start of the
+container. G20 is one gateway SYN window over the start and every driving cell, not over the
 stack's start. A window that ends before the last cell it covers is NOT DRIVEN.
 
 Exit 0: every cell held, 1: a cell failed or was not driven.
@@ -68,6 +71,7 @@ from litellm import (  # noqa: E402
     LISTENING,
     LITELLM,
     PROVIDER_HOST,
+    START_DATABASE,
     START_LISTENER,
     TLS_PROGRAM,
     LitellmProbe,
@@ -134,6 +138,14 @@ class NetworkProbe(LitellmProbe):
         # LiteLLM's port as its shipped start.sh declares it, read the way L3 reads it.
         start = mounted_file(resolved[LITELLM], resolved[LITELLM]["entrypoint"][0]).read_text()
         self.litellm_port = int(START_LISTENER.search(start).group(2))
+        # Its database as start.sh's DATABASE_URL names it: the one other name and address
+        # LiteLLM's start may ask for.
+        database = START_DATABASE.search(start)
+        self.database, self.database_port = database["service"], int(database["port"])
+        # capture.py takes alphanumeric labels and matches a frame whose question contains one, so
+        # the database's name is asked for by its first label: every question that names
+        # `litellm...` counts as the database's.
+        self.database_label = self.database.split("-")[0]
         self.overlays.append(self.write_network_overlay(scratch, resolved))
         self.expect_fake_only()
 
@@ -261,7 +273,7 @@ class NetworkProbe(LitellmProbe):
 
         def inside_syn_window() -> None:
             observed["s1"] = self.bounded_window(
-                CAPTURE_LITELLM, ["dns", asked], START_SECONDS, start
+                CAPTURE_LITELLM, ["dns", asked, self.database_label], START_SECONDS, start
             )
 
         observed["s2"] = self.bounded_window(
@@ -279,12 +291,16 @@ class NetworkProbe(LitellmProbe):
         seen, queries = result["labels"].get(asked, 0), result["queries"].get(asked, 0)
         if not queries:
             raise NotDriven("S1: not driven: the control's query is not in LiteLLM's DNS window")
+        database = result["labels"].get(self.database_label, 0)
         expect(
-            result["frames"] == seen,
-            f"S1: {result['frames'] - seen} DNS frames are not the control's",
+            result["frames"] == seen + database,
+            f"S1: {result['frames'] - seen - database} DNS frames are neither the control's nor "
+            f"for {self.database_label}...",
         )
         self.hold(
-            "S1", f"LiteLLM's DNS window holds only the control's {seen} frames, {queries} queries"
+            "S1",
+            f"LiteLLM's DNS window holds only the control's {seen} frames, {queries} queries, and "
+            f"{database} frames naming {self.database_label}...",
         )
 
     def cell_s2(self, result: dict, control_ended: float) -> None:
@@ -292,6 +308,7 @@ class NetworkProbe(LitellmProbe):
         connects to its loopback address stay inside it and are counted apart."""
         self.complete(result, "S2", control_ended)
         entrypoint = (self.second_entrypoint(), GATEWAY_PORT)
+        database = (self.address_of(self.database, "litellm-db"), self.database_port)
         leaving = [syn for syn in result["syns"] if syn["interface"] != LOOPBACK]
         inside = sorted({
             f"{syn['destination']}:{syn['port']}"
@@ -299,15 +316,18 @@ class NetworkProbe(LitellmProbe):
         })  # fmt: skip
         stray = [(syn["destination"], syn["port"]) for syn in leaving]
         expect(
-            all(found == entrypoint for found in stray),
-            f"S2: LiteLLM sent SYNs to {sorted(set(stray) - {entrypoint})}",
+            all(found in (entrypoint, database) for found in stray),
+            f"S2: LiteLLM sent SYNs to {sorted(set(stray) - {entrypoint, database})}",
         )
-        if not leaving:
-            raise NotDriven("S2: not driven: the control's SYN is not in LiteLLM's SYN window")
+        if entrypoint not in stray or database not in stray:
+            raise NotDriven(
+                "S2: not driven: the control's SYN or the database's is not in LiteLLM's SYN window"
+            )
         self.hold(
             "S2",
             f"{len(leaving)} SYNs left LiteLLM's namespace, all to "
-            f"{entrypoint[0]}:{entrypoint[1]}; {len(result['syns']) - len(leaving)} stayed on "
+            f"{entrypoint[0]}:{entrypoint[1]} or {database[0]}:{database[1]}; "
+            f"{len(result['syns']) - len(leaving)} stayed on "
             f"{LOOPBACK}, to {', '.join(inside) or 'nothing'}",
         )
 
@@ -316,6 +336,7 @@ class NetworkProbe(LitellmProbe):
         intervals: dict[str, tuple[float, float]] = {}
         litellm_backend = self.address_of(LITELLM, "litellm-backend")
         litellm_egress = self.address_of(LITELLM, "litellm-egress")
+        database = self.address_of(self.database, "litellm-db")
         service_addresses = {
             cell: self.address_of(SERVICE, network) for cell, network in SERVICE_NETWORKS.items()
         }
@@ -361,6 +382,9 @@ class NetworkProbe(LitellmProbe):
             Reach("X7b", litellm, PROVIDER_ON_INTERNET, provider, GATEWAY_PORT, False),
             Reach("X7c", SERVICE, PROVIDER_ON_INTERNET, provider, GATEWAY_PORT, False),
             Reach("X7d", GATEWAY, PROVIDER_ON_INTERNET, provider, GATEWAY_PORT, True),
+            Reach("X12a", litellm, "litellm-db", database, self.database_port, True),
+            Reach("X12b", front, "litellm-db", database, self.database_port, False),
+            Reach("X12c", SERVICE, "litellm-db", database, self.database_port, False),
         ):
             self.reach(step, intervals)
         self.cells_x8_to_x11(second)
