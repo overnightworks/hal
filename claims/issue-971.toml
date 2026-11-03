@@ -1,0 +1,8 @@
+claim_id = "3dd4b0cbd2ec4ad28a7e3833bdd4c360"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "9bc72eddec7a09cf6a0790db48bb155e66776118"
+branch = "claude/issue-971-hal-2-8-census-hopin"
+scope = ["agent-service/api_canary.py", "agent-service/litellm/config.yaml", "agent-service/live_canary.py", "agent-service/retention_census.py", "compose.yaml", "docs/agent-service.md", "probe/agent-service/fake_anthropic.py", "probe/agent-service/litellm.py", "probe/agent-service/litellm_caller.py", "probe/agent-service/litellm_key_files.py", "probe/agent-service/litellm_keys.py", "probe/agent-service/litellm_live_canary.py", "probe/agent-service/litellm_retention.py", "quality/config.toml", "src/hal/workstation/secrets_manifest.toml", "tests/test_agent_service_api_canary.py", "tests/test_agent_service_live_canary.py", "tests/test_agent_service_retention_census.py", "tests/test_agent_service_smoke.py", "tests/test_litellm_unit.py", "tests/test_stack_litellm_admin_service.py"]
+opened_commit = "d1cdf3cadefc618906dec8620c92a61f2587cf30"
+whole_reason = "One census of the direct route: the canary program, its one-off, the live wrapper, the census targets and its dump sink are each dead or wrong without the others, and the probe cells that prove them share the key step, the caller and the fake that change with them."
