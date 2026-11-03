@@ -23,6 +23,8 @@ TIMER_NAMES = [name for name in UNIT_NAMES if name.endswith(".timer")]
 TIMERS_WANTS = "timers.target.wants"
 MUTATING_VERBS = {"daemon-reload", "enable", "disable", "stop"}
 NOT_WRITTEN_BY_HAL = "was not written by hal · move or delete it, then rerun"
+TIMER_COUNT = f"{len(TIMER_NAMES)} timers"
+LINK_COUNT = f"{len(UNIT_NAMES)} links"
 
 
 class FakeSystemctl:
@@ -119,8 +121,8 @@ class Machine:
         return self.layout.live_checkout / "systemd"
 
     def arrange_legacy_links(self, *, dangling: bool) -> None:
-        """Today's state: eight links into `<live checkout>/systemd/`, four more in the wants
-        directory, systemd loaded and every timer running."""
+        """Today's state: a link per unit into `<live checkout>/systemd/`, one per timer in the
+        wants directory, systemd loaded and every timer running."""
         self.legacy_directory.mkdir(parents=True)
         self.wants.mkdir()
         for name in UNIT_NAMES:
@@ -169,7 +171,7 @@ def machine(tmp_path: Path) -> Machine:
     return Machine(tmp_path / "home")
 
 
-def test_a_fresh_apply_writes_eight_marker_files_reloads_then_enables_the_four_timers(
+def test_a_fresh_apply_writes_a_marker_file_per_unit_reloads_then_enables_every_timer(
     machine: Machine,
 ) -> None:
     assert machine.step.apply().applied is Applied.CHANGED
@@ -179,6 +181,21 @@ def test_a_fresh_apply_writes_eight_marker_files_reloads_then_enables_the_four_t
         ["daemon-reload"],
         *(["enable", "--now", name] for name in TIMER_NAMES),
     ]
+
+
+def calendar_timer(description: str, calendar: str) -> str:
+    """A timer on a calendar that catches up a missed run."""
+    return f"""\
+[Unit]
+Description={description}
+
+[Timer]
+OnCalendar={calendar}
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+"""
 
 
 EXPECTED_UNIT_TEXTS = {
@@ -193,28 +210,8 @@ Environment=LOG_FORMAT=json
 ExecStart=%h/{live}/.venv/bin/hal backup
 TimeoutStartSec=6h
 """,
-    "hal-backup.timer": """\
-[Unit]
-Description=hal backup weekly, Sunday 03:00
-
-[Timer]
-OnCalendar=Sun *-*-* 03:00:00
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-""",
-    "hal-check.timer": """\
-[Unit]
-Description=Daily hal check
-
-[Timer]
-OnCalendar=*-*-* 09:00
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-""",
+    "hal-backup.timer": calendar_timer("hal backup weekly, Sunday 03:00", "Sun *-*-* 03:00:00"),
+    "hal-check.timer": calendar_timer("Daily hal check", "*-*-* 09:00"),
     "hal-check.service": """\
 [Unit]
 Description=hal check: reports what is wrong on this machine and in the secrets manifest; mails only when a finding appears or goes
@@ -254,17 +251,21 @@ Environment=LOG_FORMAT=json
 ExecStart=%h/{live}/.venv/bin/hal restore --test
 TimeoutStartSec=6h
 """,
-    "hal-backup-restore-test.timer": """\
+    "hal-backup-restore-test.timer": calendar_timer(
+        "hal backup restore test monthly, first Sunday 05:00", "Sun *-*-01..07 05:00:00"
+    ),
+    "hal-expire.service": """\
 [Unit]
-Description=hal backup restore test monthly, first Sunday 05:00
+Description=hal expire: deletes what LiteLLM keeps per person or per tool once unused for its retention period
+Documentation=file://%h/{live}/docs/agent-service.md
 
-[Timer]
-OnCalendar=Sun *-*-01..07 05:00:00
-Persistent=true
-
-[Install]
-WantedBy=timers.target
+[Service]
+Type=oneshot
+Environment=LOG_FORMAT=json
+ExecStart=%h/{live}/.venv/bin/hal expire
+TimeoutStartSec=15min
 """,
+    "hal-expire.timer": calendar_timer("Daily hal expire, 04:00", "*-*-* 04:00:00"),
 }
 
 
@@ -346,7 +347,7 @@ def test_the_plan_fact_names_the_replaced_links_only_while_a_link_points_into_sy
 ) -> None:
     assert machine.step.open_fact() == ""
     machine.arrange_legacy_links(dangling=False)
-    assert machine.step.open_fact() == "replaces 8 links with 4 timers"
+    assert machine.step.open_fact() == f"replaces {LINK_COUNT} with {TIMER_COUNT}"
     machine.step.apply()
     (machine.user_units / "hal-check.service").unlink()
     assert machine.step.open_fact() == ""
@@ -674,7 +675,7 @@ def test_a_changed_timers_row_counts_the_timers_and_says_systemd_reloaded(
     code, lines, _ = setup_lines(sandboxed_machine, sandbox, capsys)
 
     assert code == ExitCode.OK
-    assert "  ✓ timers          changed        4 timers · systemd reloaded" in lines
+    assert f"  ✓ timers          changed        {TIMER_COUNT} · systemd reloaded" in lines
 
 
 def test_a_changed_timers_row_without_a_reload_only_counts_the_timers(
@@ -686,7 +687,7 @@ def test_a_changed_timers_row_without_a_reload_only_counts_the_timers(
 
     _, lines, _ = setup_lines(sandboxed_machine, sandbox, capsys)
 
-    assert "  ✓ timers          changed        4 timers" in lines
+    assert f"  ✓ timers          changed        {TIMER_COUNT}" in lines
 
 
 def test_an_unchanged_timers_row_is_bare(
@@ -715,7 +716,7 @@ def test_the_plan_of_the_first_run_after_the_move_names_the_replaced_links(
 
     _, lines, _ = setup_lines(sandboxed_machine, sandbox, capsys, "--dry-run")
 
-    assert "  ~ timers          will change    replaces 8 links with 4 timers" in lines
+    assert f"  ~ timers          will change    replaces {LINK_COUNT} with {TIMER_COUNT}" in lines
     assert sandboxed_machine.systemctl.changes == []
 
 
@@ -748,7 +749,11 @@ def test_a_failure_after_the_classification_stops_setup_at_timers_with_units_par
 
 @pytest.mark.parametrize(("table", "minutes"), [("", 5), ("[alarm]\ninterval = 12\n", 12)])
 def test_hal_setup_writes_the_alarm_timer_from_the_configured_interval(
-    sandboxed_machine: Machine, sandbox: Sandbox, capsys: pytest.CaptureFixture[str], table: str, minutes: int
+    sandboxed_machine: Machine,
+    sandbox: Sandbox,
+    capsys: pytest.CaptureFixture[str],
+    table: str,
+    minutes: int,
 ) -> None:
     write_hal_config(sandbox.home, table)
 

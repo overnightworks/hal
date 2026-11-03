@@ -18,6 +18,7 @@ class Verb(StrEnum):
     ALARM = "alarm"
     BACKUP = "backup"
     RESTORE = "restore"
+    EXPIRE = "expire"
     VERSION = "version"
     LEGAL = "legal"
     RENAME = "rename"
