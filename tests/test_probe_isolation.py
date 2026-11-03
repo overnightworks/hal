@@ -185,7 +185,7 @@ TRAEFIK_WITH_ONE_ENTRYPOINT = dedent(
         ),
         (TRAEFIK_WITH_ONE_ENTRYPOINT + "# was 127.0.0.1:8081\n", "2 times"),
         (TRAEFIK_WITH_ONE_ENTRYPOINT.replace("127.0.0.1", ""), "every address"),
-        (TRAEFIK_WITH_ONE_ENTRYPOINT.replace("127.0.0.1", "0.0.0.0"), "every address"),
+        (TRAEFIK_WITH_ONE_ENTRYPOINT.replace("127.0.0.1", "0.0.0.0"), "every address"),  # noqa: S104 - a config text that names the address and binds none
         (TRAEFIK_WITH_ONE_ENTRYPOINT.replace("127.0.0.1", "[::]"), "every address"),
     ],
     ids=[
@@ -655,3 +655,13 @@ def test_an_apps_run_that_passed_prints_its_line_last_and_leaves_scratch_empty(
     assert switch_only_seen == [bool(flags)]
     assert capsys.readouterr().out.splitlines()[-1].startswith(line)
     assert not any(scratch.iterdir())
+
+
+@pytest.mark.parametrize("flags", [(), ("--switch-only",)], ids=["full", "switch-only"])
+def test_an_apps_run_with_a_scratch_that_is_no_directory_ends_with_usage_error_2(
+    apps_probe, tmp_path, flags
+):
+    with pytest.raises(SystemExit) as ended:
+        apps_probe.main(["--scratch", str(tmp_path / "missing"), *flags])
+
+    assert ended.value.code == 2

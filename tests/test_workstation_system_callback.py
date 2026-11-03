@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import re
 import sys
 from importlib.metadata import version
 from pathlib import Path
 
 import pytest
+from support.terminal_support import TerminalStream, put_stdout_on_a_terminal
 from support.workstation_support import StubSudo
 
+import hal.output
 from hal.output import verbose_run
 from hal.workstation import system_step
 from hal.workstation.setup import ANSIBLE_SOURCE
@@ -129,3 +132,20 @@ def test_with_v_ansibles_text_shows_indented_and_no_event_line_does(
 
 def test_the_ansible_core_in_the_dev_group_is_the_one_hal_installs() -> None:
     assert f"ansible-core=={version('ansible-core')}" == ANSIBLE_SOURCE
+
+
+def test_the_live_line_shows_each_task_start_in_run_order_and_a_looped_task_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
+    """A changed, a skipped, a handler and a looped task each start once; the callback marks the start, never the item."""
+    monkeypatch.setattr(hal.output, "LIVE_TICK_SECONDS", 3600)
+    put_stdout_on_a_terminal(monkeypatch)
+    err = TerminalStream()
+    monkeypatch.setattr(sys, "stderr", err)
+
+    run_scratch_play(tmp_path, monkeypatch, CHANGED_SKIPPED_AND_HANDLED + LOOPED_AND_UNCHANGED, HANDLER)
+
+    shown = [re.search(r"system +(.*) \xb7 \S+$", re.sub(r"\x1b\[[0-9;]*[mK]", "", frame)) for frame in err.getvalue().split("\r")]
+    names = [match.group(1) for match in shown if match]
+    in_run_order = ["changed task", "skipped task", "handler", "looped task", "unchanged task"]
+    assert in_run_order == [name for name in names if name != "ansible.builtin.meta"]

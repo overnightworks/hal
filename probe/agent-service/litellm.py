@@ -4,7 +4,7 @@ throwaway compose project, against a fake Anthropic. Nothing live and nothing pa
 refuses to start unless the resolved copy marks `internet` internal and holds only the two fake
 hosts, and it never calls `egress.py`'s live cells.
 
-    flock -o -w 1200 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \\
+    flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \\
         python3 probe/agent-service/litellm.py --scratch DIR
 
 Measured: a run takes about a minute and its teardown a few seconds (K 30 s, CAP 1800 s).
@@ -60,7 +60,7 @@ ENTRYPOINT_ADDRESS = re.compile(r'address:\s*"([^"]+)"')
 START_LISTENER = re.compile(r"--host (\S+) --port (\d+)")
 # The database service and port as start.sh's DATABASE_URL names them.
 START_DATABASE = re.compile(r"@(?P<service>[\w-]+):(?P<port>\d+)/")
-WILDCARD_SOCKETS = ("0.0.0.0", "[::]")
+WILDCARD_SOCKETS = ("0.0.0.0", "[::]")  # noqa: S104 - names the listener addresses the probe accepts and binds none
 LOOPBACK_ADDRESS = "127.0.0.1"
 # The secret files under the scratch HOME, where compose.yaml's `secrets` read them.
 PROVIDER_KEY_FILE = Path(".secrets/litellm/anthropic")

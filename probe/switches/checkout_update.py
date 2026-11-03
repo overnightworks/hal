@@ -28,6 +28,7 @@ from edge_copy import (
     advance_origin,
     expect,
     git,
+    run_command,
 )
 
 from hal.output import write_line
@@ -62,10 +63,10 @@ BROKEN_IMPORT = '\nraise RuntimeError("probe: broken import")\n'
 
 def installed_version(copy: Path) -> str:
     """The version of the project the copy's venv has installed."""
-    shown = subprocess.run(
+    shown = run_command(
         [str(copy / ".venv" / "bin" / "python"), "-c",
          f"import importlib.metadata as m; print(m.version('{PROJECT_NAME}'))"],
-        capture_output=True, check=True, text=True, timeout=60,
+        check=True, text=True, timeout=60,
     )  # fmt: skip
     return shown.stdout.strip()
 

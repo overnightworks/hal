@@ -5,7 +5,7 @@ every log of the front, the gateway, LiteLLM and the service by `agent-service/r
 Nothing live and nothing paid: the probe refuses to start unless `internet` is internal and holds
 only the fakes.
 
-    flock -o -w 1200 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \\
+    flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \\
         python3 probe/agent-service/litellm_retention.py --scratch DIR
 
 Measured: a run takes about four minutes (B8 waits for the fake's 120 s hold limit) and its

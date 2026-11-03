@@ -6,7 +6,7 @@ directory, stands in for Cloudflare by sending `Host: auth.<domain>` and
 the stack down, volumes included. Its Traefik entrypoints listen on free loopback ports it picks
 and its keycloak network takes a free /24, so it runs beside the live edge, which stays up.
 
-    flock -o -w 1200 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 50 720 \
+    flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 50 720 \
         python3 probe/keycloak/probe.py --scratch DIR  # teardown measured 11 s (K 50 s, CAP 720 s)
 
 `hold --scratch DIR` instead brings the same stack up without the proofs, prints one READY line

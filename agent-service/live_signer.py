@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """The live signer proof of the agent service (docs/agent-service.md, "Proofs").
 
     cd ~/srv/hal && python3 agent-service/live_signer.py

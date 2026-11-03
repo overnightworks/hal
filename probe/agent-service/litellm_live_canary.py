@@ -5,7 +5,7 @@ loaded. Nothing live and nothing paid: the stack
 refuses to start unless `internet` is internal and holds only the two fake hosts, the tokens are the
 stand-in issuer's and the sign-in is never reached (`main` is not called).
 
-    flock -o -w 1200 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \\
+    flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \\
         python3 probe/agent-service/litellm_live_canary.py --scratch DIR
 
 The wrapper runs through a `Stack` built from `compose_command(guard=True)` and the guard's own

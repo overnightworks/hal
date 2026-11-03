@@ -28,6 +28,7 @@ from hal.workstation.secrets_setup import WalkEnd
 from hal.workstation.secrets_view import ManifestError, Presence, SecretEntry
 from hal.workstation.system_step import (
     AGENT_USER,
+    SYSTEM_ROW,
     Applied,
     CheckState,
     StepFailed,
@@ -76,7 +77,7 @@ class SetupRow(StrEnum):
     COMMIT_HOOK = "commit hook"
     PATH = "path"
     TIMERS = "timers"
-    SYSTEM = "system"
+    SYSTEM = SYSTEM_ROW
     SECRETS = "secrets"
 
 

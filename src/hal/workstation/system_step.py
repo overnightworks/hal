@@ -18,7 +18,7 @@ from pathlib import Path
 
 from hal.workstation import secrets_setup
 from hal.workstation.layout import Layout
-from hal.output import Tone, is_verbose, write_detail
+from hal.output import Tone, is_verbose, live_line, write_detail
 from hal.output.command import Verb, command
 
 PLAYBOOK = Path(__file__).parent / "system" / "playbook.yml"
@@ -36,6 +36,8 @@ RSYSLOG_FILE_NAMES = ("syslog", "auth.log", "kern.log", "mail.log", "mail.err", 
 # The line prefix the packaged `hal_events` callback writes before each event; the callback runs in Ansible's own
 # interpreter, which cannot import hal, so `system/callback_plugins/hal_events.py` states the same mark.
 EVENT_MARK = "\x1ehal_events "
+# The row the system step's live line and verdict row stand under; `hal setup` names its row with the same word.
+SYSTEM_ROW = "system"
 
 
 class CheckState(Enum):
@@ -64,6 +66,7 @@ class SystemStepInterrupted(StepFailed):
 
 
 class EventKind(Enum):
+    TASK = "task"
     CHANGED = "changed"
     RESULT = "result"
     COUNTS = "counts"
@@ -105,29 +108,46 @@ def _count(event: dict[str, object], name: str) -> int:
     return count
 
 
+def _task_name(event: dict[str, object]) -> str:
+    name = event["task"]
+    if type(name) is not str:
+        raise ValueError("task is no name")
+    return name
+
+
+_UNREADABLE_EVENT = (ValueError, KeyError, TypeError)
+
+
+def _event_of(event_line: str) -> tuple[EventKind, dict[str, object]]:
+    """The kind and the fields of a marked line; one of `_UNREADABLE_EVENT` when it holds no known event."""
+    event = json.loads(event_line.removeprefix(EVENT_MARK))
+    return EventKind(event["event"]), event
+
+
 def read_events(returncode: int, event_lines: Sequence[str]) -> PlaybookRun:
     """A run finished when Ansible exited 0 and the callback reported exactly one count without a failed or unreachable host.
 
     The reason is the message of the last failed or unreachable result, given only when the counts name a failed or unreachable host:
     inside a rescue it is the rescue's own failure that ended the play, and a rescued failure is no cause.
-    `tasks` are the names of the changed tasks, in the order they changed.
-    An event that is no known event, or a count that is no non-negative integer, is a run that did not finish.
+    `tasks` are the names of the changed tasks, in the order they changed; a task's start is read only for its name and shown by the runner.
+    An event that is no known event, a task's name that is no string, or a count that is no non-negative integer, is a run that did not finish.
     """
     message = ""
     tasks: list[str] = []
     counts: list[tuple[int, int, int]] = []
     for line in event_lines:
         try:
-            event = json.loads(line.removeprefix(EVENT_MARK))
-            kind = EventKind(event["event"])
-            if kind is EventKind.CHANGED:
+            kind, event = _event_of(line)
+            if kind is EventKind.TASK:
+                _task_name(event)
+            elif kind is EventKind.CHANGED:
                 tasks.append(str(event["task"]))
             elif kind is EventKind.RESULT:
                 TaskStatus(event["status"])
                 message = str(event["msg"])
             else:
                 counts.append((_count(event, "changed"), _count(event, "failed"), _count(event, "unreachable")))
-        except (ValueError, KeyError, TypeError):
+        except _UNREADABLE_EVENT:
             return PlaybookUnfinished()
     if len(counts) != 1:
         return PlaybookUnfinished()
@@ -147,6 +167,15 @@ def _forget_the_sudo_ticket() -> StepFailed | None:
     return None
 
 
+def _started_task(event_line: str) -> str | None:
+    """The task name a `task` event carries, or None for any other line; an unreadable line is `read_events`'s to judge."""
+    try:
+        kind, event = _event_of(event_line)
+        return _task_name(event) if kind is EventKind.TASK else None
+    except _UNREADABLE_EVENT:
+        return None
+
+
 def run_playbook_as_root(argv: Sequence[str]) -> PlaybookRun:
     """Runs `argv` under one `sudo` in the packaged `system/` directory, then makes sudo forget its ticket.
 
@@ -157,6 +186,7 @@ def run_playbook_as_root(argv: Sequence[str]) -> PlaybookRun:
     a Ctrl-C in the play, or between the start of sudo and the reading, is a `SystemStepInterrupted`, which a failing `sudo -k` keeps;
     it never follows a sudo that did not start.
     The pipe is read to its end either way; a line the callback does not mark is shown only with `-v`, indented, escaped and dim.
+    Without `-v` at a terminal, each task start the callback marks is the live line of the `system` row until the play ends.
     Root's Python writes no bytecode, which would leave root-owned files in the operator's tool environment.
     No timeout: a person types the password; the run asks its yes at a terminal first and `--dry-run` reaches here only when `needs_first` finds one.
     """
@@ -167,11 +197,14 @@ def run_playbook_as_root(argv: Sequence[str]) -> PlaybookRun:
     try:
         with subprocess.Popen(["sudo", "env", "PYTHONDONTWRITEBYTECODE=1", "sh", "-c", 'exec "$@" 2>&1', "sh", *argv], stdout=subprocess.PIPE, text=True, cwd=PLAYBOOK.parent, env=environment) as playbook:  # noqa: S603, S607 - argv is the packaged playbook and sudo is found on PATH by design
             try:
-                for line in playbook.stdout:
-                    if line.startswith(EVENT_MARK):
-                        event_lines.append(line)
-                    elif is_verbose():
-                        write_detail(line.rstrip("\n"), tone=Tone.DIM, flush=True)
+                with live_line(SYSTEM_ROW) as show_task:
+                    for line in playbook.stdout:
+                        if line.startswith(EVENT_MARK):
+                            event_lines.append(line)
+                            if (task := _started_task(line)) is not None:
+                                show_task(task)
+                        elif is_verbose():
+                            write_detail(line.rstrip("\n"), tone=Tone.DIM, flush=True)
             finally:
                 unforgotten = _forget_the_sudo_ticket()
                 forgotten = True

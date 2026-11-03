@@ -60,7 +60,7 @@ class Scenario:
     events: list[str] = field(default_factory=list)
     prove_action: Callable[[], int] = lambda: 0
     teardown_action: Callable[[], None] = lambda: None
-    extra: Callable[[Path], None] = lambda scratch: None
+    prepare: Callable[[Path], None] = lambda scratch: None
     create_error: BaseException | None = None
 
     def create(self, scratch: Path) -> FakeProbe:
@@ -69,7 +69,7 @@ class Scenario:
             (scratch / directory).mkdir(parents=True)
             (scratch / directory / "file").write_text("x")
         (scratch / SENTINEL).write_text("x")
-        self.extra(scratch)
+        self.prepare(scratch)
         if self.create_error:
             raise self.create_error
         return FakeProbe(self.events, self.teardown_action, scratch)
@@ -112,14 +112,14 @@ def unlockable():
 
 
 def make_unwritable(made: list[Path]) -> Callable[[Path], None]:
-    def extra(scratch: Path) -> None:
+    def prepare(scratch: Path) -> None:
         locked = scratch / "locked"
         locked.mkdir()
         (locked / "file").write_text("x")
         locked.chmod(0o500)
         made.append(locked)
 
-    return extra
+    return prepare
 
 
 @pytest.mark.parametrize(
@@ -177,7 +177,7 @@ def test_a_stop_during_create_empties_the_scratch_and_propagates(scratch):
         (directory / "late").write_text("x")
         os.kill(os.getpid(), signal.SIGTERM)
 
-    run = Scenario(scratch, extra=stop_after_writing)
+    run = Scenario(scratch, prepare=stop_after_writing)
 
     with pytest.raises(KeyboardInterrupt):
         run.run()
@@ -248,7 +248,7 @@ def test_a_stop_as_the_cleanup_starts_cuts_neither_the_teardown_nor_the_removal(
 
 
 def test_a_failed_removal_names_the_path_and_exits_one(scratch, capsys, unlockable):
-    run = Scenario(scratch, extra=make_unwritable(unlockable))
+    run = Scenario(scratch, prepare=make_unwritable(unlockable))
 
     assert run.run() == 1
 
@@ -269,7 +269,7 @@ def test_a_failed_removal_while_an_exception_propagates_still_names_the_path(
         scratch,
         prove_action=raising(ValueError("proof")),
         teardown_action=teardown_action,
-        extra=make_unwritable(unlockable),
+        prepare=make_unwritable(unlockable),
     )
 
     with pytest.raises(ValueError, match="proof"):
@@ -315,7 +315,7 @@ def test_symlinks_are_removed_and_never_followed(scratch, tmp_path):
         (directory / "to-file").symlink_to(tmp_path / "outside-file")
         (directory / "work" / "to-directory").symlink_to(outside, target_is_directory=True)
 
-    assert Scenario(scratch, extra=link).run() == 0
+    assert Scenario(scratch, prepare=link).run() == 0
 
     assert listing(scratch) == []
     assert listing(outside) == ["inner"]
@@ -341,7 +341,7 @@ def test_removal_stays_bound_to_the_directory_that_was_opened(scratch, tmp_path)
         directory.rename(moved)
         directory.symlink_to(elsewhere, target_is_directory=True)
 
-    assert Scenario(scratch, extra=swap).run() == 0
+    assert Scenario(scratch, prepare=swap).run() == 0
 
     assert listing(elsewhere) == ["file"]
     assert listing(moved) == []

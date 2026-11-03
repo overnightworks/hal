@@ -17,7 +17,7 @@ reference nor the container's full image-id label stops the drive.
 
 It removes its containers, networks, volumes and tags. It never names the project `edge`.
 
-    flock -o -w 1200 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 900 \\
+    flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 900 \\
         python3 probe/switches/built_image.py --scratch DIR
 
 Measured teardown: 11 s (K 30 s, CAP 900 s).
@@ -71,8 +71,8 @@ SERVICE_TEXT = """\
 
 """
 COMPOSE_FILE = "compose.yaml"
-SECRET = "built_probe_key"
-SECRET_FILE = ".secrets/built-probe/key"
+KEY_NAME = "built_probe_key"
+KEY_FILE = ".secrets/built-probe/key"
 NOTHING_TO_CHANGE = "nothing to change"
 COMPOSE_SECONDS = 300
 STOP_THE_LANE = "stop the lane (body, Acceptance): ps Image is neither the reference nor the id"
@@ -289,21 +289,21 @@ class Drive:
 
     def d2_a_missing_secret_file(self) -> None:
         """The unit has no container and names a secret whose file is not there."""
-        path = self.home / SECRET_FILE
+        path = self.home / KEY_FILE
         text = (self.copy / COMPOSE_FILE).read_text()
-        text = text.replace(f"  {UNIT}:\n", f"  {UNIT}:\n    secrets: [{SECRET}]\n", 1)
+        text = text.replace(f"  {UNIT}:\n", f"  {UNIT}:\n    secrets: [{KEY_NAME}]\n", 1)
         text = text.replace(
-            "\nsecrets:\n", f"\nsecrets:\n  {SECRET}:\n    file: ${{HOME}}/{SECRET_FILE}\n", 1
+            "\nsecrets:\n", f"\nsecrets:\n  {KEY_NAME}:\n    file: ${{HOME}}/{KEY_FILE}\n", 1
         )
         (self.copy / COMPOSE_FILE).write_text(text)
-        edge_copy.publish(self.copy, f"probe: {UNIT} names the secret {SECRET}")
+        edge_copy.publish(self.copy, f"probe: {UNIT} names the secret {KEY_NAME}")
         assert self.guard  # noqa: S101 - narrows the type of the guard that the setup sets
         self.guard.expect(edge_copy.copy_compose_command(self.copy), once=False)
         self.compose("rm", "--stop", "--force", UNIT)
         resolved = json.loads(self.compose("config", "--format", "json"))
         expect(
-            resolved["secrets"][SECRET]["file"] == str(path),
-            f"D2 Compose resolves the secret to {resolved['secrets'][SECRET]}, not {path}",
+            resolved["secrets"][KEY_NAME]["file"] == str(path),
+            f"D2 Compose resolves the secret to {resolved['secrets'][KEY_NAME]}, not {path}",
         )
         out = self.hal(exit_code=ExitCode.REFUSED)
         line = f"error: {UNIT} needs {path}; nothing switched next: hal setup"
