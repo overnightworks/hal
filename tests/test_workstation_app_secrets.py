@@ -58,30 +58,32 @@ APP_SECRETS = ["hopin/session-secret", "presentator/secret-key"]
 
 
 @pytest.fixture(params=APP_SECRETS)
-def app_secret(request: pytest.FixtureRequest, packaged_home: Sandbox) -> tuple[str, Path]:
-    """The generated app secret under test and its place in the home, absent."""
+def app_secret(request: pytest.FixtureRequest, packaged_home: Sandbox) -> tuple[str, Path, str]:
+    """The generated app secret under test, its path in the home and its manifest place; file and folder absent."""
     (place,) = packaged_entry(request.param).paths
     secret = packaged_home.home / place
     secret.unlink(missing_ok=True)
-    return request.param, secret
+    secret.parent.rmdir()
+    return request.param, secret, place
 
 
 def test_the_dry_run_lists_the_app_secret_as_missing_and_writes_nothing(
-    packaged_home: Sandbox, app_secret: tuple[str, Path], capsys: pytest.CaptureFixture[str]
+    packaged_home: Sandbox, app_secret: tuple[str, Path, str], capsys: pytest.CaptureFixture[str]
 ) -> None:
-    name, secret = app_secret
+    name, secret, _ = app_secret
 
     output = run_packaged_setup(packaged_home, capsys, "--dry-run")
 
     missing_lines = [line.replace(",", " ").split() for line in output.splitlines() if line.split()[:3] == ["!", "secrets", "missing"]]
     assert any(name in words for words in missing_lines)
     assert not secret.exists()
+    assert not secret.parent.exists()
 
 
 def test_apply_generates_the_app_secret_unseen_at_0644_in_a_0700_folder_and_a_rerun_keeps_it(
-    packaged_home: Sandbox, app_secret: tuple[str, Path], capsys: pytest.CaptureFixture[str]
+    packaged_home: Sandbox, app_secret: tuple[str, Path, str], capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _, secret = app_secret
+    _, secret, _ = app_secret
 
     output = run_packaged_setup(packaged_home, capsys)
 
@@ -99,10 +101,10 @@ def test_apply_generates_the_app_secret_unseen_at_0644_in_a_0700_folder_and_a_re
 
 @pytest.mark.parametrize(("mode", "is_loose"), [(0o644, False), (0o666, True)], ids=["0644 is the declared loosest mode", "0666 is loose"])
 def test_the_app_secret_is_loose_only_beyond_0644(
-    packaged_home: Sandbox, app_secret: tuple[str, Path], probe: FakeProbe, mode: int, is_loose: bool
+    packaged_home: Sandbox, app_secret: tuple[str, Path, str], probe: FakeProbe, mode: int, is_loose: bool
 ) -> None:
-    name, secret = app_secret
-    (place,) = packaged_entry(name).paths
+    _, secret, place = app_secret
+    secret.parent.mkdir()
     secret.write_text("planted")
     secret.chmod(mode)
 
@@ -111,7 +113,7 @@ def test_the_app_secret_is_loose_only_beyond_0644(
     assert (f"~/{place}" in findings_of(report_of(packaged_home.home), "loose-mode")) is is_loose
 
 
-def test_the_packaged_manifest_holds_no_value_of_hopins_session_secret() -> None:
+def test_the_packaged_manifest_holds_no_generated_app_secret_value() -> None:
     assert not re.search(r"[A-Za-z0-9_-]{43,}", PACKAGED_MANIFEST.read_text())
 
 
