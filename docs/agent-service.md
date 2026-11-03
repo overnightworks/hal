@@ -329,8 +329,8 @@ step below).
   `RETENTION_DAYS` in `src/hal/litellm_expiry.py`, not a setting, because the privacy text states
   it. The run prints counts only; with `litellm-db` not running it deletes nothing and exits 0. A
   deleted row stays in the backup's snapshots as long as [backup.md](backup.md), „What a backup
-  holds“, states, and a restore brings it back until the next daily run deletes it again. A failed
-  run fails `hal-expire.service`, which `hal check` and `hal alarm` report as `job-failed`; its error line says `nothing deleted` only
+  holds, and its limit“, states, and a restore brings it back until the next daily run deletes it
+  again. A failed run fails `hal-expire.service`, which `hal check` and `hal alarm` report as `job-failed`; its error line says `nothing deleted` only
   when psql reported the failure, and otherwise that the outcome is unknown and the next run repeats
   it. `probe/agent-service/litellm_expiry.py` proves it on the fake-only stack; re-run it on every
   LiteLLM bump, since a schema change shows in production only as a failed unit.

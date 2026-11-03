@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from hal.backup.apps import PRE_APPLY_TAG, AppsError, PostgresDatabase, parse_apps
+from hal.backup.apps import PRE_APPLY_TAG, App, AppsError, PostgresDatabase, parse_apps
 from hal.backup.cli import DEFAULT_APPS
 
 COMPOSE = Path(__file__).parent.parent / "compose.yaml"
@@ -51,12 +51,13 @@ def test_a_refused_dump_names_the_plain_values_it_allows():
     ("count_table", "accepted"),
     [
         ("LiteLLM_VerificationToken", True),
-        ('LiteLLM"; DROP TABLE x; --', False),
+        ('LiteLLM"Token', False),
         ("LiteLLM Token", False),
         ("LiteLLM;Token", False),
+        ("LiteLLMTokenü", False),
     ],
 )
-def test_count_table_admits_a_mixed_case_name_and_refuses_a_quote_a_space_or_a_semicolon(
+def test_count_table_admits_a_mixed_case_name_and_refuses_a_quote_a_space_a_semicolon_or_non_ascii(
     count_table, accepted
 ):
     restore_test = f"[app.keycloak.restore_test]\ncount_table = {count_table!r}\n"
@@ -69,22 +70,26 @@ def test_count_table_admits_a_mixed_case_name_and_refuses_a_quote_a_space_or_a_s
             parse_apps(text)
 
 
-def _shipped_stack_databases() -> list[tuple[str, PostgresDatabase]]:
-    compose_name = yaml.safe_load(COMPOSE.read_text())["name"]
-    return [
-        (app.name, app.database)
-        for app in parse_apps(DEFAULT_APPS.read_text())
-        if app.compose_project == compose_name and isinstance(app.database, PostgresDatabase)
-    ]
-
-
-@pytest.mark.parametrize(("name", "database"), _shipped_stack_databases())
-def test_a_shipped_stack_record_names_its_compose_service_user_database_and_major(name, database):
+def _shipped_stack_apps() -> list[App]:
     services = yaml.safe_load(COMPOSE.read_text())["services"]
-    service = services[database.db_service]
+    apps = [
+        app
+        for app in parse_apps(DEFAULT_APPS.read_text())
+        if isinstance(app.database, PostgresDatabase) and app.database.db_service in services
+    ]
+    assert apps, "no shipped Postgres record names a service of compose.yaml"
+    return apps
+
+
+@pytest.mark.parametrize("app", _shipped_stack_apps(), ids=lambda app: app.name)
+def test_a_shipped_stack_record_names_its_compose_project_service_user_database_and_major(app):
+    compose = yaml.safe_load(COMPOSE.read_text())
+    database = app.database
+    service = compose["services"][database.db_service]
     image_major = re.match(r"postgres:(\d+)", service["image"])
 
-    assert (database.db_user, database.db_name, database.postgres_major) == (
+    assert (app.compose_project, database.db_user, database.db_name, database.postgres_major) == (
+        compose["name"],
         service["environment"]["POSTGRES_USER"],
         service["environment"]["POSTGRES_DB"],
         int(image_major[1]),

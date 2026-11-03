@@ -418,10 +418,9 @@ printed ID brings the old Keycloak back.
 At its next start `litellm-db` is empty and LiteLLM migrates it. The key step of `hal apply` then
 makes the person budget and each app's key anew from the key files (when it runs:
 [agent-service.md](agent-service.md), „The API route“). Every budget restarts at zero, and the
-daily rows are gone. The key files must be the ones that made the hashes; `~/.secrets` is in no
-backup. `hal restore litellm --target <dir>` restores the last backup's dump into a folder;
-loading it into the live database is not scripted yet ([architecture.md](architecture.md),
-gap 18).
+daily rows are gone. `~/.secrets` is in no backup. `hal restore litellm --target <dir>` restores
+the last backup's dump into a folder; loading it into the live database is not scripted yet
+([architecture.md](architecture.md), gap 18). The key files must be the ones that made the hashes.
 
 ### Stale locks
 

@@ -1109,7 +1109,7 @@ def test_keycloak_reported_failed_while_songmaker_is_still_backed_up_when_keyclo
 ):
     """#107 T7: keycloak is recorded failed, songmaker is still backed up."""
     machine.lose_keycloak_database()
-
+    shipped = {app.name for app in parse_apps(cli.DEFAULT_APPS.read_text())}
     outcome = edge_backup(*declare_shipped_apps(), "backup")
 
     assert outcome.exit_code == 3
@@ -1118,7 +1118,7 @@ def test_keycloak_reported_failed_while_songmaker_is_still_backed_up_when_keyclo
         "keycloak",
         "not-ready",
     )
-    assert "keycloak" not in [s["app"] for s in machine.snapshots]
+    assert {s["app"] for s in machine.snapshots} == shipped - {"keycloak"}
     assert app_history(outcome.status)["last_snapshot_id"] == machine.snapshots[0]["id"]
 
 

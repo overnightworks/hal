@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import os
 import re
 import secrets
 import subprocess
@@ -36,15 +37,16 @@ from litellm_expiry import HAL, HAL_SECONDS
 from litellm_keys import APPS, KeysProbe, first_of_next_month, parsed_time
 from scratch_secrets import write_new
 
-from hal.backup.apps import parse_apps
+from hal.backup.apps import DB_FOLDER, parse_apps
 from hal.backup.cli import DEFAULT_APPS
+from hal.backup.settings import Settings
+from hal.backup.verify import DUMP_NAME
+from hal.grammar import ExitCode
 from hal.stack import litellm_keys
 from hal.stack.litellm_keys import KeysDone, Target
 
 APP = "litellm"
-COUNT_TABLE = "LiteLLM_VerificationToken"
 HAL_TABLES = (
-    COUNT_TABLE,
     "LiteLLM_BudgetTable",
     "LiteLLM_EndUserTable",
     "LiteLLM_DailyEndUserSpend",
@@ -53,11 +55,7 @@ HAL_TABLES = (
 )
 DAILY_TABLES = ("LiteLLM_DailyEndUserSpend", "LiteLLM_DailyToolSpend")
 MIGRATIONS_TABLE = "_prisma_migrations"
-RESTIC_PASSWORD_FILE = Path(".secrets/restic/password")
-STATUS_FILE = Path(".local/state/edge/backup-status.json")
-DUMP_FILE = Path("db/db.dump")
 DUMP_SECONDS = 120
-FAILURE_EXIT = 3
 # A TABLE or VIEW entry of `pg_restore --list`: "<id>; <oid> <oid> TABLE <schema> <name> <owner>".
 LISTED = re.compile(r'^\d+; \d+ \d+ (TABLE|VIEW) (\S+) "?([^"\s]+)"? \S+$')
 
@@ -79,7 +77,8 @@ class BackupProbe(KeysProbe, AdmissionProbe):
     def __init__(self, scratch: Path) -> None:
         super().__init__(scratch)
         self.scratch = scratch
-        password = self.home / RESTIC_PASSWORD_FILE
+        self.settings = Settings.for_home(self.home, os.getuid(), os.getgid())
+        password = self.settings.password_file
         password.parent.mkdir(mode=0o700)
         write_new(password, secrets.token_urlsafe(32).encode(), 0o600)
         self.apps_file = scratch / "apps.toml"
@@ -94,6 +93,7 @@ class BackupProbe(KeysProbe, AdmissionProbe):
         self.apps_file.write_text(toml_table(f"app.{APP}", record))
         (declared,) = parse_apps(self.apps_file.read_text())
         (shipped,) = (app for app in parse_apps(shipped_text) if app.name == APP)
+        self.count_table = shipped.restore_test.count_table
         expect(
             declared == dataclasses.replace(shipped, compose_project=PROJECT),
             "the scratch record differs from the shipped one beyond its project",
@@ -119,7 +119,7 @@ class BackupProbe(KeysProbe, AdmissionProbe):
         return result
 
     def last_snapshot(self) -> str:
-        status = json.loads((self.home / STATUS_FILE).read_text())
+        status = json.loads(self.settings.status_file.read_text())
         return status["apps"][APP]["last_snapshot_id"]
 
     def backed_up(self, cell: str, *options: str) -> subprocess.CompletedProcess:
@@ -204,7 +204,7 @@ class BackupProbe(KeysProbe, AdmissionProbe):
         target = self.scratch / "restored-litellm"
         restored = self.hal("restore", APP, "--target", str(target))
         expect(restored.returncode == 0, f"B2: hal restore exited {restored.returncode}")
-        dump = target / DUMP_FILE
+        dump = target / DB_FOLDER / DUMP_NAME
         listed = {
             (found[1], found[3])
             for line in self.dump_tool(dump, "--list").splitlines()
@@ -220,7 +220,7 @@ class BackupProbe(KeysProbe, AdmissionProbe):
         expect(listed == live, f"B2: dump only {sorted(listed - live)}, live only "
                f"{sorted(live - listed)}")  # fmt: skip
         tables = {name for kind, name in listed if kind == "TABLE"}
-        missing = {MIGRATIONS_TABLE, *HAL_TABLES} - tables
+        missing = {MIGRATIONS_TABLE, self.count_table, *HAL_TABLES} - tables
         expect(not missing, f"B2: the dump lacks {sorted(missing)}")
         self.hold("B2", f"the dump lists {len(tables)} tables and {len(listed) - len(tables)} "
                   "views of schema public, exactly those of the live litellm-db; "
@@ -285,17 +285,17 @@ class BackupProbe(KeysProbe, AdmissionProbe):
                   "P has no row, no daily rows; hopin's key with P served, F +1")  # fmt: skip
 
     def cell_b7(self) -> None:
-        self.query(f'DELETE FROM "{COUNT_TABLE}";')  # noqa: S608 - the table is this probe's literal
+        self.query(f'DELETE FROM "{self.count_table}";')  # noqa: S608 - the table is the shipped record's count_table
         self.backed_up("B7")
         snapshot = self.last_snapshot()
         tested = self.hal("restore", "--test", APP, "--snapshot", snapshot)
-        line = rf"✗ litellm\s+not proven\s+verify: the restored table {COUNT_TABLE} is empty"
-        expect(tested.returncode == FAILURE_EXIT, f"B7: exit {tested.returncode}")
+        line = rf"✗ litellm\s+not proven\s+verify: the restored table {self.count_table} is empty"
+        expect(tested.returncode == ExitCode.FAILURE, f"B7: exit {tested.returncode}")
         expect(bool(re.search(line, tested.stdout)), f"B7: {tested.stdout.strip()[-300:]!r}")
         self.make_keys("B7", APPS, budget_new=False)
         self.hold("B7", f"no key rows: snapshot {snapshot[:8]} ✗ litellm not proven, verify: "
-                  f"the restored table {COUNT_TABLE} is empty, exit {FAILURE_EXIT}; the key "
-                  "step made the three keys again")  # fmt: skip
+                  f"the restored table {self.count_table} is empty, exit "
+                  f"{ExitCode.FAILURE.value}; the key step made the three keys again")  # fmt: skip
 
 
 def main() -> int:
