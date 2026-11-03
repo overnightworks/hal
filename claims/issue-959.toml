@@ -1,0 +1,8 @@
+claim_id = "fe139179311046e8ba7f6a3545c7ba5f"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "c4f6c93ff60f09509fde10f82fa2b6940773e576"
+branch = "claude/issue-959-s3b-5-docker-restart-row"
+scope = ["docs/design/hal-output.html", "docs/home.md", "scripts/system-proof/drive.sh", "src/hal/workstation/setup.py", "src/hal/workstation/system_step.py", "tests/support/workstation_support.py", "tests/test_workstation_setup_system.py", "tests/test_workstation_system_step_runner.py"]
+opened_commit = "686d4ab9ecac354934f90bb43ea54d4e5e52e29b"
+whole_reason = "The forecast read, the row it prints, the fake that feeds the tests, the proof cell that checks the count against what the restart left down, and the picture and docs that name the row are one sentence of picture A; a part alone prints a row nothing proves or leaves a pin naming the old run."
