@@ -739,7 +739,7 @@ def test_a_litellm_secret_is_read_by_exactly_the_services_of_compose_that_mount_
     (secret,) = [key for key, declared in compose["secrets"].items() if declared["file"].removeprefix("${HOME}/") in map(str, entry.paths)]
     mounting = {service for service, declared in compose["services"].items() if secret in {mount if isinstance(mount, str) else mount["source"] for mount in declared.get("secrets", [])}}
     # an app reads its key from the app's own checkout, not from compose
-    readers = set(entry.read_by) & compose["services"].keys() if name in APP_KEYS else set(entry.read_by)
+    readers = set(entry.read_by) - {name.rpartition("/")[2]} if name in APP_KEYS else set(entry.read_by)
     assert readers == mounting
 
 

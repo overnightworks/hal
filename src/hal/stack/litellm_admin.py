@@ -291,7 +291,7 @@ def read_secret(path: Path) -> str:
     except OSError as error:
         raise AdminError(f"cannot read the key file {path}") from error
     if not value.isprintable():  # a line break or control character cannot be a header value
-        raise AdminError(f"the key file {path} holds no single line")
+        raise AdminError(f"the key file {path} holds no single printable line")
     return value
 
 

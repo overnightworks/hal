@@ -1,4 +1,4 @@
-"""The one-off's compose service (#964): `compose.yaml` runs `src/hal/stack/litellm_admin.py` where
+"""The one-off's compose service: `compose.yaml` runs `src/hal/stack/litellm_admin.py` where
 the program looks for its files."""
 
 import re

@@ -302,6 +302,13 @@ def test_while_litellm_runs_the_step_reads_with_the_budget_id_config_yaml_names(
         pytest.param(
             '{"apps": {}}', 0, "the key step answered an unexpected shape", id="a wrong shape"
         ),
+        pytest.param(
+            '{"apps": {"hopin": {"key": "a string", "name_taken": false}}, "budget": null,'
+            ' "models": []}',
+            0,
+            "the key step answered an unexpected shape",
+            id="a key entry that is no object",
+        ),
     ],
 )
 def test_a_read_that_fails_while_litellm_runs_plans_nothing_and_says_why(

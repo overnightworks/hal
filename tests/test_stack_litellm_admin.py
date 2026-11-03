@@ -1,5 +1,5 @@
 """The key step's one-off (#964): `src/hal/stack/litellm_admin.py` against a local fake LiteLLM
-admin API, as the realm observer's tests drive it, and the compose service that runs it."""
+admin API, as the realm observer's tests drive it."""
 
 import hashlib
 import importlib.util
@@ -160,6 +160,8 @@ class Handler(BaseHTTPRequestHandler):
 
 class Server(ThreadingHTTPServer):
     fake: FakeLitellm
+    # server_close() then joins every handler, so a released one writes before the next test runs.
+    daemon_threads = False
 
 
 @dataclass(frozen=True)
@@ -406,14 +408,13 @@ def test_a_failed_read_is_one_named_line_on_stderr_nothing_on_stdout_and_exit_1(
 def test_a_timed_out_read_is_one_named_line_on_stderr_nothing_on_stdout_and_exit_1(
     scene: Scene,
 ) -> None:
-    plant_keys(scene)
-    scene.fake.slow.add("/budget/info")
+    scene.fake.slow.add("/v2/key/info")
     run = scene.run("--read", BUDGET_ID)
 
     assert (run.exit_code, run.stdout, run.stderr) == (
         1,
         "",
-        "litellm-keys: LiteLLM does not answer /budget/info (timed out)\n",
+        "litellm-keys: LiteLLM does not answer /v2/key/info (timed out)\n",
     )
 
 
@@ -461,7 +462,10 @@ def test_a_master_key_file_that_is_no_single_printable_line_is_refused_naming_th
     run = scene.run("--read", BUDGET_ID)
 
     assert (run.exit_code, run.stdout) == (1, "")
-    assert run.stderr == f"litellm-keys: the key file {scene.master_file} holds no single line\n"
+    assert (
+        run.stderr
+        == f"litellm-keys: the key file {scene.master_file} holds no single printable line\n"
+    )
     assert scene.fake.arrivals == []
     assert "sk-first" not in run.stderr
 

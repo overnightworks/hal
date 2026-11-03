@@ -205,7 +205,7 @@ def test_a_taken_name_beside_a_unit_switch_alone_is_a_partial_end_with_nothing_w
     assert lines_of(err) == ["error: partial, hopin name taken"]
 
 
-def test_the_key_step_writes_after_the_realm_step_and_before_the_apps_are_started(
+def test_the_key_step_writes_before_the_apps_are_started(
     keys,
     app_world,  # noqa: F811
 ):
