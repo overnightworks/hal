@@ -234,22 +234,34 @@ def _plan(
     )
 
 
+@dataclass(frozen=True, kw_only=True)
+class Collaborators:
+    """What `apply_local` talks to and a test replaces; the default is production. A None
+    `engine`, `realm_backup` or `app_runtime` is built from the repository, home and state
+    directory the apply runs in."""
+
+    engine: compose.Compose | None = None
+    check: setup.SetupCheck = setup.run_setup_check
+    run_setup: setup.SetupRunner = setup.run_setup
+    verifier: barrier.Verifier = barrier.PROVEN_OVER_HTTP
+    watch: compose.Watch = compose.SETTLED
+    git: checkout.Runner = checkout.run_git
+    ensure_environment: EnsureEnvironment = environment.ensure
+    realm_backup: reconcile.Backup | None = None
+    app_runtime: AppRuntime | None = None
+    rename: Rename = os.rename
+
+
+PRODUCTION = Collaborators()
+
+
 def apply_local(
     state_directory: Path,
-    engine: compose.Compose | None = None,
     repository: Path = compose.REPOSITORY,
-    check: setup.SetupCheck = setup.run_setup_check,
-    run_setup: setup.SetupRunner = setup.run_setup,
     home: Path | None = None,
-    verifier: barrier.Verifier = barrier.PROVEN_OVER_HTTP,
-    watch: compose.Watch = compose.SETTLED,
-    git: checkout.Runner = checkout.run_git,
-    ensure_environment: EnsureEnvironment = environment.ensure,
-    realm_backup: reconcile.Backup | None = None,
-    app_runtime: AppRuntime | None = None,
-    rename: Rename = os.rename,
+    collaborators: Collaborators = PRODUCTION,
 ) -> int:
-    started = verifier.clock()
+    started = collaborators.verifier.clock()
     if not at_terminal():
         write_error(NEEDS_TERMINAL)
         return ApplyExit.GUARD_REFUSED
@@ -265,26 +277,20 @@ def apply_local(
         write_error(APPLY_RUNNING)
         return ApplyExit.GUARD_REFUSED
     try:
-        live = checkout.Git(repository, git)
+        live = checkout.Git(repository, collaborators.git)
         if refusal := refused_off_clean_main(live):
             return ApplyExit.CANNOT_PLAN if refusal.cannot_tell else ApplyExit.GUARD_REFUSED
         if (origin := fetched(live, write_error)) is None or _waits_on_origin(origin):
             return ApplyExit.CANNOT_PLAN
-        if not _environment_ready(repository, ensure_environment):
+        if not _environment_ready(repository, collaborators.ensure_environment):
             return ApplyExit.CANNOT_PLAN
         write_row(checkout_row(origin))
         return _plan_and_apply(
             state_directory,
-            engine,
             live,
-            check,
-            run_setup,
-            verifier,
-            watch,
-            realm_backup or reconcile.Backup.installed(repository, _say_waiting),
-            app_runtime or AppRuntime.of(home or Path.home(), state_directory),
-            rename,
-            lambda: verifier.clock() - started,
+            home or Path.home(),
+            collaborators,
+            lambda: collaborators.verifier.clock() - started,
         )
     finally:
         os.close(lock)
@@ -361,29 +367,29 @@ def _environment_ready(repository: Path, ensure_environment: EnsureEnvironment) 
 
 def _plan_and_apply(
     state_directory: Path,
-    engine: compose.Compose | None,
     live: checkout.Git,
-    check: setup.SetupCheck,
-    run_setup: setup.SetupRunner,
-    verifier: barrier.Verifier,
-    watch: compose.Watch,
-    realm_backup: reconcile.Backup,
-    app_runtime: AppRuntime,
-    rename: Rename,
+    home: Path,
+    collaborators: Collaborators,
     elapsed: Callable[[], float],
 ) -> int:
     repository = live.tree
-    engine = engine or compose.Compose(repository=repository)
+    engine = collaborators.engine or compose.Compose(repository=repository)
+    app_runtime = collaborators.app_runtime or AppRuntime.of(home, state_directory)
+    realm_backup = collaborators.realm_backup or reconcile.Backup.installed(
+        repository, _say_waiting
+    )
     marks = switches.Switches(state_directory)
     record = core.Record(state_directory)
     try:
         completed: list[str] = []
         while True:  # the plan made after the setups ran is held to the same refusals
-            planned = _plan(engine, marks, record, live, app_runtime, rename)
-            missing = _missing_setups(planned, repository, check)
+            planned = _plan(engine, marks, record, live, app_runtime, collaborators.rename)
+            missing = _missing_setups(planned, repository, collaborators.check)
             exit_code = _refusal(missing, planned, bool(completed))
             if exit_code is None:
-                exit_code = _ask_and_run_setups(missing, repository, check, run_setup)
+                exit_code = _ask_and_run_setups(
+                    missing, repository, collaborators.check, collaborators.run_setup
+                )
             if exit_code is not None:
                 return exit_code
             if not missing:
@@ -410,7 +416,7 @@ def _plan_and_apply(
         engine,
         planned,
         marks,
-        CorePhase(record, repository, verifier, watch),
+        CorePhase(record, repository, collaborators.verifier, collaborators.watch),
         completed,
         realm_backup,
     )

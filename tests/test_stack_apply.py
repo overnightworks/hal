@@ -800,10 +800,10 @@ def test_without_a_terminal_it_refuses_before_anything_else(
     monkeypatch.setattr(sys, "stdin", io.StringIO("yes\n"))
     environment_file = (any_tree / ".env").stat()
 
-    exit_code = apply.apply_local(
-        state, compose.Compose(scripted.run, any_tree), any_tree, missing_setup, setup_run, home,
+    exit_code = apply.apply_local(state, any_tree, home, apply.Collaborators(
+        engine=compose.Compose(scripted.run, any_tree), check=missing_setup, run_setup=setup_run,
         git=scripted_git,
-    )  # fmt: skip
+    ))  # fmt: skip
 
     assert exit_code == apply.ApplyExit.GUARD_REFUSED
     assert "refused, stdin and stdout must be a terminal" in capsys.readouterr().err
