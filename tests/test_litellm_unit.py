@@ -13,10 +13,13 @@ import secrets
 import stat
 import subprocess
 import tomllib
+from collections.abc import Iterator
 from pathlib import Path
+from types import ModuleType, SimpleNamespace
 
 import pytest
 import yaml
+from support.probe_support import probe_imports
 from support.script_module import loaded_script
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -633,3 +636,91 @@ def test_the_canary_with_cancel_reads_no_record_for_a_run_id_it_cannot_trust(can
 
     assert (code, lines[-1]) == (1, "status other")
     assert [method for method, _ in connection.requests] == ["POST"]
+
+
+# --- the probe's reading of LiteLLM's processes and listeners, on synthetic scans ---------------
+
+ENGINE_BINARY = "/opt/prisma/engine"
+PROXY_SOCKET = {"address": "00000000:0FA0", "version": 4}
+ENGINE_SOCKET = {"address": "0100007F:15B3", "version": 4}
+
+
+def snapshot_of(litellm, monkeypatch, processes: dict, listeners: list[dict]):
+    """`proxy_snapshot` over one scan of a LiteLLM container, without a container."""
+    probe = object.__new__(litellm.LitellmProbe)
+    probe.__dict__.update(proxy_address="0.0.0.0:4000", engine_executable=ENGINE_BINARY)
+    scan = {"processes": processes, "listeners": listeners}
+    monkeypatch.setattr(probe, "container", lambda _service: "litellm-1", raising=False)
+    monkeypatch.setattr(
+        probe, "run", lambda *_, **__: SimpleNamespace(stdout=json.dumps(scan)), raising=False
+    )
+    return probe.proxy_snapshot()
+
+
+@pytest.fixture(scope="module")
+def litellm() -> Iterator[ModuleType]:
+    with probe_imports():
+        import litellm as probe
+
+        yield probe
+
+
+@pytest.mark.parametrize(
+    ("executable", "parent", "is_engine"),
+    [
+        pytest.param(ENGINE_BINARY, 7, True, id="the image's engine under the proxy"),
+        pytest.param(ENGINE_BINARY + "-other", 7, False, id="a name that starts like the engine"),
+        pytest.param(
+            "/opt/other/query-engine", 7, False, id="the engine's name in another directory"
+        ),
+        pytest.param(ENGINE_BINARY, 1, False, id="the engine binary under another parent"),
+    ],
+)
+def test_only_the_images_engine_binary_under_the_proxy_is_the_query_engine(
+    litellm, executable, parent, is_engine
+):
+    probe = object.__new__(litellm.LitellmProbe)
+    probe.__dict__["engine_executable"] = ENGINE_BINARY
+
+    assert probe.is_engine({"parent": parent, "executable": executable}, 7) is is_engine
+
+
+def test_the_proxy_listens_once_it_owns_the_declared_address_and_the_engine_is_told_apart(
+    litellm, monkeypatch
+):
+    processes = {
+        "7": {"parent": 1, "executable": "/app/python"},
+        "9": {"parent": 7, "executable": ENGINE_BINARY},
+    }
+    listeners = [{**PROXY_SOCKET, "owners": [7]}, {**ENGINE_SOCKET, "owners": [9]}]
+
+    snapshot = snapshot_of(litellm, monkeypatch, processes, listeners)
+
+    assert (snapshot.listening, snapshot.engines, snapshot.outside) == (
+        True,
+        {9: ["127.0.0.1:5555"]},
+        ["0.0.0.0:4000"],
+    )
+
+
+def test_a_lone_engine_socket_is_no_listening_proxy(litellm, monkeypatch):
+    processes = {
+        "7": {"parent": 1, "executable": "/app/python"},
+        "9": {"parent": 7, "executable": ENGINE_BINARY},
+    }
+
+    snapshot = snapshot_of(litellm, monkeypatch, processes, [{**ENGINE_SOCKET, "owners": [9]}])
+
+    assert (snapshot.listening, snapshot.engines) == (False, {})
+
+
+def test_a_listener_of_a_look_alike_engine_stays_outside_the_engine(litellm, monkeypatch):
+    processes = {
+        "7": {"parent": 1, "executable": "/app/python"},
+        "9": {"parent": 7, "executable": "/opt/other/query-engine-other"},
+    }
+    listeners = [{**PROXY_SOCKET, "owners": [7]}, {**ENGINE_SOCKET, "owners": [9]}]
+
+    snapshot = snapshot_of(litellm, monkeypatch, processes, listeners)
+
+    assert (snapshot.engines, snapshot.outside) == ({}, ["0.0.0.0:4000", "127.0.0.1:5555"])

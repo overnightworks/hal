@@ -159,6 +159,16 @@ def bound_names(declared: str) -> list[list[str]]:
     return [[f"{wildcard}:{port}"] for wildcard in WILDCARD_SOCKETS]
 
 
+def named_sockets(listeners: list[dict]) -> list[tuple[str, list[int]]]:
+    """Each listening socket as `listeners_of` names it with the pids that hold it, without Docker's
+    embedded resolver, which listens in every container's namespace."""
+    named = [
+        (socket_name(entry["address"], entry["version"]), entry["owners"]) for entry in listeners
+    ]
+    resolver = EMBEDDED_RESOLVER + ":"
+    return [(name, owners) for name, owners in named if not name.startswith(resolver)]
+
+
 @dataclass(frozen=True)
 class ProxySnapshot:
     """LiteLLM's listening TCP sockets as one scan of the container saw them."""
@@ -642,11 +652,7 @@ class LitellmProbe(IssuerProbe):
                 stdin=SNAPSHOT_PROGRAM,
             ).stdout
         )
-        sockets = [
-            (socket_name(listener["address"], listener["version"]), listener["owners"])
-            for listener in scan["listeners"]
-        ]
-        sockets = [(n, o) for n, o in sockets if not n.startswith(EMBEDDED_RESOLVER + ":")]
+        sockets = named_sockets(scan["listeners"])
         declared = {name for names in bound_names(self.proxy_address) for name in names}
         proxies = {pid for name, owners in sockets if name in declared for pid in owners}
         engines = {
@@ -654,11 +660,8 @@ class LitellmProbe(IssuerProbe):
             for pid, row in scan["processes"].items()
             if any(self.is_engine(row, proxy) for proxy in proxies)
         }
-        return ProxySnapshot(
-            frozenset(proxies),
-            engines,
-            [name for name, owners in sockets if not set(owners) & engines.keys()],
-        )
+        outside = [name for name, owners in sockets if not set(owners) & engines.keys()]
+        return ProxySnapshot(frozenset(proxies), engines, outside)
 
     def cells_r1_r2(self) -> None:
         for cell, name in (("R1", PROVIDER_HOST), ("R2", ISSUER_HOST)):
