@@ -290,6 +290,43 @@ services:
     volumes:
       - ./src/hal/stack/realm/observe.py:/opt/observer/observe.py:ro
 
+  # hal apply's key step (src/hal/stack/litellm_admin.py): reads and makes each app's LiteLLM key
+  # and the person budget through LiteLLM's admin routes with the master key. The apps are the key
+  # files mounted below, one secret each. No depends_on: the step never starts LiteLLM. Run it as
+  # `compose run -T --rm --no-deps litellm-keys` with `--read <budget id>`, or with `--write` and
+  # the changes on stdin.
+  litellm-keys:
+    # realm-observer's python pin; tests/test_stack_litellm_admin.py holds the two equal.
+    image: python:3.14.10-alpine@sha256:eb2c62658b8d51bff0acc408504b76521d02030de56a8a3c1e830083e89b89d2
+    profiles: [apply]
+    logging: *one-off-logging
+    # litellm's user, which owns the key files the secrets bind.
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    networks: [litellm-backend]
+    # -I ignores the PYTHON* environment, so -B is what keeps bytecode unwritten.
+    entrypoint:
+      - python
+      - -I
+      - -B
+      - /opt/litellm-keys/litellm_admin.py
+      - --base-url
+      - http://litellm:4000
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+    secrets:
+      - litellm_master_key
+      - source: litellm_key_hopin
+        target: apps/hopin
+      - source: litellm_key_presentator
+        target: apps/presentator
+      - source: litellm_key_songmaker
+        target: apps/songmaker
+    volumes:
+      - ./src/hal/stack/litellm_admin.py:/opt/litellm-keys/litellm_admin.py:ro
+
   step-ca:
     profiles: [step-ca]
     image: smallstep/step-ca:0.30.2@sha256:a2b17872915c193259b75a5474c398326f41bd199f0842093e52cf4182bc8270
@@ -624,10 +661,18 @@ secrets:
   # agent-service/setup makes it; only the private file reaches the service, never its folder.
   agent_service_signing_key:
     file: ${HOME}/.secrets/agent-service/signing/private.pem
-  # LiteLLM refuses to boot without a master key; this one is generated, read by litellm alone
-  # and known to no app, so its admin routes stay closed to them.
+  # LiteLLM refuses to boot without a master key; this one is generated, read by litellm and by
+  # hal apply's key step litellm-keys and known to no app, so its admin routes stay closed to them.
   litellm_master_key:
     file: ${HOME}/.secrets/litellm/master-key
+  # Each app's own LiteLLM key (hal setup writes it); here read by litellm-keys alone, which makes
+  # its key row.
+  litellm_key_hopin:
+    file: ${HOME}/.secrets/litellm/apps/hopin
+  litellm_key_presentator:
+    file: ${HOME}/.secrets/litellm/apps/presentator
+  litellm_key_songmaker:
+    file: ${HOME}/.secrets/litellm/apps/songmaker
   # The provider key, read by litellm alone.
   litellm_anthropic_key:
     file: ${HOME}/.secrets/litellm/anthropic
@@ -699,7 +744,7 @@ networks:
   litellm-api:
     internal: true
     driver_opts: *isolated-bridge
-  # The front and LiteLLM.
+  # The front, LiteLLM and hal apply's key step.
   litellm-backend:
     internal: true
     driver_opts: *isolated-bridge

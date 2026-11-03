@@ -732,11 +732,13 @@ def test_the_litellm_keys_without_a_prefix_keep_their_unprefixed_value_form(home
     assert not (home / ".secrets/litellm/db-password").read_text().startswith("sk-")
 
 
-def test_the_database_password_is_read_by_the_services_that_mount_it() -> None:
-    readers = {entry.name: entry.read_by for entry in load_manifest(PACKAGED_MANIFEST)}
-    compose = yaml.safe_load((Path(__file__).resolve().parents[1] / "compose.yaml").read_text())["services"]
-    mounting = {name for name, service in compose.items() if "litellm_db_password" in service.get("secrets", [])}
-    assert set(readers["litellm/db-password"]) == mounting
+@pytest.mark.parametrize("name", ["litellm/master-key", "litellm/db-password", *APP_KEYS])
+def test_a_litellm_secret_is_read_by_exactly_the_services_of_compose_that_mount_it(name: str) -> None:
+    entry = {entry.name: entry for entry in load_manifest(PACKAGED_MANIFEST)}[name]
+    compose = yaml.safe_load((Path(__file__).resolve().parents[1] / "compose.yaml").read_text())
+    (secret,) = [key for key, declared in compose["secrets"].items() if declared["file"].removeprefix("${HOME}/") in map(str, entry.paths)]
+    mounting = {service for service, declared in compose["services"].items() if secret in {mount if isinstance(mount, str) else mount["source"] for mount in declared.get("secrets", [])}}
+    assert set(entry.read_by) & compose["services"].keys() == mounting
 
 
 def test_each_apps_litellm_key_is_listed_with_its_readers_and_mode_0644_is_no_finding(tmp_path: Path, probe: FakeProbe, capsys) -> None:
@@ -755,9 +757,9 @@ def test_each_apps_litellm_key_is_listed_with_its_readers_and_mode_0644_is_no_fi
     assert (code, by_service) == (0, 0)
     assert findings_of(report, "loose-mode") == {}
     assert all(f"| {app} | " in listing and "litellm" in listing.split(f"| {app} |")[1].splitlines()[0] for app in APPS)
-    litellm_rows = [line for line in listing.splitlines() if line.startswith("| litellm | ")]
-    assert len(litellm_rows) == 1
-    assert all(key in litellm_rows[0] for key in APP_KEYS)
+    key_step_rows = [line for line in listing.splitlines() if line.startswith("| litellm-keys | ")]
+    assert len(key_step_rows) == 1
+    assert all(key in key_step_rows[0] for key in APP_KEYS)
 
 
 def test_the_real_terminal_fact_is_false_while_stdio_is_captured(capsys: pytest.CaptureFixture[str]) -> None:

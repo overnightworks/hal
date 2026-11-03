@@ -29,6 +29,8 @@ enabled in the catalog, declares a setup, and its containers still run while it 
 the run is refused: nothing is asked or published. After the setups, and before the plan is
 shown, a service this run creates that names a secret file which does not exist refuses the run
 with that path and `next: hal setup`, where Compose would refuse it at `up`.
+While the `litellm` container runs, the key step (`litellm_keys.py`) plans each app's LiteLLM key
+and the person budget in the same plan and makes them after the realm step and before the apps.
 An app (an entry with `repo`) is planned last, in the same plan and under the same `yes`: its
 newest release tag is checked out, built, started and recorded once its containers are settled
 (`apps.py`).
@@ -75,7 +77,17 @@ from hal.output import (
     write_verdict,
 )
 from hal.output.command import Verb, command
-from hal.stack import barrier, catalog, checkout, compose, core, environment, setup, switches
+from hal.stack import (
+    barrier,
+    catalog,
+    checkout,
+    compose,
+    core,
+    environment,
+    litellm_keys,
+    setup,
+    switches,
+)
 from hal.stack.appkit_step import AppkitError, Rename, plan_appkit
 from hal.stack.apps import AppError, AppFailed, AppHeldOff, AppRuntime, plan_apps
 from hal.stack.core_phase import CoreFailure, CorePhase
@@ -97,6 +109,8 @@ from hal.stack.result_rows import (
     app_partial,
     app_row,
     appkit_rows,
+    keys_partial,
+    keys_rows,
     legal_rows,
     not_written_partial,
     not_written_row,
@@ -198,6 +212,7 @@ def _plan(
         gates.get(reconcile.REALM_UNIT),
         reconcile.restart_of(plans, unit_services.recreates),
     )
+    keys = litellm_keys.plan_keys(engine, states, repository)
     app_plans = plan_apps(repository, fleet, app_runtime, marks)
     appkit = plan_appkit(repository, rename=rename)
     legal = plan_legal(repository, record.directory / RECORD_FILE, fleet)
@@ -212,6 +227,7 @@ def _plan(
         plans,
         unit_services.images,
         realm,
+        keys,
         app_plans,
         appkit,
         legal,
@@ -378,12 +394,8 @@ def _plan_and_apply(
         return ApplyExit.CANNOT_PLAN
     if planned.changes_nothing:
         _write_plan(planned)
-        if (realm := planned.realm).action is reconcile.RealmAction.UNREADABLE:
-            write_error(
-                f"realm: Keycloak could not be read; not checked ({realm.error})",
-                command(Verb.APPLY),
-            )
-            return ApplyExit.REFUSED
+        if (refused := _refused_unsettled(planned)) is not None:
+            return refused
         write_verdict(
             Verdict(
                 Glyph.DONE,
@@ -402,6 +414,23 @@ def _plan_and_apply(
         completed,
         realm_backup,
     )
+
+
+def _refused_unsettled(planned: Plan) -> int | None:
+    """How a plan that changes nothing ends when a step could not settle it, None when every step
+    did: an unread realm, unread keys, or an app whose key name another key holds."""
+    keys = planned.keys
+    if (realm := planned.realm).action is reconcile.RealmAction.UNREADABLE:
+        write_error(
+            f"realm: Keycloak could not be read; not checked ({realm.error})", command(Verb.APPLY)
+        )
+    elif keys.not_read is not None:
+        write_error(f"litellm: keys not read ({keys.not_read})", command(Verb.APPLY))
+    elif keys.name_taken:
+        write_error(f"litellm: {', '.join(keys.name_taken)} name taken; nothing changed")
+    else:
+        return None
+    return ApplyExit.REFUSED
 
 
 def _missing_setups(planned: Plan, repository: Path, check: setup.SetupCheck) -> list[MissingSetup]:
@@ -565,6 +594,17 @@ def _apply_realm(
     return error is not None
 
 
+def _apply_keys(engine: compose.Compose, planned: Plan) -> bool:
+    """The key step after the realm step; says its lines and whether it ended partial."""
+    result = litellm_keys.run_keys(planned.keys, engine)
+    for row in keys_rows(result):
+        write_row(row)
+    partial = keys_partial(result)
+    if partial:
+        write_error(*partial)
+    return partial is not None
+
+
 def _apply_apps(planned: Plan, marks: switches.Switches, progress: Progress) -> bool:
     """The app step after the realm step; says its lines and whether it ended partial."""
     failed = False
@@ -660,6 +700,8 @@ def _confirm_and_switch(
         mismatched = _observe_and_record(engine, planned, core_phase, started, progress)
         progress.unit, progress.step = reconcile.REALM_UNIT, "apply the realm step"
         realm_failed = _apply_realm(engine, planned, marks, core_phase, realm_backup)
+        progress.unit, progress.step = litellm_keys.LITELLM_SERVICE, "apply the key step"
+        keys_failed = _apply_keys(engine, planned)
         apps_failed = _apply_apps(planned, marks, progress)
     except (compose.ComposeError, switches.SwitchError, core.CoreError) as error:
         write_error(f"partial, {progress.unit}: could not {progress.step}, {error}")
@@ -667,7 +709,8 @@ def _confirm_and_switch(
     except KeyboardInterrupt as interruption:
         _say_interrupted(progress, interruption)
         return ApplyExit.REFUSED
-    return _report_switched(changes, withheld, mismatched, realm_failed or apps_failed)
+    later_failed = realm_failed or keys_failed or apps_failed
+    return _report_switched(changes, withheld, mismatched, later_failed)
 
 
 def _report_switched(

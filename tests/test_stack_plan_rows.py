@@ -37,10 +37,12 @@ from hal.stack.core import (
     FollowerPlan,
     Gate,
 )
+from hal.stack.litellm_keys import Change, FieldChange, KeysPlan, Target
 from hal.stack.plan_rows import (
     CHECKOUT,
     CheckoutEvent,
     Effect,
+    KeysEvent,
     PlanEvent,
     PlanGroup,
     checkout_row,
@@ -51,11 +53,12 @@ from hal.stack.unit_plans import Action, ImageReference, KeptImage, Recreate
 
 
 def rows_of(**parts: object) -> tuple[Row, ...]:
-    [legal, core, units, apps] = groups_of(**parts)
-    assert (legal.heading, core.heading, units.heading, apps.heading) == (
+    [legal, core, units, keys, apps] = groups_of(**parts)
+    assert (legal.heading, core.heading, units.heading, keys.heading, apps.heading) == (
         None,
         PlanGroup.CORE,
         PlanGroup.UNITS,
+        PlanGroup.LITELLM,
         PlanGroup.APPS,
     )
     return apps.rows
@@ -232,7 +235,7 @@ def test_the_kept_images_come_before_the_realm_row_and_the_units_before_the_apps
     image = kept(ImageReference(KEYCLOAK, DIGEST_A), ImageReference(KEYCLOAK, DIGEST_B))
     realm = RealmPlan(RealmAction.RUN, why="x")
 
-    _, _, units, apps = groups_of(images=(image,), realm=realm, plans=(app_plan(AppKind.ON),))
+    _, _, units, _, apps = groups_of(images=(image,), realm=realm, plans=(app_plan(AppKind.ON),))
 
     assert [row.event for row in units.rows] == [PlanEvent.OLD_IMAGE, PlanEvent.REALM_APPLY]
     assert apps.rows
@@ -358,7 +361,7 @@ def test_a_unit_part_is_one_row_of_its_typed_fields(parts: dict[str, Any], row: 
 def test_the_unit_rows_stand_built_then_recreates_then_plans_then_images_then_the_realm() -> None:
     image = kept(ImageReference(KEYCLOAK, DIGEST_A), ImageReference(KEYCLOAK, DIGEST_B))
 
-    _, _, units, apps = groups_of(
+    _, _, units, _, apps = groups_of(
         built=(built(rebuilt=True),),
         recreates=(Recreate("keycloak", "keycloak-db"),),
         unit_plans=(unit_plan(Action.ON), unit_plan(Action.STAYS_STOPPED)),
@@ -517,14 +520,14 @@ def test_a_follower_is_one_row_and_a_waiting_one_ends_with_the_state_of_its_unit
 
 
 def test_the_core_group_holds_core_plans_then_followers_and_stands_before_units_and_apps() -> None:
-    _, core, units, apps = groups_of(
+    _, core, units, keys, apps = groups_of(
         core=(core_plan(CoreAction.RECREATE, DEFINITION),),
         followers=(follower_plan(FollowerAction.RECREATE, Gate.ON, DEFINITION),),
         unit_plans=(unit_plan(Action.ON),),
         plans=(app_plan(AppKind.ON),),
     )
 
-    assert [group.heading for group in (core, units, apps)] == list(PlanGroup)
+    assert [group.heading for group in (core, units, keys, apps)] == list(PlanGroup)
     assert [row.subject for row in core.rows] == ["socket-proxy", "traefik-mcp"]
 
 
@@ -591,3 +594,121 @@ def test_files_that_cannot_be_classified_are_one_row_with_the_reason() -> None:
     rows = update_row_texts(None, "cannot read compose.yaml")
 
     assert rows[1] == "files|cannot read compose.yaml|None|"
+
+
+def key_change(new: bool, *fields: FieldChange, subject: str = "hopin") -> Change:
+    return Change(Target.KEY, subject, new, fields)
+
+
+@pytest.mark.parametrize(
+    ("keys", "expected"),
+    [
+        pytest.param(KeysPlan(), (), id="no row when the step plans nothing"),
+        pytest.param(
+            KeysPlan(
+                (
+                    Change(
+                        Target.BUDGET,
+                        "person",
+                        True,
+                        (
+                            FieldChange("max_budget", None, 2.0),
+                            FieldChange("budget_duration", None, "1mo"),
+                        ),
+                    ),
+                )
+            ),
+            (Row(Glyph.ADD, "person", KeysEvent.NEW_BUDGET, "2 dollars · 1mo"),),
+            id="a new budget",
+        ),
+        pytest.param(
+            KeysPlan(
+                (
+                    key_change(
+                        True,
+                        FieldChange("key_alias", None, "hopin"),
+                        FieldChange("max_budget", None, 10.0),
+                        FieldChange("budget_duration", None, "1mo"),
+                        FieldChange("models", None, ("a", "b")),
+                        FieldChange("allowed_routes", None, ("/r",)),
+                        FieldChange("max_parallel_requests", None, 5),
+                    ),
+                )
+            ),
+            (
+                Row(
+                    Glyph.ADD,
+                    "hopin",
+                    KeysEvent.NEW_KEY,
+                    "10 dollars · 1mo · 2 models · 1 route · 5 parallel",
+                ),
+            ),
+            id="a new key",
+        ),
+        pytest.param(
+            KeysPlan(
+                (
+                    key_change(
+                        False,
+                        FieldChange("max_budget", 7.0, 10.0),
+                        FieldChange("max_parallel_requests", 2, 5),
+                        FieldChange("rpm_limit", 60, None),
+                        FieldChange("tpm_limit", 1000, None),
+                    ),
+                )
+            ),
+            (
+                Row(
+                    Glyph.CHANGE,
+                    "hopin",
+                    KeysEvent.KEY_CHANGED,
+                    "budget 7 → 10 dollars · parallel 2 → 5 · rpm 60 → none · tpm 1000 → none",
+                ),
+            ),
+            id="a pure limit change",
+        ),
+        pytest.param(
+            KeysPlan(
+                (
+                    key_change(
+                        False,
+                        FieldChange("models", ("a", "b"), ("b", "c")),
+                        FieldChange("key_alias", None, "hopin"),
+                        FieldChange("budget_duration", "1d", "1mo"),
+                    ),
+                )
+            ),
+            (
+                Row(
+                    Glyph.CHANGE,
+                    "hopin",
+                    KeysEvent.KEY_CHANGED,
+                    "models +c -a · name none → hopin · period 1d → 1mo",
+                ),
+            ),
+            id="models, name and period",
+        ),
+        pytest.param(
+            KeysPlan(name_taken=("hopin",)),
+            (Row(Glyph.NEEDS_YOU, "hopin", KeysEvent.NAME_TAKEN, "another key holds the name"),),
+            id="a taken name",
+        ),
+        pytest.param(
+            KeysPlan(not_read="status 502\x1b"),
+            (Row(Glyph.NEEDS_YOU, "litellm", KeysEvent.NOT_READ, "status 502\\x1b"),),
+            id="not read, its reason escaped",
+        ),
+    ],
+)
+def test_the_key_step_is_one_row_per_change_conflict_or_unread_step_under_litellm(
+    keys: KeysPlan, expected: tuple[Row, ...]
+) -> None:
+    group = groups_of(keys=keys)[3]
+
+    assert (group.heading, group.rows) == (PlanGroup.LITELLM, expected)
+
+
+def test_a_model_name_is_escaped_in_its_row() -> None:
+    keys = KeysPlan((key_change(False, FieldChange("models", (), ("evil\nname",))),))
+
+    assert groups_of(keys=keys)[3].rows[0].fact == "models +evil\\nname"
