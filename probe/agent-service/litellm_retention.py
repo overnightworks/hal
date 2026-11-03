@@ -660,7 +660,9 @@ class RetentionProbe(FailureProbe, KeyFiles):
         self.tag_barrier("T4")
         hopin = self.count(self.tag_rows_of(self.key))
         tags = self.count(f'SELECT count(*) FROM "{TAG_TABLE}"')  # noqa: S608 - the table name is this probe's literal
-        control = self.tag_rows([self.t1_tag])
+        control = self.count(
+            f"{self.tag_rows_of(self.file_keys['presentator'])} AND tag = '{self.t1_tag}'"
+        )
         expect(tags == 0 and hopin == 0, f"T4: {tags} tag table rows, {hopin} of hopin's key")
         expect(control >= 1, "T4: the control finds no tag row of T1")
         self.hold("T4", f"{TAG_TABLE} empty and no {DAILY_TAG_TABLE} row of hopin's key; "

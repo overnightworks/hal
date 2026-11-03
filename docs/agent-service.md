@@ -425,7 +425,7 @@ songmaker's own call is the proof.
 to let people in; it has not been run. It makes a paid call from hopin's app budget, so it runs only when the operator says so,
 after `hal apply` has made hopin's key. No one signs in: it checks that the front, the gateway, LiteLLM and its database each run once
 (C0), runs `agent-canary` once, which posts a random value to the front with hopin's key, the way an app does, and asks for it back (C1),
-waits 34 seconds, the longest interval at which LiteLLM writes to its database, and runs the retention census over those four containers for that value (C2), a `pg_dump` of the database among
+waits 34 seconds, the longest interval of the writers a request feeds, and runs the retention census over those four containers for that value (C2), a `pg_dump` of the database among
 the sinks. The dump reads the whole store into the program's memory and never leaves it. Each run leaves one customer row for its throwaway
 fingerprint, which `hal expire` removes like any other. Nothing is recreated; a failed canary ends the run, and a new run uses a new value.
 It prints only verdict lines of a closed grammar and a last line, `canary and census held` or `canary and census FAILED`, matching the exit

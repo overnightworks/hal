@@ -5,7 +5,7 @@
 It runs only at V3, on the operator's word: it makes a paid call, which spends from hopin's app
 budget. It checks that each container of the direct route runs once (C0), runs `agent-canary` once,
 which posts a random value through the front with hopin's key and asks for it back (C1), waits for
-the longest interval at which LiteLLM writes to its database, and runs the retention census over
+the longest interval of the writers a request feeds, and runs the retention census over
 those containers for that value (C2), the dump of `litellm-db` among the sinks. The dump reads the
 whole store into this program's memory; no line of it is ever printed. Nothing is recreated and no
 one signs in; a failed C0 or C1 ends the run, and a new run uses a new value.
@@ -45,9 +45,9 @@ INSPECT_NAME = "{{.Name}}"
 # LiteLLM 1.106.6 writes its batched updates every PROXY_BATCH_WRITE_AT = 10 s (constants.py:1877)
 # plus randint(0, 5) (proxy_server.py:10936), and a job of its own writes the daily tag rows every
 # int(that interval * DAILY_TAG_SPEND_BATCH_MULTIPLIER = 2.3) s (constants.py:1901,
-# proxy_server.py:10983). The longest of these is the tag job's, the longest interval at which
-# LiteLLM writes anything. The front strips body and header tags, so this canary writes no tag row;
-# the settle still outlasts every writer, and the retention probe's barrier timeout reads it.
+# proxy_server.py:10983). The longest of these is the tag job's, the longest interval of the
+# writers a request feeds. The front strips body and header tags, so this canary writes no tag row;
+# the settle still outlasts both writers, and the retention probe's barrier timeout reads it.
 LITELLM_BATCH_SECONDS = 10
 LITELLM_BATCH_JITTER_SECONDS = 5
 LITELLM_TAG_MULTIPLIER = 2.3
