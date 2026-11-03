@@ -487,6 +487,12 @@ def test_the_writable_destinations_of_an_inspection_are_its_rw_mounts_and_tmpfs(
     assert retention.writable_destinations(document) == {"/a", "/t"}
 
 
+def test_a_tmpfs_below_var_run_is_listed_where_the_mount_table_shows_it(retention) -> None:
+    document = json.loads(inspect_answer([("/var/run", True)], {"/var/run/db": "size=1m"}))[0]
+
+    assert retention.writable_destinations(document) == {"/run", "/run/db"}
+
+
 def test_a_searched_mount_that_the_census_did_not_walk_is_an_unexamined_sink(retention) -> None:
     report = census_report([mount_report("/work")], HOSTS_TABLE)
 
