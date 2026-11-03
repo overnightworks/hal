@@ -441,10 +441,11 @@ class FakeSystem:
     playbook: FakePlaybook
     terminal: bool = True
     user: str = "operator"
+    docker_driver: str | None = "journald"  # what `docker info` tells the operator, None when Docker does not answer
 
     @property
     def boundaries(self) -> system_step.Boundaries:
-        return system_step.Boundaries(lambda: self.terminal, self.playbook, lambda: self.user)
+        return system_step.Boundaries(lambda: self.terminal, self.playbook, lambda: self.user, lambda: self.docker_driver)
 
 
 class FakeClock:

@@ -17,7 +17,7 @@ from enum import Enum
 from pathlib import Path
 
 from hal.workstation import secrets_setup
-from hal.workstation.layout import Layout
+from hal.workstation.layout import Layout, run_command
 from hal.output import Tone, is_verbose, live_line, write_detail
 from hal.output.command import Verb, command
 
@@ -28,6 +28,9 @@ AGENT_USER = "agent"
 LOG_RETENTION_DAYS = 30
 # The default log driver of Docker, which the play merges into daemon.json and `hal check` expects.
 DOCKER_LOG_DRIVER = "journald"
+DOCKER_DEFAULT_DRIVER = ["docker", "info", "--format", "{{.LoggingDriver}}"]
+DOCKER_DOES_NOT_ANSWER = "Docker does not answer `docker info`"
+DOCKER_STATUS = "systemctl status docker"
 # journalctl deletes whole archive files by the age of their oldest entry: one day for a file's span
 # and one day of slack for a PC that is off at midnight keep every line under LOG_RETENTION_DAYS.
 JOURNAL_VACUUM_DAYS = LOG_RETENTION_DAYS - 2
@@ -64,6 +67,10 @@ class StepFailed(Exception):
 
 class PlayChangedNothing(StepFailed):
     """/etc is as it was: sudo never started the play, or the play stopped and its final counts report no change."""
+
+
+class DockerDoesNotAnswer(PlayChangedNothing):
+    """The operator's `docker info` got no answer before the password; `DOCKER_STATUS` is the way on."""
 
 
 class SystemStepInterrupted(StepFailed):
@@ -280,15 +287,25 @@ def _running_user() -> str:
 
 @dataclass(frozen=True)
 class Boundaries:
-    """The terminal the sudo prompt needs, Ansible itself, and who runs `home`."""
+    """The terminal the sudo prompt needs, Ansible itself, who runs `home`, and the log driver Docker tells the operator (`None` when it does not answer)."""
 
     has_terminal: Callable[[], bool]
     run_playbook: PlaybookRunner
     operator_user: Callable[[], str]
+    docker_driver: Callable[[], str | None]
+
+
+def _docker_driver() -> str | None:
+    """The log driver `docker info` tells the operator; None for a Docker that cannot be run or does not answer (a `docker` that is not executable raises `PermissionError`)."""
+    try:
+        output = run_command(DOCKER_DEFAULT_DRIVER)
+    except OSError:
+        return None
+    return None if output is None else output.strip()
 
 
 # The terminal fact is the one the wizard asks: both ends are a terminal.
-TERMINAL_BOUNDARIES = Boundaries(secrets_setup.TERMINAL_BOUNDARIES.terminal.is_interactive, run_playbook_as_root, _running_user)
+TERMINAL_BOUNDARIES = Boundaries(secrets_setup.TERMINAL_BOUNDARIES.terminal.is_interactive, run_playbook_as_root, _running_user, _docker_driver)
 
 
 @dataclass(frozen=True)
@@ -319,10 +336,16 @@ class SystemStep:
             return NEEDS_ANSIBLE
         return ""
 
+    def refuse_unless_docker_answers(self) -> None:
+        """Docker is read as the operator, so a Docker that does not answer ends the step before sudo asks for a password."""
+        if self.boundaries.docker_driver() is None:
+            raise DockerDoesNotAnswer(DOCKER_DOES_NOT_ANSWER)
+
     def check(self) -> CheckState | TasksWouldChange:
         """At a terminal, Ansible's check mode asks for sudo once and names the tasks that would change; without what it needs nothing is read."""
         if self.needs_first():
             return CheckState.NOT_CHECKED
+        self.refuse_unless_docker_answers()
         match self._run_playbook(check=True):
             case PlaybookFinished(changed, tasks):
                 return TasksWouldChange(tasks) if changed else CheckState.UNCHANGED

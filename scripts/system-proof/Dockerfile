@@ -65,7 +65,7 @@ RUN echo "postfix postfix/main_mailer_type select No configuration" | debconf-se
 
 COPY --from=ghcr.io/astral-sh/uv:0.10.9 /uv /uvx /usr/local/bin/
 
-# `tester` is the operator: in the sudo group, its password set per run by run.sh. `bystander` is any other user.
+# `tester` is the operator: in the sudo and docker groups (hal reads `docker info` as the operator, before the password), its password set per run by run.sh. `bystander` is any other user.
 ARG FAKE_TUNNEL_ID=00000000-0000-4000-8000-000000000000
 RUN mkdir -p /etc/cloudflared \
     && printf 'tunnel: %s\ncredentials-file: /etc/cloudflared/%s.json\n' \
@@ -73,7 +73,7 @@ RUN mkdir -p /etc/cloudflared \
     && printf '{"AccountTag":"fake","TunnelSecret":"ZmFrZQ==","TunnelID":"%s"}\n' \
         "$FAKE_TUNNEL_ID" > "/etc/cloudflared/$FAKE_TUNNEL_ID.json" \
     && chmod 600 "/etc/cloudflared/$FAKE_TUNNEL_ID.json" \
-    && useradd --create-home --shell /bin/bash --groups sudo tester \
+    && useradd --create-home --shell /bin/bash --groups sudo,docker tester \
     && useradd --create-home --shell /bin/bash bystander \
     && printf '%s\n' '[Unit]' 'Description=another unit for the polkit cells' \
         '[Service]' 'ExecStart=/bin/sleep infinity' \
