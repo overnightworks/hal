@@ -1,27 +1,35 @@
-"""Probe of the agent service's API route through LiteLLM (#768 S1a cells G1-G15, N1, L1-L3, R1,
-R2): the real service, its one-route front, LiteLLM and the gateway's second entrypoint, in a
-throwaway compose project, against a fake Anthropic. Nothing live and nothing paid: the probe
-refuses to start unless the resolved copy marks `internet` internal and holds only the two fake
-hosts, and it never calls `egress.py`'s live cells.
+"""Probe of LiteLLM's own keys on the API route (cells K1, K2, K4, and #768 S1a's G6-G9, N1, L1-L3,
+R1, R2, D1): the service, the one-route front, LiteLLM and the gateway's
+second entrypoint, in a throwaway compose project, against a fake Anthropic. The caller is a
+throwaway on `litellm-api` that posts agent-runtime's wire body (`model`, `messages`, `user`,
+`tools`) through the front with an app key the probe made through the master key from a throwaway
+on `litellm-backend`. Nothing live and nothing paid: the probe refuses to start unless the resolved
+copy marks `internet` internal and holds only the two fake hosts, and it never calls `egress.py`'s
+live cells.
 
     flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \\
         python3 probe/agent-service/litellm.py --scratch DIR
 
-Measured: a run takes about a minute and its teardown a few seconds (K 30 s, CAP 1800 s).
+Measured: a run takes about two minutes and its teardown a few seconds (K 30 s, CAP 1800 s).
 
-The scratch HOME holds the throwaway secrets (random values, never printed): the provider key,
-the service credential, the CA and the signing pair. The fake provider (alias api.anthropic.com)
-and the fake issuer (alias auth.hallucinai.de) hold certificates of the scratch CA, which
-LiteLLM's SSL_CERT_FILE trusts. The scratch HOME also holds LiteLLM's master key file.
+The scratch HOME holds the throwaway secrets (random values, never printed): the provider key, the
+master key, the old service credential (a bearer K2 expects refused), the CA and the signing pair.
+The fake provider (alias api.anthropic.com) and the fake issuer (alias auth.hallucinai.de) hold
+certificates of the scratch CA, which LiteLLM's SSL_CERT_FILE trusts. Keys, budgets and
+fingerprints are the probe's scenario data; a key reaches a throwaway inside the program on its
+standard input, never in argv, and only its hash is printed or persists.
 
-Evidence: F is the fake provider's request log, R the canary's verdict lines, I `docker inspect`,
-LA LiteLLM's access log. The probe differs from production in LiteLLM's log level: compose.yaml sets
-`CRITICAL`, which prints no access line, so this probe sets `INFO` for LA (LITELLM_LOG_LEVEL;
-litellm_retention.py leaves the shipped level). Exit 0: every cell held.
+Evidence: F is the fake provider's request log, A the caller's status and LiteLLM's error type, I
+`docker inspect`, LA LiteLLM's access log. The probe differs from production in LiteLLM's log
+level: compose.yaml sets `CRITICAL`, which prints no access line, so this probe sets `INFO` for LA
+(LITELLM_LOG_LEVEL; litellm_retention.py leaves the shipped level). Its scratch copy of
+config.yaml differs in one setting: the budget rescheduler runs every few seconds
+(RESCHEDULER_SECONDS), so a budget moved due resets at once. Exit 0: every cell held.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import secrets
@@ -32,6 +40,8 @@ from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
 
+import yaml
+
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "probe"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -39,26 +49,32 @@ sys.path.insert(0, str(REPO / "src"))
 sys.path.insert(0, str(REPO / "agent-service"))
 
 from agent_networks import EMBEDDED_RESOLVER, gateway_listeners, listeners_of  # noqa: E402
-from api_canary import verdicts  # noqa: E402
 from egress import LABEL, PROJECT, ProbeFailed, expect, run_scratch_probe  # noqa: E402
 from egress_observe import socket_name  # noqa: E402
-from issuer import ISSUER_ORIGIN, ISSUER_SERVICE, SERVICE, IssuerProbe  # noqa: E402
-from refusals import API_GROUP  # noqa: E402
+from issuer import ISSUER_SERVICE, SERVICE, IssuerProbe  # noqa: E402
 from retention_census import DATABASE, FRONT, GATEWAY, LITELLM  # noqa: E402
 from scratch_secrets import issue_certificate, write_new  # noqa: E402
 
-FAKE_PROVIDER, FAKE_ISSUER, CANARY = "fake-anthropic", "fake-issuer", "agent-canary"
+from hal.output import write_line  # noqa: E402
+
+FAKE_PROVIDER, FAKE_ISSUER = "fake-anthropic", "fake-issuer"
 PROVIDER_HOST, ISSUER_HOST = "api.anthropic.com", "auth.hallucinai.de"
 NEW_NETWORKS = ("litellm-api", "litellm-backend", "litellm-egress", "litellm-db")
 ISOLATED = "isolated"
 LISTEN_SECONDS = 60
-CANARY_SECONDS = 240
 FAKE_DIRECTORY = "/fake"
-DEFAULT_APP, REMAPPED_APP, REMAPPED_MODEL = "songmaker", "hopin", "nonesuch"
 ACCESS_LINE = re.compile(r'"(?:GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS) \S+ HTTP/\d(?:\.\d)?"')
 ADMITTED_LINE = re.compile(r'"POST /v1/chat/completions HTTP/\d(?:\.\d)?" 200')
 ROUTE = "/v1/chat/completions"
-LISTENING = "Uvicorn running"
+LISTENING = "Uvicorn running"  # the service's line; LiteLLM's listening is ProxySnapshot's
+FRONT_PORT = 4000
+# The scenario of an app key and a person (docs/agent-service.md, "The API route"): each app key
+# has a money budget per month and a parallel bound, each person a budget per month.
+APP_BUDGET, PERSON_BUDGET, PERIOD, PARALLEL = 10.0, 2.0, "1mo", 5
+OPERATOR_BUDGET = "probe-operator"  # a budget with no max_budget, linked to the operator's row
+RESCHEDULER_SECONDS = 3
+SPEND_SECONDS = 90
+TOO_MANY = 429
 FRONT_STATIC = "/etc/traefik/traefik.yml"
 ENTRYPOINT_ADDRESS = re.compile(r'address:\s*"([^"]+)"')
 START_LISTENER = re.compile(r"--host (\S+) --port (\d+)")
@@ -114,20 +130,38 @@ from prisma.client import BINARY_PATHS
 from prisma.engine import utils
 print(os.path.realpath(utils.ensure(BINARY_PATHS.query_engine)))
 """
-HTTP_PROGRAM = """\
-import json, socket, sys
-method, path, bearer, body = sys.argv[1:5]
-head = f"{method} {path} HTTP/1.1\\r\\nHost: litellm-front:4000\\r\\nConnection: close\\r\\n"
-if bearer != "-":
-    head += f"Authorization: Bearer {bearer}\\r\\n"
-payload = b"" if body == "-" else body.encode()
+# One HTTP/1.0 request, so no answer is chunked. The program on standard input starts with
+# `BEARER = ...` (a key, or None), `BODY = ...` (the request's JSON, or None) and `HIDDEN = [...]`
+# (the keys its output shows as `<key>`), so no key reaches argv or the output. argv: host, port,
+# method, path; prints {"status", "retry_after", "seconds", "document"}, the answer's JSON or None.
+CALL_PROGRAM = """\
+import json, socket, sys, time
+host, port, method, path = sys.argv[1:5]
+payload = b"" if BODY is None else BODY.encode()
+head = f"{method} {path} HTTP/1.0\\r\\nHost: {host}:{port}\\r\\n"
+if BEARER:
+    head += f"Authorization: Bearer {BEARER}\\r\\n"
 head += f"Content-Type: application/json\\r\\nContent-Length: {len(payload)}\\r\\n\\r\\n"
-with socket.create_connection(("litellm-front", 4000), timeout=60) as raw:
+started = time.monotonic()
+with socket.create_connection((host, int(port)), timeout=150) as raw:
     raw.sendall(head.encode() + payload)
     reply = b""
     while chunk := raw.recv(65536):
         reply += chunk
-print(json.dumps({"status": int(reply.split(b" ", 2)[1])}))
+top, _, content = reply.partition(b"\\r\\n\\r\\n")
+lines = top.decode().splitlines()
+headers = {k.lower(): v for k, _, v in (line.partition(": ") for line in lines[1:])}
+try:
+    document = json.loads(content)
+except ValueError:
+    document = None
+shown = json.dumps({
+    "status": int(lines[0].split(" ", 2)[1]), "retry_after": headers.get("retry-after"),
+    "seconds": time.monotonic() - started, "document": document,
+})
+for key in HIDDEN:
+    shown = shown.replace(key, "<key>")
+print(shown, flush=True)
 """
 # The step-ca root inside a client container, at the path of compose.yaml's secret mount.
 CA_IN_CLIENT = "/run/secrets/step_ca_root_certificate"
@@ -182,6 +216,73 @@ class ProxySnapshot:
         return bool(self.proxies)
 
 
+def is_engine(row: dict, proxy: int, engine_executable: str) -> bool:
+    """The process is the query engine: the image's engine binary, a child of the proxy."""
+    return row["parent"] == proxy and row["executable"] == engine_executable
+
+
+def snapshot_of(scan: dict, proxy_address: str, engine_executable: str) -> ProxySnapshot:
+    """LiteLLM's listeners from one scan of SNAPSHOT_PROGRAM: the proxy owns the declared address,
+    and the engine sockets are those of the processes `is_engine` accepts."""
+    sockets = named_sockets(scan["listeners"])
+    declared = {name for names in bound_names(proxy_address) for name in names}
+    proxies = {pid for name, owners in sockets if name in declared for pid in owners}
+    engines = {
+        int(pid): [name for name, owners in sockets if int(pid) in owners]
+        for pid, row in scan["processes"].items()
+        if any(is_engine(row, proxy, engine_executable) for proxy in proxies)
+    }
+    outside = [name for name, owners in sockets if not set(owners) & engines.keys()]
+    return ProxySnapshot(frozenset(proxies), engines, outside)
+
+
+def shipped_config() -> dict:
+    return yaml.safe_load(
+        (REPO / "agent-service" / "litellm" / "config.yaml").read_text(encoding="utf-8")
+    )
+
+
+def shipped_models() -> dict[str, dict]:
+    """Each model name of the shipped config.yaml with its `litellm_params`."""
+    return {
+        entry["model_name"]: entry["litellm_params"] for entry in shipped_config()["model_list"]
+    }
+
+
+DEFAULT_MODEL = next(iter(shipped_models()))
+
+
+def person_budget() -> dict:
+    """The scenario's person budget, under the id config.yaml names."""
+    budget_id = shipped_config()["litellm_settings"]["max_end_user_budget_id"]
+    return {"budget_id": budget_id, "max_budget": PERSON_BUDGET, "budget_duration": PERIOD}
+
+
+def hashed(key: str) -> str:
+    """A key as LiteLLM stores and accepts it on its admin routes: its SHA-256 in hex."""
+    return hashlib.sha256(key.encode()).hexdigest()
+
+
+def error_of(answer: dict) -> str:
+    """LiteLLM's error type and code of an answer, never its message, which may quote a request."""
+    document = answer["document"]
+    error = document.get("error") if isinstance(document, dict) else None
+    return f"{error.get('type')}/{error.get('code')}" if isinstance(error, dict) else "-"
+
+
+def wire_body(model: str = DEFAULT_MODEL, user: str | None = None, **extra: object) -> dict:
+    """agent-runtime's wire body for `model` and `user` (none when None), with `extra`."""
+    asked = {"model": model, "messages": [{"role": "user", "content": "probe"}]}
+    return {**asked, **({"user": user} if user else {}), "tools": [], **extra}
+
+
+def answer_text(answer: dict) -> str | None:
+    try:
+        return answer["document"]["choices"][0]["message"]["content"]
+    except KeyError, IndexError, TypeError:
+        return None
+
+
 class LitellmProbe(IssuerProbe):
     """The service with an API-only person, the front, LiteLLM and a fake Anthropic."""
 
@@ -197,6 +298,8 @@ class LitellmProbe(IssuerProbe):
         home = Path(self.environment["HOME"])
         self.provider_key = secrets.token_urlsafe(32)
         self.credential = secrets.token_urlsafe(32)
+        self.master_key = f"sk-{secrets.token_hex(32)}"
+        self.app_keys: list[str] = []
         self.marker = secrets.token_hex(8)
         self.identity = {
             name: f"{name}-{secrets.token_hex(6)}" for name in ("sub", "username", "email")
@@ -206,10 +309,7 @@ class LitellmProbe(IssuerProbe):
         self.fake = scratch / "fake"
         self.write_fakes(self.fake)
         self.litellm_config = scratch / "litellm.yaml"
-        shipped = (REPO / "agent-service" / "litellm" / "config.yaml").read_text(encoding="utf-8")
-        self.litellm_config.write_text(shipped, encoding="utf-8")
-        self.litellm_config.chmod(0o644)
-        self.write_service_configuration()
+        self.write_litellm_config(shipped_config())
         self.overlays.append(self.write_overlay(scratch))
         self.expect_fake_only()
 
@@ -218,7 +318,7 @@ class LitellmProbe(IssuerProbe):
     def write_secrets(self, home: Path) -> None:
         for relative, text in (
             (PROVIDER_KEY_FILE, self.provider_key + "\n"),
-            (MASTER_KEY_FILE, f"sk-{secrets.token_hex(32)}\n"),
+            (MASTER_KEY_FILE, self.master_key + "\n"),
             (CREDENTIAL_FILE, json.dumps({"shared_key": self.credential})),
             (DATABASE_PASSWORD_FILE, self.database_password + "\n"),
         ):
@@ -232,12 +332,21 @@ class LitellmProbe(IssuerProbe):
             mode = 0o644 if relative == DATABASE_PASSWORD_FILE else 0o600
             write_new(home / relative, text.encode(), mode)
 
+    def write_litellm_config(self, config: dict) -> None:
+        """The scratch config.yaml: the given one with the rescheduler's short period."""
+        rescheduled = {**config["general_settings"],
+                       "proxy_budget_rescheduler_min_time": RESCHEDULER_SECONDS,
+                       "proxy_budget_rescheduler_max_time": RESCHEDULER_SECONDS + 1}  # fmt: skip
+        text = yaml.safe_dump({**config, "general_settings": rescheduled}, sort_keys=False)
+        self.litellm_config.write_text(text, encoding="utf-8")
+        self.litellm_config.chmod(0o644)
+
     def write_fakes(self, directory: Path) -> None:
         """One directory per fake host: its certificate and key, what it checks and its program."""
         directory.mkdir()
         expectations = json.dumps({
             "provider_key": self.provider_key, "credential": self.credential,
-            "identity": [*self.identity.values(), DEFAULT_APP, REMAPPED_APP],
+            "identity": list(self.identity.values()),
             "marker": self.marker,
         })  # fmt: skip
         program = (Path(__file__).resolve().parent / "fake_anthropic.py").read_text(
@@ -251,29 +360,6 @@ class LitellmProbe(IssuerProbe):
             for file in (directory / host).iterdir():
                 file.chmod(0o644)
         directory.chmod(0o755)
-
-    def write_service_configuration(self) -> None:
-        """The issuer's scratch service.toml, with the API route and a model LiteLLM lacks for one
-        app."""
-        text = self.configuration.read_text(encoding="utf-8")
-        text = text.replace(
-            "[cli.anthropic]",
-            "[cli.anthropic]\n# probe: a name the service lists and LiteLLM lacks",
-        ).replace(
-            'models = ["opus", "sonnet", "haiku"]',
-            'models = ["opus", "sonnet", "haiku", "nonesuch"]',
-        )
-        text = text.replace(
-            'group_claim = "groups"', f'group_claim = "groups"\napi_groups = ["{API_GROUP}"]'
-        )
-        text = text.replace(
-            "[apps.hopin]\n", f'[apps.hopin]\nmodel = "anthropic/{REMAPPED_MODEL}"\n'
-        )
-        text += (
-            '\n[api]\ncompletion_url = "http://litellm-front:4000/v1/chat/completions"\n'
-            'credential_file = "/run/secrets/agent_service_api_credential"\n'
-        )
-        self.configuration.write_text(text, encoding="utf-8")
 
     def write_overlay(self, scratch: Path) -> Path:
         hardened = {
@@ -299,7 +385,6 @@ class LitellmProbe(IssuerProbe):
         overlay.write_text(
             json.dumps({
                 "services": {
-                    SERVICE: {"secrets": ["agent_service_api_credential"]},
                     LITELLM: {
                         "environment": {
                             "SSL_CERT_FILE": "/probe/ca.crt",
@@ -338,16 +423,8 @@ class LitellmProbe(IssuerProbe):
     # --- life cycle ---------------------------------------------------------------------------
 
     def services_to_start(self) -> tuple[str, ...]:
-        return (
-            GATEWAY,
-            SERVICE,
-            ISSUER_SERVICE,
-            FAKE_PROVIDER,
-            FAKE_ISSUER,
-            FRONT,
-            DATABASE,
-            LITELLM,
-        )
+        return (GATEWAY, SERVICE, ISSUER_SERVICE, FAKE_PROVIDER, FAKE_ISSUER, FRONT, DATABASE,
+                LITELLM)  # fmt: skip
 
     def log_of(self, service: str) -> str:
         return self.container_log(service, container=self.container(service))
@@ -370,40 +447,13 @@ class LitellmProbe(IssuerProbe):
     def access_lines(self) -> list[str]:
         return [line for line in self.log_of(LITELLM).splitlines() if ACCESS_LINE.search(line)]
 
-    def canary_input(self, app: str) -> str:
-        """The two tokens of a person of the API group alone, as the canary reads them."""
-        claims = {
-            "sub": self.identity["sub"], "preferred_username": self.identity["username"],
-            "email": self.identity["email"], "azp": app, "groups": [f"/apps/{app}", API_GROUP],
-        }  # fmt: skip
-        issuer = f"{ISSUER_ORIGIN}/realms/hallucinai"
-        person = self.issuer.token(issuer, claims)
-        workload = self.issuer.token(
-            issuer,
-            {"sub": "workload", "azp": app, "client_id": app,
-             "realm_access": {"roles": ["agent-workload"]}},
-        )  # fmt: skip
-        return f"{person}\n{workload}\n"
-
-    def canary_command(self, options: tuple[str, ...] = ()) -> list[str]:
-        return self.compose_command(
-            "run", "--rm", "-T", "--no-deps", "--label", LABEL, CANARY,
-            "--marker", self.marker, *options,
-        )  # fmt: skip
-
-    def canary(self, app: str, options: tuple[str, ...] = ()) -> dict[str, str]:
-        """R: the canary's verdict lines of one run of `app` by a person of the API group alone."""
-        result = self.run(
-            self.canary_command(options), stdin=self.canary_input(app), check=False,
-            timeout=CANARY_SECONDS,
-        )  # fmt: skip
-        return verdicts(result.stdout, result.returncode)
-
     def steer_fake(self, **steering: object) -> None:
-        """Writes the provider fake's control file; the fake re-reads it on every request."""
+        """Writes the provider fake's control file; the fake re-reads it on every request. The
+        app keys and the master key are always among the values it counts."""
         folder = self.fake / PROVIDER_HOST
         draft = folder / "control.json.new"
-        draft.write_text(json.dumps(steering), encoding="utf-8")
+        counted = {"secrets": [*self.app_keys, self.master_key], **steering}
+        draft.write_text(json.dumps(counted), encoding="utf-8")
         draft.chmod(0o644)
         draft.replace(folder / "control.json")
 
@@ -411,114 +461,197 @@ class LitellmProbe(IssuerProbe):
         self.compose(
             "up", "--detach", "--wait", "--force-recreate", "--no-deps", LITELLM, timeout=300
         )
-        self.wait_until(LITELLM, LISTENING)
+        self.wait_until_listening()
 
-    def http(self, method: str, path: str, bearer: str | None = None, body: dict | None = None):
-        """The status of one raw request from a throwaway on `litellm-api`, through the front."""
-        arguments = [method, path, bearer or "-", "-" if body is None else json.dumps(body)]
-        network = f"--network={PROJECT}_litellm-api"
-        return self.throwaway([network], arguments, HTTP_PROGRAM)["status"]
+    def wait_until_listening(self, seconds: int = LISTEN_SECONDS) -> None:
+        """Until a snapshot shows the declared address listening; a scan that fails (the container
+        not up yet) is tried again, and the last failure ends up in the deadline's message."""
+        deadline, last = time.monotonic() + seconds, "nothing listens"
+        while time.monotonic() < deadline:
+            try:
+                if self.proxy_snapshot().listening:
+                    return
+            except ProbeFailed as problem:
+                last = str(problem)
+            time.sleep(1)
+        raise ProbeFailed(f"LiteLLM did not listen in {seconds} seconds: {last}")
 
-    def good_body(self) -> dict:
-        return {"model": "anthropic/opus", "messages": [], "tools": []}
+    # --- the caller ---------------------------------------------------------------------------
+
+    def call_command(self, name: str, bearer: str | None, method: str, path: str,
+                     body: dict | None, *, front: bool):  # fmt: skip
+        """The argv and standard input of one throwaway's request: through the front from
+        `litellm-api`, or straight at LiteLLM from `litellm-backend`. Bearer and body go on
+        standard input, since a body may carry a key."""
+        network, host, port = (
+            ("litellm-api", FRONT, str(FRONT_PORT)) if front
+            else ("litellm-backend", LITELLM, self.proxy_address.rsplit(":", 1)[1])
+        )  # fmt: skip
+        argv = [
+            "docker", "run", "--rm", "-i", "--name", name, "--label", LABEL,
+            f"--network={PROJECT}_{network}", "--read-only", "--user", "65534:65534",
+            "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", self.image,
+            "python", "-I", "-", host, port, method, path,
+        ]  # fmt: skip
+        payload = None if body is None else json.dumps(body)
+        hidden = [*self.app_keys, self.master_key]
+        preamble = f"BEARER = {bearer!r}\nBODY = {payload!r}\nHIDDEN = {hidden!r}\n"
+        return argv, preamble + CALL_PROGRAM
+
+    def call(
+        self, bearer: str | None, method: str, path: str, body: dict | None = None,
+        *, front: bool = True,
+    ) -> dict:  # fmt: skip
+        """A: one request's status, Retry-After, seconds and answer document."""
+        self.throwaways += 1
+        name = f"{PROJECT}-caller-{self.throwaways}"
+        argv, program = self.call_command(name, bearer, method, path, body, front=front)
+        return json.loads(
+            self.run(argv, stdin=program, timeout=240).stdout.strip().splitlines()[-1]
+        )
+
+    def admin(self, method: str, path: str, body: dict | None = None) -> dict:
+        """The answer document of one admin request with the master key, straight at LiteLLM."""
+        answer = self.call(self.master_key, method, path, body, front=False)
+        expect(answer["status"] == 200, f"{method} {path}: {answer['status']} {error_of(answer)}")
+        return answer["document"]
+
+    def make_key(self, **settings: object) -> str:
+        """A new app key of the scenario, its settings overridden by `settings`."""
+        scenario = {
+            "models": list(shipped_models()), "max_budget": APP_BUDGET, "budget_duration": PERIOD,
+            "allowed_routes": [ROUTE], "max_parallel_requests": PARALLEL,
+        }  # fmt: skip
+        key = f"sk-{secrets.token_urlsafe(32)}"
+        self.app_keys.append(key)
+        self.admin("POST", "/key/generate", {**scenario, **settings, "key": key})
+        self.steer_fake()
+        return key
+
+    def key_info(self, key: str) -> dict:
+        return self.admin("GET", f"/key/info?key={hashed(key)}")["info"]
+
+    def customer_row(self, user: str) -> dict | None:
+        """The person's row; None while LiteLLM's batched write has not made it yet."""
+        path = f"/customer/info?end_user_id={user}"
+        answer = self.call(self.master_key, "GET", path, front=False)
+        expect(answer["status"] in {200, 404}, f"/customer/info: {answer['status']}")
+        return answer["document"] if answer["status"] == 200 else None
+
+    def customer_spend(self, user: str) -> float:
+        return (self.customer_row(user) or {"spend": 0.0})["spend"]
+
+    def complete(self, key: str | None, model: str = DEFAULT_MODEL, user: str | None = None,
+                 path: str = ROUTE, **extra: object) -> dict:  # fmt: skip
+        """A: one request of agent-runtime's wire body."""
+        return self.call(key, "POST", path, wire_body(model, user, **extra))
+
+    def fingerprint(self) -> str:
+        return f"fp-{secrets.token_hex(8)}"
+
+    def wait_for(self, cell: str, what: str, holds, seconds: int = SPEND_SECONDS) -> float:
+        """Polls `holds()` until it is true and returns the seconds it took."""
+        started = time.monotonic()
+        while not holds():
+            expect(time.monotonic() - started < seconds, f"{cell}: {what} not within {seconds} s")
+            time.sleep(1)
+        return time.monotonic() - started
+
+    def served(self, cell: str, answer: dict, sent: list[dict], model: str = DEFAULT_MODEL) -> None:
+        expect(answer["status"] == 200, f"{cell}: {answer['status']} {error_of(answer)}")
+        expect(answer_text(answer) == self.marker, f"{cell}: the marker is not in the answer")
+        wanted = shipped_models()[model]["model"].split("/", 1)[1]
+        expect([request["model"] for request in sent] == [wanted], f"{cell}: F saw {sent}")
+
+    def refused(self, cell: str, answer: dict, before: int) -> None:
+        """Refused before the provider: a 4xx that is not 429, and F saw nothing new."""
+        status = answer["status"]
+        expect(400 <= status < 500 and status != TOO_MANY, f"{cell}: status {status}")
+        expect(len(self.provider_requests()) == before, f"{cell}: the provider was reached")
 
     # --- the cells ----------------------------------------------------------------------------
 
     def drive(self) -> None:
         self.wait_until(SERVICE, LISTENING)
-        self.wait_until(LITELLM, LISTENING)
+        self.wait_until_listening()
         self.cell_d1()
         self.cell_n1()
         self.cells_listeners()
         self.cells_r1_r2()
-        self.cells_g1_to_g3_g10()
+        self.admin("POST", "/budget/new", person_budget())
+        key = self.make_key()
+        self.cell_k1(key)
         for cell, method, path in (
             ("G6", "GET", ROUTE), ("G7", "POST", "/key/generate"),
             ("G8", "POST", "/mcp/"), ("G9", "POST", "/register"),
         ):  # fmt: skip
-            self.cell_unreachable(cell, method, path)
-        self.cells_g11_to_g15()
-        self.cell_g5()
-        self.cell_g4()
+            self.cell_unreachable(cell, method, path, key)
+        self.cell_k2(key)
+        self.cell_k4(key)
 
-    def model_id(self, text: str, name: str = "anthropic/opus") -> str:
-        found = re.search(
-            rf"model_name: {re.escape(name)}\n\s+litellm_params:\n\s+model: \S+/(\S+)", text
-        )
-        expect(found is not None, f"config.yaml names no model {name}")
-        return found[1]
-
-    def cells_g1_to_g3_g10(self) -> None:
+    def cell_k1(self, key: str) -> None:
         before_f, before_la = len(self.provider_requests()), len(self.access_lines())
-        run = self.canary(DEFAULT_APP)
-        expect(run.get("exit") == "0" and run.get("marker") == "yes", f"G1: {run}")
+        answer = self.complete(key, user=self.fingerprint())
         sent = self.provider_requests()[before_f:]
-        expect(len(sent) == 1, f"G1: the fake provider got {len(sent)} requests")
-        shipped = (REPO / "agent-service" / "litellm" / "config.yaml").read_text(encoding="utf-8")
-        expect(sent[0]["model"] == self.model_id(shipped), f"G1: model {sent[0]['model']}")
-        expect(sent[0]["key_ok"], "G1: the provider key did not arrive")
-        self.hold("G1", "succeeded, marker in the answer, one request, mapped id, key equal")
-        expect(sent[0]["identity_hits"] == 0, f"G2: {sent[0]['identity_hits']} identity matches")
-        expect(sent[0]["jwt_hits"] == 0 and sent[0]["uuid_hits"] == 0, "G2: a token or id arrived")
-        self.hold("G2", "no identity string, token or run id at the fake provider")
-        expect(not sent[0]["authorization"] and not sent[0]["credential_bytes"], "G3: credential")
-        self.hold("G3", "no Authorization header and no credential bytes at the fake provider")
+        self.served("K1", answer, sent)
+        expect(sent[0]["key_ok"], "K1: the provider key did not arrive")
+        expect(sent[0]["secret_hits"] == 0 and not sent[0]["authorization"], "K1: a key at F")
+        expect(sent[0]["identity_hits"] == 0, f"K1: {sent[0]['identity_hits']} identity matches")
+        expect(sent[0]["jwt_hits"] == 0 and sent[0]["uuid_hits"] == 0, "K1: a token or id at F")
         admitted = [line for line in self.access_lines()[before_la:] if ADMITTED_LINE.search(line)]
-        expect(len(admitted) == 1, f"G10: {len(admitted)} admitted lines in LiteLLM's log")
-        self.hold("G10", "the admitted request shows once as POST /v1/chat/completions 200")
+        expect(len(admitted) == 1, f"K1: {len(admitted)} admitted lines in LiteLLM's log")
+        self.hold("K1", "200 with the marker; F 1 with the mapped id and the provider key, no app "
+                  "or master key, no identity string; one admitted line in LA")  # fmt: skip
 
-    def cell_unreachable(self, cell: str, method: str, path: str) -> None:
+    def cell_unreachable(self, cell: str, method: str, path: str, key: str) -> None:
         before = len(self.access_lines())
-        status = self.http(method, path, self.credential, self.good_body())
+        status = self.call(key, method, path, {"model": DEFAULT_MODEL})["status"]
         expect(status == 404, f"{cell}: status {status}")
         expect(len(self.access_lines()) == before, f"{cell}: LiteLLM's log grew")
         self.hold(cell, f"{method} {path} through the front: 404, LiteLLM saw nothing")
 
-    def cells_g11_to_g15(self) -> None:
-        wrong = secrets.token_urlsafe(24)
-        cases = (
-            ("G11", f"{ROUTE}?model=x", self.credential, self.good_body(), 401),
-            ("G12", ROUTE, None, self.good_body(), 401),
-            ("G13", ROUTE, wrong, self.good_body(), 401),
-            ("G14", ROUTE, self.credential, {**self.good_body(), "api_base": "x"}, 401),
-            ("G15", ROUTE, self.credential, {**self.good_body(), "fallbacks": ["x"]}, 401),
-        )  # fmt: skip
-        for cell, path, bearer, body, wanted in cases:
+    def cell_k2(self, key: str) -> None:
+        user, stored = self.fingerprint(), hashed(key)
+        for how, bearer, front in (
+            ("no bearer", None, True), ("a wrong one", secrets.token_urlsafe(24), True),
+            ("the old shared credential", self.credential, True),
+            ("the key's stored hash through the front", stored, True),
+            ("the key's stored hash straight at LiteLLM", stored, False),
+        ):  # fmt: skip
             before = len(self.provider_requests())
-            status = self.http("POST", path, bearer, body)
-            expect(status == wanted, f"{cell}: status {status}, wanted {wanted}")
-            expect(len(self.provider_requests()) == before, f"{cell}: the provider was reached")
-            self.hold(cell, f"{wanted} and the fake provider saw nothing")
+            answer = self.call(bearer, "POST", ROUTE, wire_body(user=user), front=front)
+            served = answer["status"] == 200 or len(self.provider_requests()) != before
+            if bearer == stored and served:
+                write_line("K2 measured: the stored hash is accepted as a bearer", flush=True)
+            expect(answer["status"] == 401, f"K2: {how}: {answer['status']} {error_of(answer)}")
+            expect(len(self.provider_requests()) == before, f"K2: {how}: the provider was reached")
+        self.hold("K2", "no bearer, a wrong one, the old shared credential and the key's stored "
+                  "hash, through the front and straight at LiteLLM: 401 each, F 0")  # fmt: skip
 
-    def cell_g5(self) -> None:
+    def cell_k4(self, key: str) -> None:
+        user, results = self.fingerprint(), []
+        url = "https://x.invalid"
+        for how, extra in (
+            ("api_base", {"api_base": url}),
+            ("a fallback URL", {"fallbacks": [url]}),
+        ):
+            before = len(self.provider_requests())
+            answer = self.complete(key, user=user, **extra)
+            self.refused(f"K4: {how}", answer, before)
+            results.append(f"{how}: {answer['status']} {error_of(answer)}")
         before = len(self.provider_requests())
-        run = self.canary(REMAPPED_APP)
-        expect(run.get("code") == "provider_unavailable", f"G5: {run}")
-        expect(len(self.provider_requests()) == before, "G5: the provider was reached")
-        self.hold("G5", "a model LiteLLM lacks ends failed: provider_unavailable, provider 0")
-
-    def cell_g4(self) -> None:
-        text = self.litellm_config.read_text(encoding="utf-8")
-        old = self.model_id(text)
-        new = self.model_id(text, "anthropic/sonnet")
-        expect(old != new, "G4: the two families share an id")
-        self.litellm_config.write_text(text.replace(f"anthropic/{old}", f"anthropic/{new}", 1))
-        self.recreate_litellm()
-        before = len(self.provider_requests())
-        run = self.canary(DEFAULT_APP)
-        sent = self.provider_requests()[before:]
-        expect(run.get("exit") == "0" and [r["model"] for r in sent] == [new], f"G4: {run} {sent}")
-        self.hold("G4", "a remapped config reaches LiteLLM after its recreate")
+        second = list(shipped_models())[1]
+        answer = self.complete(key, user=user, fallbacks=[second])
+        self.served("K4", answer, self.provider_requests()[before:])
+        self.hold("K4", f"{'; '.join(results)}, F 0; fallbacks naming {second}: served by "
+                  f"{DEFAULT_MODEL}")  # fmt: skip
 
     def cell_d1(self) -> None:
         """LiteLLM runs as its configured user on a read-only root, and its migrations are done."""
         resolved = json.loads(self.compose("config", "--format", "json").stdout)["services"]
         container = json.loads(self.run(["docker", "inspect", self.container(LITELLM)]).stdout)[0]
         user = resolved[LITELLM]["user"]
-        expect(
-            container["Config"]["User"] == user,
-            f"D1: LiteLLM runs as {container['Config']['User']}",
-        )
+        expect(container["Config"]["User"] == user, f"D1: runs as {container['Config']['User']}")
         expect(container["HostConfig"]["ReadonlyRootfs"] is True, "D1: the root is writable")
         counted = self.sql(
             "SELECT count(finished_at), count(*) FROM _prisma_migrations",
@@ -549,9 +682,8 @@ class LitellmProbe(IssuerProbe):
         resolved = json.loads(self.compose("config", "--format", "json").stdout)
         members = (SERVICE, FRONT, LITELLM, GATEWAY, DATABASE)
         for service in members:
-            container = json.loads(self.run(["docker", "inspect", self.container(service)]).stdout)[
-                0
-            ]
+            inspected = self.run(["docker", "inspect", self.container(service)]).stdout
+            (container,) = json.loads(inspected)
             joined = set(container["NetworkSettings"]["Networks"])
             wanted = {
                 resolved["networks"][key]["name"]
@@ -563,9 +695,7 @@ class LitellmProbe(IssuerProbe):
             service: {n for n in resolved["services"][service]["networks"] if n in NEW_NETWORKS}
             for service in members
         }
-        expect(
-            declared[FRONT] == {"litellm-api", "litellm-backend"}, f"N1: front {declared[FRONT]}"
-        )
+        expect(declared[FRONT] == {"litellm-api", "litellm-backend"}, f"N1: {declared[FRONT]}")
         expect(
             declared[LITELLM] == {"litellm-backend", "litellm-egress", "litellm-db"},
             f"N1: {declared[LITELLM]}",
@@ -590,9 +720,8 @@ class LitellmProbe(IssuerProbe):
     def cells_listeners(self) -> None:
         addresses = ENTRYPOINT_ADDRESS.findall(self.static_file.read_text())
         gateway_listeners(self, GATEWAY, addresses)
-        self.hold(
-            "L1", f"the gateway listens on {', '.join(addresses)}/tcp and holds no UDP socket"
-        )
+        listened = ", ".join(addresses)
+        self.hold("L1", f"the gateway listens on {listened}/tcp and holds no UDP socket")
         resolved = json.loads(self.compose("config", "--format", "json").stdout)["services"]
         front_static = mounted_file(resolved[FRONT], FRONT_STATIC).read_text()
         (front_address,) = ENTRYPOINT_ADDRESS.findall(front_static)
@@ -607,7 +736,8 @@ class LitellmProbe(IssuerProbe):
             engine = [name for names in engines.values() for name in names]
             expect(
                 tcp in bound_names(declared[service]) and found["udp"] == [],
-                f"{cell}: {service} declares {declared[service]} and listens on {found}",
+                f"{cell}: {service} declares {declared[service]} and listens on tcp {tcp}, "
+                f"udp {found['udp']}",
             )
             expect(
                 service != LITELLM or (len(engines) == 1 and len(engine) == 1),
@@ -639,29 +769,14 @@ class LitellmProbe(IssuerProbe):
         ).stdout
         return shown.strip().splitlines()[-1]
 
-    def is_engine(self, row: dict, proxy: int) -> bool:
-        """The process is the query engine: the image's engine binary, a child of the proxy."""
-        return row["parent"] == proxy and row["executable"] == self.engine_executable
-
     def proxy_snapshot(self) -> ProxySnapshot:
-        """LiteLLM's listeners from one scan: the proxy owns the declared address, and the engine
-        sockets are those of the processes `is_engine` accepts."""
         scan = json.loads(
             self.run(
                 ["docker", "exec", "-i", self.container(LITELLM), "python3", "-"],
                 stdin=SNAPSHOT_PROGRAM,
             ).stdout
         )
-        sockets = named_sockets(scan["listeners"])
-        declared = {name for names in bound_names(self.proxy_address) for name in names}
-        proxies = {pid for name, owners in sockets if name in declared for pid in owners}
-        engines = {
-            int(pid): [name for name, owners in sockets if int(pid) in owners]
-            for pid, row in scan["processes"].items()
-            if any(self.is_engine(row, proxy) for proxy in proxies)
-        }
-        outside = [name for name, owners in sockets if not set(owners) & engines.keys()]
-        return ProxySnapshot(frozenset(proxies), engines, outside)
+        return snapshot_of(scan, self.proxy_address, self.engine_executable)
 
     def cells_r1_r2(self) -> None:
         for cell, name in (("R1", PROVIDER_HOST), ("R2", ISSUER_HOST)):

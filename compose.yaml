@@ -427,10 +427,11 @@ services:
       timeout: 3s
       retries: 20
 
-  # LiteLLM, the agent service's route to the paid API (agent-service/litellm/). It reads the
-  # provider key, the database password and the service credential as files and reaches only the
-  # front, its database and, through agent-egress, the provider. A change of its files reaches it
-  # only through a recreate. Not started by any unit yet.
+  # LiteLLM, the apps' route to the paid API (agent-service/litellm/). Its own keys and budgets in
+  # its database decide who may call; no hal code runs in it. It reads the provider key, the master
+  # key and the database password as files and reaches only the front, its database and, through
+  # agent-egress, the provider. A change of its files reaches it only through a recreate. Not
+  # started by any unit yet.
   litellm:
     image: ghcr.io/berriai/litellm:v1.106.6@sha256:37e2dafb088a7723beb998590682957386dfc83ffea1848486f8e0e5cfac0b06
     profiles: [litellm]
@@ -450,7 +451,6 @@ services:
       api.anthropic.com: *litellm-egress-address
     environment:
       HOME: /tmp
-      PYTHONPATH: /etc/litellm
       LITELLM_LOCAL_MODEL_COST_MAP: "True"
       LITELLM_TELEMETRY: "False"
       # Prisma's version check asks checkpoint.prisma.io at every migration; the isolated network
@@ -458,12 +458,9 @@ services:
       CHECKPOINT_DISABLE: "1"
       # LiteLLM logs a provider's error text at ERROR, which can echo request content (E13).
       LITELLM_LOG: CRITICAL
-      # The API route's bound on parallel requests, per key and per process. A literal, not an
-      # interpolation: nothing outside this file may set the bound of a paid route.
-      API_ROUTE_MAX_PARALLEL_REQUESTS: "5"
     tmpfs:
       - /tmp:uid=1000,gid=1000,mode=0700,size=64m,nosuid,nodev
-    secrets: [litellm_anthropic_key, litellm_master_key, litellm_db_password, agent_service_api_credential]
+    secrets: [litellm_anthropic_key, litellm_master_key, litellm_db_password]
     entrypoint:
       - /etc/litellm/start.sh
       - /run/secrets/litellm_anthropic_key
@@ -471,8 +468,6 @@ services:
       - /run/secrets/litellm_db_password
     volumes:
       - ./agent-service/litellm/config.yaml:/etc/litellm/config.yaml:ro
-      - ./agent-service/litellm/auth.py:/etc/litellm/auth.py:ro
-      - ./agent-service/litellm/gate.py:/etc/litellm/gate.py:ro
       - ./agent-service/litellm/start.sh:/etc/litellm/start.sh:ro
 
   # The agent service (the image is built on the PC, docs/agent-service.md,
@@ -630,16 +625,17 @@ secrets:
   agent_service_signing_key:
     file: ${HOME}/.secrets/agent-service/signing/private.pem
   # LiteLLM refuses to boot without a master key; this one is generated, read by litellm alone
-  # and known to no client, so its admin routes stay closed.
+  # and known to no app, so its admin routes stay closed to them.
   litellm_master_key:
     file: ${HOME}/.secrets/litellm/master-key
-  # The provider key, read by litellm alone, and the service credential (JSON with `shared_key`),
-  # read by litellm and, once the service has an [api] table, by agent-service.
+  # The provider key, read by litellm alone.
   litellm_anthropic_key:
     file: ${HOME}/.secrets/litellm/anthropic
   # The password of LiteLLM's database user, read by litellm and litellm-db alone.
   litellm_db_password:
     file: ${HOME}/.secrets/litellm/db-password
+  # The service credential (JSON with `shared_key`): agent-service/setup writes it, and no
+  # service reads it.
   agent_service_api_credential:
     file: ${HOME}/.secrets/agent-service/api/credential.json
 

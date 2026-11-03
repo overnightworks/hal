@@ -8,8 +8,9 @@ It reads `/fake/cert.pem`, `/fake/key.pem` and `/fake/expect.json` (the scratch 
 scratch service credential, the scratch identity strings and the answer marker; all of them
 throwaway values). The `issuer` role answers `{}` to anything. The `provider` role answers an
 Anthropic message with the marker and prints one JSON line per request on standard output: the
-model, whether the key matched, and counts of what must not arrive here. It prints a verdict and
-never a value of the request, and its answer holds only values it builds itself.
+model, `max_tokens`, `metadata.user_id` (the fingerprint, which must arrive), whether the key
+matched, and counts of what must not arrive here. It prints a verdict and no other value of the
+request, and its answer holds only values it builds itself.
 
 The `provider` role re-reads `/fake/control.json` on every request, so one container serves every
 cell of the failure probe (probe/agent-service/litellm_failures.py). The file holds `mode`:
@@ -21,9 +22,10 @@ afterwards; the held request is then answered) or `echo`
 (an error of `status` whose message is `request_canary` when the request holds it, as an upstream
 that quotes its input); and optionally `tool_use` (`name` and `input`: the answer then also holds a
 tool call of that name, as a model that calls a tool absent from the request's `tools`),
-`provider_key`, `credential` and `marker`, which stand in
-for the values of `expect.json`, and `request_canary`, whose occurrences in a request the log line
-counts.
+`usage` (the answer's `input_tokens` and `output_tokens`, which LiteLLM prices), `provider_key`,
+`credential` and `marker`, which stand in for the values of `expect.json`, `secrets` (keys that
+must not arrive, counted as `secret_hits`) and `request_canary`, whose occurrences in a request the
+log line counts.
 The error bodies are Anthropic's own shapes, https://docs.anthropic.com/en/api/errors: 500
 `api_error`, 529 `overloaded_error`, 402 `billing_error`; `low_credit` is the other answer a
 used-up balance gets, as clients report it: 400 `invalid_request_error` saying the credit balance
@@ -97,15 +99,21 @@ def wait_for_disconnect(connection: socket.socket, seconds: float) -> str:
 def provider_record(expect: dict, request: http.server.BaseHTTPRequestHandler, body: bytes) -> dict:
     raw = str(request.headers).encode() + body
     try:
-        model = json.loads(body)["model"]
-    except ValueError, KeyError, TypeError:
-        model = None
+        document = json.loads(body)
+    except ValueError:
+        document = None
+    if not isinstance(document, dict):
+        document = {}
+    metadata = document.get("metadata")
     return {
         "path": request.path,
-        "model": model,
+        "model": document.get("model"),
+        "max_tokens": document.get("max_tokens"),
+        "user_id": metadata.get("user_id") if isinstance(metadata, dict) else None,
         "key_ok": request.headers.get("x-api-key") == expect["provider_key"],
         "authorization": "authorization" in request.headers,
         "credential_bytes": expect["credential"].encode() in raw,
+        "secret_hits": sum(raw.count(value.encode()) for value in expect.get("secrets", [])),
         "identity_hits": sum(raw.count(value.encode()) for value in expect["identity"]),
         "jwt_hits": len(JWT.findall(raw)),
         "uuid_hits": len(UUID.findall(raw)),
@@ -122,7 +130,7 @@ def message(expect: dict) -> bytes:
         "id": "msg_probe", "type": "message", "role": "assistant", "model": ANSWER_MODEL,
         "content": content,
         "stop_reason": "tool_use" if call else "end_turn", "stop_sequence": None,
-        "usage": {"input_tokens": 1, "output_tokens": 1},
+        "usage": expect.get("usage", {"input_tokens": 1, "output_tokens": 1}),
     }).encode()  # fmt: skip
 
 

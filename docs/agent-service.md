@@ -172,9 +172,9 @@ reaches a container, never a restart. There is no grace period.
 
 ## The API credential
 
-The API route's bearer is one service credential that `litellm` checks and, once the route is on,
-the service sends. Only `agent-service/setup` makes it, in the operator's terminal after `hal apply`
-has asked:
+No service reads the service credential: LiteLLM's own keys decide who may call
+([The API route](#the-api-route)). Only `agent-service/setup` makes it, in the operator's terminal
+after `hal apply` has asked:
 
 ```
 ~/.secrets/agent-service/api/                   0700, uid 1000
@@ -185,7 +185,7 @@ has asked:
 agent-runtime): UTF-8 JSON with only `shared_key` and/or `app_keys`, no duplicate field, `app_keys` an
 object, every value of the credential syntax. The rules live once on the hal side, in
 `agent-service/litellm/gate.py` (`shared_key_of`), and setup judges the bytes it read through them,
-so `--check` never says "set up" for a file the hook refuses. A missing credential is made with
+so `--check` never says "set up" for a file that reader refuses. A missing credential is made with
 `secrets.token_urlsafe(32)` through `credential.json.new` (created exclusively), then `link(2)`,
 which refuses any existing entry. Every path is reached without following a link, under one lock on
 the folder. A plain run and `--renew` never replace a credential, and nothing is printed of it. Setup
@@ -205,11 +205,9 @@ first gap, a refusal or a leftover `credential.json.new`, which the next plain r
 
 **Replacing the credential.** `agent-service/setup --replace-api-credential` works only at a terminal,
 says what it does and goes on after a typed `yes`. It writes `credential.next.json`, checks it with
-the reader and renames it over `credential.json`; the old key is not erased from the disk. It ends
-by naming the recreates: `litellm`, and `agent-service` as well while `service.toml` has an `[api]`
-table. Both containers read the file at create time, and the old credential gets 401 at LiteLLM
-after its recreate, so the order is LiteLLM first. A lost credential needs no backup: it protects no
-stored data.
+the reader and renames it over `credential.json`; the old key is not erased from the disk. It still
+ends by naming a recreate of `litellm`, which no longer reads the file, so nothing needs one. A lost
+credential needs no backup: it protects no stored data.
 
 The master key `~/.secrets/litellm/master-key` and the database password
 `~/.secrets/litellm/db-password` are not made here: `hal setup` generates each (a `service-password`,
@@ -231,8 +229,8 @@ a turn leaves this PC for Anthropic, which generates the answer.
 
 **The API route keeps no content, as evidence for the paths exercised only.** LiteLLM logs no
 message and redacts the `Messages:` suffix of its exceptions, and neither it nor the front
-configures a callback, cache or spend log; LiteLLM's database holds keys, budgets and tool names but no
-spend-log or error-log row and no prompt (`disable_spend_logs`, `disable_error_logs`,
+configures a callback, cache or spend log; LiteLLM's database holds keys, budgets, tool names and each
+person's fingerprint with its counters, but no spend-log or error-log row and no prompt (`disable_spend_logs`, `disable_error_logs`,
 `store_prompts_in_spend_logs`). Only the per-request logs stop: the daily and the key, user and team
 spend aggregates are written whatever `disable_spend_logs` says, and they hold amounts, never content.
 What the database keeps per person or per tool goes after 90 days without use ([The API route](#the-api-route), What expires).
@@ -240,7 +238,7 @@ The census also searches the database's volume and a `pg_dump` of it; the front 
 The retention census (`agent-service/retention_census.py`, driven by
 `probe/agent-service/litellm_retention.py` on the fake-only stack) searches a request and an answer canary in every writable mount and every log of
 the front, the gateway, LiteLLM and the service. After a success, an upstream 500, an upstream error
-body that echoes the request, a refused model, a cancel and a hook refusal it finds none, and each
+body that echoes the request, a refused model and a refusal of LiteLLM's guard it finds none, and each
 search is proven by a control that plants a canary where it must be found. LiteLLM runs at log level
 `CRITICAL`: its own logging sites and uvicorn's write no error line that could carry a provider's
 text, and a provider failure shows at the caller. One channel stays open: `logging.lastResort` and
@@ -257,17 +255,15 @@ Their retention is the Docker daemon's (edge#167). How long Anthropic keeps the 
 privacy section, which owns it.
 
 **Whose account.** Only the operator and his own test accounts are members of `/services/agent-service/subscription`, so his
-Claude subscription serves only his own use. Every other person reaches the service only through the
-API route (`/services/agent-service/api`), under Anthropic's commercial API terms. That route is not
-enabled yet (`api_groups` and `[api]` are unset in `service.toml`), so a member of the api group
-gets 403 `not_enabled`. The operator ruled on 28.10.2026
+Claude subscription serves only his own use. Every other person reaches the provider only through the
+API route, under Anthropic's commercial API terms: an app's own key at LiteLLM, not the service
+(see „The API route“). Nothing runs that route yet, and no app holds a key in LiteLLM's database. The operator ruled on 28.10.2026
 ([#299 comment](https://github.com/overnightworks/hal/issues/299#issuecomment-6464712955)) that the
 agent service writes its own privacy section, `agent-dienst` in `legal/sections/agent-service/datenschutz.html`,
 and describes only the API route; it does not speak of the subscription, which no user can ever use, and no
 text a person reads speaks of the subscription. Every other app or service links
-`/datenschutz#agent-dienst` and says in its own text only what it sends. Which groups may use an AI
-feature is decided by the service's subscription and api groups only, the same in every app; an app
-adds no AI group of its own. Membership in the app (`/apps/<name>`) stays separate access to the app.
+`/datenschutz#agent-dienst` and says in its own text only what it sends. Who may use the subscription is decided by the service's subscription group, and who may
+use the API route by LiteLLM's keys and budgets, the same in every app; an app adds no AI group of its own. Membership in the app (`/apps/<name>`) stays separate access to the app.
 
 ## An app's side
 
@@ -293,39 +289,58 @@ key, mode 0644 in a 0700 folder so the app's container reads it as its own user;
 
 ## The API route
 
-A person who is in an API group but not in a subscription group reaches the provider through
-LiteLLM instead of a CLI. The path is `agent-service`, `litellm-front`, `litellm`, `agent-egress`,
-the provider, over the internal, isolated networks `litellm-api`, `litellm-backend` and
-`litellm-egress`; `litellm` also reaches its own Postgres, `litellm-db`, over `litellm-db`, a network
-with those two members. Nothing runs it yet: the profile `litellm` is in no unit, and `service.toml`
-has no `[api]` table.
+An app reaches the provider through LiteLLM with its own key. The path is `litellm-front`,
+`litellm`, `agent-egress`, the provider, over the internal, isolated networks `litellm-api`,
+`litellm-backend` and `litellm-egress`; `litellm` also reaches its own Postgres, `litellm-db`, over
+`litellm-db`, a network with those two members. Nothing runs it yet: the profile `litellm` is in no
+unit, and no app holds a key in LiteLLM's database.
 
 - **The boundary.** `litellm-front` is the same pinned Traefik as the gateway with one router,
   `POST /v1/chat/completions` (`agent-service/litellm/front/`); every other method and path ends in
-  the front itself, so LiteLLM's own unauthenticated routes are unreachable. LiteLLM's hook
-  (`agent-service/litellm/auth.py`, deciding in `gate.py`) allows that one route with the service
-  credential as bearer, no query string, the body sent as exactly `application/json` (LiteLLM also
-  parses form bodies), no `x-litellm-` header (LiteLLM reads per-request retries and timeouts from
-  them), no `anthropic-` header (LiteLLM forwards `anthropic-version` and `anthropic-beta` to the
-  provider) and exactly the body keys `model`, `messages` and `tools`, which agent-runtime's one posting
-  function sends. Messages are not logged; LiteLLM needs a master key to boot, a file secret that
-  `hal setup` generates and no client holds, so its admin routes stay closed.
+  the front itself, so LiteLLM's own unauthenticated routes are unreachable. Behind it LiteLLM's
+  own keys decide, with no hal code in its process: a request needs an app key as bearer (401
+  otherwise, the old service credential included), a model among the key's `models` (the three
+  names `text/opus`, `text/sonnet`, `text/haiku` of `config.yaml`; 403 otherwise), a path among
+  the key's `allowed_routes` (403 otherwise, the provider routes `/v1/messages` and
+  `/v1/completions` included), and a `user`, the person's fingerprint (`enforce_user_param`; 401
+  without one). LiteLLM also routes by a `model` in the query string, which the key's `models` do
+  not bind: one unknown to `config.yaml` is refused with 400, but a configured name outside the
+  key's `models` is served by that model and its spend counts on the key, and a key or person
+  past its budget is refused (measured); the front passes the query string.
+  LiteLLM's ban list refuses `api_base` in the body with 401, and a fallback naming a URL with 401
+  too. Messages are
+  not logged; LiteLLM needs a master key to boot, a file secret that `hal setup` generates and no
+  app holds, so its admin routes stay closed to apps, straight at `litellm:4000` too.
+- **The money.** Each app key carries `max_budget` in dollars and `budget_duration` `1mo`; LiteLLM
+  prices each answer by its cost map and refuses the next request of a key past its budget before
+  the provider, with 422 `budget_exceeded`, never the 429 agent-runtime's client reads as busy
+  (`budget_exceeded_status_code` stays unset). A person's spend across all keys is bounded by the
+  budget that `max_end_user_budget_id` in `config.yaml` names, refused the same way; a row LiteLLM
+  makes for a new fingerprint resets with that budget. A fingerprint whose own row links a budget
+  without `max_budget`, the operator's, is bound by its app key's budget alone. Both periods reset on the 1st
+  of the month at 00:00 UTC, through LiteLLM's own reset job. A recreate keeps the refusals: spend
+  lives in the database. Without its database a running proxy keeps admitting a cached key until
+  its cache expires (about a minute, measured), then refuses every request before the provider
+  with 503.
+- **The output default.** Each name sets `max_tokens` 16384 in `config.yaml`: what a request that
+  names none gets, and the output LiteLLM reserves against a budget, so the ceiling of a conforming
+  app. An app that names more is bound by the budgets alone.
 - **The database.** `litellm-db` is Postgres 17 at the image and hardening of `keycloak-db` (one
   `x-postgres` anchor in `compose.yaml`), with its own volume and the file secret `litellm/db-password`,
-  which `start.sh` turns into `DATABASE_URL`. LiteLLM stays the official image by its digest: BerriAI ships one
+  which `start.sh` turns into `DATABASE_URL`. It holds the keys (their hashes only), the budgets, and
+  each person's fingerprint with its counters. LiteLLM stays the official image by its digest: BerriAI ships one
   image whose enterprise part a licence key switches on, and hal sets no key and uses no enterprise
   function, so it builds no image of its own. It runs with no `LITELLM_LICENSE` and none of the settings behind its premium check (`enforced_params`,
   `allowed_ips`, global `allowed_routes`, key `tags`, `model_max_budget`, `/key/regenerate`). It
   waits for the database to be healthy at the start only; with the database gone or the password
-  wrong it ends non-zero after Prisma's retries, and what a running proxy does when the database
-  leaves belongs to the keys and budgets that use it. The database password is an environment value
+  wrong it ends non-zero after Prisma's retries. The database password is an environment value
   of the proxy and its Prisma processes, the same holders as the provider key.
 - **What expires.** `hal expire`, run daily at 04:00 by `hal-expire.timer` (`Persistent=true`
   catches up a missed run), deletes in one statement, all or nothing, the daily person and tool rows
   (`LiteLLM_DailyEndUserSpend`, `LiteLLM_DailyToolSpend`) dated more than 90 UTC days back, the tool
   rows (`LiteLLM_ToolTable`) not used for 90 days, and the customer rows (`LiteLLM_EndUserTable`)
   whose fingerprint has had no request for 90 days and whose spend is 0. A customer row linked to
-  its own budget stays, and so do keys, budgets and every other table. The period is
+  its own budget, as the operator's is, stays, and so do keys, budgets and every other table. The period is
   `RETENTION_DAYS` in `src/hal/litellm_expiry.py`, not a setting, because the privacy text states
   it. The run prints counts only; with `litellm-db` not running it deletes nothing and exits 0. A
   backup that copies the database keeps deleted rows until that copy goes, and a restore brings them
@@ -334,44 +349,39 @@ has no `[api]` table.
   when psql reported the failure, and otherwise that the outcome is unknown and the next run repeats
   it. `probe/agent-service/litellm_expiry.py` proves it on the fake-only stack; re-run it on every
   LiteLLM bump, since a schema change shows in production only as a failed unit.
-- **What stays reachable.** The front sees every message and the service credential in memory; a
-  compromised front could spend credit through LiteLLM, bounded by the prepaid credit and, for the
-  burn rate, by the route's concurrency bound. LiteLLM reaches only the front, its database
+- **What stays reachable.** The front sees every message and every app key in memory; a
+  compromised front could spend credit through LiteLLM, bounded by each key's budget and parallel
+  bound. LiteLLM reaches only the front, its database
   and, through the gateway's `litellm` entrypoint, the provider's name.
-- **The bound.** LiteLLM refuses the next request over a bound on the API route at once with 429
-  and `Retry-After`, before the provider; nothing waits, and the run ends
-  `failed: provider_unavailable` on route `api`. The bound is the fixed number
-  `API_ROUTE_MAX_PARALLEL_REQUESTS` in `compose.yaml`, which `auth.py` reads once at start and sets on
-  the service key; a missing or malformed value stops the hook from loading, and the route then
-  refuses everything. It counts HTTP requests, not runs (a later tool round of an admitted run can
-  be refused), per LiteLLM process in memory (a second worker or replica would multiply it), and
-  all apps share the one key. A request whose client left keeps its slot until the provider call
-  ends or 3600 s pass (`cancel_on_disconnect` is off and `config.yaml` sets no `request_timeout`),
-  so stalled calls can refuse the route for up to an hour. `probe/agent-service/litellm_admission.py`
-  proves it on the fake-only stack.
+- **The bound.** Each app key's `max_parallel_requests` bounds its requests in flight; LiteLLM
+  refuses the next one at once with 429 and `Retry-After`, before the provider, and another key's
+  requests are not counted against it. It counts HTTP requests, not runs, per LiteLLM process in
+  memory (a second worker or replica would multiply it). A request whose client left keeps its
+  slot until the provider call ends or 3600 s pass (`cancel_on_disconnect` is off and `config.yaml`
+  sets no `request_timeout`), so stalled calls can refuse a key for up to an hour.
 - **A change reaches LiteLLM only through a recreate** of its container: `config.yaml` (model
-  remapping included), `auth.py`, `gate.py`, `start.sh` and the bound are read once at start, and the four
-  secrets (provider key, master key, database password and service credential) are files mounted at create time.
-- **A failure ends the run by name.** LiteLLM, the front or the gateway stopped, an upstream 500,
-  529, timeout, reset or broken answer, an untrusted certificate, a refused credential and
-  Anthropic's refusal of a used-up balance (a 402 `billing_error`, or a 400 saying the credit
-  balance is too low) all end the run as `failed: provider_unavailable` on route `api`;
-  the run never falls back to the subscription. A bad key, a used-up balance and an outage
-  therefore look the same, and no log tells them apart, because LiteLLM logs at `CRITICAL`, so
-  the operator checks his credit and his key. A cancelled run ends `cancelled` and starts no
-  further provider request; the cancel does not close the request in flight, which may finish and is billed.
-- **Rotating a key is a recreate.** A replaced provider key file reaches LiteLLM only through its
-  recreate, until then it keeps sending the old key. A replaced service credential reaches each
-  reader only through its own recreate, LiteLLM first, then `agent-service`; in between every run
-  fails `provider_unavailable`. Compose refuses to create LiteLLM's container when the provider
-  key file is missing; an empty one makes the container exit non-zero with a line that names the
-  path only.
+  remapping included) and `start.sh` are read once at start, and the three secrets (provider key,
+  master key, database password) are files mounted at create time. Keys and budgets live in the
+  database and change without a recreate.
+- **A provider failure reaches the caller.** An upstream reset, a broken answer and Anthropic's
+  refusal of a used-up balance (a 402 `billing_error`, or a 400 saying the credit balance is too
+  low) each reach the provider once, and the caller gets an error, never a 200; LiteLLM logs at
+  `CRITICAL`,
+  so no log tells them apart, and the operator checks his credit and his key. A caller that leaves
+  does not end the request in flight, which may finish and is billed.
+- **Rotating the provider key is a recreate.** A replaced provider key file reaches LiteLLM only
+  through its recreate, until then it keeps sending the old key. Compose refuses to create LiteLLM's
+  container when the provider key file is missing; an empty one makes the container exit non-zero
+  with a line that names the path only.
 - **Proof:** `probe/agent-service/litellm.py` runs the whole path on a fake-only stack (its
   docstring gives the command line): the fake Anthropic and a fake issuer sit on `internet`, made
-  internal, and the probe refuses to start otherwise. Re-run it and `litellm_admission.py` (the bound) for every LiteLLM, Traefik or Docker
-  bump. `probe/agent-service/litellm_failures.py` drives the failure, key and rotation
-  cases on the same stack, `litellm_admission.py` the bound, and `litellm_retention.py` the retention census of the route. The CI job `front` runs the front's table of requests (`tests/test_litellm_front.py`) for
-  every Traefik bump; a LiteLLM bump still needs the probes.
+  internal, and the probe refuses to start otherwise. Its caller is a throwaway on `litellm-api`
+  that posts agent-runtime's wire body with an app key the probe made through the master key.
+  `litellm_admission.py` drives the key's models, the budgets, the person budget, the operator's
+  exception and the bound, `litellm_failures.py` the failure and key cases, and
+  `litellm_retention.py` the retention census of the route, on the same stack and with the same caller. Re-run them for every LiteLLM,
+  Traefik or Docker bump. The CI job `front` runs the front's table of requests
+  (`tests/test_litellm_front.py`) for every Traefik bump; a LiteLLM bump still needs the probes.
 
 ## Proofs
 
@@ -408,7 +418,8 @@ capability. It needs `[apps.songmaker] mcp_origin` in `service.toml`. It also re
 songmaker's own call is the proof.
 
 **The live canary** is `cd ~/srv/hal && python3 agent-service/live_canary.py`, for the operator at the go
-to let people in; it has not been run. It makes a paid call, so it runs only when the operator says so, as a
+to let people in; it has not been run. It and its probe are frozen until HAL-2.8: LiteLLM no longer
+admits the service's call, which carries no app key and no `user`. It makes a paid call, so it runs only when the operator says so, as a
 person of the API group outside the subscription group: you sign in as for the live smoke, but the
 prompt is the only thing on standard error and no browser starts, you open its link yourself. It
 checks that the route's five containers run and that the running service's `[api]` names
