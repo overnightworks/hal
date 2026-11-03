@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from hal.backup import host, sqlite_copy
-from hal.backup.apps import parse_apps
+from hal.backup.apps import PostgresDatabase, parse_apps
 from hal.backup.cli import DEFAULT_APPS
 from hal.backup.docker import (
     FILE_COUNT_LABEL,
@@ -34,11 +34,6 @@ DUMP = b"PGDMP custom archive"
 AUDIO = {"u1/one.mp3": b"ID3 one", "u1/two.mp3": b"ID3 two", "u2/cover.png": b"PNG"}
 SONGMAKER_CONTAINER = "c0ffee"
 RESTORE_SERVER_ID = "deadbeef" * 8
-RADIO_CONTAINER = "beef01"
-KEYCLOAK_CONTAINER = "kc01"
-KEYCLOAK_PROJECT = next(
-    app.compose_project for app in parse_apps(DEFAULT_APPS.read_text()) if app.name == "keycloak"
-)
 STATUS_KEYS = {
     "schema",
     "state",
@@ -78,6 +73,18 @@ count_table = "songs"
 audio_reference_table = "generations"
 audio_reference_column = "mp3_path"
 """
+KEYCLOAK_TOML = """
+[app.keycloak]
+compose_project = "sso"
+db_service = "keycloak-db"
+dump = "pg_dump_custom"
+db_user = "keycloak"
+db_name = "keycloak"
+postgres_major = 17
+[app.keycloak.restore_test]
+count_table = "realm"
+require_rows = true
+"""
 SQLITE_TOML = """
 [app.presentator]
 compose_project = "presentator"
@@ -88,6 +95,13 @@ database_file = "presentator.sqlite3"
 count_table = "users"
 """
 SQLITE_COPY = b"SQLite rows=7"
+SHIPPED_APPS = parse_apps(DEFAULT_APPS.read_text())
+# Every Postgres record a test may declare: the shipped ones and the scenario ones.
+DECLARABLE_DATABASES = tuple(
+    app
+    for app in (*SHIPPED_APPS, *parse_apps(RADIO_TOML + KEYCLOAK_TOML))
+    if isinstance(app.database, PostgresDatabase)
+)
 # The real boundary, kept before the `machine` fixture swaps it: exits and files go through it.
 REAL_HOST_RUN = host.run
 
@@ -97,18 +111,23 @@ class Machine:
     """Answers each fixed argv the way docker, restic and the throwaway postgres would."""
 
     audio: dict[str, bytes] = field(default_factory=lambda: dict(AUDIO))
-    table_rows: dict[str, int] = field(default_factory=lambda: {"songs": 42, "realm": 2})
-    """The rows the restored database holds, by table."""
+    table_rows: dict[str, int] = field(
+        default_factory=lambda: {app.restore_test.count_table: 2 for app in DECLARABLE_DATABASES}
+    )
+    """The rows the restored database holds, by table: each declarable record's count has rows."""
     references: list[str] = field(default_factory=lambda: ["u1/one.mp3", "u1/two.mp3"])
     db_containers: list[str] = field(default_factory=lambda: [SONGMAKER_CONTAINER])
     volumes: list[str] = field(default_factory=lambda: ["songmaker_audiofiles"])
-    other_db_containers: dict[str, list[str]] = field(
+    other_db_containers: dict[tuple[str, str], list[str]] = field(
         default_factory=lambda: {
-            "radio": [RADIO_CONTAINER],
-            KEYCLOAK_PROJECT: [KEYCLOAK_CONTAINER],
+            (project, service): [f"{project}-{service}"]
+            for project, service in (
+                (app.compose_project, app.database.db_service) for app in DECLARABLE_DATABASES
+            )
+            if project != "songmaker"
         }
     )
-    """The database containers of every project but songmaker, by compose project."""
+    """The database containers of every project but songmaker, by compose project and service."""
     other_volumes: dict[str, list[str]] = field(
         default_factory=lambda: {"radio": ["radio_audiofiles"]}
     )
@@ -238,8 +257,10 @@ class Machine:
         return next(argv for called, argv in self.calls if called == label)
 
     def lose_keycloak_database(self) -> None:
-        """The shipped keycloak app's project has no database container."""
-        self.other_db_containers[KEYCLOAK_PROJECT] = []
+        """Each keycloak record's database service has no container; its neighbours keep theirs."""
+        for app in DECLARABLE_DATABASES:
+            if app.name == "keycloak":
+                self.other_db_containers[(app.compose_project, app.database.db_service)] = []
 
     def _host_lock_is_free(self) -> bool:
         lock = self.status_file.with_name("backup.lock")
@@ -285,7 +306,12 @@ class Machine:
             self.absent_polls -= 1
             return b""
         project = label_value(argv, "com.docker.compose.project")
-        found = self.db_containers if project == "songmaker" else self.other_db_containers[project]
+        service = label_value(argv, "com.docker.compose.service")
+        found = (
+            self.db_containers
+            if project == "songmaker"
+            else self.other_db_containers[(project, service)]
+        )
         return "\n".join(found).encode()
 
     def _state(self, argv, **_) -> bytes:
@@ -514,6 +540,11 @@ def declare_shipped_apps() -> tuple[str, str]:
 def declare_two_apps(home: Path) -> tuple[str, str]:
     """The `--apps` arguments that declare songmaker and radio."""
     return declare_apps(home, SONGMAKER_TOML + RADIO_TOML)
+
+
+def declare_songmaker_and_keycloak(home: Path) -> tuple[str, str]:
+    """The `--apps` arguments that declare songmaker and a keycloak beside it."""
+    return declare_apps(home, SONGMAKER_TOML + KEYCLOAK_TOML)
 
 
 def schema_one_status(snapshot_id: str) -> dict:

@@ -13,7 +13,8 @@ DB_FOLDER = "db"
 
 # Names end up in `docker` filters, restic tags and SQL identifiers, so they stay this plain.
 _PLAIN_NAME = re.compile(r"[a-z_][a-z0-9_-]{0,62}")
-_SQL_IDENTIFIER = re.compile(r"[a-z_][a-z0-9_]{0,62}")
+# Every user double-quotes an identifier, so Postgres keeps its case (`LiteLLM_VerificationToken`).
+_SQL_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,62}")
 # A SQLite file name is one path segment, so it stays inside its volume and is safe in a URI.
 _SQLITE_FILE_NAME = re.compile(r"\w[\w.-]{0,127}", re.ASCII)
 # One name glob: a plain prefix and exactly one trailing `*`, so it is never `*`, a path or another
