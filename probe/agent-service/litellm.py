@@ -13,7 +13,7 @@ live cells.
 Measured: a run takes about two minutes and its teardown a few seconds (K 30 s, CAP 1800 s).
 
 The scratch HOME holds the throwaway secrets (random values, never printed): the provider key, the
-master key, the CA and the signing pair.
+master key, the database password, the CA and the signing pair.
 The fake provider (alias api.anthropic.com) and the fake issuer (alias auth.hallucinai.de) hold
 certificates of the scratch CA, which LiteLLM's SSL_CERT_FILE trusts. Keys, budgets and
 fingerprints are the probe's scenario data; a key reaches a throwaway inside the program on its

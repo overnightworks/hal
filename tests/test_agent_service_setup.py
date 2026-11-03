@@ -233,6 +233,7 @@ def test_a_host_with_every_gap_at_once_is_set_up_in_one_run(make_setup, home, do
     assert make_setup().run(renew=False) == 0
     assert terminal.said[-1] == "agent-service/setup: set up"
     assert make_setup().check() == 0
+    assert not (home / ".secrets" / "agent-service" / "api").exists()
 
 
 def test_a_leftover_api_folder_is_neither_judged_nor_touched_by_a_run_or_the_check(

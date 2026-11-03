@@ -266,8 +266,8 @@ unit, and no app holds a key in LiteLLM's database.
   past its budget is refused (measured); the front passes the query string.
   LiteLLM's ban list refuses `api_base` in the body with 401, and a fallback naming a URL with 401
   too. Messages are
-  not logged; LiteLLM needs a master key to boot, a file secret that `hal setup` generates and no
-  app holds, so its admin routes stay closed to apps, straight at `litellm:4000` too.
+  not logged; LiteLLM needs a master key to boot, a file secret that no app holds (`hal setup`
+  makes it, see below), so its admin routes stay closed to apps, straight at `litellm:4000` too.
 - **The money.** Each app key carries `max_budget` in dollars and `budget_duration` `1mo`; LiteLLM
   prices each answer by its cost map and refuses the next request of a key past its budget before
   the provider, with 422 `budget_exceeded`, never the 429 agent-runtime's client reads as busy
@@ -331,8 +331,8 @@ unit, and no app holds a key in LiteLLM's database.
   container when the provider key file is missing; an empty one makes the container exit non-zero
   with a line that names the path only.
 - **What `hal setup` makes.** The master key `~/.secrets/litellm/master-key` and the database
-  password `~/.secrets/litellm/db-password` are not made by `agent-service/setup`: `hal setup`
-  generates each (a `service-password`, never shown) and creates only a missing file.
+  password `~/.secrets/litellm/db-password` come from `hal setup` alone: it generates each (a
+  `service-password`, never shown) and creates only a missing file.
 - **Proof:** `probe/agent-service/litellm.py` runs the whole path on a fake-only stack (its
   docstring gives the command line): the fake Anthropic and a fake issuer sit on `internet`, made
   internal, and the probe refuses to start otherwise. Its caller is a throwaway on `litellm-api`
