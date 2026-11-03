@@ -414,7 +414,7 @@ def a_play_under_stub_sudo(
     monkeypatch.setattr(
         system_step,
         "TERMINAL_BOUNDARIES",
-        system_step.Boundaries(lambda: True, lambda _argv: system_step.run_playbook_as_root([str(playbook)]), lambda: "operator"),
+        system_step.Boundaries(lambda: True, lambda _argv: system_step.run_playbook_as_root([str(playbook)]), lambda: "operator", lambda: "journald"),
     )
     return stub
 
@@ -593,3 +593,28 @@ def test_a_marked_line_that_cannot_be_read_shows_nothing_and_leaves_the_run_unfi
 
     assert system_step.run_playbook_as_root([str(playbook)]) == PlaybookUnfinished()
     assert terminal.getvalue() == ""
+
+
+@pytest.mark.parametrize(
+    ("script", "driver"),
+    [("echo journald", "journald\n"), ("exit 1", None)],
+    ids=["answers", "exits 1"],
+)
+def test_the_terminal_boundary_reads_the_drivers_name_from_docker_and_none_when_docker_does_not_answer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, script: str, driver: str | None
+) -> None:
+    """Ruled S3b-4, cell D9."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    docker = bin_dir / "docker"
+    docker.write_text(f"#!/bin/sh\n{script}\n")
+    docker.chmod(0o755)
+    monkeypatch.setenv("PATH", str(bin_dir))
+
+    assert system_step.TERMINAL_BOUNDARIES.docker_driver() == driver
+
+
+def test_the_terminal_boundary_reads_none_without_a_docker_binary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PATH", str(tmp_path))
+
+    assert system_step.TERMINAL_BOUNDARIES.docker_driver() is None

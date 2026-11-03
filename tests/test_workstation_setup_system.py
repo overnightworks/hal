@@ -324,6 +324,44 @@ def test_a_sudo_that_refuses_the_password_fails_the_system_step_with_etc_unchang
     assert global_hooks_path(sandbox) == str(sandbox.layout.git_hooks_dir)
 
 
+DOCKER_SILENT = "  ✗ system          failed         Docker does not answer `docker info`"
+
+
+@pytest.mark.parametrize("flags", [(), ("-v",)], ids=["plain", "with -v"])
+def test_a_docker_that_does_not_answer_stops_the_run_before_the_password_and_names_systemctl_status_docker(
+    sandbox: Sandbox, capsys: pytest.CaptureFixture[str], flags: tuple[str, ...]
+) -> None:
+    """Ruled S3b-4, cells D1 and D2: no needs-sudo row, no play, `/etc unchanged`."""
+    sandbox.system.docker_driver = None
+    code, lines, error = run_setup(sandbox, capsys, *flags)
+
+    assert (code, lines[3:]) == (ExitCode.FAILURE, [DOCKER_SILENT, NOT_RUN[SECRETS]])
+    assert error.splitlines() == ["error: setup stopped at system · /etc unchanged", f"next: {system_step.DOCKER_STATUS}"]
+    assert playbook_runs(sandbox) == []
+    assert global_hooks_path(sandbox) == str(sandbox.layout.git_hooks_dir)
+
+
+def test_a_docker_that_does_not_answer_fails_the_dry_run_before_the_play(sandbox: Sandbox, capsys: pytest.CaptureFixture[str]) -> None:
+    """Ruled S3b-4, cell D3."""
+    run_setup(sandbox, capsys)
+    sandbox.system.docker_driver = None
+    sandbox.system.playbook.calls.clear()
+    code, lines, error = run_setup(sandbox, capsys, "--dry-run")
+
+    assert (code, lines[3:]) == (ExitCode.FAILURE, [DOCKER_SILENT, NOT_RUN[SECRETS]])
+    assert error.splitlines() == ["error: setup stopped at system · /etc unchanged", f"next: {system_step.DOCKER_STATUS}"]
+    assert playbook_runs(sandbox) == []
+
+
+def test_a_dry_run_without_a_terminal_reads_no_docker(sandbox: Sandbox, capsys: pytest.CaptureFixture[str]) -> None:
+    """Ruled S3b-4, cell D5: `needs_first` answers before Docker is read."""
+    sandbox.system.docker_driver = None
+    sandbox.system.terminal = False
+    code, lines, _ = run_setup(sandbox, capsys, "--dry-run")
+
+    assert (code, NOT_CHECKED in lines) == (ExitCode.OK, True)
+
+
 def test_a_sudo_that_refuses_the_password_fails_the_dry_run_with_etc_unchanged(sandbox: Sandbox, capsys: pytest.CaptureFixture[str]) -> None:
     run_setup(sandbox, capsys)
     sandbox.system.playbook.refused = True
