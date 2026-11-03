@@ -28,6 +28,8 @@ import secrets
 import subprocess
 import sys
 import time
+from dataclasses import dataclass
+from functools import cached_property
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
@@ -36,7 +38,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(REPO / "src"))
 sys.path.insert(0, str(REPO / "agent-service"))
 
-from agent_networks import gateway_listeners, listeners_of  # noqa: E402
+from agent_networks import EMBEDDED_RESOLVER, gateway_listeners, listeners_of  # noqa: E402
 from api_canary import verdicts  # noqa: E402
 from egress import LABEL, PROJECT, ProbeFailed, expect, run_scratch_probe  # noqa: E402
 from egress_observe import socket_name  # noqa: E402
@@ -69,29 +71,48 @@ PROVIDER_KEY_FILE = Path(".secrets/litellm/anthropic")
 MASTER_KEY_FILE = Path(".secrets/litellm/master-key")
 DATABASE_PASSWORD_FILE = Path(".secrets/litellm/db-password")
 CREDENTIAL_FILE = Path(".secrets/agent-service/api/credential.json")
-# The listening TCP sockets of each query-engine process of the container, by the executable behind
-# `/proc/<pid>/exe`: argv: none; prints {pid: [[hexadecimal address, IP version], ...]}.
-ENGINE_SOCKETS_PROGRAM = """\
-import json, os
-engines = {}
-for entry in filter(str.isdigit, os.listdir("/proc")):
-    try:
-        if not os.path.basename(os.readlink(f"/proc/{entry}/exe")).startswith("query-engine"):
+# The processes of the container and its listening TCP sockets in one snapshot: argv: none; prints
+# {"processes": {pid: {parent, executable}}, "listeners": [{address, version, owners: [pid]}]}, the
+# address in /proc/net's hexadecimal. A process or descriptor that vanishes mid-scan repeats the
+# scan; a scan that never completes ends non-zero.
+SNAPSHOT_PROGRAM = """\
+import json, os, sys, time
+def scan():
+    processes, held = {}, {}
+    for entry in filter(str.isdigit, os.listdir("/proc")):
+        if int(entry) == os.getpid():
             continue
-        engines[entry] = {
-            os.readlink(f"/proc/{entry}/fd/{fd}")[8:-1]
-            for fd in os.listdir(f"/proc/{entry}/fd")
-            if os.readlink(f"/proc/{entry}/fd/{fd}").startswith("socket:[")
+        fields = open(f"/proc/{entry}/stat").read().rpartition(")")[2].split()
+        processes[entry] = {
+            "parent": int(fields[1]), "executable": os.readlink(f"/proc/{entry}/exe"),
         }
+        for fd in os.listdir(f"/proc/{entry}/fd"):
+            target = os.readlink(f"/proc/{entry}/fd/{fd}")
+            if target.startswith("socket:["):
+                held.setdefault(target[8:-1], []).append(int(entry))
+    listeners = []
+    for table, version in (("tcp", 4), ("tcp6", 6)):
+        for row in (line.split() for line in open(f"/proc/net/{table}").read().splitlines()[1:]):
+            if row[3] == "0A":
+                owners = held.get(row[9], [])
+                listeners.append({"address": row[1], "version": version, "owners": owners})
+    return {"processes": processes, "listeners": listeners}
+for _ in range(50):
+    try:
+        print(json.dumps(scan()))
+        break
     except OSError:
-        continue
-found = {pid: [] for pid in engines}
-for table, version in (("tcp", 4), ("tcp6", 6)):
-    for row in (line.split() for line in open(f"/proc/net/{table}").read().splitlines()[1:]):
-        for pid, inodes in engines.items():
-            if row[3] == "0A" and row[9] in inodes:
-                found[pid].append([row[1], version])
-print(json.dumps(found))
+        time.sleep(0.1)
+else:
+    sys.exit("the processes of the container never stood still for one scan")
+"""
+# The query engine path Prisma's client resolves for the proxy, from the image and not from a
+# running process: prints the version check of the binary, then the path on the last line.
+ENGINE_PATH_PROGRAM = """\
+import os
+from prisma.client import BINARY_PATHS
+from prisma.engine import utils
+print(os.path.realpath(utils.ensure(BINARY_PATHS.query_engine)))
 """
 HTTP_PROGRAM = """\
 import json, socket, sys
@@ -136,6 +157,19 @@ def bound_names(declared: str) -> list[list[str]]:
     if host:
         return [[declared]]
     return [[f"{wildcard}:{port}"] for wildcard in WILDCARD_SOCKETS]
+
+
+@dataclass(frozen=True)
+class ProxySnapshot:
+    """LiteLLM's listening TCP sockets as one scan of the container saw them."""
+
+    proxies: frozenset[int]  # the owners of the declared proxy address
+    engines: dict[int, list[str]]  # each query engine child of a proxy, with its socket names
+    outside: list[str]  # the sockets no query engine owns
+
+    @property
+    def listening(self) -> bool:
+        return bool(self.proxies)
 
 
 class LitellmProbe(IssuerProbe):
@@ -551,12 +585,15 @@ class LitellmProbe(IssuerProbe):
         )
         resolved = json.loads(self.compose("config", "--format", "json").stdout)["services"]
         front_static = mounted_file(resolved[FRONT], FRONT_STATIC).read_text()
-        start = mounted_file(resolved[LITELLM], resolved[LITELLM]["entrypoint"][0]).read_text()
         (front_address,) = ENTRYPOINT_ADDRESS.findall(front_static)
-        declared = {FRONT: front_address, LITELLM: ":".join(START_LISTENER.search(start).groups())}
+        declared = {FRONT: front_address, LITELLM: self.proxy_address}
         for cell, service in (("L2", FRONT), ("L3", LITELLM)):
             found = listeners_of(self, service)
-            tcp, engines = (found["tcp"], {}) if service != LITELLM else self.proxy_listeners()
+            tcp, engines = found["tcp"], {}
+            if service == LITELLM:
+                snapshot = self.proxy_snapshot()
+                tcp, engines = snapshot.outside, snapshot.engines
+                expect(snapshot.listening, f"{cell}: nothing listens on {self.proxy_address}")
             engine = [name for names in engines.values() for name in names]
             expect(
                 tcp in bound_names(declared[service]) and found["udp"] == [],
@@ -576,22 +613,52 @@ class LitellmProbe(IssuerProbe):
                 + (f"; its Prisma engine on {engine}" if engine else ""),
             )
 
-    def proxy_listeners(self) -> tuple[list[str], dict[str, list[str]]]:
-        """LiteLLM's TCP listeners outside its Prisma query engine, and the sockets of each query
-        engine process, told by the executable and the owner of the socket. The engine listens on
-        one ephemeral loopback port, before the proxy binds its own."""
-        sockets = json.loads(
+    @cached_property
+    def proxy_address(self) -> str:
+        """The `host:port` start.sh gives LiteLLM, from the resolved configuration."""
+        resolved = json.loads(self.compose("config", "--format", "json").stdout)["services"]
+        start = mounted_file(resolved[LITELLM], resolved[LITELLM]["entrypoint"][0]).read_text()
+        return ":".join(START_LISTENER.search(start).groups())
+
+    @cached_property
+    def engine_executable(self) -> str:
+        """The one query engine binary the image ships for the proxy, read from the image."""
+        shown = self.run(
+            ["docker", "exec", "-i", self.container(LITELLM), "python3", "-"],
+            stdin=ENGINE_PATH_PROGRAM,
+        ).stdout
+        return shown.strip().splitlines()[-1]
+
+    def is_engine(self, row: dict, proxy: int) -> bool:
+        """The process is the query engine: the image's engine binary, a child of the proxy."""
+        return row["parent"] == proxy and row["executable"] == self.engine_executable
+
+    def proxy_snapshot(self) -> ProxySnapshot:
+        """LiteLLM's listeners from one scan: the proxy owns the declared address, and the engine
+        sockets are those of the processes `is_engine` accepts."""
+        scan = json.loads(
             self.run(
                 ["docker", "exec", "-i", self.container(LITELLM), "python3", "-"],
-                stdin=ENGINE_SOCKETS_PROGRAM,
+                stdin=SNAPSHOT_PROGRAM,
             ).stdout
         )
+        sockets = [
+            (socket_name(listener["address"], listener["version"]), listener["owners"])
+            for listener in scan["listeners"]
+        ]
+        sockets = [(n, o) for n, o in sockets if not n.startswith(EMBEDDED_RESOLVER + ":")]
+        declared = {name for names in bound_names(self.proxy_address) for name in names}
+        proxies = {pid for name, owners in sockets if name in declared for pid in owners}
         engines = {
-            pid: [socket_name(address, version) for address, version in owned]
-            for pid, owned in sockets.items()
+            int(pid): [name for name, owners in sockets if int(pid) in owners]
+            for pid, row in scan["processes"].items()
+            if any(self.is_engine(row, proxy) for proxy in proxies)
         }
-        owned = {name for names in engines.values() for name in names}
-        return [n for n in listeners_of(self, LITELLM)["tcp"] if n not in owned], engines
+        return ProxySnapshot(
+            frozenset(proxies),
+            engines,
+            [name for name, owners in sockets if not set(owners) & engines.keys()],
+        )
 
     def cells_r1_r2(self) -> None:
         for cell, name in (("R1", PROVIDER_HOST), ("R2", ISSUER_HOST)):

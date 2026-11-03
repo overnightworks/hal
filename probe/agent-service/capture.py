@@ -78,6 +78,8 @@ IPV6_FRAGMENT_OFFSET_BITS = 0xFFF8
 IPV6_CHAIN_LIMIT = 8
 DNS_PORT = 53
 DNS_HEADER_BYTES = 12
+DNS_QUESTION_TAIL_BYTES = 4  # the question type and class behind its name
+DNS_POINTER_BITS = 0xC0  # a name length byte with these bits set is no label length
 DNS_RESPONSE_BIT = 0x80  # QR, the top bit of the header's third byte
 EMBEDDED_RESOLVER = "127.0.0.11"  # Docker's resolver inside every container on a user network
 LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")
@@ -112,6 +114,7 @@ class Segment:
     undecoded: bool = False  # the frame could not be fully decoded
     partial_dns: bool = False  # TCP port 53 with a payload that is not one whole DNS message
     dns: bool = False  # the frame is a DNS message or a segment of one
+    one_question: bool = False  # a DNS message of a whole header and exactly one whole question
 
 
 def kernel_time(ancillary: list[tuple[int, int, bytes]]) -> float:
@@ -233,9 +236,11 @@ def parse(
         return gap
     flags, payload, partial = transport_contents(protocol, transport, header_bytes, carries_dns)
     question, query = dns_reading(payload) if carries_dns else ("", False)
+    one_question = carries_dns and has_one_question(payload)
     return Segment(
         outgoing, interface, protocol, destination, source_port, destination_port, flags,
         question, at, query=query, partial_dns=partial, dns=carries_dns,
+        one_question=one_question,
     )  # fmt: skip
 
 
@@ -257,6 +262,19 @@ def dns_question(message: bytes) -> str:
         labels.append(message[at + 1 : at + 1 + length].decode("ascii", errors="replace"))
         at += 1 + length
     return ".".join(labels).lower()
+
+
+def has_one_question(message: bytes) -> bool:
+    """A whole header that declares one question, and that question whole: its name ends inside the
+    message with no compression pointer, and its type and class follow."""
+    if len(message) < DNS_HEADER_BYTES or struct.unpack_from("!H", message, 4)[0] != 1:
+        return False
+    at = DNS_HEADER_BYTES
+    while at < len(message) and message[at]:
+        if message[at] & DNS_POINTER_BITS:
+            return False
+        at += 1 + message[at]
+    return at + 1 + DNS_QUESTION_TAIL_BYTES <= len(message)
 
 
 # (label, opcode, operand, jump to this label if true, if false); no label: the next instruction.
@@ -329,6 +347,7 @@ class Window:
         self.label_frames: dict[str, int] = {}
         self.query_frames: dict[str, int] = {}
         self.undecoded = 0
+        self.one_question_frames: dict[str, int] = {}
         self.dns_messages = 0
 
     def see(self, segment: Segment, labels: list[str]) -> None:
@@ -350,6 +369,9 @@ class Window:
         self.dns_messages += segment.dns
         for label in labels:
             if segment.question.split(".")[0] == label:
+                # `litellm-db.<other>` matches too: the first label alone is the limit.
+                if segment.one_question:
+                    self.one_question_frames[label] = self.one_question_frames.get(label, 0) + 1
                 self.label_frames[label] = self.label_frames.get(label, 0) + 1
                 if segment.query:
                     self.query_frames[label] = self.query_frames.get(label, 0) + 1
@@ -417,6 +439,7 @@ def run(mode: str, labels: list[str], seconds: int = WINDOW_SECONDS) -> dict:
     return result | {
         "labels": window.label_frames,
         "queries": window.query_frames,
+        "one_question": window.one_question_frames,
         "dns_messages": window.dns_messages,
     }
 

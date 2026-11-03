@@ -186,14 +186,15 @@ class RetentionProbe(FailureProbe):
         return sum(request["request_canary_hits"] for request in self.provider_requests()[since:])
 
     def wait_until(self, service: str, line: str, seconds: int = 60) -> None:
-        """LiteLLM at CRITICAL prints no start line, so its listening socket is the signal."""
+        """LiteLLM at CRITICAL prints no start line, so the declared proxy address listening is the
+        signal."""
         if service != LITELLM:
             super().wait_until(service, line, seconds)
             return
         deadline = time.monotonic() + seconds
         while True:
             try:
-                if self.proxy_listeners()[0]:
+                if self.proxy_snapshot().listening:
                     return
             except ProbeFailed:
                 pass  # the container is not up yet
@@ -488,8 +489,8 @@ class RetentionProbe(FailureProbe):
         """Every sink of the route over B4 to B9."""
         found = self.sweep(self.clean).found
         expect(not found, f"B10: retained in {found}")
-        self.hold("B10", f"the mounts and logs of the front, the gateway, LiteLLM and the service "
-                  f"hold none of {len(self.clean)} canaries of B4 to B9")  # fmt: skip
+        self.hold("B10", f"the mounts and logs of {', '.join(ROUTE_SERVICES)} hold none of "
+                  f"{len(self.clean)} canaries of B4 to B9")  # fmt: skip
 
     def cell_b11(self) -> None:
         litellm, front = self.container_name(LITELLM), self.container_name(FRONT)

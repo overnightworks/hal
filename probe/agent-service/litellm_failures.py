@@ -76,13 +76,12 @@ for entry in os.listdir("/proc"):
         rows[entry] = {
             "parent": int(fields[1]), "holds": holds, "uid": int(uid),
             "name": open(f"/proc/{entry}/comm").read().strip(),
-            "executable": os.path.basename(os.readlink(f"/proc/{entry}/exe")),
+            "executable": os.readlink(f"/proc/{entry}/exe"),
             "core": core.split()[-3:-1],
         }
 print(json.dumps({"processes": rows}))
 """
 SECRET_NAMES = ("ANTHROPIC_API_KEY", "LITELLM_MASTER_KEY", "DATABASE_URL")
-ENGINE_EXECUTABLE = "query-engine"
 
 
 class FailureProbe(LitellmProbe):
@@ -164,7 +163,8 @@ class FailureProbe(LitellmProbe):
         self.compose("up", "--detach", "--no-deps", service)
 
     def wait_for_front(self) -> None:
-        """The front answers and reaches LiteLLM: its hook refuses a request without a bearer."""
+        """The front answers and a request through it reaches LiteLLM: LiteLLM refuses one without a
+        bearer. A 401 proves no more: not the hook, the database or the provider."""
         deadline = time.monotonic() + 60
         while True:
             try:
@@ -479,7 +479,7 @@ class FailureProbe(LitellmProbe):
         expect(proxy in holders and 1 not in holders, f"F19: holders {sorted(holders)}")
         expect(set(rows[proxy]["holds"]) == set(SECRET_NAMES), f"F19: proxy {rows[proxy]['holds']}")
         user = self.expect_holders(rows, holders, proxy, container)
-        names = sorted(rows[pid]["executable"] for pid in holders)
+        names = sorted(Path(rows[pid]["executable"]).name for pid in holders)
         self.hold(
             "F19",
             f"init and a main tree of {len(rows) - 1}; holders {names}, all uid {user} with core"
@@ -499,10 +499,6 @@ class FailureProbe(LitellmProbe):
             "F19: a holder is not the configured user or has a core size",
         )
         return user
-
-    @staticmethod
-    def is_engine(row: dict, proxy: int) -> bool:
-        return row["parent"] == proxy and row["executable"].startswith(ENGINE_EXECUTABLE)
 
     def configured_user(self, container: str) -> int:
         configured = json.loads(self.run(["docker", "inspect", container]).stdout)[0]["Config"]

@@ -10,6 +10,7 @@ pure logic, checked here on synthetic frames.
 
 import importlib.util
 import ipaddress
+import json
 import re
 import signal
 import socket
@@ -606,30 +607,125 @@ def test_the_dns_window_counts_a_query_to_the_embedded_resolver_apart_from_its_r
     assert (window.label_frames, window.query_frames) == ({"label": 1}, queries)
 
 
+def with_questions(first: str, *more: str) -> bytes:
+    """A DNS query for `first` followed by one more question for each of `more`."""
+    extra = b"".join(dns_message(name)[12:] for name in more)
+    count = struct.pack("!H", 1 + len(more))
+    return dns_message(first)[:4] + count + dns_message(first)[6:] + extra
+
+
 @pytest.mark.parametrize(
-    ("name", "matched"),
+    ("message", "matched"),
     [
-        ("litellm-db.example.com", {"litellm-db": 1}),
-        ("litellm-db", {"litellm-db": 1}),
-        ("license.litellm.ai", {}),
-        ("litellm-dbx.example.com", {}),
-        ("x.litellm-db.example.com", {}),
+        (dns_message("litellm-db.example.com"), {"litellm-db": 1}),
+        (dns_message("litellm-db"), {"litellm-db": 1}),
+        (dns_message("license.litellm.ai"), {}),
+        (dns_message("litellm-dbx.example.com"), {}),
+        (dns_message("x.litellm-db.example.com"), {}),
+        (with_questions("litellm-db", "license.litellm.ai"), {}),
+        (dns_message("litellm-db")[:4] + struct.pack("!H", 0) + dns_message("litellm-db")[6:], {}),
+        (dns_message("litellm-db")[:-5], {}),
+        (dns_message("litellm-db")[:20], {}),
+        (dns_message("litellm-db")[:8], {}),
     ],
     ids=["the label with a domain", "the label alone", "another host of litellm",
-         "a longer first label", "the label deeper in the name"],
+         "a longer first label", "the label deeper in the name",
+         "a second question behind the label", "no question", "a question cut after its name",
+         "a name cut inside a label", "a header cut short"],
 )  # fmt: skip
-def test_the_dns_window_matches_the_first_label_of_the_question_and_counts_every_dns_message(
-    capture, name, matched
+def test_the_dns_window_matches_one_whole_question_by_its_first_label_and_counts_every_message(
+    capture, message, matched
 ):
-    """S1: `litellm-db` is told from other names that contain it, and an unmatched message still
-    counts."""
-    body = udp(40000, 53, dns_message(name))
+    """S1: `litellm-db` is told from other names that contain it, a message with any other question
+    count or a cut question matches nothing, and every DNS message still counts."""
+    body = udp(40000, 53, message)
     segment = parse(capture, ethernet(0x0800, ipv4_header(17, body, destination="127.0.0.1")))
     window = capture.Window()
 
     window.see(segment, ["litellm-db"])
 
-    assert (window.label_frames, window.dns_messages) == (matched, 1)
+    assert (window.one_question_frames, window.dns_messages) == (matched, 1)
+
+
+ENGINE_BINARY = "/opt/prisma/engine"
+PROXY_SOCKET = {"address": "00000000:0FA0", "version": 4}
+ENGINE_SOCKET = {"address": "0100007F:15B3", "version": 4}
+
+
+def snapshot_of(litellm, monkeypatch, processes: dict, listeners: list[dict]):
+    """`proxy_snapshot` over one scan of a LiteLLM container, without a container."""
+    probe = object.__new__(litellm.LitellmProbe)
+    probe.__dict__.update(proxy_address="0.0.0.0:4000", engine_executable=ENGINE_BINARY)
+    scan = {"processes": processes, "listeners": listeners}
+    monkeypatch.setattr(probe, "container", lambda _service: "litellm-1", raising=False)
+    monkeypatch.setattr(
+        probe, "run", lambda *_, **__: SimpleNamespace(stdout=json.dumps(scan)), raising=False
+    )
+    return probe.proxy_snapshot()
+
+
+@pytest.fixture(scope="module")
+def litellm() -> Iterator[ModuleType]:
+    yield from probe_module("litellm")
+
+
+@pytest.mark.parametrize(
+    ("executable", "parent", "is_engine"),
+    [
+        pytest.param(ENGINE_BINARY, 7, True, id="the image's engine under the proxy"),
+        pytest.param(ENGINE_BINARY + "-other", 7, False, id="a name that starts like the engine"),
+        pytest.param("/tmp/query-engine", 7, False, id="the engine's name in another directory"),
+        pytest.param(ENGINE_BINARY, 1, False, id="the engine binary under another parent"),
+    ],
+)
+def test_only_the_images_engine_binary_under_the_proxy_is_the_query_engine(
+    litellm, executable, parent, is_engine
+):
+    probe = object.__new__(litellm.LitellmProbe)
+    probe.__dict__["engine_executable"] = ENGINE_BINARY
+
+    assert probe.is_engine({"parent": parent, "executable": executable}, 7) is is_engine
+
+
+def test_the_proxy_listens_once_it_owns_the_declared_address_and_the_engine_is_told_apart(
+    litellm, monkeypatch
+):
+    processes = {
+        "7": {"parent": 1, "executable": "/app/python"},
+        "9": {"parent": 7, "executable": ENGINE_BINARY},
+    }
+    listeners = [{**PROXY_SOCKET, "owners": [7]}, {**ENGINE_SOCKET, "owners": [9]}]
+
+    snapshot = snapshot_of(litellm, monkeypatch, processes, listeners)
+
+    assert (snapshot.listening, snapshot.engines, snapshot.outside) == (
+        True,
+        {9: ["127.0.0.1:5555"]},
+        ["0.0.0.0:4000"],
+    )
+
+
+def test_a_lone_engine_socket_is_no_listening_proxy(litellm, monkeypatch):
+    processes = {
+        "7": {"parent": 1, "executable": "/app/python"},
+        "9": {"parent": 7, "executable": ENGINE_BINARY},
+    }
+
+    snapshot = snapshot_of(litellm, monkeypatch, processes, [{**ENGINE_SOCKET, "owners": [9]}])
+
+    assert (snapshot.listening, snapshot.engines) == (False, {})
+
+
+def test_a_listener_of_a_look_alike_engine_stays_outside_the_engine(litellm, monkeypatch):
+    processes = {
+        "7": {"parent": 1, "executable": "/app/python"},
+        "9": {"parent": 7, "executable": "/tmp/query-engine-other"},
+    }
+    listeners = [{**PROXY_SOCKET, "owners": [7]}, {**ENGINE_SOCKET, "owners": [9]}]
+
+    snapshot = snapshot_of(litellm, monkeypatch, processes, listeners)
+
+    assert (snapshot.engines, snapshot.outside) == ({}, ["0.0.0.0:4000", "127.0.0.1:5555"])
 
 
 # --- the unit probe's refused-start decision, on synthetic state and logs ----------------------

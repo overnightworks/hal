@@ -284,10 +284,10 @@ class NetworkProbe(LitellmProbe):
         """The window must show the control's own query, not only its reply: a window that
         dropped queries would miss an unanswered one from LiteLLM's start."""
         self.complete(result, "S1", control_ended)
-        seen, queries = result["labels"].get(asked, 0), result["queries"].get(asked, 0)
+        seen, queries = result["one_question"].get(asked, 0), result["queries"].get(asked, 0)
         if not queries:
             raise NotDriven("S1: not driven: the control's query is not in LiteLLM's DNS window")
-        database = result["labels"].get(self.database, 0)
+        database = result["one_question"].get(self.database, 0)
         # `frames` also holds the kernel's IPv6 multicast reports, which are no DNS.
         expect(
             result["dns_messages"] == seen + database,
