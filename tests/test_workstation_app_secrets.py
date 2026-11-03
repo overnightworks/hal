@@ -58,7 +58,7 @@ APP_SECRETS = ["hopin/session-secret", "presentator/secret-key"]
 
 
 @pytest.fixture(params=APP_SECRETS)
-def app_secret(request: pytest.FixtureRequest, packaged_home: Sandbox) -> tuple[str, Path, str]:
+def app_secret(request: pytest.FixtureRequest, packaged_home: Sandbox) -> tuple[str, Path, PurePosixPath]:
     """The generated app secret under test, its path in the home and its manifest place; file and folder absent."""
     (place,) = packaged_entry(request.param).paths
     secret = packaged_home.home / place
@@ -68,7 +68,7 @@ def app_secret(request: pytest.FixtureRequest, packaged_home: Sandbox) -> tuple[
 
 
 def test_the_dry_run_lists_the_app_secret_as_missing_and_writes_nothing(
-    packaged_home: Sandbox, app_secret: tuple[str, Path, str], capsys: pytest.CaptureFixture[str]
+    packaged_home: Sandbox, app_secret: tuple[str, Path, PurePosixPath], capsys: pytest.CaptureFixture[str]
 ) -> None:
     name, secret, _ = app_secret
 
@@ -81,7 +81,7 @@ def test_the_dry_run_lists_the_app_secret_as_missing_and_writes_nothing(
 
 
 def test_apply_generates_the_app_secret_unseen_at_0644_in_a_0700_folder_and_a_rerun_keeps_it(
-    packaged_home: Sandbox, app_secret: tuple[str, Path, str], capsys: pytest.CaptureFixture[str]
+    packaged_home: Sandbox, app_secret: tuple[str, Path, PurePosixPath], capsys: pytest.CaptureFixture[str]
 ) -> None:
     _, secret, _ = app_secret
 
@@ -101,10 +101,10 @@ def test_apply_generates_the_app_secret_unseen_at_0644_in_a_0700_folder_and_a_re
 
 @pytest.mark.parametrize(("mode", "is_loose"), [(0o644, False), (0o666, True)], ids=["0644 is the declared loosest mode", "0666 is loose"])
 def test_the_app_secret_is_loose_only_beyond_0644(
-    packaged_home: Sandbox, app_secret: tuple[str, Path, str], probe: FakeProbe, mode: int, is_loose: bool
+    packaged_home: Sandbox, app_secret: tuple[str, Path, PurePosixPath], probe: FakeProbe, mode: int, is_loose: bool
 ) -> None:
     _, secret, place = app_secret
-    secret.parent.mkdir()
+    secret.parent.mkdir(mode=0o700)
     secret.write_text("planted")
     secret.chmod(mode)
 
