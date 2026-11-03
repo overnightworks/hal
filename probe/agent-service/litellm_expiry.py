@@ -54,8 +54,8 @@ HEALTHY_SECONDS = 120
 TOOL_COLUMN = "last_used_at"
 RENAMED_COLUMN = "last_used_at_probe"
 EXPIRED_TABLES = {kind.value for kind in Kind}
-ROW_LINE = re.compile(r"  [✓·] (person days|tool days|tools|people) +deleted +(\d+) rows? · ")
-INSIDE, OUTSIDE = RETENTION_DAYS - 1, RETENTION_DAYS + 1
+ROW_LINE = re.compile(r" {2}[✓·] (person days|tool days|tools|people) +deleted +(\d+) rows? · ")
+INSIDE, EDGE, OUTSIDE = RETENTION_DAYS - 1, RETENTION_DAYS, RETENTION_DAYS + 1
 
 
 def canary(label: str) -> str:
@@ -98,7 +98,7 @@ class ExpiryProbe(LitellmProbe):
             f' FROM "{table}" AS r'
             for table in chosen
         )
-        return dict(line.split("|", 1) for line in self.query(union))
+        return {line.split("|", 1)[0]: line.split("|", 1)[1] for line in self.query(union)}
 
     def present(self, table: str, column: str, value: str) -> bool:
         (count,) = self.query(f'SELECT count(*) FROM "{table}" WHERE "{column}" = \'{value}\'')  # noqa: S608 - table and column are this probe's literals and the value a token it generated
@@ -216,11 +216,12 @@ class ExpiryProbe(LitellmProbe):
         self.cell_x6(fresh)
 
     def plant(self) -> dict[str, str]:
-        person = {name: self.name(f"person-{name}") for name in ("a", "b", "s", "l")}
+        person = {name: self.name(f"person-{name}") for name in ("a", "b", "s", "l", "e", "d")}
         linked = self.budget("NULL")
         planted = {
             "budget-l": linked, "budget-other": self.budget("5"), "key": self.key(),
             "tool-day-inside": self.tool_day(INSIDE), "tool-day-outside": self.tool_day(OUTSIDE),
+            "tool-day-edge": self.tool_day(EDGE),
             "tool-inside": self.tool(INSIDE), "tool-outside": self.tool(OUTSIDE),
             **{f"person-{name}": value for name, value in person.items()},
         }  # fmt: skip
@@ -231,6 +232,9 @@ class ExpiryProbe(LitellmProbe):
         self.customer(person["b"], 0)
         self.customer(person["s"], 0.25)
         self.customer(person["l"], 0, linked)
+        self.person_day(person["e"], EDGE)
+        self.person_day(person["d"], EDGE)
+        self.customer(person["d"], 0)
         return planted
 
     def cell_x1(self, run: Run, planted: dict[str, str]) -> None:
@@ -239,6 +243,10 @@ class ExpiryProbe(LitellmProbe):
         expected = {
             (days, "end_user_id", planted["person-a"]): True,
             **{(days, "end_user_id", planted[f"person-{n}"]): False for n in ("b", "s", "l")},
+            (days, "end_user_id", planted["person-e"]): True,
+            (days, "end_user_id", planted["person-d"]): True,
+            ("LiteLLM_DailyToolSpend", "tool_name", planted["tool-day-edge"]): True,
+            ("LiteLLM_EndUserTable", "user_id", planted["person-d"]): True,
             ("LiteLLM_DailyToolSpend", "tool_name", planted["tool-day-inside"]): True,
             ("LiteLLM_DailyToolSpend", "tool_name", planted["tool-day-outside"]): False,
             ("LiteLLM_ToolTable", "tool_name", planted["tool-inside"]): True,

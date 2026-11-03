@@ -68,7 +68,7 @@ def require_daemon() -> None:
             timeout=PROBE_TIMEOUT,
         )
     except host.HostCommandError as error:
-        raise NotReadyError(f"docker does not answer: {error}") from error
+        raise DockerSilentError(f"docker does not answer: {error}") from error
 
 
 def ensure_pinned_images(apps: tuple[App, ...]) -> None:

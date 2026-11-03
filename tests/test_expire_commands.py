@@ -1,6 +1,7 @@
 """`hal expire` at its entry, with `docker` and the container's `psql` scripted by label."""
 
-from collections.abc import Sequence
+import signal
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
@@ -23,8 +24,9 @@ class LitellmHost:
 
     containers: list[str] = field(default_factory=lambda: [CONTAINER])
     state: bytes = b"running healthy\n"
-    answer: bytes | int | type[BaseException] = b"0|0|0|0\n"
-    """What psql prints, the exit it ends with, or what interrupts it."""
+    answer: bytes | int | type[BaseException] | Callable[[], None] = b"0|0|0|0\n"
+    """What psql prints, the exit it ends with, what interrupts it, or what it does first."""
+    settings: bytes = b"litellm\nlitellm\n"
     docker_silent: bool = False
     silent_after_psql: bool = False
     psql_runs: int = 0
@@ -49,7 +51,7 @@ class LitellmHost:
             return self.state
         assert argv[:3] == ["docker", "exec", CONTAINER]
         if argv[3] == "printenv":
-            return b"litellm\nlitellm\n"
+            return self.settings
         assert argv[3] == "psql"
         self.psql_runs += 1
         return self.psql(label)
@@ -60,19 +62,25 @@ class LitellmHost:
                 return self.answer
             case int():
                 raise host.HostCommandError(label, f"ended with exit {self.answer}", self.answer)
-            case _:
+            case type():
                 raise self.answer()
+            case _:
+                self.answer()
+                return b"0|0|0|0\n"
 
 
-class Hung(host.HostCommandError):
+class NoExit(host.HostCommandError):
+    """A psql call that ended without an exit code."""
+
     def __init__(self) -> None:
-        super().__init__("psql", "did not answer within 900 s")
+        super().__init__("psql", "ended without an exit code")
 
 
 @pytest.fixture
 def litellm_host(monkeypatch: pytest.MonkeyPatch) -> LitellmHost:
     scripted = LitellmHost()
     monkeypatch.setattr(host, "run", scripted.run)
+    monkeypatch.setattr(host, "monotonic", lambda: 0.0)
     return scripted
 
 
@@ -121,7 +129,7 @@ def test_a_run_shows_one_row_per_kind_and_the_total(
     )
 
 
-def test_a_failure_psql_reports_says_nothing_deleted_and_exits_3(
+def test_a_failure_psql_itself_reports_says_nothing_deleted_and_exits_3(
     litellm_host: LitellmHost, capsys: pytest.CaptureFixture[str]
 ) -> None:
     litellm_host.answer = 1
@@ -140,10 +148,20 @@ UNKNOWN_ERROR = "error: litellm not expired · outcome unknown · the next run r
     ("answer", "silent_after_psql", "reason"),
     [
         (1, True, "psql ended with exit 1, unconfirmed by docker"),
-        (Hung, False, "psql did not answer within 900 s"),
+        (2, False, "psql ended with exit 2"),
+        (-9, False, "psql ended with exit -9"),
+        (137, False, "psql ended with exit 137"),
+        (NoExit, False, "psql ended without an exit code"),
         (b"41|12\n", False, "psql's answer is unreadable"),
     ],
-    ids=["docker-silent-after-psql", "timeout", "unreadable-answer"],
+    ids=[
+        "docker-silent-after-psql",
+        "connection-lost-exit-2",
+        "client-killed-negative-exit",
+        "psql-killed-in-container",
+        "no-exit-code",
+        "unreadable-answer",
+    ],
 )
 def test_a_failure_whose_outcome_is_unknown_says_so_and_exits_3(
     litellm_host: LitellmHost,
@@ -189,6 +207,34 @@ def test_a_lookup_that_fails_runs_no_statement_and_exits_3(
     reason: str,
 ) -> None:
     litellm_host.containers, litellm_host.docker_silent = containers, docker_silent
+
+    assert expire(capsys) == (
+        ExitCode.FAILURE,
+        [f"  ✗ litellm         not expired    {reason}"],
+        [f"error: litellm not expired · {reason}", NEXT],
+    )
+    assert litellm_host.psql_runs == 0
+
+
+def test_a_sigterm_during_the_statement_says_the_outcome_is_unknown_and_exits_130(
+    litellm_host: LitellmHost,
+    capsys: pytest.CaptureFixture[str],
+    restored_signal_handlers: None,
+) -> None:
+    litellm_host.answer = lambda: signal.raise_signal(signal.SIGTERM)
+
+    assert expire(capsys) == (
+        ExitCode.INTERRUPTED,
+        ["  ✗ litellm         not expired    interrupted · outcome unknown"],
+        [UNKNOWN_ERROR, NEXT],
+    )
+
+
+def test_unreadable_database_settings_run_no_statement_and_exit_3(
+    litellm_host: LitellmHost, capsys: pytest.CaptureFixture[str]
+) -> None:
+    litellm_host.settings = b"litellm\n"
+    reason = "the database settings of litellm are unreadable"
 
     assert expire(capsys) == (
         ExitCode.FAILURE,

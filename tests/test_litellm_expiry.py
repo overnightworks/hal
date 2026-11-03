@@ -1,8 +1,10 @@
 """The cutoff of `hal expire`: what LiteLLM keeps goes after 90 UTC days without use."""
 
 from datetime import UTC, date, datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
+import yaml
 
 from hal import litellm_expiry
 
@@ -64,3 +66,10 @@ def test_a_tool_goes_only_when_unused_for_more_than_90_days(
 
     assert moment.utcoffset() == timedelta(0)
     assert (last_used < moment) is goes
+
+
+def test_the_compose_project_and_service_are_the_ones_compose_yaml_declares() -> None:
+    compose = yaml.safe_load((Path(__file__).parent.parent / "compose.yaml").read_text())
+
+    assert compose["name"] == litellm_expiry.DEFAULT_PROJECT
+    assert litellm_expiry.SERVICE in compose["services"]

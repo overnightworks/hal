@@ -18,6 +18,7 @@ NAME = "litellm"
 SERVICE = "litellm-db"
 SETTINGS_LABEL = "database settings read"
 PSQL_LABEL = "psql"
+PSQL_SQL_ERROR_EXIT = 1
 
 
 @dataclass(frozen=True)
@@ -130,9 +131,11 @@ def _database_settings(container: str) -> tuple[str, str]:
 
 
 def _failure_of(error: host.HostCommandError, project: str, container: str) -> ExpiryFailed:
-    """`docker exec` ends with psql's exit, and with 1 when Docker itself fails: only an exit
-    after which Docker still shows the same ready container is psql's own report."""
-    if error.exit_code is None:
+    """`docker exec` ends with psql's exit, and with 1 when Docker itself fails. Only exit 1 is
+    psql's own SQL error under `--command`, and only with the same ready container afterwards is
+    it psql's report. Any other exit (2: the connection went bad, possibly after the commit; 128+N:
+    psql killed; negative: the docker client killed while psql runs on) leaves the outcome open."""
+    if error.exit_code != PSQL_SQL_ERROR_EXIT:
         return ExpiryFailed(str(error), Outcome.UNKNOWN)
     if _still_ready(project, container):
         return ExpiryFailed(str(error), Outcome.NOTHING_DELETED)

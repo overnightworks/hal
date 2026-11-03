@@ -86,7 +86,7 @@ def _tell_failed(reason: str, outcome: Outcome) -> None:
             fact, error = reason, reason
         case Outcome.NOTHING_DELETED:
             fact, error = f"{reason} · {NOTHING_DELETED}", NOTHING_DELETED
-        case Outcome.UNKNOWN:
+        case _:
             fact, error = (
                 f"{reason} · {OUTCOME_UNKNOWN}",
                 f"{OUTCOME_UNKNOWN} · the next run repeats it",
