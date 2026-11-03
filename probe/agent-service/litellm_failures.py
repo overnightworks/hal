@@ -164,10 +164,11 @@ class FailureProbe(LitellmProbe):
         self.compose("up", "--detach", "--no-deps", service)
 
     def wait_for_front(self) -> None:
+        """The front answers and reaches LiteLLM: its hook refuses a request without a bearer."""
         deadline = time.monotonic() + 60
         while True:
             try:
-                if self.http("GET", "/") == 404:
+                if self.http("POST", ROUTE, None, self.good_body()) == 401:
                     return
             except ProbeFailed:
                 pass
