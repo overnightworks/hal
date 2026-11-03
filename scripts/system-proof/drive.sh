@@ -397,7 +397,7 @@ cell_13() {  # cell 12 has activated the hook already, so it is undone here for 
     PROOF_PASSWORD="not-the-password" at_terminal cell13 "$HAL_BIN setup"
     code=$?
     verdict 13 "a wrong password fails the system step alone, exit 3" \
-        '[ $code -eq 3 ] && row_in_log cell13 "commit hook" changed && row_in_log cell13 system failed'
+        '[ $code -eq 3 ] && row_in_log cell13 "commit hook" changed && row_in_log cell13 system "failed +sudo refused" && in_log cell13 "/etc unchanged"'
     verdict 13 "the commit hook is active" '[ -n "$(su - tester -c "git config --global --get core.hooksPath")" ]'
     return
 }
@@ -1932,7 +1932,7 @@ cell_p_wrong_password() {  # cell_p_wrong_password <cell> <log>: sudo refuses th
     PROOF_PASSWORD="not-the-password" at_sudo_terminal "$log" none "$APPLY_ARGUMENTS"
     code=$?
     verdict "$cell" "a wrong password: three prompts, hal fails, the play never started, /etc unchanged, the ticket is gone" \
-        "[ \$code -eq 3 ] && active_sudo_is \"\$sudo_alternative\" && hal_prompts_are $log 3 && row_in_log $log system failed && ! grep -q 'PLAY \[' \"\$EVIDENCE/$log.log\" && [ \"\$before\" = \"\$(snapshot)\" ] && ticket_is_gone $log"
+        "[ \$code -eq 3 ] && active_sudo_is \"\$sudo_alternative\" && hal_prompts_are $log 3 && row_in_log $log system 'failed +sudo refused' && in_log $log '/etc unchanged' && ! grep -q 'PLAY \[' \"\$EVIDENCE/$log.log\" && [ \"\$before\" = \"\$(snapshot)\" ] && ticket_is_gone $log"
     return
 }
 
