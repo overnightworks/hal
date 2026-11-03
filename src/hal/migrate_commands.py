@@ -158,7 +158,7 @@ def _write_state_plan(home: Path, plans: tuple[SourcePlan, ...]) -> None:
             ),
         )
         for glyph, event, fact, names in rows:
-            if names or event is Event.MOVE:
+            if names or (event is Event.MOVE and not plan.entries):
                 write_row(Row(glyph, source, event, fact, details=names))
 
 
