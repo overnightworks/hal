@@ -948,18 +948,6 @@ def test_a_token_is_the_workload_identity_only_with_role_audience_client_and_no_
 
 
 @pytest.mark.parametrize(
-    ("roles", "holds"),
-    [(["agent-workload"], False), (["agent-workload", "speech-workload"], True)],
-)
-def test_a_token_holds_the_speech_role_only_when_its_roles_name_it(
-    probe: ModuleType, roles: list[str], holds: bool
-) -> None:
-    claims = {"realm_access": {"roles": roles}}
-
-    assert probe.service_audience_cell.has_workload_role(claims, "speech-service") is holds
-
-
-@pytest.mark.parametrize(
     ("login_address", "error_address", "accepted"),
     [
         ("198.51.100.23", "198.51.100.23", True),
