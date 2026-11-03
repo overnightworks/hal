@@ -88,6 +88,20 @@ TIMER_JOBS: tuple[TimerJob, ...] = (
         # (unexpected error) still fail the unit.
         success_exit_statuses=(1,),
     ),
+    TimerJob(
+        name="hal-expire",
+        service_description=(
+            f"{command(Verb.EXPIRE)}: deletes what LiteLLM keeps per person or per tool once unused"
+            " for its retention period"
+        ),
+        timer_description=f"Daily {command(Verb.EXPIRE)}, 04:00",
+        verb=Verb.EXPIRE,
+        arguments=(),
+        on_calendar="*-*-* 04:00:00",
+        timeout_start="15min",
+        documentation="docs/agent-service.md",
+        log_format=LogFormat.JSON,
+    ),
     alarm_job(DEFAULT_ALARM_INTERVAL),
 )
 

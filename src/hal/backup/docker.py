@@ -55,6 +55,11 @@ class TargetError(RuntimeError):
     """The labels do not name exactly one container or volume; waiting will not fix that."""
 
 
+class DockerSilentError(NotReadyError):
+    """Docker did not answer: worth waiting for in a backup, a failure for a run that cannot
+    wait."""
+
+
 def require_daemon() -> None:
     try:
         host.run(
@@ -63,7 +68,7 @@ def require_daemon() -> None:
             timeout=PROBE_TIMEOUT,
         )
     except host.HostCommandError as error:
-        raise NotReadyError(f"docker does not answer: {error}") from error
+        raise DockerSilentError(f"docker does not answer: {error}") from error
 
 
 def ensure_pinned_images(apps: tuple[App, ...]) -> None:
@@ -103,21 +108,24 @@ def _pull(image: str) -> None:
 
 
 def database_container(app: App, database: PostgresDatabase) -> str:
+    return service_container(app.compose_project, database.db_service, app.name)
+
+
+def service_container(project: str, service: str, name: str) -> str:
+    """The one ready database container of the project's service; `name` stands in messages."""
     try:
         ids = _lines(
             host.run(
                 ["docker", "ps", "--all", "--quiet", "--no-trunc",
-                 *_label_filter(PROJECT_LABEL, app.compose_project),
-                 *_label_filter(SERVICE_LABEL, database.db_service),
+                 *_label_filter(PROJECT_LABEL, project),
+                 *_label_filter(SERVICE_LABEL, service),
                  *_label_filter(ONEOFF_LABEL, "False")],
                 label="docker ps",
                 timeout=PROBE_TIMEOUT,
             )
         )  # fmt: skip
         if len(ids) > 1:
-            raise TargetError(
-                f"{len(ids)} database containers for {app.name} instead of exactly one"
-            )
+            raise TargetError(f"{len(ids)} database containers for {name} instead of exactly one")
         if not ids:
             raise NotReadyError("no database container")
         state = host.run(
@@ -127,7 +135,7 @@ def database_container(app: App, database: PostgresDatabase) -> str:
             timeout=PROBE_TIMEOUT,
         )  # fmt: skip
     except host.HostCommandError as error:
-        raise NotReadyError(f"docker does not answer: {error}") from error
+        raise DockerSilentError(f"docker does not answer: {error}") from error
     if state.decode().strip() not in _READY_STATES:
         raise NotReadyError("database not ready")
     return ids[0]
