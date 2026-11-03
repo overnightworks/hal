@@ -200,9 +200,9 @@ answer, `User-Agent` and `x-litellm-tags`. After a success, an upstream 500, an 
 model, a refusal of LiteLLM's guard, a tool call and a streamed answer it finds none, and each search is proven by a control that plants
 a canary where it must be found. The front's constant user agent lands in the tool rows, beside each tool name. LiteLLM writes no request
 tag from the user agent (`disable_add_user_agent_to_request_tags`), so a conforming request writes no tag row. A key holder who does not
-conform can send a tag in the body: the census measured where each of the four forms lands, and it lands at most in `LiteLLM_TagTable`
-and `LiteLLM_DailyTagSpend`, with a request id. Those rows are outside the four tables `hal expire` prunes, so the 90 days above do not
-cover them. LiteLLM runs at log level
+conform can send a tag in the body: a root `tags` list, `metadata.tags` and `litellm_metadata.tags` each land in `LiteLLM_DailyTagSpend`
+alone, with LiteLLM's own request id, and `metadata` as a JSON string lands nowhere; none reaches the provider. Those rows are outside the
+four tables `hal expire` prunes, so the 90 days above do not cover them. LiteLLM runs at log level
 `CRITICAL`: its own logging sites and uvicorn's write no error line that could carry a provider's
 text, and a provider failure shows at the caller. One channel stays open: `logging.lastResort` and
 `warnings.warn` reach LiteLLM's standard error, and whether a real path sends a provider's text

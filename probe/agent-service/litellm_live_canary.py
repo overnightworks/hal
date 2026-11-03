@@ -104,19 +104,15 @@ class LiveCanaryProbe(RetentionProbe):
         self.ran: list[str] = []
 
     def drive(self) -> None:
+        """K0, then the wrapper's runs in the order of the matrix; the first failure ends it."""
         self.wait_until_listening()
-        self.cell_k0()
-        self.steer()
-        self.expect_the_probe_project()
-        self.cell_dirty()
-        self.recreate_route()
-        self.cell_clean()
-        self.cell_wrong_answer()
-        self.cell_missing_container()
-        self.cell_r_key()
-        self.cell_k_rest()
-        self.cell_output()
-        self.cell_r3()
+        for step in (
+            self.cell_k0, self.steer, self.expect_the_probe_project, self.cell_dirty,
+            self.recreate_route, self.cell_clean, self.cell_wrong_answer,
+            self.cell_missing_container, self.cell_r_key, self.cell_k_rest, self.cell_output,
+            self.cell_r3,
+        ):  # fmt: skip
+            step()
 
     def stack(self, answered: Callable[[str], dict] | None = None) -> SteeredStack:
         def steer(marker: str) -> None:
