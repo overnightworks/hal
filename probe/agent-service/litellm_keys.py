@@ -45,7 +45,7 @@ from litellm import (
 from scratch_secrets import write_new
 
 from hal.output import write_line
-from hal.stack import compose, litellm_keys
+from hal.stack import api_limits, compose, litellm_keys
 from hal.stack.litellm_keys import KeysDone, KeysFailed, KeysPlan, Target
 from hal.stack.result_rows import keys_partial
 
@@ -121,8 +121,12 @@ class KeysProbe(LitellmProbe):
             self.seen.output += [result.stdout, result.stderr]
         return result
 
+    def api_settings(self) -> api_limits.ApiSettings:
+        """The numbers the step plans with: the code defaults here."""
+        return api_limits.NONE_SET
+
     def plan(self) -> KeysPlan:
-        return litellm_keys.plan_keys(self.engine, self.engine.states(), REPO)
+        return litellm_keys.plan_keys(self.engine, self.engine.states(), REPO, self.api_settings())
 
     def read_plan(self, cell: str) -> KeysPlan:
         """The plan once the keys can be read: LiteLLM answers 502 while it migrates."""
@@ -216,7 +220,7 @@ class KeysProbe(LitellmProbe):
         budget = self.budget()
         expect(
             (budget["max_budget"], budget["budget_duration"])
-            == (litellm_keys.PERSON_BUDGET_DOLLARS, litellm_keys.BUDGET_DURATION),
+            == (api_limits.PERSON_BUDGET_DOLLARS, litellm_keys.BUDGET_DURATION),
             "S1: budget",
         )
         models, reset = sorted(self.models()), first_of_next_month()
@@ -255,9 +259,9 @@ class KeysProbe(LitellmProbe):
             )
             wanted = (
                 app,
-                litellm_keys.APP_BUDGET_DOLLARS,
+                api_limits.APP_BUDGET_DOLLARS,
                 litellm_keys.BUDGET_DURATION,
-                litellm_keys.MAX_PARALLEL_REQUESTS,
+                api_limits.MAX_PARALLEL_REQUESTS,
                 models,
                 [litellm_keys.ROUTE],
                 None,
@@ -288,7 +292,9 @@ class KeysProbe(LitellmProbe):
 
     def cell_s3(self) -> None:
         self.query("DELETE FROM \"LiteLLM_VerificationToken\" WHERE key_alias = 'hopin';")
-        desired = litellm_keys.desired_key("hopin", tuple(self.models()))
+        desired = litellm_keys.desired_key(
+            "hopin", tuple(self.models()), api_limits.NONE_SET.limits_of("hopin")
+        )
         made = {
             name: list(value) if isinstance(value, tuple) else value
             for name, value in desired.items()
@@ -336,11 +342,11 @@ class KeysProbe(LitellmProbe):
             budget["max_budget"],
         )
         wanted = (
-            litellm_keys.APP_BUDGET_DOLLARS,
-            litellm_keys.MAX_PARALLEL_REQUESTS,
+            api_limits.APP_BUDGET_DOLLARS,
+            api_limits.MAX_PARALLEL_REQUESTS,
             None,
             None,
-            litellm_keys.PERSON_BUDGET_DOLLARS,
+            api_limits.PERSON_BUDGET_DOLLARS,
         )
         expect(held == wanted, f"S4: {held}")
         expect(
@@ -446,7 +452,7 @@ class KeysProbe(LitellmProbe):
         by_alias = self.key_rows(key_aliases=["hopin"])
         row = self.key_of("hopin")
         expect(
-            len(by_alias) == 1 and row["max_budget"] == litellm_keys.APP_BUDGET_DOLLARS,
+            len(by_alias) == 1 and row["max_budget"] == api_limits.APP_BUDGET_DOLLARS,
             "S9: hopin's key",
         )
         self.hold(

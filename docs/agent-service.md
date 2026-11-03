@@ -285,11 +285,23 @@ step below).
   of the month at 00:00 UTC, through LiteLLM's own reset job. A recreate keeps the refusals: spend
   lives in the database. Without its database a running proxy keeps admitting a cached key until
   its cache expires (about a minute, measured), then refuses every request before the provider
-  with 503.
-- **The key step.** `hal apply` makes each app's key and the person budget from code defaults in
-  `src/hal/stack/litellm_keys.py`: per app 10 dollars, `1mo`, 5 parallel, the one route, `models`
-  as LiteLLM's `/v1/models` lists them and no rpm or tpm, and the app's name as `key_alias`; the
-  person budget 2 dollars and `1mo` under the id `max_end_user_budget_id` names. The apps are the
+  with 503. The operator sets both amounts in `~/.config/hal/config.toml` and `hal apply` writes
+  them (the key step, below): a changed app budget binds the key at its next request, a changed
+  person budget once LiteLLM's cache lets it in (up to 60 s per cache layer, two layers read). A
+  budget below the spend refuses from then on, until the reset, and the plan does not warn.
+- **The key step.** `hal apply` makes each app's key and the person budget from the numbers of
+  `[api]` and `[api.<app>]` in `~/.config/hal/config.toml` (`docs/home.md`, „Konfiguration“): per
+  number an app's own table, else `[api]`, else the code default in `src/hal/stack/api_limits.py`.
+  The defaults are per app 10 dollars and 5 parallel, and 2 dollars per person; every key carries
+  `1mo`, the one route, `models` as LiteLLM's `/v1/models` lists them and no rpm or tpm, and the
+  app's name as `key_alias`; the person budget carries `1mo` under the id `max_end_user_budget_id`
+  names. `hal apply`'s door reads the file before any guard and ends 2 on a malformed one; the
+  step plans only what the file and LiteLLM's rows disagree on, so a changed number is a change
+  row with old and new, and the next apply sets it without a recreate. An `[api.<name>]` naming no
+  app the one-off read ends `hal apply` with `cannot plan` before the question while LiteLLM runs:
+  a table for an app compose does not mount yet stops the setups that run would offer, and a
+  retired app's leftover table stops every `hal apply` until the operator removes it. With LiteLLM
+  stopped the name is not checked and nothing is set. The apps are the
   key files compose mounts into the one-off `litellm-keys` (profile `apply`, on `litellm-backend`
   alone), which holds them and the master key; hal's own process opens neither. At plan time the
   one-off reads each app's live key by the SHA-256 of its file, in a request body, so a deleted key
@@ -342,10 +354,12 @@ step below).
   only the front, its database and, through the gateway's `litellm` entrypoint, the provider's name.
 - **The bound.** Each app key's `max_parallel_requests` bounds its requests in flight; LiteLLM
   refuses the next one at once with 429 and `Retry-After`, before the provider, and another key's
-  requests are not counted against it. It counts HTTP requests, not runs, per LiteLLM process in
-  memory (a second worker or replica would multiply it). A request whose client left keeps its
-  slot until the provider call ends or 3600 s pass (`cancel_on_disconnect` is off and `config.yaml`
-  sets no `request_timeout`), so stalled calls can refuse a key for up to an hour.
+  requests are not counted against it. The operator sets it per app through `config.toml` (the key
+  step); a changed bound binds at the key's next request, and 0 refuses every request. It counts
+  HTTP requests, not runs, per LiteLLM process in memory (a second worker or replica would multiply
+  it). A request whose client left keeps its slot until the provider call ends or 3600 s pass
+  (`cancel_on_disconnect` is off and `config.yaml` sets no `request_timeout`), so stalled calls can
+  refuse a key for up to an hour.
 - **A change reaches LiteLLM only through a recreate** of its container: `config.yaml` (model
   remapping included) and `start.sh` are read once at start, and the three secrets (provider key,
   master key, database password) are files mounted at create time. Keys and budgets live in the
@@ -371,8 +385,9 @@ step below).
   that each reaches the front alone and that an app's alias `litellm` captures nothing.
   `litellm_admission.py` drives the key's models, the budgets, the person budget, the operator's
   exception and the bound, `litellm_failures.py` the failure and key cases, and
-  `litellm_retention.py` the retention census of the route, and `litellm_keys.py` the key step through
-  `hal apply`'s own plan and run, on the same stack and with the same caller. Re-run them for every LiteLLM,
+  `litellm_retention.py` the retention census of the route, `litellm_keys.py` the key step through
+  `hal apply`'s own plan and run, and `litellm_limits.py` the operator's numbers from `config.toml`
+  through that step, on the same stack and with the same caller. Re-run them for every LiteLLM,
   Traefik or Docker bump. The CI job `front` runs the front's table of requests
   (`tests/test_litellm_front.py`) for every Traefik bump; a LiteLLM bump still needs the probes.
 
@@ -381,7 +396,10 @@ step below).
 Re-run the probes in `probe/agent-service/` for every Traefik, Docker, agent-runtime or LiteLLM upgrade.
 `litellm_keys.py` proves `hal apply`'s key step on the fake-only stack: its plan and run, a lost answer,
 a pure limit change, a taken name, a failed write and a deleted key, and that no key or hash reaches an
-argument, the step's input or output, or LiteLLM's log.
+argument, the step's input or output, or LiteLLM's log. `litellm_limits.py` proves the numbers of
+`[api]` and `[api.<app>]` through that step: their precedence, their return to the defaults, no
+recreate and no moved reset, an app budget below spend, a bound and a budget of 0, a person budget
+below spend binding within LiteLLM's cache lifetime, and an app table naming no app.
 
 **The live smoke** is one command, run in the live checkout after `hal apply` and with the image
 built: `cd ~/srv/hal && python3 agent-service/live_smoke.py`. It signs you in as yourself (the

@@ -141,7 +141,9 @@ die Container noch einmal und meldet nur, was er sieht. Ein zweiter Lauf meldet 
 "An" heisst: jeder Dienst der Einheit hat seinen Container laufen (oder ein Einmal-Dienst ist fertig),
 nicht, dass er gesund ist; die Gesundheit zeigt `docker compose ps`.
 
-**Wo und woraus er laeuft.** Nur aus dem Live-Checkout `~/srv/hal` als Haupt-Worktree (sonst Exit 4
+**Wo und woraus er laeuft.** Vor jeder Pruefung, auch der des Terminals, liest `hal apply`
+`~/.config/hal/config.toml`; eine ungueltige Datei, in jeder Tabelle, beendet es mit Exit 2, Pfad und
+Grund ([home.md](home.md), „Konfiguration“). Nur aus dem Live-Checkout `~/srv/hal` als Haupt-Worktree (sonst Exit 4
 mit dem Grund), sonst haengte er das Live-Projekt an einen fremden Baum. Dann, jeweils mit nur der
 ersten verweigernden Zeile: weder ein anderes `hal apply --local` noch ein `hal update` laeuft
 (Exit 4; `stop` und `start` warten nie darauf), HEAD steht auf `main` (Exit 4) und der Baum ist

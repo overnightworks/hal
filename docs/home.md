@@ -772,12 +772,15 @@ ungültiger Konfiguration mit `2`.
 ## Konfiguration
 
 `hal` liest seine Einstellungen aus `~/.config/hal/config.toml`, eine Tabelle je
-Timer-Job mit Einstellungen; `hal` schreibt, verschiebt und löscht die Datei nie.
+Timer-Job mit Einstellungen und `[api]` für die Zahlen, die LiteLLM den Apps setzt; `hal`
+schreibt, verschiebt und löscht die Datei nie.
 Ohne die Datei gelten die Defaults. Eine unbekannte Tabelle, ein unbekannter
 Schlüssel, ein falscher Werttyp, Inhalt, der kein TOML ist, oder eine nicht
-lesbare Datei ist ein Konfigurationsfehler: `hal check` meldet ihn auf stderr
-und beendet sich mit Exit-Code 2, statt mit falschen Einstellungen
-weiterzulaufen. Die Datei enthält kein Geheimnis; das SMTP-Konto bleibt unter
+lesbare Datei ist ein Konfigurationsfehler, in jeder Tabelle: `hal check`, `hal alarm`,
+`hal setup` und `hal apply` melden ihn auf stderr mit Pfad und Grund und beenden sich mit
+Exit-Code 2, statt mit falschen Einstellungen weiterzulaufen; `hal apply` liest die Datei vor
+jeder anderen Prüfung. `hal stop`, `hal start`, `hal offline`, `hal online` und `hal update`
+lesen sie nie. Die Datei enthält kein Geheimnis; das SMTP-Konto bleibt unter
 `~/.secrets/smtp/`.
 
 ### `[check]`
@@ -795,6 +798,40 @@ weiterzulaufen. Die Datei enthält kein Geheimnis; das SMTP-Konto bleibt unter
 
 Beide Werte sind ganze Zahlen ab 1. Ein neuer `interval` gilt nach `hal setup`; `runs` gilt beim nächsten Lauf.
 
+### `[api]` und `[api.<app>]`
+
+Die Zahlen, die LiteLLM auf dem Schlüssel jeder App und für jede Person durchsetzt
+([agent-service.md](agent-service.md), „The key step“). `[api]` gilt für jede App,
+`[api.<app>]` überschreibt die beiden App-Zahlen für eine App; `<app>` ist der Name ihres
+Schlüssels, wie ihn `compose.yaml` dem Schritt einbindet (etwa `hopin`).
+
+| Schlüssel | Tabelle | Default | Bedeutung |
+|---|---|---|---|
+| `budget_dollars` | `[api]`, `[api.<app>]` | `10` | Dollar je App und Monat |
+| `max_parallel_requests` | `[api]`, `[api.<app>]` | `5` | gleichzeitige Anfragen je App; die nächste lehnt LiteLLM sofort mit 429 ab |
+| `person_budget_dollars` | `[api]` | `2` | Dollar je Person und Monat, über alle Apps |
+
+Je Zahl gilt die Tabelle der App, sonst `[api]`, sonst der Default (`src/hal/stack/api_limits.py`).
+Dollar sind Zahlen ab 0, `max_parallel_requests` ist eine ganze Zahl ab 0; nach oben gibt es
+keine Grenze. Der Zeitraum ist keine Einstellung: ein Monat, zurückgesetzt am Monatsersten
+00:00 UTC.
+
+Der nächste `hal apply` zeigt eine geänderte Zahl als Zeile unter `litellm` (alt → neu) und setzt
+sie nach dem `yes` ohne Neustart von LiteLLM und ohne den Zeitraum zu verschieben; eine entfernte
+Zahl kehrt zum Default zurück. Das setzt er nur, solange `litellm` läuft; sonst setzt es der
+nächste `hal apply`, der es laufen sieht. Eine Zahl der App gilt ab ihrer nächsten Anfrage, das
+Personen-Budget erst, wenn LiteLLMs Cache es übernimmt (bis zu etwa einer Minute je Cache-Schicht).
+`0` sperrt: `budget_dollars = 0` lehnt die erste Anfrage der App ab, `max_parallel_requests = 0`
+jede, `person_budget_dollars = 0` eine Person nach ihrer ersten bezahlten Antwort im Monat. Ein
+Budget unter dem schon Verbrauchten lehnt ab sofort ab, bis zur Rücksetzung; der Plan warnt nicht.
+Eine Zahl, die jemand in LiteLLM von Hand gesetzt hat, überschreibt der nächste `hal apply`.
+
+Ein `[api.<name>]`, dessen Name keine App mit Schlüssel ist (ein Tippfehler, eine App, die
+`compose.yaml` noch nicht oder nicht mehr einbindet), beendet `hal apply`, solange `litellm` läuft,
+vor der Frage mit `error: cannot plan, [api.<name>] names no app with a LiteLLM key (…)`; die
+Klammer nennt die Apps, die es gibt. Erst wenn die Tabelle korrigiert oder entfernt ist, plant
+`hal apply` wieder.
+
 Beispiel:
 
 ```toml
@@ -804,6 +841,14 @@ notify = true
 [alarm]
 interval = 5
 runs = 2
+
+[api]
+budget_dollars = 10
+max_parallel_requests = 5
+person_budget_dollars = 2
+
+[api.hopin]
+budget_dollars = 6
 ```
 
 ## Installation
