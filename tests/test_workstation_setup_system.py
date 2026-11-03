@@ -17,7 +17,9 @@ from support.workstation_support import (
     TASK_MESSAGE,
     Sandbox,
     global_hooks_path,
+    run_hal_setup,
     run_setup,
+    split_at_the_prompt,
 )
 
 import hal.workstation
@@ -459,3 +461,69 @@ def test_a_dry_run_under_json_logging_carries_the_task_names_under_details(
     system_events = [event for event in events if event.get("subject") == "system"]
     assert len(system_events) == 1
     assert system_events[0]["details"] == ["Write edge files", "Restart Docker"]
+
+
+def docker_restarts(consequence: str) -> str:
+    return f"  ! docker          restarts       {consequence}"
+
+
+@pytest.mark.parametrize("flags", [(), ("-v",)], ids=["plain", "with -v"])
+@pytest.mark.parametrize(
+    ("policies", "consequence"),
+    [
+        (("no", "on-failure", "always", "unless-stopped"), "all containers stop · 2 stay down"),
+        (("always", "no"), "all containers stop · 1 stays down"),
+        (("always", "unless-stopped"), "all containers stop · 0 stay down"),
+        ((), "all containers stop · 0 stay down"),
+        (None, "all containers stop"),
+    ],
+    ids=["two stay down", "one stays down", "none stays down", "none running", "policies unreadable"],
+)
+def test_a_docker_that_restarts_is_named_with_the_containers_that_stay_down_before_the_password(
+    sandbox: Sandbox, capsys: pytest.CaptureFixture[str], flags: tuple[str, ...], policies: tuple[str, ...] | None, consequence: str
+) -> None:
+    """Ruled S3b-5, cells R1 to R4: the row stands after the timers and before the sudo row, the verdict counts what it counted, and the run goes on."""
+    sandbox.system.docker_driver = "json-file"
+    sandbox.system.running_policies = policies
+    code, lines, _ = run_setup(sandbox, capsys, *flags)
+
+    assert (code, lines) == (ExitCode.OK, [*FRESH_APPLY[:3], docker_restarts(consequence), *FRESH_APPLY[3:]])
+    assert sandbox.system.driver_reads == 1
+
+
+def test_a_play_that_fails_after_the_restart_was_named_ends_with_the_red_row_and_etc_unchanged(sandbox: Sandbox, capsys: pytest.CaptureFixture[str]) -> None:
+    """Ruled S3b-5, cell R9."""
+    sandbox.system.docker_driver = "json-file"
+    sandbox.system.running_policies = ("no", "no")
+    sandbox.system.playbook.succeeds = False
+    sandbox.system.playbook.failure = TASK_MESSAGE
+    sandbox.system.playbook.changed_before_failing = 0
+    code, lines, error = run_setup(sandbox, capsys)
+
+    assert (code, lines[3:]) == (
+        ExitCode.FAILURE,
+        [docker_restarts("all containers stop · 2 stay down"), SUDO_ANNOUNCEMENT, f"  ✗ system          failed         {TASK_MESSAGE}", NOT_RUN[SECRETS]],
+    )
+    assert error.splitlines() == ["error: setup stopped at system · /etc unchanged", f"next: {RERUN}"]
+
+
+def test_the_agent_prints_no_restart_row_on_a_docker_that_would_restart(sandbox: Sandbox, capsys: pytest.CaptureFixture[str]) -> None:
+    """Ruled S3b-5, cell R7: the agent role reads no Docker."""
+    sandbox.system.docker_driver = "json-file"
+    sandbox.system.running_policies = ("no",)
+    sandbox.system.user = AGENT_USER
+    _, lines, _ = run_setup(sandbox, capsys)
+
+    assert not any("restarts" in line for line in lines)
+    assert sandbox.system.driver_reads == 0
+
+
+def test_the_dry_run_and_the_plan_before_the_yes_print_no_restart_row_on_a_docker_that_would_restart(sandbox: Sandbox, capsys: pytest.CaptureFixture[str]) -> None:
+    """Ruled S3b-5, cell R6: the restart is named at the sudo announcement, so neither the dry run nor the plan half of a run holds it."""
+    sandbox.system.docker_driver = "json-file"
+    sandbox.system.running_policies = ("no",)
+    _, dry_lines, _ = run_setup(sandbox, capsys, "--dry-run")
+    run_hal_setup(home=sandbox.home, secrets_setup_boundaries=sandbox.secrets_boundaries)
+    plan, _ = split_at_the_prompt(capsys.readouterr().out)
+
+    assert not any("restarts" in line for line in [*dry_lines, *plan])

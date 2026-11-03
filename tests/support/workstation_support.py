@@ -442,10 +442,16 @@ class FakeSystem:
     terminal: bool = True
     user: str = "operator"
     docker_driver: str | None = "journald"  # what `docker info` tells the operator, None when Docker does not answer
+    running_policies: tuple[str, ...] | None = ()  # the restart policy of each running container, None when they cannot be read
+    driver_reads: int = 0  # how often `docker info` was asked
+
+    def _read_docker_driver(self) -> str | None:
+        self.driver_reads += 1
+        return self.docker_driver
 
     @property
     def boundaries(self) -> system_step.Boundaries:
-        return system_step.Boundaries(lambda: self.terminal, self.playbook, lambda: self.user, lambda: self.docker_driver)
+        return system_step.Boundaries(lambda: self.terminal, self.playbook, lambda: self.user, self._read_docker_driver, lambda: self.running_policies)
 
 
 class FakeClock:
