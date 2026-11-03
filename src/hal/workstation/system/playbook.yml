@@ -88,7 +88,7 @@
     - name: Refuse before writing anything when the config names no tunnel
       ansible.builtin.assert:
         that: tunnel_id | length > 0
-        fail_msg: "{{ tunnel_config }} names no `tunnel:`; nothing was written"
+        fail_msg: "{{ tunnel_config }} names no `tunnel:`"
         quiet: true
 
     - name: List every user and group of this PC
@@ -213,7 +213,7 @@
     - name: Refuse before writing anything when the agents' account has another shape
       ansible.builtin.assert:
         that: agent_foreign_shape | length == 0
-        fail_msg: "{{ agent_user }} exists with {{ agent_foreign_shape | join(', ') }}; nothing was written"
+        fail_msg: "{{ agent_user }} exists with {{ agent_foreign_shape | join(', ') }}"
         quiet: true
 
     - name: Look at Docker's daemon.json
@@ -236,7 +236,7 @@
       rescue:
         - name: Refuse a daemon.json that is not JSON
           ansible.builtin.fail:
-            msg: "{{ docker_config_path }} is not valid JSON; nothing was written"
+            msg: "{{ docker_config_path }} is not valid JSON"
 
     - name: Refuse before writing anything when daemon.json cannot take the journal as its default
       ansible.builtin.assert:
@@ -246,7 +246,7 @@
           - docker_config['log-driver'] | default(docker_log_driver) == docker_log_driver
         fail_msg: >-
           {{ docker_config_path }} is not a JSON object, or carries `log-opts` or a `log-driver` other than
-          {{ docker_log_driver }}; nothing was written
+          {{ docker_log_driver }}
         quiet: true
 
     - name: Merge the journal into the settings, keeping every other key
@@ -264,7 +264,7 @@
     - name: Refuse before writing anything when Docker does not answer
       ansible.builtin.assert:
         that: docker_driver.rc | default(1) == 0
-        fail_msg: "Docker does not answer `docker info`; nothing was written"
+        fail_msg: "Docker does not answer `docker info`"
         quiet: true
 
     # `hal check` mails its news through msmtp, which needs the system's trust store for the server certificate.

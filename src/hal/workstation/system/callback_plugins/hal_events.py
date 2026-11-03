@@ -1,4 +1,4 @@
-"""The `default` screen output of Ansible plus one marker-prefixed JSON line per started task, per changed task, per failed result and one for the final counts.
+"""The `default` screen output of Ansible plus one marker-prefixed JSON line per started task, per changed task (a failed task that changed included), per failed result and one for the final counts.
 
 `hal setup` reads these lines to judge the root run, to show the task running now, to name the tasks a check found to change and to show a failed task's message.
 The play's own text stays as `default` prints it; `hal setup` shows it only with `-v`.
@@ -16,7 +16,7 @@ DOCUMENTATION = """
     type: stdout
     short_description: default Ansible screen output plus hal's event lines
     description:
-        - The default output callback, followed by one JSON line per started task (handlers included), per changed task, per failed or unreachable result and one for the final counts.
+        - The default output callback, followed by one JSON line per started task (handlers included), per changed task (a failed task that changed included), per failed or unreachable result and one for the final counts.
     extends_documentation_fragment:
       - default_callback
       - result_format_callback
@@ -48,6 +48,9 @@ class CallbackModule(DefaultCallbackModule):
 
     def v2_runner_on_failed(self, result, ignore_errors=False):
         super().v2_runner_on_failed(result, ignore_errors)
+        # Ansible counts a failed task as no change, yet a loop can fail after its first item wrote.
+        if result.is_changed():
+            self._write_event({"event": "changed", "task": result.task_name})
         if not ignore_errors:
             self._write_result("failed", result)
 
