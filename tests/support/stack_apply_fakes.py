@@ -16,6 +16,7 @@ from hal.stack import (
     setup,
     switches,
 )
+from hal.stack.litellm_keys import KEYS_SERVICE
 from hal.stack.realm import reconcile
 
 PROJECT_PREFIX = 6  # docker compose --project-directory D --file F
@@ -124,6 +125,60 @@ def resolved_configuration() -> dict:
 
 
 @dataclass
+class ScriptedKeys:
+    """The key step's one-off: its read reports `rows` (app -> its live key's settings, None when
+    absent), the apps whose name another key holds, `budget` and `models`; its write makes each
+    change into them in turn until the change at `fail_at`, which fails with `cause`, so the next
+    plan sees what the run made."""
+
+    rows: dict[str, dict | None] = field(default_factory=dict)
+    taken: set[str] = field(default_factory=set)
+    budget: dict | None = None
+    models: tuple[str, ...] = ("text/opus", "text/sonnet")
+    read_fails: bool = False
+    fail_at: int | None = None
+    cause: str = "status 500"
+    writes: list[list[dict]] = field(default_factory=list)  # each write's changes, from stdin
+
+    def run(
+        self, command: list[str], arguments: list[str], stdin: str | None
+    ) -> subprocess.CompletedProcess[str]:
+        if "--read" in arguments:
+            if self.read_fails:
+                failure = "litellm-keys: status 502 at /v2/key/info\n"
+                return subprocess.CompletedProcess(command, 1, "", failure)
+            return subprocess.CompletedProcess(command, 0, json.dumps(self.read()), "")
+        changes = json.loads(stdin or "")
+        self.writes.append(changes)
+        return subprocess.CompletedProcess(command, 0, json.dumps(self.write(changes)), "")
+
+    def read(self) -> dict:
+        apps = {
+            app: {"key": row, "name_taken": app in self.taken} for app, row in self.rows.items()
+        }
+        return {"apps": apps, "budget": self.budget, "models": list(self.models)}
+
+    def write(self, changes: list[dict]) -> list[dict]:
+        outcomes = []
+        for index, change in enumerate(changes):
+            named = {"target": change["target"], "subject": change["subject"]}
+            if self.fail_at is not None and index > self.fail_at:
+                outcomes.append(named | {"outcome": "not made"})
+            elif index == self.fail_at:
+                outcomes.append(named | {"outcome": "failed", "cause": self.cause})
+            else:
+                self.make(change)
+                outcomes.append(named | {"outcome": "done"})
+        return outcomes
+
+    def make(self, change: dict) -> None:
+        if change["target"] == "budget":
+            self.budget = (self.budget or {}) | change["fields"]
+        else:
+            self.rows[change["subject"]] = (self.rows[change["subject"]] or {}) | change["fields"]
+
+
+@dataclass
 class ScriptedCompose:
     """Compose over a table of service -> container state; records every call.
 
@@ -162,9 +217,10 @@ class ScriptedCompose:
     realm_checksums: dict = field(default_factory=lambda: {"master": {}, "hallucinai": {}})
     realm_applies: int = 0  # how often config-cli ran
     config_cli_fails: bool = False
+    keys: ScriptedKeys = field(default_factory=ScriptedKeys)
 
     def run(
-        self, command: list[str], _timeout: int, _stdin: str | None = None
+        self, command: list[str], _timeout: int, stdin: str | None = None
     ) -> subprocess.CompletedProcess[str]:
         if command[:2] == ["docker", "image"]:
             image_id = self.image_ids.get(command[-1].removeprefix("reference="), LABELLED_IMAGE_ID)
@@ -177,6 +233,8 @@ class ScriptedCompose:
             return subprocess.CompletedProcess(
                 command, 1, "", f"{verb} broke\n{self.failure_line}\n\n"
             )
+        if verb == "run" and KEYS_SERVICE in arguments:
+            return self.keys.run(command, arguments, stdin)
         if verb == "run" and self.config_cli_fails and "realm-observer" not in arguments:
             return subprocess.CompletedProcess(command, 1, "", "config-cli broke\n")
         output = getattr(self, f"verb_{verb}")(profile, arguments)

@@ -5,13 +5,14 @@ from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from enum import StrEnum
 
-from hal.output import Glyph, Group, Noun, Row, TrailingNoun, counted
+from hal.output import Glyph, Group, Noun, Row, TrailingNoun, counted, printable
 from hal.output.command import Verb, command
 from hal.stack import checkout, core, environment, switches
 from hal.stack.appkit_step import APPKIT_UNIT, TARGETS, AppkitPlan
 from hal.stack.apps import AppKind, AppPlan, AppsPlan, OffPlan, SkippedNote, StaysStoppedNote
 from hal.stack.built_image import ENDS_RUNS, BuiltRecreate
 from hal.stack.legal_step import LEGAL_UNIT, BlockChange, LegalPlan, PageChange
+from hal.stack.litellm_keys import LITELLM_SERVICE, Change, FieldChange, KeysPlan, Target, Value
 from hal.stack.plan import Plan
 from hal.stack.realm.reconcile import REALM_UNIT, RealmAction, RealmPlan
 from hal.stack.unit_plans import Action, ImageReference, KeptImage, Recreate, UnitPlan
@@ -41,6 +42,18 @@ class PlanEvent(StrEnum):
     OLD_FILES = "old files"
 
 
+class KeysEvent(StrEnum):
+    NEW_BUDGET = "new budget"
+    BUDGET_CHANGED = "budget changed"
+    NEW_KEY = "new key"
+    KEY_CHANGED = "key changed"
+    NAME_TAKEN = "name taken"
+    NOT_READ = "keys not read"
+
+
+NAME_TAKEN_FACT = "another key holds the name"
+
+
 class LegalEvent(TrailingNoun):
     NEW_PAGE = "new page"
     EDITED_PAGE = "edited page"
@@ -68,9 +81,15 @@ class FileNoun(Noun):
     FILE = "file"
 
 
+class ListNoun(Noun):
+    MODEL = "model"
+    ROUTE = "route"
+
+
 class PlanGroup(StrEnum):
     CORE = "core"
     UNITS = "units"
+    LITELLM = "litellm"
     APPS = "apps"
 
 
@@ -192,6 +211,7 @@ def plan_groups(plan: Plan) -> tuple[Group, ...]:
         Group(None, (*_appkit_rows(plan.appkit), *_legal_rows(plan.legal))),
         Group(PlanGroup.CORE, _core_rows(plan)),
         Group(PlanGroup.UNITS, _unit_rows(plan)),
+        Group(PlanGroup.LITELLM, _keys_rows(plan.keys)),
         Group(PlanGroup.APPS, _app_rows(plan.app_plans)),
     )
 
@@ -383,6 +403,82 @@ def _realm_row(realm: RealmPlan) -> Row | None:
             return Row(Glyph.NEEDS_YOU, REALM_UNIT, PlanEvent.REALM_SKIPPED, realm.error)
         case _:
             return None
+
+
+def _keys_rows(keys: KeysPlan) -> tuple[Row, ...]:
+    if keys.not_read is not None:
+        return (
+            Row(Glyph.NEEDS_YOU, LITELLM_SERVICE, KeysEvent.NOT_READ, printable(keys.not_read)),
+        )
+    return (
+        *(
+            key_change_row(change, Glyph.ADD if change.new else Glyph.CHANGE)
+            for change in keys.changes
+        ),
+        *(name_taken_row(app) for app in keys.name_taken),
+    )
+
+
+def key_change_row(change: Change, glyph: Glyph) -> Row:
+    """One budget or key to make or update; a new one shows what it gets, a changed one each
+    field's old and new value."""
+    shown = (field for field in change.fields if field.name != "key_alias" or not change.new)
+    texts = _new_field_text if change.new else _changed_field_text
+    return Row(glyph, change.subject, change_event(change), _SEPARATOR.join(map(texts, shown)))
+
+
+def change_event(change: Change) -> KeysEvent:
+    if change.target is Target.BUDGET:
+        return KeysEvent.NEW_BUDGET if change.new else KeysEvent.BUDGET_CHANGED
+    return KeysEvent.NEW_KEY if change.new else KeysEvent.KEY_CHANGED
+
+
+def name_taken_row(app: str) -> Row:
+    return Row(Glyph.NEEDS_YOU, app, KeysEvent.NAME_TAKEN, NAME_TAKEN_FACT)
+
+
+_FIELD_LABELS = {
+    "key_alias": "name",
+    "max_budget": "budget",
+    "budget_duration": "period",
+    "max_parallel_requests": "parallel",
+    "models": "models",
+    "allowed_routes": "routes",
+    "rpm_limit": "rpm",
+    "tpm_limit": "tpm",
+}
+_LIST_NOUNS = {"models": ListNoun.MODEL, "allowed_routes": ListNoun.ROUTE}
+# A new row's value without its label where the value says what it is.
+_NEW_FIELD_FORMS = {
+    "max_budget": "{} dollars",
+    "budget_duration": "{}",
+    "max_parallel_requests": "{} parallel",
+}
+
+
+def _new_field_text(field: FieldChange) -> str:
+    if isinstance(field.new, tuple):
+        return counted(len(field.new), _LIST_NOUNS[field.name])
+    return _NEW_FIELD_FORMS[field.name].format(_shown(field.new))
+
+
+def _changed_field_text(field: FieldChange) -> str:
+    label = _FIELD_LABELS[field.name]
+    if isinstance(field.new, tuple):
+        old = field.old if isinstance(field.old, tuple) else ()
+        added = (f"+{printable(item)}" for item in field.new if item not in old)
+        removed = (f"-{printable(item)}" for item in old if item not in field.new)
+        return " ".join((label, *added, *removed))
+    unit = " dollars" if field.name == "max_budget" else ""
+    return f"{label} {_shown(field.old)} \N{RIGHTWARDS ARROW} {_shown(field.new)}{unit}"
+
+
+def _shown(value: Value) -> str:
+    if value is None:
+        return "none"
+    if isinstance(value, float):
+        return f"{value:g}"
+    return printable(str(value))
 
 
 def _app_rows(apps: AppsPlan) -> tuple[Row, ...]:

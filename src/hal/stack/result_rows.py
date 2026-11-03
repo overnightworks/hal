@@ -19,7 +19,23 @@ from hal.stack.apps import (
 )
 from hal.stack.barrier import BarriersUnproven
 from hal.stack.legal_step import LEGAL_UNIT, LegalPlan, PageChange
-from hal.stack.plan_rows import ChangeNoun, PlanEvent, appkit_row
+from hal.stack.litellm_keys import (
+    LITELLM_SERVICE,
+    Change,
+    KeysDone,
+    KeysFailed,
+    KeysResult,
+    KeysSkipped,
+)
+from hal.stack.plan_rows import (
+    ChangeNoun,
+    KeysEvent,
+    PlanEvent,
+    appkit_row,
+    change_event,
+    key_change_row,
+    name_taken_row,
+)
 from hal.stack.realm import Kind
 from hal.stack.realm.reconcile import (
     REALM_UNIT,
@@ -65,6 +81,9 @@ class ResultEvent(StrEnum):
     PAGES_WRITTEN = "pages written"
     RECORD_WRITTEN = "record written"
     NOT_WRITTEN = "not written"
+    NOT_MADE = "not made"
+    KEYS_SKIPPED = "keys skipped"
+    KEYS_FAILED = "keys failed"
 
 
 _APP_ON_EVENT = {
@@ -112,6 +131,65 @@ def partial_error(result: StepResult) -> str | None:
             )
         case _:
             return None
+
+
+def keys_rows(result: KeysResult) -> tuple[Row, ...]:
+    """The key step's rows: each change done, the failed one with its cause and each one not made
+    after it, then each app whose name another key holds."""
+    rows: list[Row] = []
+    match result:
+        case KeysSkipped(reason):
+            rows.append(
+                Row(Glyph.NEEDS_YOU, LITELLM_SERVICE, ResultEvent.KEYS_SKIPPED, printable(reason))
+            )
+        case KeysDone(done, name_taken):
+            rows += [*_done_rows(done), *map(name_taken_row, name_taken)]
+        case KeysFailed(done, failed, cause, not_made, name_taken):
+            rows += [
+                *_done_rows(done),
+                _failed_keys_row(failed, cause),
+                *(_not_made_row(change) for change in not_made),
+                *map(name_taken_row, name_taken),
+            ]
+    return tuple(rows)
+
+
+def keys_partial(result: KeysResult) -> tuple[str, str | None] | None:
+    """The run's `partial, ...` text for the key step and the command that ends it, None when it
+    did not end partial; a taken name no hal command resolves."""
+    match result:
+        case KeysSkipped():
+            return f"partial, {LITELLM_SERVICE} {ResultEvent.KEYS_SKIPPED}", command(Verb.APPLY)
+        case KeysDone(name_taken=name_taken) if name_taken:
+            return f"partial, {_names_taken(name_taken)}", None
+        case KeysFailed(failed=failed, name_taken=name_taken):
+            what = (
+                f"{LITELLM_SERVICE} {ResultEvent.KEYS_FAILED}"
+                if failed is None
+                else f"{failed.subject} {change_event(failed)} failed"
+            )
+            text = "; ".join((what, _names_taken(name_taken)) if name_taken else (what,))
+            return f"partial, {text}", command(Verb.APPLY)
+        case _:
+            return None
+
+
+def _done_rows(done: tuple[Change, ...]) -> tuple[Row, ...]:
+    return tuple(key_change_row(change, Glyph.DONE) for change in done)
+
+
+def _failed_keys_row(failed: Change | None, cause: str) -> Row:
+    if failed is None:
+        return Row(Glyph.FAILED, LITELLM_SERVICE, ResultEvent.KEYS_FAILED, printable(cause))
+    return Row(Glyph.FAILED, failed.subject, change_event(failed), printable(cause))
+
+
+def _not_made_row(change: Change) -> Row:
+    return Row(Glyph.UNCHANGED, change.subject, ResultEvent.NOT_MADE, str(change_event(change)))
+
+
+def _names_taken(apps: tuple[str, ...]) -> str:
+    return f"{', '.join(apps)} {KeysEvent.NAME_TAKEN}"
 
 
 def app_row(result: AppResult) -> Row:

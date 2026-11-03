@@ -1177,11 +1177,59 @@ Type <span class="w">yes</span> to apply 3 changes: yes
 <span class="rw">error:</span> partial, relay failed
 <span class="c">next:</span> hal apply</pre>
       </figure>
+      <figure id="f-apply-litellm-keys">
+        <figcaption><span class="tag new">neu #964</span> der Schlüssel-Schritt unter <code>litellm</code>: nicht lesbar und allein, nicht lesbar neben einer anderen Änderung, ein vergebener Name, ein Schreiben scheitert</figcaption>
+<pre class="term"><span class="p">$</span> <span class="u">hal apply</span>
+<span class="d">…</span>
+<span class="hd">litellm</span>
+<span class="y">  !</span> litellm         keys not read  <span class="d">`docker compose run` exited 1: litellm-keys: status 502 at /v2/key/info</span>
+<span class="rw">error:</span> litellm: keys not read (`docker compose run` exited 1: litellm-keys: status 502 at /v2/key/info)
+<span class="c">next:</span> hal apply
+
+<span class="p">$</span> <span class="u">hal apply</span>
+<span class="d">…</span>
+<span class="hd">units</span>
+<span class="g">  +</span> step-ca         switch on      <span class="d">step-ca, traefik-mcp</span>
+<span class="hd">litellm</span>
+<span class="y">  !</span> litellm         keys not read  <span class="d">`docker compose run` exited 1: litellm-keys: status 502 at /v2/key/info</span>
+Type <span class="w">yes</span> to apply 1 change: yes
+<span class="d">…</span>
+<span class="y">  !</span> litellm         keys skipped   <span class="d">`docker compose run` exited 1: litellm-keys: status 502 at /v2/key/info</span>
+<span class="rw">error:</span> partial, litellm keys skipped
+<span class="c">next:</span> hal apply
+
+<span class="p">$</span> <span class="u">hal apply</span>
+<span class="d">…</span>
+<span class="hd">litellm</span>
+<span class="b">  ~</span> person-monthly  budget changed <span class="d">budget 1.5 → 2 dollars</span>
+<span class="b">  ~</span> songmaker       key changed    <span class="d">parallel 2 → 5 · rpm 60 → none</span>
+<span class="y">  !</span> hopin           name taken     <span class="d">another key holds the name</span>
+Type <span class="w">yes</span> to apply 2 changes: yes
+<span class="g">  ✓</span> person-monthly  budget changed <span class="d">budget 1.5 → 2 dollars</span>
+<span class="g">  ✓</span> songmaker       key changed    <span class="d">parallel 2 → 5 · rpm 60 → none</span>
+<span class="y">  !</span> hopin           name taken     <span class="d">another key holds the name</span>
+<span class="rw">error:</span> partial, hopin name taken
+
+<span class="p">$</span> <span class="u">hal apply</span>
+<span class="d">…</span>
+<span class="hd">litellm</span>
+<span class="g">  +</span> person-monthly  new budget     <span class="d">2 dollars · 1mo</span>
+<span class="g">  +</span> hopin           new key        <span class="d">10 dollars · 1mo · 3 models · 1 route · 5 parallel</span>
+<span class="g">  +</span> presentator     new key        <span class="d">10 dollars · 1mo · 3 models · 1 route · 5 parallel</span>
+<span class="g">  +</span> songmaker       new key        <span class="d">10 dollars · 1mo · 3 models · 1 route · 5 parallel</span>
+Type <span class="w">yes</span> to apply 4 changes: yes
+<span class="r">  ✗</span> person-monthly  new budget     <span class="d">status 500</span>
+<span class="d">  · hopin           not made       new key</span>
+<span class="d">  · presentator     not made       new key</span>
+<span class="d">  · songmaker       not made       new key</span>
+<span class="rw">error:</span> partial, person-monthly new budget failed
+<span class="c">next:</span> hal apply</pre>
+      </figure>
     </div>
   </div>
   <ul class="why">
     <li><b>Kein <code>edge apply --closed:</code> vor jeder Zeile.</b> Du hast <code>hal apply</code> getippt; die Zeilen brauchen keinen Absender.</li>
-    <li><b>Nach Kategorie gruppiert, darin in der Reihenfolge, in der hal arbeitet:</b> erst appkit und die Rechtsseiten, dann core, die Einheiten mit dem Realm, die Apps, zuletzt Cloudflare. So steht das Ergebnis Zeile für Zeile wie der Plan. Die Plan-Zeichen <code>+ ~ -</code> kennst du von tofu.</li>
+    <li><b>Nach Kategorie gruppiert, darin in der Reihenfolge, in der hal arbeitet:</b> erst appkit und die Rechtsseiten, dann core, die Einheiten mit dem Realm, die LiteLLM-Schlüssel, die Apps, zuletzt Cloudflare. So steht das Ergebnis Zeile für Zeile wie der Plan. Die Plan-Zeichen <code>+ ~ -</code> kennst du von tofu.</li>
     <li><b>Was der Plan schon weiß, steht im Plan.</b> Keycloak antwortet nicht: heute erfährst du das erst nach dem yes als „partial“, neu steht es gelb vor dem yes; ist es die einzige Änderung, fragt hal gar nicht und endet mit <code>error:</code> und <code>next: hal apply</code>.</li>
     <li><b>Alte Images:</b> eine Zeile mit beiden Versionen, ohne „block 6“ und „K11b“. Wie man hochzieht, steht in der Doku, nicht in jeder Ausgabe.</li>
     <li><b>Rechtsseiten:</b> eine Zeile je Art; die Abschnitte geänderter Seiten stehen eingerückt darunter, die einer neuen zeigt <code>-v</code>.</li>

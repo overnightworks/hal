@@ -8,6 +8,7 @@ from hal.stack.appkit_step import AppkitPlan
 from hal.stack.apps import AppsPlan
 from hal.stack.built_image import BuiltRecreate
 from hal.stack.legal_step import LegalPlan
+from hal.stack.litellm_keys import KeysPlan
 from hal.stack.realm import reconcile
 from hal.stack.unit_plans import Action, Fleet, KeptImage, Recreate, UnitPlan
 
@@ -24,6 +25,7 @@ class Plan:
     plans: list[UnitPlan]
     images: list[KeptImage]
     realm: reconcile.RealmPlan
+    keys: KeysPlan
     app_plans: AppsPlan
     appkit: AppkitPlan
     legal: LegalPlan
@@ -54,6 +56,7 @@ class Plan:
     def changes_nothing(self) -> bool:
         return (
             self.realm.action is not reconcile.RealmAction.RUN
+            and not self.keys.changes
             and all(plan.action is Action.STAYS_STOPPED for plan in self.plans)
             and all(plan.action is core.CoreAction.NOT_STARTED for plan in self.core)
             and all(plan.action is core.FollowerAction.HELD for plan in self.followers)

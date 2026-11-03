@@ -214,7 +214,7 @@ privacy section, which owns it.
 **Whose account.** Only the operator and his own test accounts are members of `/services/agent-service/subscription`, so his
 Claude subscription serves only his own use. Every other person reaches the provider only through the
 API route, under Anthropic's commercial API terms: an app's own key at LiteLLM, not the service
-(see „The API route“). Nothing runs that route yet, and no app holds a key in LiteLLM's database. The operator ruled on 28.10.2026
+(see „The API route“). Nothing runs that route yet. The operator ruled on 28.10.2026
 ([#299 comment](https://github.com/overnightworks/hal/issues/299#issuecomment-6464712955)) that the
 agent service writes its own privacy section, `agent-dienst` in `legal/sections/agent-service/datenschutz.html`,
 and describes only the API route; it does not speak of the subscription, which no user can ever use, and no
@@ -242,9 +242,9 @@ host process can reach it, because the network has no host address and publishes
 
 An app that calls LiteLLM directly holds only its own key, the file `~/.secrets/litellm/apps/<app>` (`songmaker`,
 `hopin`, `presentator`). `hal setup` creates a missing one with the prefix `sk-` that LiteLLM requires of a custom
-key, mode 0644 in a 0700 folder so the app's container reads it as its own user; no service reads the file today.
-On the same agent network the app posts to `http://litellm-front:4000/v1/chat/completions` with that
-key as bearer; nothing starts the front yet.
+key, mode 0644 in a 0700 folder so the app's container reads it as its own user. `hal apply`'s key step reads it to
+make the app's key in LiteLLM (see "The API route"). On the same agent network the app posts to
+`http://litellm-front:4000/v1/chat/completions` with that key as bearer; nothing starts the front yet.
 
 ## The API route
 
@@ -252,7 +252,8 @@ An app reaches the provider through LiteLLM with its own key. The path starts on
 agent network, `hal_agent_<app>`, and is `litellm-front`, `litellm`, `agent-egress`, the provider,
 over the internal, isolated networks `litellm-backend` and `litellm-egress`; `litellm` also reaches its own Postgres, `litellm-db`, over
 `litellm-db`, a network with those two members. Nothing runs it yet: the profile `litellm` is in no
-unit, and no app holds a key in LiteLLM's database.
+unit. While its container runs, `hal apply` makes each app's key and the person budget (the key
+step below).
 
 - **The boundary.** `litellm-front` is the same pinned Traefik as the gateway with one router,
   `POST /v1/chat/completions` (`agent-service/litellm/front/`); every other method and path ends in
@@ -272,7 +273,8 @@ unit, and no app holds a key in LiteLLM's database.
   LiteLLM's ban list refuses `api_base` in the body with 401, and a fallback naming a URL with 401
   too. Messages are
   not logged; LiteLLM needs a master key to boot, a file secret that no app holds (`hal setup`
-  makes it, see below), so its admin routes stay closed to apps, straight at `litellm:4000` too.
+  makes it, see below; LiteLLM and the key step read it), so its admin routes stay closed to apps,
+  straight at `litellm:4000` too.
 - **The money.** Each app key carries `max_budget` in dollars and `budget_duration` `1mo`; LiteLLM
   prices each answer by its cost map and refuses the next request of a key past its budget before
   the provider, with 422 `budget_exceeded`, never the 429 agent-runtime's client reads as busy
@@ -284,6 +286,26 @@ unit, and no app holds a key in LiteLLM's database.
   lives in the database. Without its database a running proxy keeps admitting a cached key until
   its cache expires (about a minute, measured), then refuses every request before the provider
   with 503.
+- **The key step.** `hal apply` makes each app's key and the person budget from code defaults in
+  `src/hal/stack/litellm_keys.py`: per app 10 dollars, `1mo`, 5 parallel, the one route, `models`
+  as LiteLLM's `/v1/models` lists them and no rpm or tpm, and the app's name as `key_alias`; the
+  person budget 2 dollars and `1mo` under the id `max_end_user_budget_id` names. The apps are the
+  key files compose mounts into the one-off `litellm-keys` (profile `apply`, on `litellm-backend`
+  alone), which holds them and the master key; hal's own process opens neither. At plan time the
+  one-off reads each app's live key by the SHA-256 of its file, in a request body, so a deleted key
+  reads as absent and is made anew; the diff is plan rows under `litellm`, part of the one
+  question. After the yes, past the realm step and before the apps, it makes the changes: the
+  person budget first, then the apps in name order, each with only its changed fields, so a pure
+  limit change keeps the period's reset. The first failed write stops the step: the result names
+  it and every change not made, and the run ends `partial` with `next: hal apply`. An app whose
+  name another live key holds (its file was replaced) is a `!` row before the yes; nothing is
+  written for it, and the run ends `partial` naming it, which no hal command resolves (deleting the
+  old key is the operator's call). Keys that cannot be read while LiteLLM runs end as an unread
+  realm does: alone, `error:` and `next: hal apply` without a question; beside other changes,
+  skipped and `partial`. Output names apps, budget ids and models, never a key or its hash. The
+  step reads only while the `litellm` container runs; nothing in `hal apply` starts it yet. After
+  LiteLLM's first start it migrates its database and answers 502 meanwhile, so a second `hal
+  apply` makes the keys.
 - **The output default.** Each name sets `max_tokens` 16384 in `config.yaml`: what a request that
   names none gets, and the output LiteLLM reserves against a budget, so the ceiling of a conforming
   app. An app that names more is bound by the budgets alone.
@@ -349,13 +371,17 @@ unit, and no app holds a key in LiteLLM's database.
   that each reaches the front alone and that an app's alias `litellm` captures nothing.
   `litellm_admission.py` drives the key's models, the budgets, the person budget, the operator's
   exception and the bound, `litellm_failures.py` the failure and key cases, and
-  `litellm_retention.py` the retention census of the route, on the same stack and with the same caller. Re-run them for every LiteLLM,
+  `litellm_retention.py` the retention census of the route, and `litellm_keys.py` the key step through
+  `hal apply`'s own plan and run, on the same stack and with the same caller. Re-run them for every LiteLLM,
   Traefik or Docker bump. The CI job `front` runs the front's table of requests
   (`tests/test_litellm_front.py`) for every Traefik bump; a LiteLLM bump still needs the probes.
 
 ## Proofs
 
 Re-run the probes in `probe/agent-service/` for every Traefik, Docker, agent-runtime or LiteLLM upgrade.
+`litellm_keys.py` proves `hal apply`'s key step on the fake-only stack: its plan and run, a lost answer,
+a pure limit change, a taken name, a failed write and a deleted key, and that no key or hash reaches an
+argument, the step's input or output, or LiteLLM's log.
 
 **The live smoke** is one command, run in the live checkout after `hal apply` and with the image
 built: `cd ~/srv/hal && python3 agent-service/live_smoke.py`. It signs you in as yourself (the

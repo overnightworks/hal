@@ -22,10 +22,13 @@ import yaml
 from support.probe_support import probe_imports
 from support.script_module import loaded_script
 
+from hal.stack import litellm_keys
+
 ROOT = Path(__file__).resolve().parents[1]
 LITELLM_DIRECTORY = ROOT / "agent-service" / "litellm"
 LITELLM, FRONT, SERVICE, GATEWAY = "litellm", "litellm-front", "agent-service", "agent-egress"
 DATABASE = "litellm-db"
+KEYS = litellm_keys.KEYS_SERVICE
 NEW_NETWORKS = ("litellm-api", "litellm-backend", "litellm-egress", "litellm-db")
 ISOLATED_MODE = {"com.docker.network.bridge.gateway_mode_ipv4": "isolated"}
 DIGEST_PINNED = re.compile(r"^[^@\s]+:[^@\s]+@sha256:[0-9a-f]{64}$")
@@ -105,22 +108,29 @@ def test_each_member_joins_exactly_the_networks_the_boundary_declares(compose):
     assert "litellm-backend" not in services[SERVICE]["networks"]
     assert "egress" not in services[LITELLM]["networks"]
     assert "litellm-egress" in services[GATEWAY]["networks"]
-    assert [n for n, s in services.items() if "litellm-backend" in s.get("networks", [])] == [
-        FRONT,
-        LITELLM,
-    ]
 
 
-def test_litellm_holds_a_fixed_address_outside_the_dynamic_range_of_its_pinned_backend_subnet(
+def test_only_litellm_holds_a_static_backend_address_and_it_lies_outside_the_dynamic_range(
     compose,
 ):
-    (pinned,) = compose["networks"]["litellm-backend"]["ipam"]["config"]
+    backend = "litellm-backend"
+    members = {
+        name: service["networks"]
+        for name, service in compose["services"].items()
+        if backend in service.get("networks", [])
+    }
+    static = {
+        name: networks[backend]["ipv4_address"]
+        for name, networks in members.items()
+        if isinstance(networks, dict) and (networks[backend] or {}).get("ipv4_address")
+    }
+    (pinned,) = compose["networks"][backend]["ipam"]["config"]
     subnet = ipaddress.ip_network(pinned["subnet"])
     dynamic = ipaddress.ip_network(pinned["ip_range"])
-    address = ipaddress.ip_address(
-        compose["services"][LITELLM]["networks"]["litellm-backend"]["ipv4_address"]
-    )
+    address = ipaddress.ip_address(static[LITELLM])
 
+    assert set(members) == {FRONT, LITELLM, KEYS}
+    assert set(static) == {LITELLM}
     assert dynamic.subnet_of(subnet)
     assert address in subnet
     assert address not in dynamic
@@ -194,13 +204,13 @@ def test_the_database_keeps_keycloaks_postgres_image_and_hardening_and_its_volum
     assert DATABASE in compose["volumes"]
 
 
-def test_only_litellm_reads_the_provider_key_and_the_master_key(compose):
+def test_only_litellm_reads_the_provider_key_and_only_it_and_the_key_step_the_master_key(compose):
     holders = {
-        secret: [n for n, s in compose["services"].items() if secret in s.get("secrets", [])]
+        secret: {n for n, s in compose["services"].items() if secret in s.get("secrets", [])}
         for secret in (KEY_SECRET, MASTER_SECRET)
     }
 
-    assert holders == {KEY_SECRET: [LITELLM], MASTER_SECRET: [LITELLM]}
+    assert holders == {KEY_SECRET: {LITELLM}, MASTER_SECRET: {LITELLM, KEYS}}
 
 
 def test_the_fronts_http_block_global_and_log_are_those_of_the_public_traefik(front_static):
@@ -224,6 +234,13 @@ def test_the_fronts_dynamic_file_has_one_router_for_the_completion_call_and_noth
     assert router["entryPoints"] == ["api"]
     (server,) = dynamic["http"]["services"][router["service"]]["loadBalancer"]["servers"]
     assert server["url"] == f"http://{LITELLM}:{START_LISTENER.search(START_SCRIPT).group('port')}"
+
+
+def test_the_key_steps_route_is_the_one_path_the_front_serves():
+    dynamic = load(ROUTE_FILE)
+    (router,) = dynamic["http"]["routers"].values()
+
+    assert re.findall(r"Path\(`([^`]+)`\)", router["rule"]) == [litellm_keys.ROUTE]
 
 
 def test_the_completion_router_chains_only_middlewares_the_file_declares():

@@ -6,11 +6,22 @@ import pytest
 from support.stack_plan_legal_rows import ALL_LABELS, appkit_plan, legal_plan
 from support.stack_plan_rows import APP, NEW, app_plan
 
-from hal.output import Glyph
+from hal.output import Glyph, Row
+from hal.output.command import Verb, command
 from hal.stack import realm as realm_lines
 from hal.stack.apps import AppFailed, AppHeldOff, AppKind, AppOn, AppSwitchedOff, OffPlan
 from hal.stack.barrier import BarriersUnproven, Unproven
 from hal.stack.legal_step import PageChange
+from hal.stack.litellm_keys import (
+    Change,
+    FieldChange,
+    KeysDone,
+    KeysFailed,
+    KeysResult,
+    KeysSkipped,
+    Target,
+)
+from hal.stack.plan_rows import KeysEvent
 from hal.stack.realm.reconcile import (
     Leftovers,
     NotRecorded,
@@ -21,9 +32,12 @@ from hal.stack.realm.reconcile import (
     Stage,
 )
 from hal.stack.result_rows import (
+    ResultEvent,
     app_partial,
     app_row,
     appkit_rows,
+    keys_partial,
+    keys_rows,
     legal_rows,
     not_written_partial,
     not_written_row,
@@ -402,3 +416,69 @@ def test_the_failure_text_of_an_unproven_barrier_is_escaped_in_its_detail() -> N
     row = unproven_row(BarriersUnproven((Unproven("probe", "a\x1b[31m\nb"),)))
 
     assert row.details[0] == "probe: a\\x1b[31m\\nb"
+
+
+BUDGET = Change(Target.BUDGET, "person", False, (FieldChange("max_budget", 1.5, 2.0),))
+HOPIN = Change(Target.KEY, "hopin", True, (FieldChange("max_budget", None, 10.0),))
+SONGMAKER = Change(Target.KEY, "songmaker", False, (FieldChange("max_parallel_requests", 2, 5),))
+
+
+@pytest.mark.parametrize(
+    ("result", "rows", "partial"),
+    [
+        pytest.param(None, (), None, id="a step that planned nothing"),
+        pytest.param(
+            KeysDone((BUDGET, HOPIN), ()),
+            (
+                Row(Glyph.DONE, "person", KeysEvent.BUDGET_CHANGED, "budget 1.5 → 2 dollars"),
+                Row(Glyph.DONE, "hopin", KeysEvent.NEW_KEY, "10 dollars"),
+            ),
+            None,
+            id="every change done",
+        ),
+        pytest.param(
+            KeysDone((SONGMAKER,), ("hopin",)),
+            (
+                Row(Glyph.DONE, "songmaker", KeysEvent.KEY_CHANGED, "parallel 2 → 5"),
+                Row(Glyph.NEEDS_YOU, "hopin", KeysEvent.NAME_TAKEN, "another key holds the name"),
+            ),
+            ("partial, hopin name taken", None),
+            id="a taken name: no command resolves it",
+        ),
+        pytest.param(
+            KeysFailed((BUDGET,), HOPIN, "status 500\n", (SONGMAKER,), ()),
+            (
+                Row(Glyph.DONE, "person", KeysEvent.BUDGET_CHANGED, "budget 1.5 → 2 dollars"),
+                Row(Glyph.FAILED, "hopin", KeysEvent.NEW_KEY, "status 500\\n"),
+                Row(Glyph.UNCHANGED, "songmaker", ResultEvent.NOT_MADE, "key changed"),
+            ),
+            ("partial, hopin new key failed", command(Verb.APPLY)),
+            id="a failed write and the change not made after it",
+        ),
+        pytest.param(
+            KeysFailed((), None, "`docker compose run` exited 130", (), ("hopin",)),
+            (
+                Row(
+                    Glyph.FAILED,
+                    "litellm",
+                    ResultEvent.KEYS_FAILED,
+                    "`docker compose run` exited 130",
+                ),
+                Row(Glyph.NEEDS_YOU, "hopin", KeysEvent.NAME_TAKEN, "another key holds the name"),
+            ),
+            ("partial, litellm keys failed; hopin name taken", command(Verb.APPLY)),
+            id="a write that did not finish beside a taken name",
+        ),
+        pytest.param(
+            KeysSkipped("status 502"),
+            (Row(Glyph.NEEDS_YOU, "litellm", ResultEvent.KEYS_SKIPPED, "status 502"),),
+            ("partial, litellm keys skipped", command(Verb.APPLY)),
+            id="a step not read",
+        ),
+    ],
+)
+def test_the_key_steps_result_is_a_row_per_change_and_its_partial_names_what_was_not_made(
+    result: KeysResult, rows: tuple[Row, ...], partial: tuple[str, str | None] | None
+) -> None:
+    assert keys_rows(result) == rows
+    assert keys_partial(result) == partial

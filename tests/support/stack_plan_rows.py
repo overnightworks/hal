@@ -17,6 +17,7 @@ from hal.stack.apps import (
 )
 from hal.stack.catalog import App, Unit
 from hal.stack.legal_step import LegalPlan
+from hal.stack.litellm_keys import KeysPlan
 from hal.stack.plan import Plan
 from hal.stack.plan_rows import (
     plan_groups,
@@ -54,6 +55,9 @@ NO_LEGAL = LegalPlan(Path(), Path(), {}, {})
 REPOSITORY = Path("/repository")
 
 
+NO_KEYS = KeysPlan()
+
+
 NO_APPKIT = AppkitPlan("0.5.0", Path(), REPOSITORY, (), ())
 
 
@@ -62,6 +66,7 @@ def plan_of(
     realm: RealmPlan = NO_REALM,
     legal: LegalPlan = NO_LEGAL,
     appkit: AppkitPlan = NO_APPKIT,
+    keys: KeysPlan = NO_KEYS,
     **parts: Any,
 ) -> Plan:
     units = {
@@ -74,6 +79,7 @@ def plan_of(
         app_plans=apps,
         images=list(images),
         realm=realm,
+        keys=keys,
         legal=legal,
         appkit=appkit,
         built=list(units.pop("built", ())),
