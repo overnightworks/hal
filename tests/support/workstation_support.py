@@ -385,25 +385,26 @@ def write_executable(path: Path, text: str) -> None:
 class StubSudo:
     """A `sudo` first on PATH: it writes one line per call (its argv, working directory and every ANSIBLE_* it received), then runs the rest.
 
-    `-k` only forgets a ticket, so it is recorded and not executed.
+    `-k` only forgets a ticket, so it is recorded and not executed; with `refusing`, any other call is recorded and exits 1 without running anything.
     """
 
-    def __init__(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, forgetting_exit_code: int = 0) -> None:
+    def __init__(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, forgetting_exit_code: int = 0, refusing: bool = False) -> None:
         self.log = tmp_path / "sudo.log"
         bin_dir = tmp_path / "bin"
         bin_dir.mkdir()
         sudo = bin_dir / "sudo"
         sudo.write_text(
             "#!/bin/sh\n"
-            f'echo "$* | $(pwd) | $(env | grep \'^ANSIBLE_\' | tr \'\\n\' \' \')" >> {self.log}\n'
+            f'printf \'%s\\n\' "$* | $(pwd) | $(env | grep \'^ANSIBLE_\' | tr \'\\n\' \' \')" >> {self.log}\n'
             f'[ "$1" = "-k" ] && exit {forgetting_exit_code}\n'
-            'exec "$@"\n'
+            + ("exit 1\n" if refusing else 'exec "$@"\n')
         )
         sudo.chmod(0o755)
         monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
 
     def calls(self) -> list[list[str]]:
-        return [[part.strip() for part in line.split(" | ")] for line in self.log.read_text().splitlines()]
+        # `str.splitlines` would also cut at the mark's control character.
+        return [[part.strip() for part in line.split(" | ")] for line in self.log.read_text().rstrip("\n").split("\n")]
 
 
 TASK_MESSAGE = "/etc/cloudflared/config.yml names no `tunnel:`"
@@ -415,6 +416,7 @@ class FakePlaybook:
     def __init__(self) -> None:
         self.calls: list[list[str]] = []
         self.succeeds = True
+        self.refused = False
         self.failure = ""
         self.changed_before_failing: int | None = None
         self.applied = False
@@ -422,6 +424,8 @@ class FakePlaybook:
 
     def __call__(self, argv: Sequence[str]) -> system_step.PlaybookRun:
         self.calls.append(list(argv))
+        if self.refused:
+            return system_step.PlaybookNotStarted()
         tasks = () if self.applied else self.tasks
         if self.succeeds and "--check" not in argv:
             self.applied = True

@@ -240,7 +240,7 @@ class Step:
     `apply` may return `UnitsApplied`, which adds the fact the row of a changed step shows.
     `before_apply` is the row printed before an apply that waits on the operator (the wizard, sudo's password), or nothing.
     `operators_only` marks a step the agents' account skips: it needs sudo, the operator's units or the operator's secrets.
-    `may_leave_system_partial` marks the step that runs as root, whose failed apply leaves /etc half written unless the play's counts show it changed nothing.
+    `may_leave_system_partial` marks the step that runs as root, whose failed apply leaves /etc half written unless sudo never started the play or its counts show no change.
     """
 
     name: str
@@ -637,7 +637,7 @@ def _run_row(row: SetupRow, steps: tuple[Step, ...], role: ExecutionRole, mode: 
 
 
 def _failure_detail(row: SetupRow, error: OSError | StepFailed, step: Step, mode: Pass) -> str:
-    """What the failed row left behind, for the rows that say: the system step is unchanged only where the play stopped with no change counted or named, or ran as a dry run or plan."""
+    """What the failed row left behind, for the rows that say: the system step is unchanged only where sudo never started the play, the play stopped with no change counted or named, or ran as a dry run or plan."""
     match row:
         case SetupRow.SYSTEM:
             partial = step.may_leave_system_partial and mode is Pass.RUN and not isinstance(error, PlayChangedNothing)
