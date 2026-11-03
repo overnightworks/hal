@@ -482,11 +482,14 @@ def test_a_window_lasts_for_its_bound_in_seconds(capture, monkeypatch, bound):
         (["--seconds", "90"], None),
         (["--seconds", "90", "syn", "label"], None),
         (["dns"], None),
+        (["dns", "litellm-db"], (None, "dns", ["litellm-db"])),
+        (["dns", "-db"], None),
     ],
     ids=[
         "no bound", "a bound on syn", "a bound on dns", "a bound without a number",
         "a bound of zero", "a bound that is no number", "a bound without a mode",
-        "syn with a label", "dns without a label",
+        "syn with a label", "dns without a label", "a label with a hyphen",
+        "a label that starts with a hyphen",
     ],
 )  # fmt: skip
 def test_the_window_arguments_name_the_bound_the_mode_and_the_labels(capture, arguments, parsed):
@@ -601,6 +604,46 @@ def test_the_dns_window_counts_a_query_to_the_embedded_resolver_apart_from_its_r
     window.see(segment, ["label"])
 
     assert (window.label_frames, window.query_frames) == ({"label": 1}, queries)
+
+
+def with_questions(first: str, *more: str) -> bytes:
+    """A DNS query for `first` followed by one more question for each of `more`."""
+    extra = b"".join(dns_message(name)[12:] for name in more)
+    count = struct.pack("!H", 1 + len(more))
+    return dns_message(first)[:4] + count + dns_message(first)[6:] + extra
+
+
+@pytest.mark.parametrize(
+    ("message", "matched"),
+    [
+        (dns_message("litellm-db.example.com"), {"litellm-db": 1}),
+        (dns_message("litellm-db"), {"litellm-db": 1}),
+        (dns_message("license.litellm.ai"), {}),
+        (dns_message("litellm-dbx.example.com"), {}),
+        (dns_message("x.litellm-db.example.com"), {}),
+        (with_questions("litellm-db", "license.litellm.ai"), {}),
+        (dns_message("litellm-db")[:4] + struct.pack("!H", 0) + dns_message("litellm-db")[6:], {}),
+        (dns_message("litellm-db")[:-5], {}),
+        (dns_message("litellm-db")[:20], {}),
+        (dns_message("litellm-db")[:8], {}),
+    ],
+    ids=["the label with a domain", "the label alone", "another host of litellm",
+         "a longer first label", "the label deeper in the name",
+         "a second question behind the label", "no question", "a question cut after its name",
+         "a name cut inside a label", "a header cut short"],
+)  # fmt: skip
+def test_the_dns_window_matches_one_whole_question_by_its_first_label_and_counts_every_message(
+    capture, message, matched
+):
+    """S1: `litellm-db` is told from other names that contain it, a message with any other question
+    count or a cut question matches nothing, and every DNS message still counts."""
+    body = udp(40000, 53, message)
+    segment = parse(capture, ethernet(0x0800, ipv4_header(17, body, destination="127.0.0.1")))
+    window = capture.Window()
+
+    window.see(segment, ["litellm-db"])
+
+    assert (window.one_question_frames, window.dns_messages) == (matched, 1)
 
 
 # --- the unit probe's refused-start decision, on synthetic state and logs ----------------------

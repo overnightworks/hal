@@ -19,7 +19,9 @@ the client disconnects, the control file no longer says `hold`, or `hold_seconds
 default) have passed, and the log gets `held disconnected`, `held released` or `held timed out`
 afterwards; the held request is then answered) or `echo`
 (an error of `status` whose message is `request_canary` when the request holds it, as an upstream
-that quotes its input); and optionally `provider_key`, `credential` and `marker`, which stand in
+that quotes its input); and optionally `tool_use` (`name` and `input`: the answer then also holds a
+tool call of that name, as a model that calls a tool absent from the request's `tools`),
+`provider_key`, `credential` and `marker`, which stand in
 for the values of `expect.json`, and `request_canary`, whose occurrences in a request the log line
 counts.
 The error bodies are Anthropic's own shapes, https://docs.anthropic.com/en/api/errors: 500
@@ -112,10 +114,14 @@ def provider_record(expect: dict, request: http.server.BaseHTTPRequestHandler, b
 
 
 def message(expect: dict) -> bytes:
+    call = expect.get("tool_use")
+    content = [{"type": "text", "text": expect["marker"]}]
+    if call:
+        content.append({"type": "tool_use", "id": "toolu_probe", **call})
     return json.dumps({
         "id": "msg_probe", "type": "message", "role": "assistant", "model": ANSWER_MODEL,
-        "content": [{"type": "text", "text": expect["marker"]}],
-        "stop_reason": "end_turn", "stop_sequence": None,
+        "content": content,
+        "stop_reason": "tool_use" if call else "end_turn", "stop_sequence": None,
         "usage": {"input_tokens": 1, "output_tokens": 1},
     }).encode()  # fmt: skip
 

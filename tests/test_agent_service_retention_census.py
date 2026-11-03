@@ -438,6 +438,19 @@ def test_a_file_mount_of_a_container_with_python_is_copied_out_and_searched(rete
     assert sweep.found == {"answer": ("service /etc/hosts",)}
 
 
+def test_a_masked_file_mount_of_a_container_with_python_is_not_copied_out(retention) -> None:
+    report = census_report(
+        [mount_report("/work"), mount_report("/proc/kcore", file_mount=1)],
+        [["/work", "tmpfs", True], ["/proc/kcore", "tmpfs", True]],
+    )
+    answers = python_answers(report)
+
+    sweep, docker = sweep_of(retention, answers, retention.Target("service", has_python=True))
+
+    assert sweep.problems == ()
+    assert not [command for command, _ in docker.calls if command[:2] == ("docker", "cp")]
+
+
 @pytest.mark.parametrize("reason", ["refused", "replaced", "too_deep", "vanished", "not_regular"])
 def test_an_unresolved_skip_of_the_census_fails_the_container(retention, reason) -> None:
     report = census_report([mount_report("/work", **{reason: 1})])
@@ -485,6 +498,12 @@ def test_the_writable_destinations_of_an_inspection_are_its_rw_mounts_and_tmpfs(
     document = json.loads(inspect_answer([("/a", True), ("/b", False)], {"/t": "size=1m"}))[0]
 
     assert retention.writable_destinations(document) == {"/a", "/t"}
+
+
+def test_a_tmpfs_below_var_run_is_listed_where_the_mount_table_shows_it(retention) -> None:
+    document = json.loads(inspect_answer([("/var/run", True)], {"/var/run/db": "size=1m"}))[0]
+
+    assert retention.writable_destinations(document) == {"/run", "/run/db"}
 
 
 def test_a_searched_mount_that_the_census_did_not_walk_is_an_unexamined_sink(retention) -> None:
