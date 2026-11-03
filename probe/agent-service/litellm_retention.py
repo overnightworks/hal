@@ -88,6 +88,7 @@ SETTINGS_SECTIONS = {
         "turn_off_message_logging": True,
         "redact_messages_in_exceptions": True,
         "max_end_user_budget_id": NonEmptyId(),
+        "disable_add_user_agent_to_request_tags": True,
     },
     "general_settings": {
         "enforce_user_param": True,

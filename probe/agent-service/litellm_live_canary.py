@@ -52,25 +52,16 @@ CANARY, DEFAULT_APP = "agent-canary", "songmaker"
 
 # The grammar of the grammar table, written from it and not from the program: a (cell, verdict)
 # and the figures that may follow.
-WORD, NAME = r"[a-z_]{1,40}", r"[A-Za-z]{1,60}"
-SINK = r"[\w.-]+ (?:log|/[\w./-]*)"
+NAME = r"[A-Za-z]{1,60}"
+SINK = r"[\w.-]+ (?:log|/[\w./-]*|dump(?: \w+)?)"
 GRAMMAR = {
-    ("C0 gateway", "held"): [r"the service's gateway is the front"],
-    ("C0 gateway", "FAILED"): [
-        "a container is missing",
-        "the configuration could not be read",
-        "the service has no api table",
-        "the service names another gateway",
-        "the service has not loaded this file",
-    ],
-    ("C1 canary", "held"): [r"route api, the answer held the marker"],
+    ("C0 route", "held"): ["the route's containers run"],
+    ("C0 route", "FAILED"): ["a container is missing"],
+    ("C1 canary", "held"): ["the answer held the marker"],
     ("C1 canary", "FAILED"): [
-        "the sign-in failed",
         "the turn timed out",
         "the turn could not start",
         r"answer \d+",
-        f"route {WORD}",
-        f"code {WORD}",
         "the answer lacked the marker",
         f"crashed {NAME}",
         r"\d+ unknown lines",

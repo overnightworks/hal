@@ -551,6 +551,83 @@ def test_an_archive_of_a_sink_that_cannot_be_read_completely_fails_the_sweep(ret
     assert sweep.problems == ("front /dev/shm: an archive that could not be read completely",)
 
 
+# --- the dump of a database target -------------------------------------------------------------
+
+PG_DUMP = "docker exec front pg_dump --username=keeper --dbname=store"
+ROW_TEXT = "row-text-6d2c8e41"
+
+
+def plain_dump(*, inside: str = "", outside: str = "") -> bytes:
+    """A plain-format dump with one table's rows and one statement outside any COPY block."""
+    return "\n".join([
+        'CREATE TABLE public."LiteLLM_ToolTable" (tool_name text);',
+        f"COMMENT ON TABLE public.\"LiteLLM_ToolTable\" IS '{outside}';",
+        'COPY public."LiteLLM_ToolTable" (tool_name) FROM stdin;',
+        f"{ROW_TEXT}\t{inside}",
+        "\\.",
+        "COPY public.other (value) FROM stdin;",
+        "plain",
+        "\\.",
+    ]).encode()  # fmt: skip
+
+
+def database_sweep(retention: ModuleType, dump: tuple[int, bytes]):
+    login = retention.DatabaseLogin(user="keeper", database="store")
+    target = retention.Target("front", has_python=False, login=login)
+    return sweep_of(retention, front_answers(**{PG_DUMP: dump}), target)[0]
+
+
+def test_a_canary_in_a_dumped_tables_rows_names_the_dump_and_the_table(retention) -> None:
+    sweep = database_sweep(retention, (0, plain_dump(inside=REQUEST)))
+
+    assert (sweep.found, sweep.problems) == ({"request": ("front dump LiteLLM_ToolTable",)}, ())
+
+
+def test_a_canary_outside_any_copy_block_names_the_dump_alone(retention) -> None:
+    sweep = database_sweep(retention, (0, plain_dump(outside=ANSWER)))
+
+    assert sweep.found == {"answer": ("front dump",)}
+
+
+@pytest.mark.parametrize("dump", [(1, b""), (0, b"\xff\xfe not text")], ids=["failed", "not text"])
+def test_a_dump_that_fails_or_cannot_be_read_is_an_unexamined_sink(retention, dump) -> None:
+    sweep = database_sweep(retention, dump)
+
+    assert [problem.partition(":")[0] for problem in sweep.problems] == ["front dump"]
+    assert sweep.found == {}
+
+
+def test_a_clean_dump_is_searched_and_no_text_of_it_reaches_the_verdict(retention) -> None:
+    sweep = database_sweep(retention, (0, plain_dump()))
+
+    assert (sweep.found, sweep.problems) == ({}, ())
+    assert "dump" in sweep.inventory["front"]
+    assert ROW_TEXT not in repr((sweep.hits, sweep.problems, sweep.inventory))
+
+
+def test_a_target_without_a_login_is_never_dumped(retention) -> None:
+    _, docker = sweep_of(retention, front_answers())
+
+    assert not [command for command, _ in docker.calls if "pg_dump" in command]
+
+
+def test_a_database_login_is_read_from_the_resolved_services_postgres_environment(
+    retention,
+) -> None:
+    service = {"environment": {"POSTGRES_USER": "keeper", "POSTGRES_DB": "store", "OTHER": "x"}}
+
+    assert retention.DatabaseLogin.of(service) == retention.DatabaseLogin("keeper", "store")
+
+
+def test_the_census_targets_are_the_containers_of_the_direct_route_without_the_agent_service(
+    retention,
+) -> None:
+    route = {retention.FRONT, retention.GATEWAY, retention.LITELLM, retention.DATABASE}
+
+    assert set(retention.ROUTE_SERVICES) == route
+    assert retention.AGENT_SERVICE not in retention.ROUTE_SERVICES
+
+
 # --- B11's reading of LiteLLM's configuration in litellm_retention.py -----------------------------
 
 

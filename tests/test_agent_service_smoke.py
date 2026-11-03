@@ -379,7 +379,7 @@ def services() -> dict:
     return yaml.safe_load((ROOT / "compose.yaml").read_text())["services"]
 
 
-ONE_OFFS = pytest.mark.parametrize("name", ["agent-smoke", "agent-canary"])
+ONE_OFFS = pytest.mark.parametrize("name", ["agent-smoke"])
 
 
 @ONE_OFFS
