@@ -3,6 +3,6 @@ agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
 role = "builder"
 base = "32182080790eedb80368a920e7e685e8bea3bdfe"
 branch = "claude/issue-941-presentator-speech-grant"
-scope = ["docs/keycloak.md", "keycloak/realm.yaml", "probe/keycloak/README.md", "probe/keycloak/service_audience_cell.py", "tests/test_keycloak_probe.py", "tests/test_stack_keycloak_unit.py"]
+scope = ["docs/keycloak.md", "keycloak/realm.yaml", "probe/keycloak/README.md", "probe/keycloak/probe.py", "probe/keycloak/service_audience_cell.py", "tests/test_keycloak_probe.py", "tests/test_stack_keycloak_unit.py"]
 opened_commit = "7ec800d75b34e3a290508498754cb0e3500947ab"
 whole_reason = "One grant, the document that says who holds it, and the cell that proves it: none of them is true without the others."
