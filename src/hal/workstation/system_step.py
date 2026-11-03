@@ -61,6 +61,10 @@ class StepFailed(Exception):
     """A step that did not finish; its message says why."""
 
 
+class PlayChangedNothing(StepFailed):
+    """The play stopped and its final counts report no change: /etc is as it was."""
+
+
 class SystemStepInterrupted(StepFailed):
     """The person pressed Ctrl-C during the play; the message is the ticket sentence when `sudo -k` failed after it, else empty."""
 
@@ -92,9 +96,13 @@ class TasksWouldChange:
 
 @dataclass(frozen=True)
 class PlaybookUnfinished:
-    """A run that did not finish; `reason` is empty unless the play itself failed, then it is the message of its last failed result."""
+    """A run that did not finish; `reason` is empty unless the play itself failed, then it is the message of its last failed result.
+
+    `changed` is the higher of the play's final count and the number of changed tasks named, `None` when no final counts could be read.
+    """
 
     reason: str = ""
+    changed: int | None = None
 
 
 PlaybookRun = PlaybookFinished | PlaybookUnfinished
@@ -130,7 +138,10 @@ def read_events(returncode: int, event_lines: Sequence[str]) -> PlaybookRun:
     The reason is the message of the last failed or unreachable result, given only when the counts name a failed or unreachable host:
     inside a rescue it is the rescue's own failure that ended the play, and a rescued failure is no cause.
     `tasks` are the names of the changed tasks, in the order they changed; a task's start is read only for its name and shown by the runner.
-    An event that is no known event, a task's name that is no string, or a count that is no non-negative integer, is a run that did not finish.
+    An event that is no known event, a task's name that is no string, or a count that is no non-negative integer, is a run that did not finish
+    and carries no counts; so is a run with other than one counts event.
+    A run that did not finish after its counts carries them, with `changed` the higher of the count and the number of changed tasks named,
+    because Ansible's count leaves out a failed task, even one that changed, while the callback names it; an ignored failure is counted.
     """
     message = ""
     tasks: list[str] = []
@@ -141,7 +152,7 @@ def read_events(returncode: int, event_lines: Sequence[str]) -> PlaybookRun:
             if kind is EventKind.TASK:
                 _task_name(event)
             elif kind is EventKind.CHANGED:
-                tasks.append(str(event["task"]))
+                tasks.append(_task_name(event))
             elif kind is EventKind.RESULT:
                 TaskStatus(event["status"])
                 message = str(event["msg"])
@@ -153,8 +164,8 @@ def read_events(returncode: int, event_lines: Sequence[str]) -> PlaybookRun:
         return PlaybookUnfinished()
     changed, failed, unreachable = counts[0]
     if failed or unreachable:
-        return PlaybookUnfinished(message)
-    return PlaybookFinished(changed, tuple(tasks)) if returncode == 0 else PlaybookUnfinished()
+        return PlaybookUnfinished(message, max(changed, len(tasks)))
+    return PlaybookFinished(changed, tuple(tasks)) if returncode == 0 else PlaybookUnfinished(changed=max(changed, len(tasks)))
 
 
 def _forget_the_sudo_ticket() -> StepFailed | None:
@@ -294,6 +305,8 @@ class SystemStep:
         match self._run_playbook(check=False):
             case PlaybookFinished(changed):
                 return Applied.CHANGED if changed else Applied.UNCHANGED
+            case PlaybookUnfinished(changed=0) as unfinished:
+                raise PlayChangedNothing(unfinished.reason or _unfinished_fact("Ansible"))
             case unfinished:
                 raise StepFailed(unfinished.reason or _unfinished_fact("Ansible"))
 

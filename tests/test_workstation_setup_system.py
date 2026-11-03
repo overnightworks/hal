@@ -274,18 +274,24 @@ def test_the_system_steps_check_answers_with_one_of_the_three_states(
 
 
 @pytest.mark.parametrize(
-    ("flags", "failure", "fact"),
+    ("flags", "failure", "changed", "fact", "leaves"),
     [
-        ((), "", "Ansible did not finish · hal setup -v shows why"),
-        (("-v",), "", "Ansible did not finish · its output above says why"),
-        ((), TASK_MESSAGE, TASK_MESSAGE),
+        ((), "", None, "Ansible did not finish · hal setup -v shows why", "/etc may be partial"),
+        (("-v",), "", None, "Ansible did not finish · its output above says why", "/etc may be partial"),
+        ((), TASK_MESSAGE, None, TASK_MESSAGE, "/etc may be partial"),
+        ((), TASK_MESSAGE, 0, TASK_MESSAGE, "/etc unchanged"),
+        ((), TASK_MESSAGE, 2, TASK_MESSAGE, "/etc may be partial"),
+        ((), "", 0, "Ansible did not finish · hal setup -v shows why", "/etc unchanged"),
     ],
-    ids=["no failed task", "no failed task with -v", "a failed task's message"],
+    ids=["no failed task", "no failed task with -v", "a failed task's message without counts", "a refusal that changed nothing", "a failure after a change", "no failed host and no change"],
 )
-def test_a_failed_ansible_run_fails_the_system_step_alone_and_records_nothing(sandbox: Sandbox, capsys: pytest.CaptureFixture[str], flags: tuple[str, ...], failure: str, fact: str) -> None:
-    """Rule 2, rule 7 and cells 12, 13, 17: a wrong password or a missing tunnel id fails only the last step, with exit 3; the failed task's message is the fact."""
+def test_a_failed_ansible_run_fails_the_system_step_alone_and_records_nothing(
+    sandbox: Sandbox, capsys: pytest.CaptureFixture[str], flags: tuple[str, ...], failure: str, changed: int | None, fact: str, leaves: str
+) -> None:
+    """Rule 2, rule 7, cells 12, 13, 17 and B1-B4: a wrong password or a missing tunnel id fails only the last step, with exit 3; the final counts say whether /etc is unchanged."""
     sandbox.system.playbook.succeeds = False
     sandbox.system.playbook.failure = failure
+    sandbox.system.playbook.changed_before_failing = changed
     code, lines, error = run_setup(sandbox, capsys, *flags)
 
     assert (code, lines) == (
@@ -298,7 +304,7 @@ def test_a_failed_ansible_run_fails_the_system_step_alone_and_records_nothing(sa
         ],
     )
     assert error.splitlines() == [
-        "error: setup stopped at system · /etc may be partial",
+        f"error: setup stopped at system · {leaves}",
         f"next: {RERUN}",
     ]
     assert global_hooks_path(sandbox) == str(sandbox.layout.git_hooks_dir)
