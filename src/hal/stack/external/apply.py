@@ -191,6 +191,7 @@ def _raise_interrupt(_signal_number: int, _frame: object) -> None:
 
 @contextmanager
 def terminate_like_interrupt() -> Iterator[None]:
+    """systemd stops a unit with SIGTERM: a run ends as on Ctrl-C, cleanup runs, the unit fails."""
     previous = signal.signal(signal.SIGTERM, _raise_interrupt)
     try:
         yield

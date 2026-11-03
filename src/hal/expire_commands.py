@@ -46,15 +46,15 @@ def _configure(parser: argparse.ArgumentParser) -> None:
 
 def _expire(arguments: argparse.Namespace) -> ExitCode:
     started = host.monotonic()
-    try:
-        with terminate_like_interrupt():
+    with terminate_like_interrupt():
+        try:
             result = litellm_expiry.expire(arguments.project, host.now())
-    except ExpiryFailed as failure:
-        _tell_failed(str(failure), failure.outcome)
-        return ExitCode.FAILURE
-    except KeyboardInterrupt:
-        _tell_failed("interrupted", Outcome.UNKNOWN)
-        return ExitCode.INTERRUPTED
+        except ExpiryFailed as failure:
+            _tell_failed(str(failure), failure.outcome)
+            return ExitCode.FAILURE
+        except KeyboardInterrupt:
+            _tell_failed("interrupted", Outcome.UNKNOWN)
+            return ExitCode.INTERRUPTED
     if isinstance(result, Expired):
         _tell_expired(result, host.monotonic() - started)
     else:

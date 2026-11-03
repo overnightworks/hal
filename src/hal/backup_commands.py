@@ -154,16 +154,17 @@ def _run(
         write_error(step, f"{program} --help")
         return ExitCode.USAGE
     settings = Settings.for_home(Path.home(), os.getuid(), os.getgid())
-    try:
-        # Every run holds the one host lock, so no two runs share the repository.
-        with terminate_like_interrupt(), host.exclusive_lock(settings.lock_file):
-            step(settings, arguments)
-    except StepFailed as failure:
-        tell_ended(failure)
-        return ExitCode.FAILURE
-    except (Interrupted, KeyboardInterrupt) as interrupt:
-        tell_ended(interrupt)
-        return ExitCode.INTERRUPTED
+    with terminate_like_interrupt():
+        try:
+            # Every run holds the one host lock, so no two runs share the repository.
+            with host.exclusive_lock(settings.lock_file):
+                step(settings, arguments)
+        except StepFailed as failure:
+            tell_ended(failure)
+            return ExitCode.FAILURE
+        except (Interrupted, KeyboardInterrupt) as interrupt:
+            tell_ended(interrupt)
+            return ExitCode.INTERRUPTED
     return ExitCode.OK
 
 
