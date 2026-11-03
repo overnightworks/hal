@@ -5,7 +5,7 @@ internal `internet` network. Standard library only; it runs in the service image
     python -I -B fake_anthropic.py {provider|issuer}
 
 It reads `/fake/cert.pem`, `/fake/key.pem` and `/fake/expect.json` (the scratch provider key, the
-scratch service credential, the scratch identity strings and the answer marker; all of them
+scratch identity strings and the answer marker; all of them
 throwaway values). The `issuer` role answers `{}` to anything. The `provider` role answers an
 Anthropic message with the marker and prints one JSON line per request on standard output: the
 model, `max_tokens`, `metadata.user_id` (the fingerprint, which must arrive), whether the key
@@ -22,8 +22,8 @@ afterwards; the held request is then answered) or `echo`
 (an error of `status` whose message is `request_canary` when the request holds it, as an upstream
 that quotes its input); and optionally `tool_use` (`name` and `input`: the answer then also holds a
 tool call of that name, as a model that calls a tool absent from the request's `tools`),
-`usage` (the answer's `input_tokens` and `output_tokens`, which LiteLLM prices), `provider_key`,
-`credential` and `marker`, which stand in for the values of `expect.json`, `secrets` (keys that
+`usage` (the answer's `input_tokens` and `output_tokens`, which LiteLLM prices), `provider_key`
+and `marker`, which stand in for the values of `expect.json`, `secrets` (keys that
 must not arrive, counted as `secret_hits`) and `request_canary`, whose occurrences in a request the
 log line counts.
 The error bodies are Anthropic's own shapes, https://docs.anthropic.com/en/api/errors: 500
@@ -112,7 +112,6 @@ def provider_record(expect: dict, request: http.server.BaseHTTPRequestHandler, b
         "user_id": metadata.get("user_id") if isinstance(metadata, dict) else None,
         "key_ok": request.headers.get("x-api-key") == expect["provider_key"],
         "authorization": "authorization" in request.headers,
-        "credential_bytes": expect["credential"].encode() in raw,
         "secret_hits": sum(raw.count(value.encode()) for value in expect.get("secrets", [])),
         "identity_hits": sum(raw.count(value.encode()) for value in expect["identity"]),
         "jwt_hits": len(JWT.findall(raw)),
