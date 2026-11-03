@@ -7,6 +7,7 @@ hold the static facts those do not see.
 
 import importlib
 import io
+import ipaddress
 import json
 import re
 import secrets
@@ -33,6 +34,8 @@ MASTER_SECRET, PASSWORD_SECRET = "litellm_master_key", "litellm_db_password"
 CLAUDE_ID = re.compile(r"anthropic/claude-(?P<family>[a-z]+)-[\w.-]+")
 START_SCRIPT = (LITELLM_DIRECTORY / "start.sh").read_text()
 START_LISTENER = re.compile(r"--port (?P<port>\d+)")
+APP_NETWORK_NAME = re.compile(r"hal_agent_[a-z]+")
+ROUTE_FILE = LITELLM_DIRECTORY / "front" / "dynamic" / "route.yml"
 
 
 def load(path: Path) -> dict:
@@ -54,21 +57,44 @@ def front_static() -> dict:
     return load(LITELLM_DIRECTORY / "front" / "traefik.yml")
 
 
-def test_the_four_new_networks_are_internal_and_isolated_and_litellm_egress_pins_a_subnet(
+def test_the_four_new_networks_are_internal_and_isolated(
     compose,
 ):
     for name in NEW_NETWORKS:
         network = compose["networks"][name]
         assert network["internal"] is True
         assert network["driver_opts"] == ISOLATED_MODE
-    assert "ipam" in compose["networks"]["litellm-egress"]
-    assert not any("ipam" in compose["networks"][name] for name in NEW_NETWORKS[:2])
+
+
+def test_every_pinned_network_the_agent_probe_joins_is_one_the_probe_moves(compose, litellm):
+    from edge_copy import PINNED_NETWORKS  # on the path while the probe module is imported
+
+    services = compose["services"]
+    probe_services = [SERVICE, GATEWAY] + [
+        name for name, service in services.items() if "litellm" in service.get("profiles", [])
+    ]
+    joined = {network for name in probe_services for network in services[name]["networks"]}
+    pinned = {name for name, network in compose["networks"].items() if "ipam" in (network or {})}
+
+    assert pinned & joined == set(PINNED_NETWORKS)
+
+
+def app_networks(compose: dict) -> set[str]:
+    """The networks of compose.yaml whose fixed name is `hal_agent_<app>`."""
+    return {
+        key
+        for key, network in compose["networks"].items()
+        if APP_NETWORK_NAME.fullmatch((network or {}).get("name", ""))
+    }
 
 
 def test_each_member_joins_exactly_the_networks_the_boundary_declares(compose):
     services = compose["services"]
 
-    assert set(services[FRONT]["networks"]) == {"litellm-api", "litellm-backend"}
+    assert app_networks(compose)
+    assert set(services[FRONT]["networks"]) == {"litellm-api", "litellm-backend"} | app_networks(
+        compose
+    )
     assert set(services[LITELLM]["networks"]) == {"litellm-backend", "litellm-egress", "litellm-db"}
     assert services[DATABASE]["networks"] == ["litellm-db"]
     assert {n for n, s in services.items() if "litellm-db" in s.get("networks", [])} == {
@@ -83,6 +109,27 @@ def test_each_member_joins_exactly_the_networks_the_boundary_declares(compose):
         FRONT,
         LITELLM,
     ]
+
+
+def test_litellm_holds_a_fixed_address_outside_the_dynamic_range_of_its_pinned_backend_subnet(
+    compose,
+):
+    (pinned,) = compose["networks"]["litellm-backend"]["ipam"]["config"]
+    subnet = ipaddress.ip_network(pinned["subnet"])
+    dynamic = ipaddress.ip_network(pinned["ip_range"])
+    address = ipaddress.ip_address(
+        compose["services"][LITELLM]["networks"]["litellm-backend"]["ipv4_address"]
+    )
+
+    assert dynamic.subnet_of(subnet)
+    assert address in subnet
+    assert address not in dynamic
+
+
+def test_the_front_finds_litellm_at_its_fixed_backend_address_and_never_by_dns(compose):
+    backend = compose["services"][LITELLM]["networks"]["litellm-backend"]
+
+    assert compose["services"][FRONT]["extra_hosts"] == {LITELLM: backend["ipv4_address"]}
 
 
 def test_litellm_is_pinned_by_digest_hardened_and_reaches_the_provider_through_the_gateway(compose):
@@ -169,7 +216,7 @@ def test_the_fronts_http_block_global_and_log_are_those_of_the_public_traefik(fr
 
 
 def test_the_fronts_dynamic_file_has_one_router_for_the_completion_call_and_nothing_else():
-    dynamic = load(LITELLM_DIRECTORY / "front" / "dynamic" / "route.yml")
+    dynamic = load(ROUTE_FILE)
 
     assert set(dynamic) == {"http"}
     (router,) = dynamic["http"]["routers"].values()
@@ -177,6 +224,14 @@ def test_the_fronts_dynamic_file_has_one_router_for_the_completion_call_and_noth
     assert router["entryPoints"] == ["api"]
     (server,) = dynamic["http"]["services"][router["service"]]["loadBalancer"]["servers"]
     assert server["url"] == f"http://{LITELLM}:{START_LISTENER.search(START_SCRIPT).group('port')}"
+
+
+def test_the_completion_router_chains_only_middlewares_the_file_declares():
+    dynamic = load(ROUTE_FILE)["http"]
+    (router,) = dynamic["routers"].values()
+
+    assert router["middlewares"]
+    assert set(router["middlewares"]) <= set(dynamic["middlewares"])
 
 
 def test_the_fronts_directories_are_mounted_where_its_static_file_reads_them(compose, front_static):

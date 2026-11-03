@@ -134,10 +134,11 @@ class AdmissionProbe(LitellmProbe):
 
     def expect_query_refused(self, cell: str, key: str, user: str) -> str:
         """A `?model=` request naming the second configured name, as K3 sends, from a key or a
-        person past the budget: refused before the provider like the body's model."""
+        person past the budget, straight at LiteLLM (the front answers any query string itself):
+        refused before the provider like the body's model."""
         second = list(shipped_models())[1]
         before = len(self.provider_requests())
-        answer = self.complete(key, user=user, path=f"{ROUTE}?model={second}")
+        answer = self.complete(key, user=user, path=f"{ROUTE}?model={second}", front=False)
         expect(answer["status"] != 200 and len(self.provider_requests()) == before,
                f"{cell}: BUDGET PASSED BY ?model={second}: {answer['status']}")  # fmt: skip
         self.refused(cell, answer, before)
@@ -224,31 +225,42 @@ class AdmissionProbe(LitellmProbe):
 
     def cell_k3(self, key: str) -> None:
         """A model outside the key's `models`, in the body or in the query string. `narrow` allows
-        only the first configured name, so the second is refused by the key, not the router."""
+        only the first configured name, so the second is refused by the key, not the router. Every
+        `?model=` line through the front is answered by the front; straight at LiteLLM they measure
+        LiteLLM's own routing by the query."""
         first, second = list(shipped_models())[:2]
         narrow, user, refusals = self.make_key(models=[first]), self.fingerprint(), []
-        for how, model, path, bearer in (
-            (f"{second} outside the key's", second, ROUTE, narrow),
-            ("the CLI route's name", "anthropic/opus", ROUTE, key),
-            ("?model= outside them", first, f"{ROUTE}?model=anthropic/opus", key),
+        queries = ((f"{ROUTE}?model=anthropic/opus", key), (f"{ROUTE}?model={second}", narrow),
+                   (f"{ROUTE}?model={second}", key))  # fmt: skip
+        for path, bearer in queries:
+            before, logged = len(self.provider_requests()), len(self.access_lines())
+            status = self.complete(bearer, first, user, path)["status"]
+            reached = len(self.provider_requests()) - before, len(self.access_lines()) - logged
+            expect(status == 400 and reached == (0, 0), f"K3: {path} through the front: {status}, "
+                   f"F {reached[0]}, LA {reached[1]}")  # fmt: skip
+        for how, model, path, bearer, front in (
+            (f"{second} outside the key's", second, ROUTE, narrow, True),
+            ("the CLI route's name", "anthropic/opus", ROUTE, key, True),
+            ("?model= outside them", first, f"{ROUTE}?model=anthropic/opus", key, False),
         ):  # fmt: skip
             before = len(self.provider_requests())
-            answer = self.complete(bearer, model, user, path)
+            answer = self.complete(bearer, model, user, path, front=front)
             self.refused(f"K3: {how}", answer, before)
             refusals.append(f"{how}: {answer['status']} {error_of(answer)}")
         before, spent = len(self.provider_requests()), self.key_info(narrow)["spend"]
-        bypass = self.complete(narrow, first, user, f"{ROUTE}?model={second}")
+        bypass = self.complete(narrow, first, user, f"{ROUTE}?model={second}", front=False)
         self.served("K3", bypass, self.provider_requests()[before:], second)
         self.wait_for("K3", "SPEND NOT COUNTED: the narrow key's spend after the ?model= request",
                       lambda: self.key_info(narrow)["spend"] > spent)  # fmt: skip
         counted = self.key_info(narrow)["spend"]
         before = len(self.provider_requests())
-        answer = self.complete(key, first, user, f"{ROUTE}?model={second}")
+        answer = self.complete(key, first, user, f"{ROUTE}?model={second}", front=False)
         self.served("K3", answer, self.provider_requests()[before:], second)
-        self.hold("K3", f"refused with F 0: {refusals}; ?model={second} passes the models of a key "
-                  f"allowing only {first}: served, F names {second}'s id, and its spend counts on "
-                  f"the key ({spent} -> {counted}); ?model={second} on a key allowing it served, "
-                  "F names its id")  # fmt: skip
+        self.hold("K3", f"through the front the {len(queries)} ?model= lines: 400, F 0, LA "
+                  f"unchanged; refused with F 0: {refusals}; straight at LiteLLM ?model={second} "
+                  f"passes the models of a key allowing only {first}: served, F names {second}'s "
+                  f"id, and its spend counts on the key ({spent} -> {counted}); ?model={second} on "
+                  "a key allowing it served, F names its id")  # fmt: skip
 
     def cell_m1(self, key: str) -> None:
         user, seen = self.fingerprint(), {}

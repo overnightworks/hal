@@ -1,6 +1,6 @@
 # Probe overlay (probe/agent-service/egress.py), laid over a copy of compose.yaml whose networks
-# that pin the gateway's address (edge_copy.GATEWAY_NETWORKS) the probe moved to free /24s, so it
-# never collides with the live stack's: the gateway's static file from that copy, and the two
+# that pin an address (edge_copy.PINNED_NETWORKS) the probe moved to free /24s, so it never
+# collides with the live stack's: the gateway's static file from that copy, and the two
 # packet windows. Never used live. The copy also names the fixed networks `<project>_...`
 # (edge_copy.namespaced_compose).
 services:

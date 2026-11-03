@@ -62,10 +62,12 @@ LIVE_NETWORK_PREFIX = "hal_"
 FIXED_NAME_SECTIONS = ("networks", "volumes")
 NAME_LINE = re.compile(r"^(\s+name:\s+)(\S+)\s*$", re.MULTILINE)
 GUARDED_COMPOSE_VERBS = {"up", "run", "down"}  # what creates or removes networks
-# The networks of compose.yaml that pin a /24 so agent-egress has one address on each; a probe
-# moves each to a free /24 of its own, so it never collides with the live stack's.
+# The networks of compose.yaml that pin a /24: so agent-egress has one address on each of its two,
+# and so LiteLLM has one on litellm-backend. A probe moves each to a free /24 of its own, so it
+# never collides with the live stack's.
 GATEWAY_NETWORKS = ("egress", "litellm-egress")
-GATEWAY_SUBNET = re.compile(r"^ {2}(?P<network>[\w-]+):\n(?P<block>(?: {4}.*\n)+)", re.MULTILINE)
+PINNED_NETWORKS = (*GATEWAY_NETWORKS, "litellm-backend")
+NETWORK_BLOCK = re.compile(r"^ {2}(?P<network>[\w-]+):\n(?P<block>(?: {4}.*\n)+)", re.MULTILINE)
 PINNED_PREFIX = re.compile(r"subnet:\s+(\d+\.\d+\.\d+\.)0/24")
 # The loopback address a probe's Traefik listens on beside the live one: `lo` routes all of
 # 127.0.0.0/8, and the live listeners are bound to 127.0.0.1 only.
@@ -162,22 +164,20 @@ def beside_the_live_edge(text: str, project: str) -> str:
     return text
 
 
-def live_gateway_prefixes(text: str) -> dict[str, str]:
-    """The first three octets (with the trailing dot) of the /24 each of `GATEWAY_NETWORKS` pins in
+def live_pinned_prefixes(text: str) -> dict[str, str]:
+    """The first three octets (with the trailing dot) of the /24 each of `PINNED_NETWORKS` pins in
     `text` of compose.yaml. Refuses a text in which one pins none."""
-    blocks = {m["network"]: m["block"] for m in GATEWAY_SUBNET.finditer(text)}
+    blocks = {m["network"]: m["block"] for m in NETWORK_BLOCK.finditer(text)}
     prefixes = {
         network: found[1]
-        for network in GATEWAY_NETWORKS
+        for network in PINNED_NETWORKS
         if (found := PINNED_PREFIX.search(blocks.get(network, "")))
     }
-    expect(
-        set(prefixes) == set(GATEWAY_NETWORKS), f"compose.yaml pins no /24 on {GATEWAY_NETWORKS}"
-    )
+    expect(set(prefixes) == set(PINNED_NETWORKS), f"compose.yaml pins no /24 on {PINNED_NETWORKS}")
     return prefixes
 
 
-def free_gateway_prefixes(
+def free_probe_prefixes(
     live: Mapping[str, str], candidates: Sequence[str], occupied: Sequence[str]
 ) -> dict[str, str]:
     """For each live prefix of `live` a free /24 of `candidates`, none of them twice."""
