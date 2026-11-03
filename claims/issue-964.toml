@@ -1,8 +1,0 @@
-claim_id = "c5f5b7852c504a64b3bfde6125615086"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "abe5fa93a0827b8243863b3798653efb7eb29021"
-branch = "claude/issue-964-hal-2-4a-litellm-keys"
-scope = ["compose.yaml", "docs/agent-service.md", "docs/design/hal-output.html", "probe/agent-service/litellm_keys.py", "src/hal/stack/apply.py", "src/hal/stack/litellm_admin.py", "src/hal/stack/litellm_keys.py", "src/hal/stack/plan.py", "src/hal/stack/plan_rows.py", "src/hal/stack/result_rows.py", "src/hal/workstation/secrets_manifest.toml", "tests/support/stack_apply_fakes.py", "tests/support/stack_plan_rows.py", "tests/test_litellm_unit.py", "tests/test_stack_apply_litellm_keys.py", "tests/test_stack_litellm_admin.py", "tests/test_stack_litellm_admin_service.py", "tests/test_stack_litellm_keys.py", "tests/test_stack_plan_rows.py", "tests/test_stack_result_rows.py", "tests/test_workstation_secrets_setup.py"]
-opened_commit = "65cd441b8e9ac52790bec483e37d4205e8b75016"
-whole_reason = "One key step: the one-off, the program it runs, the host step that plans and runs it and the apply wiring that reaches it are each dead without the others, and the rows are their only output."
