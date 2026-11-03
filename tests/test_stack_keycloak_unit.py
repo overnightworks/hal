@@ -357,7 +357,7 @@ def test_a_speech_caller_has_a_workload_service_account_in_no_group(app):
 
 
 def test_hopin_has_no_personal_scope():
-    """#506: an app that reads no `email`, `web-origins` or `acr` has none of them."""
+    """An app that reads no `email`, `web-origins` or `acr` has none of them."""
     assert not {"email", "web-origins", "acr"} & set(
         realm_clients()["hopin"]["defaultClientScopes"]
     )
@@ -379,7 +379,7 @@ def test_presentator_shares_songmakers_default_scopes():
         ("songmaker", []),
     ],
 )
-def test_the_speech_callers_alone_offer_the_speech_audience_as_an_optional_scope(app, offered):
+def test_each_app_clients_optional_scopes_are_exactly_its_decided_ones(app, offered):
     assert realm_clients()[app]["optionalClientScopes"] == offered
 
 

@@ -169,6 +169,7 @@ PRESENTATOR = AppClient(
     optional_scopes=frozenset({SPEECH_SCOPE}),
 )
 APP_CLIENTS = (SONGMAKER, HOPIN, PRESENTATOR)
+SPEECH_APPS = tuple(app for app in APP_CLIENTS if SPEECH_SCOPE in app.optional_scopes)
 AGENT_WORKLOAD_ROLE = WORKLOAD_ROLES[AGENT_SERVICE]
 SECRET_FILES = (
     "db-password",
@@ -242,9 +243,7 @@ DROPPED_CLIENT = "hopin"
 DROPPED_GROUP = "services"
 ROLE_HOLDERS = {  # the realm roles earlier applies created, with the service accounts holding each
     AGENT_WORKLOAD_ROLE: [f"service-account-{client.client_id}" for client in APP_CLIENTS],
-    WORKLOAD_ROLES[SPEECH_SERVICE]: [
-        f"service-account-{c.client_id}" for c in APP_CLIENTS if SPEECH_SCOPE in c.optional_scopes
-    ],
+    WORKLOAD_ROLES[SPEECH_SERVICE]: [f"service-account-{app.client_id}" for app in SPEECH_APPS],
 }
 CHANGED_CONFIG = "browser-mfa-without-passkey"
 # 6.5.1 reads the managed-role switch only when the file has a roles section, so an empty

@@ -24,7 +24,7 @@ WORKLOAD_ROLES = {AGENT_SERVICE: "agent-workload", SPEECH_SERVICE: "speech-workl
 SPEECH_SCOPE = "speech-service-audience"
 PROOF_CLIENT = "hopin"  # the client whose branch also runs the bearer-only and measurement cells
 SPEECH_GROUP = f"/services/{SPEECH_SERVICE}"
-USERNAME = "probe-hopin-speech-member"
+USERNAME = f"probe-{PROOF_CLIENT}-speech-member"
 BEARER_ONLY_PROOFS = {AGENT_SERVICE: "W4", SPEECH_SERVICE: "SP6"}
 FLOWS = (
     "standardFlowEnabled",
@@ -217,10 +217,12 @@ def prove(
     person_access_token: str,
 ) -> None:
     cell = ServiceAudienceCell(probe, expect, client)
-    if SPEECH_SCOPE not in client.optional_scopes:
+    runs_whole_proof = client.client_id == PROOF_CLIENT
+    if runs_whole_proof:
+        expect(SPEECH_SCOPE in client.optional_scopes, f"{PROOF_CLIENT} offers {SPEECH_SCOPE}")
+    elif SPEECH_SCOPE not in client.optional_scopes:
         cell.client_without_the_scope(person_access_token)
         return
-    runs_whole_proof = client.client_id == PROOF_CLIENT
     if runs_whole_proof:
         cell.bearer_only_services()
     cell.workload_with_and_without_the_scope()
