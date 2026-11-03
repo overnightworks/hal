@@ -208,18 +208,20 @@ def switch(
         tree = tree or repository
         exit_code = apply.apply_local(
             state,
-            compose.Compose(scripted.run, tree),
             tree,
-            setup_check,
-            run_setup or setup_run,
             from_home or home,
-            dataclasses.replace(ingress.verifier, clock=clock) if clock else ingress.verifier,
-            ingress.watch,
-            git or scripted_git,
-            ensure_environment,
-            None if installed_backup else realm_backup,
-            app_runtime,
-            rename,
+            apply.Collaborators(
+                compose.Compose(scripted.run, tree),
+                setup_check,
+                run_setup or setup_run,
+                dataclasses.replace(ingress.verifier, clock=clock) if clock else ingress.verifier,
+                ingress.watch,
+                git or scripted_git,
+                ensure_environment,
+                None if installed_backup else realm_backup,
+                app_runtime,
+                rename,
+            ),
         )
         return exit_code, sys.stdout.getvalue(), capsys.readouterr().err
 
