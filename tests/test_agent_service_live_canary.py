@@ -136,6 +136,7 @@ class Run:
     stdout: list[str]
     stderr: str
     route: Route
+    stray_stdout: str
 
 
 def drive(route: Route, capsys) -> Run:
@@ -144,7 +145,8 @@ def drive(route: Route, capsys) -> Run:
         stack_of=route.stack, census_run=route.census, out=out,
         pause=lambda seconds: route.timeline.append(f"pause {seconds:g}"),
     )  # fmt: skip
-    return Run(code, out.getvalue().splitlines(), capsys.readouterr().err, route)
+    captured = capsys.readouterr()
+    return Run(code, out.getvalue().splitlines(), captured.err, route, captured.out)
 
 
 def assert_only_verdicts(run: Run) -> None:
@@ -152,6 +154,7 @@ def assert_only_verdicts(run: Run) -> None:
     assert run.stdout[-1] in FINAL
     assert (run.code == 0) == (run.stdout[-1] == "canary and census held")
     assert run.stderr == ""
+    assert run.stray_stdout == ""
     printed = "\n".join(run.stdout)
     for secret in (SENTINEL, run.route.marker or SENTINEL):
         assert secret not in printed
@@ -181,7 +184,7 @@ def test_a_clean_run_prints_three_held_cells_and_nothing_on_standard_error(capsy
 def test_the_census_waits_for_a_settle_after_the_turn_and_before_any_sink_is_read(capsys):
     run = drive(Route(), capsys)
 
-    settle = f"pause {live_canary.SETTLE_SECONDS:g}"
+    settle = f"pause {live_canary.ROUTE_SETTLE_SECONDS:g}"
     timeline = run.route.timeline
     assert timeline.index("canary") < timeline.index(settle) < timeline.index("census")
 
@@ -216,7 +219,8 @@ def test_a_new_run_has_a_new_marker(capsys):
         drive(route, capsys)
         markers.append(route.marker)
 
-    assert markers[0] and markers[0] != markers[1]
+    assert markers[0]
+    assert markers[0] != markers[1]
 
 
 # --- C0 --------------------------------------------------------------------------------------

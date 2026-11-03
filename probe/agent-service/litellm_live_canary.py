@@ -35,7 +35,7 @@ from litellm import DATABASE, FRONT, LISTENING, LITELLM, expect, hashed, run_scr
 from litellm_retention import RetentionProbe  # noqa: E402
 from live_canary import Verdicts, live_canary, route_targets  # noqa: E402
 from live_smoke import Stack  # noqa: E402
-from retention_census import Census, contains, run_docker  # noqa: E402
+from retention_census import DUMP, Census, contains, run_docker  # noqa: E402
 
 CANARY = "agent-canary"
 
@@ -165,8 +165,9 @@ class LiveCanaryProbe(RetentionProbe):
         before, spent = len(self.provider_requests()), self.hopin_spend()
         code, lines = self.run_wrapper()
         expect(code == 0 and len(lines) == 4, f"clean: {code} {lines}")
-        searched = Census(run_docker, b"probe").sweep(self.targets(), {"none": "-"}).inventory
-        dumped = "dump" in searched[self.container_name(DATABASE)]
+        targets = route_targets(self.stack())
+        searched = Census(run_docker, b"probe").sweep(targets, {"none": "-"}).inventory
+        dumped = DUMP in searched[self.container_name(DATABASE)]
         count = sum(len(sinks) for sinks in searched.values())
         expect(dumped and lines[2] == f"C2 census held: {count} sinks searched, the canary is in "
                "none", f"clean: {lines}")  # fmt: skip
@@ -249,7 +250,7 @@ class LiveCanaryProbe(RetentionProbe):
             "docker", "compose", "--project-directory", str(REPO), "--file", str(file),
             "--profile", "*", "config", "--hash", "*",
         ]).stdout  # fmt: skip
-        return dict(line.split() for line in listed.splitlines())
+        return {name: digest for name, digest in map(str.split, listed.splitlines())}
 
 
 def main() -> int:

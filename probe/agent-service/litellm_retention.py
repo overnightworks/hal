@@ -37,7 +37,7 @@ import secrets
 import subprocess
 import sys
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 import yaml
@@ -67,7 +67,15 @@ from litellm import (  # noqa: E402
 from litellm_caller import CALL_PROGRAM, STREAM_PROGRAM, caller_input  # noqa: E402
 from litellm_failures import FailureProbe  # noqa: E402
 from litellm_key_files import APPS, KeyFiles  # noqa: E402
-from retention_census import ROUTE_SERVICES, Census, Sweep, Target, run_docker  # noqa: E402
+from retention_census import (  # noqa: E402
+    DUMP,
+    ROUTE_SERVICES,
+    Census,
+    Sweep,
+    Target,
+    route_target,
+    run_docker,
+)
 
 from hal.output import write_line  # noqa: E402
 
@@ -110,6 +118,7 @@ DEPLOYMENT_PARAMS = {"model", "api_key", "max_retries", "max_tokens"}
 TOOL_TABLE = "LiteLLM_ToolTable"
 FINGERPRINT_TABLES = {"LiteLLM_EndUserTable", "LiteLLM_DailyEndUserSpend"}
 TAG_TABLE, DAILY_TAG_TABLE = "LiteLLM_TagTable", "LiteLLM_DailyTagSpend"
+USER_AGENT = "user agent"  # the label of the user-agent canary in T1 and D9
 TOOL_WRITE_SECONDS = 120
 TAG_SETTLE_POLLS = 4  # 5 s apart: over two of LiteLLM's batch writes
 STORE_NAMES = re.compile(
@@ -157,6 +166,18 @@ def tool_body(tool: str, user: str, messages: list[dict], description: str = "pr
     )
 
 
+def sinks_outside_the_database(
+    sinks: Sequence[str], database: str, volumes: Sequence[str]
+) -> list[str]:
+    """The sinks of a canary that are neither the database's dump nor one of its volumes: its log,
+    its tmpfs and its other mounts count as outside."""
+    permitted = {f"{database} {volume}" for volume in volumes} | {f"{database} {DUMP}"}
+    return [
+        sink for sink in sinks
+        if sink not in permitted and not sink.startswith(f"{database} {DUMP} ")
+    ]  # fmt: skip
+
+
 class RetentionProbe(FailureProbe, KeyFiles):
     """litellm.py's stack with the census run over the route's containers, at the log level
     compose.yaml ships, and hopin's key made by the key step."""
@@ -197,12 +218,12 @@ class RetentionProbe(FailureProbe, KeyFiles):
 
     # --- the census ---------------------------------------------------------------------------
 
+    def resolved_services(self) -> dict:
+        return json.loads(self.compose("config", "--format", "json").stdout)["services"]
+
     def targets(self) -> list[Target]:
-        login = self.database_login()
-        return [
-            Target(self.container_name(service), has_python, login if service == DATABASE else None)
-            for service, has_python in ROUTE_SERVICES.items()
-        ]
+        resolved = self.resolved_services()
+        return [route_target(s, self.container_name(s), resolved) for s in ROUTE_SERVICES]
 
     def sweep(self, tokens: Mapping[str, str]) -> Sweep:
         """C: the census over the route's containers for the canaries `tokens` (label -> value)."""
@@ -212,12 +233,21 @@ class RetentionProbe(FailureProbe, KeyFiles):
 
     def dump_tables(self, sinks: tuple[str, ...]) -> set[str]:
         """The tables of the database's dump among a canary's sinks; `` for a line outside one."""
-        dump = f"{self.container_name(DATABASE)} dump"
+        dump = f"{self.container_name(DATABASE)} {DUMP}"
         return {s.removeprefix(dump).strip() for s in sinks if s.startswith(dump)}
 
     def outside_the_database(self, sinks: tuple[str, ...]) -> list[str]:
         """The sinks of a canary that are neither the database's dump nor its volume."""
-        return [s for s in sinks if not s.startswith(f"{self.container_name(DATABASE)} ")]
+        volumes = [
+            volume["target"]
+            for volume in self.resolved_services()[DATABASE]["volumes"]
+            if volume["type"] == "volume"
+        ]
+        return sinks_outside_the_database(sinks, self.container_name(DATABASE), volumes)
+
+    def landing(self, sinks: tuple[str, ...]) -> list[str]:
+        """Where a canary sits, the database's container shown as its service."""
+        return sorted(s.replace(self.container_name(DATABASE), DATABASE) for s in sinks)
 
     def expect_nothing_retained(self, cell: str, tokens: Mapping[str, str]) -> None:
         found = self.sweep(tokens).found
@@ -401,8 +431,8 @@ class RetentionProbe(FailureProbe, KeyFiles):
         expect(status == 200, f"T1: LiteLLM answered {status}")
         self.wait_for_tool(tool)
         self.wait_for_row(DAILY_TAG_TABLE, "tag", tag)
-        found = self.sweep({"user agent": agent, "tag": tag}).found
-        agent_tables = self.dump_tables(found.get("user agent", ()))
+        found = self.sweep({USER_AGENT: agent, "tag": tag}).found
+        agent_tables = self.dump_tables(found.get(USER_AGENT, ()))
         expect(TOOL_TABLE in agent_tables, f"T1: the user agent is in {sorted(agent_tables)}")
         expect(DAILY_TAG_TABLE not in agent_tables, "T1: a tag row holds the user agent")
         tag_tables = self.dump_tables(found.get("tag", ()))
@@ -489,7 +519,7 @@ class RetentionProbe(FailureProbe, KeyFiles):
         canaries = {
             label: canary(f"d9-{label}")
             for label in ("message", "description", "arguments", "result", "answer", "call",
-                          "user agent", "tag")
+                          USER_AGENT, "tag")
         }  # fmt: skip
         tool = canary("d9-tool").replace("-", "_")
         answered = canary("d9-answered").replace("-", "_")
@@ -506,7 +536,7 @@ class RetentionProbe(FailureProbe, KeyFiles):
             {"role": "assistant", "content": None, "tool_calls": [call]},
             {"role": "tool", "tool_call_id": "call_d9", "content": canaries["result"]},
         ], description=canaries["description"])  # fmt: skip
-        headers = {"User-Agent": canaries["user agent"], "x-litellm-tags": canaries["tag"]}
+        headers = {"User-Agent": canaries[USER_AGENT], "x-litellm-tags": canaries["tag"]}
         status = self.call_with_headers(self.key, body, headers, front=True)["status"]
         expect(status == 200, f"D9: the route answered {status}")
         self.steer()
@@ -521,8 +551,10 @@ class RetentionProbe(FailureProbe, KeyFiles):
         held = sorted(set(canaries) & set(found))
         expect(not held, f"D9: canaries retained: {held}: {[found[label] for label in held]}")
         for kind in ("request tool", "response tool"):
-            tables = self.dump_tables(found.get(kind, ()))
+            sinks = found.get(kind, ())
+            tables, outside = self.dump_tables(sinks), self.outside_the_database(sinks)
             expect(tables == {TOOL_TABLE}, f"D9: the {kind} name is in {sorted(tables)}")
+            expect(not outside, f"D9: the {kind} name is in {outside}")
         agents = self.tool_user_agents(tool, answered)
         expect(agents == {front_user_agent()}, f"D9: the tool rows' user agents {agents}")
         raw = [label for label in found if label.startswith("app key")]
@@ -624,8 +656,8 @@ class RetentionProbe(FailureProbe, KeyFiles):
 
     def cell_t4(self) -> None:
         """Q after the conforming flows: no tag row of hopin's key, the tag table empty."""
+        hopin = self.settled_tag_rows(lambda: self.count(self.tag_rows_of(self.key)), "T4")
         tags = self.count(f'SELECT count(*) FROM "{TAG_TABLE}"')  # noqa: S608 - the table name is this probe's literal
-        hopin = self.count(self.tag_rows_of(self.key))
         presentator = self.count(self.tag_rows_of(self.file_keys["presentator"]))
         expect(tags == 0 and hopin == 0, f"T4: {tags} tag table rows, {hopin} of hopin's key")
         expect(presentator >= 1, "T4: the control finds no tag row of T1")
@@ -643,33 +675,33 @@ class RetentionProbe(FailureProbe, KeyFiles):
         """Each body tag form on its own non-conforming request through the front."""
         tags = {form: canary("t3-tag") for form in TAG_FORMS}
         recorded = {form: self.tagged_request(form, tag) for form, tag in tags.items()}
-        rows = self.settled_tag_rows(list(tags.values()))
+        rows = self.settled_tag_rows(lambda: self.tag_rows(list(tags.values())), "T3")
         found = self.sweep(tags).found
         expect(self.tag_rows(list(tags.values())) == rows, "T3: a tag row came after the dump")
         failed = []
         for form, tag in tags.items():
             sinks = found.get(form, ())
             tables, outside = self.dump_tables(sinks), self.outside_the_database(sinks)
-            figures = f"{recorded[form]}, dump tables {sorted(tables) or 'none'}"
+            figures = f"{recorded[form]}, in {self.landing(sinks) or 'no sink'}"
             figures += f", tag row id {self.request_id_form(tag)}"
             if not tables <= {TAG_TABLE, DAILY_TAG_TABLE} or outside:
                 failed.append(form)
                 write_line(f"{form} FAILED: {figures}, outside the database {outside}", flush=True)
             else:
-                self.hold(form, figures if tables else f"{figures}: lands nowhere")
+                self.hold(form, figures if sinks else f"{figures}: lands nowhere")
         expect(not failed, f"T3: {failed}")
 
     def tag_rows(self, tags: list[str]) -> int:
         named = ", ".join(f"'{tag}'" for tag in tags)
         return self.count(f'SELECT count(*) FROM "{DAILY_TAG_TABLE}" WHERE tag IN ({named})')  # noqa: S608 - the tags are tokens this probe generated
 
-    def settled_tag_rows(self, tags: list[str]) -> int:
-        """The count of the tags' rows once it held over TAG_SETTLE_POLLS polls: LiteLLM writes a
-        tag row in a later batch than the person's row."""
+    def settled_tag_rows(self, count: Callable[[], int], cell: str) -> int:
+        """A tag-row count once it held over TAG_SETTLE_POLLS polls: LiteLLM writes a tag row in a
+        later batch than the person's row."""
         deadline, seen = time.monotonic() + TOOL_WRITE_SECONDS, []
         while len(seen) < TAG_SETTLE_POLLS or len(set(seen[-TAG_SETTLE_POLLS:])) > 1:
-            expect(time.monotonic() < deadline, f"T3: the tag rows never settled: {seen}")
-            seen.append(self.tag_rows(tags))
+            expect(time.monotonic() < deadline, f"{cell}: the tag rows never settled: {seen}")
+            seen.append(count())
             time.sleep(5)
         return seen[-1]
 
@@ -687,7 +719,9 @@ class RetentionProbe(FailureProbe, KeyFiles):
     def request_id_form(self, tag: str) -> str:
         query = f"SELECT request_id FROM \"{DAILY_TAG_TABLE}\" WHERE tag = '{tag}'"  # noqa: S608 - a tag this probe generated
         ids = self.sql(query, "--tuples-only", "--no-align").stdout.split()
-        return "none" if not ids else "the fake's msg_probe" if "msg_probe" in ids else "LiteLLM's"
+        if not ids:
+            return "none"
+        return "the fake's msg_probe" if "msg_probe" in ids else "LiteLLM's"
 
     def wait_for_tool(self, tool: str) -> None:
         self.wait_for_row(TOOL_TABLE, "tool_name", tool)

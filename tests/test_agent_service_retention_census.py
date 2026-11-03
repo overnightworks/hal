@@ -558,13 +558,15 @@ ROW_TEXT = "row-text-6d2c8e41"
 
 
 def plain_dump(*, inside: str = "", outside: str = "") -> bytes:
-    """A plain-format dump with one table's rows and one statement outside any COPY block."""
+    """A plain-format dump with one table's rows and statements outside any COPY block, before and
+    after it."""
     return "\n".join([
         'CREATE TABLE public."LiteLLM_ToolTable" (tool_name text);',
         f"COMMENT ON TABLE public.\"LiteLLM_ToolTable\" IS '{outside}';",
         'COPY public."LiteLLM_ToolTable" (tool_name) FROM stdin;',
         f"{ROW_TEXT}\t{inside}",
         "\\.",
+        f"COMMENT ON TABLE public.other IS '{outside}';",
         "COPY public.other (value) FROM stdin;",
         "plain",
         "\\.",
@@ -626,6 +628,27 @@ def test_the_census_targets_are_the_containers_of_the_direct_route_without_the_a
 
     assert set(retention.ROUTE_SERVICES) == route
     assert retention.AGENT_SERVICE not in retention.ROUTE_SERVICES
+
+
+def test_the_route_target_of_the_database_carries_the_login_compose_resolves(retention) -> None:
+    environment = {"POSTGRES_USER": "keeper", "POSTGRES_DB": "store"}
+
+    target = retention.route_target(
+        retention.DATABASE, "db-1", {retention.DATABASE: {"environment": environment}}
+    )
+
+    login = retention.DatabaseLogin(user="keeper", database="store")
+    assert target == retention.Target("db-1", has_python=False, login=login)
+
+
+def test_the_route_target_of_every_other_service_carries_no_login(retention) -> None:
+    others = set(retention.ROUTE_SERVICES) - {retention.DATABASE}
+
+    targets = {service: retention.route_target(service, "name", {}) for service in others}
+
+    assert {service: (t.has_python, t.login) for service, t in targets.items()} == {
+        service: (retention.ROUTE_SERVICES[service], None) for service in others
+    }
 
 
 # --- B11's reading of LiteLLM's configuration in litellm_retention.py -----------------------------
@@ -704,3 +727,39 @@ def test_the_environment_name_of_litellms_payload_print_is_a_forbidden_store(
     retention_probe: ModuleType,
 ) -> None:
     assert retention_probe.STORE_NAMES.search("LITELLM_PRINT_STANDARD_LOGGING_PAYLOAD")
+
+
+# --- T3, P7 and D9: where a canary may sit besides the permitted tables -----------------------
+
+DATABASE_NAME = "db-1"
+DATA_VOLUME = "/var/lib/postgresql/data"
+
+
+@pytest.mark.parametrize(
+    "sink",
+    [
+        f"{DATABASE_NAME} log",
+        f"{DATABASE_NAME} /tmp",  # noqa: S108 - a sink name and no test creates the path
+        f"{DATABASE_NAME} /run/postgresql",
+        f"{DATABASE_NAME} /dev/shm",  # noqa: S108 - a sink name and no test creates the path
+        f"{DATABASE_NAME} /dev",
+        "litellm-1 log",
+        f"{DATABASE_NAME}-other dump",
+    ],
+)
+def test_a_sink_of_the_database_other_than_its_volume_and_dump_is_outside_it(
+    retention_probe: ModuleType, sink: str
+) -> None:
+    outside = retention_probe.sinks_outside_the_database([sink], DATABASE_NAME, [DATA_VOLUME])
+
+    assert outside == [sink]
+
+
+@pytest.mark.parametrize(
+    "sink",
+    [f"{DATABASE_NAME} {DATA_VOLUME}", f"{DATABASE_NAME} dump", f"{DATABASE_NAME} dump Table"],
+)
+def test_the_databases_volume_and_its_dump_are_not_outside_it(
+    retention_probe: ModuleType, sink: str
+) -> None:
+    assert retention_probe.sinks_outside_the_database([sink], DATABASE_NAME, [DATA_VOLUME]) == []

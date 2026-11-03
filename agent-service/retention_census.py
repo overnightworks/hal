@@ -92,6 +92,13 @@ class Target:
     login: DatabaseLogin | None = None  # a database whose dump is one more sink
 
 
+def route_target(service: str, name: str, services: Mapping[str, Mapping]) -> Target:
+    """The census target of a route service's container: the database comes with the login the
+    resolved compose services give it, so that its dump is searched."""
+    login = DatabaseLogin.of(services[DATABASE]) if service == DATABASE else None
+    return Target(name, ROUTE_SERVICES[service], login)
+
+
 @dataclass
 class Sweep:
     """The verdict over every sink of the targets for the canaries asked."""

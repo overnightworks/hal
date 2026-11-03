@@ -163,7 +163,9 @@ def test_the_canary_prints_its_status_and_whether_the_answer_held_the_marker_alo
 ):
     code, lines, _ = run_canary(canary, monkeypatch, tmp_path, response)
 
-    assert (code, lines) == expected
+    expected_code, expected_lines = expected
+    assert code == expected_code
+    assert lines == expected_lines
 
 
 def test_an_exception_ends_the_canary_with_the_type_of_it_alone(canary, monkeypatch, tmp_path):
@@ -180,7 +182,8 @@ def test_an_exception_ends_the_canary_with_the_type_of_it_alone(canary, monkeypa
         ["--key-file", str(key_file), "--model", "text/opus", "--marker", "m"], out=out
     )
 
-    assert (code, out.getvalue()) == (1, "crashed ConnectionRefusedError\n")
+    assert code == 1
+    assert out.getvalue() == "crashed ConnectionRefusedError\n"
 
 
 def test_a_missing_key_file_is_a_crash_by_its_type_alone(canary, tmp_path):
@@ -190,7 +193,8 @@ def test_a_missing_key_file_is_a_crash_by_its_type_alone(canary, tmp_path):
         ["--key-file", str(tmp_path / "absent"), "--model", "text/opus", "--marker", "m"], out=out
     )
 
-    assert (code, out.getvalue()) == (1, "crashed FileNotFoundError\n")
+    assert code == 1
+    assert out.getvalue() == "crashed FileNotFoundError\n"
 
 
 def test_no_key_reaches_the_canarys_output(canary, monkeypatch, tmp_path):

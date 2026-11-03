@@ -308,17 +308,51 @@ def setting_keys(node: object) -> Iterator[str]:
             yield from setting_keys(item)
 
 
+def string_values(node: object) -> Iterator[str]:
+    """Every string a YAML document holds as a value, at any depth."""
+    if isinstance(node, dict):
+        for value in node.values():
+            yield from string_values(value)
+    elif isinstance(node, list):
+        for item in node:
+            yield from string_values(item)
+    elif isinstance(node, str):
+        yield node
+
+
+PREMIUM_SETTINGS = (
+    "LITELLM_LICENSE", "enforced_params", "allowed_ips", "allowed_routes", "tags",
+    "model_max_budget",
+)  # fmt: skip
+PREMIUM_ROUTE = "regenerate"
+
+
+def premium_names(document: object) -> set[str]:
+    """The premium settings a document sets as keys and the premium route it names in a value."""
+    named = set(PREMIUM_SETTINGS) & set(setting_keys(document))
+    return named | {PREMIUM_ROUTE for value in string_values(document) if PREMIUM_ROUTE in value}
+
+
+@pytest.mark.parametrize(
+    ("document", "named"),
+    [
+        ({"general_settings": {"allowed_routes": ["/chat"]}}, {"allowed_routes"}),
+        ({"litellm_settings": [{"model_max_budget": {}}]}, {"model_max_budget"}),
+        ({"LITELLM_LICENSE": "x"}, {"LITELLM_LICENSE"}),
+        ({"some_routes": ["/key/regenerate"]}, {PREMIUM_ROUTE}),
+        ({"general_settings": {"enforce_user_param": True}}, set()),
+    ],
+)
+def test_a_premium_setting_is_found_by_its_key_and_a_premium_route_by_its_value(document, named):
+    assert premium_names(document) == named
+
+
 def test_litellm_holds_no_license_and_none_of_the_settings_behind_the_premium_check(
     compose, config
 ):
-    premium_settings = (
-        "LITELLM_LICENSE", "enforced_params", "allowed_ips", "allowed_routes", "tags",
-        "model_max_budget", "regenerate",
-    )  # fmt: skip
     environment = compose["services"][LITELLM]["environment"]
-    configured = set(setting_keys(config)) | set(environment)
 
-    assert not set(premium_settings) & configured
+    assert premium_names(config) | premium_names(environment) == set()
     assert "LITELLM_LICENSE" not in START_SCRIPT
 
 

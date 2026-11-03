@@ -4,11 +4,11 @@
 
 It runs only at V3, on the operator's word: it makes a paid call, which spends from hopin's app
 budget. It checks that each container of the direct route runs once (C0), runs `agent-canary` once,
-which posts a random value through the front with hopin's key and asks for it back (C1), waits a
-short settle, and runs the retention census over those containers for that value (C2), the dump of
-`litellm-db` among the sinks. The dump reads the whole store into this program's memory; no line of
-it is ever printed. Nothing is recreated and no one signs in; a failed C0 or C1 ends the run, and a
-new run uses a new value.
+which posts a random value through the front with hopin's key and asks for it back (C1), waits for
+two of LiteLLM's database batches, and runs the retention census over those containers for that
+value (C2), the dump of `litellm-db` among the sinks. The dump reads the whole store into this
+program's memory; no line of it is ever printed. Nothing is recreated and no one signs in; a failed
+C0 or C1 ends the run, and a new run uses a new value.
 
 stdout holds verdict lines of a closed grammar and the last line (`canary and census held` or
 `canary and census FAILED`, matching the exit code); stderr holds nothing. No exception text, no
@@ -32,26 +32,20 @@ from typing import TextIO
 from api_canary import EXCEPTION_NAME, crashed_line, verdicts
 from live_smoke import (
     PAID_TURN_SECONDS,
-    SETTLE_SECONDS,
     TIMED_OUT,
     Cell,
     Stack,
     Verdict,
     remove_smoke_containers,
 )
-from retention_census import (
-    DATABASE,
-    ROUTE_SERVICES,
-    Census,
-    DatabaseLogin,
-    Run,
-    Sweep,
-    Target,
-    run_docker,
-)
+from retention_census import ROUTE_SERVICES, Census, Run, Sweep, Target, route_target, run_docker
 
 CANARY_SERVICE = "agent-canary"
 INSPECT_NAME = "{{.Name}}"
+# LiteLLM 1.106.6 writes its batched updates every PROXY_BATCH_WRITE_AT = 10 s (constants.py:1877)
+# plus randint(0, 5) (proxy_server.py:10936), and a tag row comes a batch after the person's row:
+# two batches of at most 15 s, so the dump holds the rows the request wrote.
+ROUTE_SETTLE_SECONDS = 2 * (10 + 5)
 
 
 class Reason(StrEnum):
@@ -135,7 +129,7 @@ def route_targets(stack: Stack) -> list[Target] | None:
     """The census targets of the route's running containers, the database with the login compose
     resolves for it, or None when one is not running."""
     targets = []
-    for service, has_python in ROUTE_SERVICES.items():
+    for service in ROUTE_SERVICES:
         listed = stack.compose("ps", "-q", service)
         containers = listed.stdout.split()
         if listed.returncode != 0 or len(containers) != 1:
@@ -144,9 +138,7 @@ def route_targets(stack: Stack) -> list[Target] | None:
         name = named.stdout.strip().removeprefix("/")
         if named.returncode != 0 or not name:
             return None
-        resolved = stack.configuration["services"]
-        login = DatabaseLogin.of(resolved[DATABASE]) if service == DATABASE else None
-        targets.append(Target(name, has_python, login))
+        targets.append(route_target(service, name, stack.configuration["services"]))
     return targets
 
 
@@ -245,7 +237,7 @@ def live_canary(
     targets = running_route(stack, say)
     marker = f"canary-{secrets.token_hex(16)}"
     if targets is not None and canary_turn(stack, say, marker):
-        pause(SETTLE_SECONDS)
+        pause(ROUTE_SETTLE_SECONDS)
         run_census(targets, marker, census_run, say)
     return say.last()
 
