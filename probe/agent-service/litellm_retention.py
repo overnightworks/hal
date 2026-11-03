@@ -457,18 +457,17 @@ class RetentionProbe(FailureProbe):
         query = f"SELECT count(*) FROM \"{TOOL_TABLE}\" WHERE tool_name = '{tool}'"  # noqa: S608 - the value is a token this probe generated
         deadline = time.monotonic() + TOOL_WRITE_SECONDS
         while True:
-            counted = self.run([
-                "docker", "exec", self.container_name(DATABASE), "psql", "--username=litellm",
-                "--dbname=litellm", "--tuples-only", "--no-align", "--command", query,
-            ]).stdout.strip()  # fmt: skip
+            counted = self.sql(query, "--tuples-only", "--no-align").stdout.strip()
             if counted == "1":
                 return
             expect(time.monotonic() < deadline, f"D9: the request tool name is not in {TOOL_TABLE}")
             time.sleep(3)
 
-    def sql(self, statement: str) -> None:
-        self.run(["docker", "exec", self.container_name(DATABASE), "psql", "--username=litellm",
-                  "--dbname=litellm", "--command", statement])  # fmt: skip
+    def sql(self, statement: str, *options: str) -> subprocess.CompletedProcess:
+        return self.run([
+            "docker", "exec", self.container_name(DATABASE), "psql", "--username=litellm",
+            "--dbname=litellm", *options, "--command", statement,
+        ])  # fmt: skip
 
     def dump(self) -> str:
         return self.run(["docker", "exec", self.container_name(DATABASE), "pg_dump",
