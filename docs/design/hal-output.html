@@ -1449,6 +1449,25 @@ Type <span class="w">yes</span> to reopen the tunnel: yes
 <span class="c">next:</span> hal backup songmaker</pre>
       <p class="was">Angepasst an den Lauf: die Fehlerzeile nennt die letzte gute Sicherung der ersten gescheiterten App aus der Statusdatei, in Ortszeit, mit Jahr ab einem anderen Jahr; ohne Eintrag <code>songmaker has no good backup recorded</code>, bei einer App ohne den Namen noch einmal</p>
     </figure>
+    <figure id="f-expire">
+      <figcaption><span class="tag new">neu #945</span> <code>hal expire</code>, der tägliche Timer: gelöscht, LiteLLM aus, psql scheitert (Zahlen erfunden)</figcaption>
+<pre class="term"><span class="p">$</span> <span class="u">hal expire</span>
+<span class="g">  ✓</span> person days     deleted        <span class="d">41 rows · older than 90 days</span>
+<span class="g">  ✓</span> tool days       deleted        <span class="d">12 rows · older than 90 days</span>
+<span class="d">  · tools           deleted        0 rows · unused for 90 days</span>
+<span class="g">  ✓</span> people          deleted        <span class="d">2 rows · idle for 90 days</span>
+<span class="w">✓ expire done</span> <span class="d">· 55 rows · &lt;1s</span>
+
+<span class="p">$</span> <span class="u">hal expire</span>
+<span class="d">  · litellm         not running    nothing deleted</span>
+<span class="w">✓ expire done</span>
+
+<span class="p">$</span> <span class="u">hal expire</span>
+<span class="r">  ✗</span> litellm         not expired    <span class="d">psql ended with exit 1 · nothing deleted</span>
+<span class="rw">error:</span> litellm not expired · nothing deleted
+<span class="c">next:</span> hal expire</pre>
+      <p class="was">Nur Zahlen, nie ein Fingerabdruck oder Werkzeugname. <code>nothing deleted</code> nur, wenn psql selbst scheiterte; schweigt Docker danach, endet psql anders als mit Exit 1 oder kommt ein Ctrl-C, heißt es <code>outcome unknown · the next run repeats it</code></p>
+    </figure>
     <figure>
       <figcaption><span class="tag new">neu</span> <code>hal check exposure</code>: heute 272 Zeilen für einen Prozess</figcaption>
 <pre class="term"><span class="p">$</span> <span class="u">hal check exposure</span>
