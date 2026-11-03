@@ -1,8 +1,10 @@
-"""Probe of the API route's retention (#814 S1c cells B1-B7, B9-B11, D9, and P7): the stack of
-litellm.py (the service, the one-route front, LiteLLM and the gateway's second entrypoint, against a
-fake Anthropic) and its caller with an app key, with a unique canary in each request and answer,
-searched afterwards in every writable mount and every log of the front, the gateway, LiteLLM and
-the service by `agent-service/retention_census.py`.
+"""Probe of the direct route's retention (#814 S1c cells B1-B7, B9-B11, D9 and P7; HAL-2.8 cells
+K0, T1-T4, STR-c and STR): the stack of litellm.py without the agent service and the issuer (the
+one-route front, LiteLLM, its database and the gateway's second entrypoint, against a fake
+Anthropic) and its caller with hopin's key, made by `hal apply`'s key step from a scratch key file,
+with a unique canary in each request and answer, searched afterwards in every writable mount and
+every log of the front, the gateway, LiteLLM and its database, and in a `pg_dump` of the database,
+by `agent-service/retention_census.py`.
 Nothing live and nothing paid: the probe refuses to start unless `internet` is internal and holds
 only the fakes.
 
@@ -13,9 +15,10 @@ Measured: a run takes about three minutes and its
 teardown a few seconds (K 30 s, CAP 1800 s).
 
 Evidence: F is the fake provider's request log, A the caller's status, C the census's verdict
-(canaries found per sink, and every sink it could not examine). B2, B3a and B3b are the controls:
-each plants a canary where the search must find it (a file by exec into a tmpfs, a LiteLLM debug
-log, the front's access log), and they run first on a stack the probe then recreates, so no clean
+(canaries found per sink, the dump's tables among them, and every sink it could not examine), Q
+an SQL count in the database. B2, B3a, B3b and D9's planted row are the controls: each plants a
+canary where the search must find it (a file by exec into a tmpfs, a LiteLLM debug log, the front's
+access log, a row), and B2 and B3 run first on a stack the probe then recreates, so no clean
 cell sees their tmpfs. The probe differs from production as the controls say, for B3a and B3b
 only: `LITELLM_LOG=DEBUG`, and the front's access log. The fake's control file and the caller's
 program are harness inputs that hold the canaries by design and are no sinks of the route. Unlike
@@ -46,31 +49,33 @@ sys.path.insert(0, str(REPO / "agent-service"))
 from litellm import (  # noqa: E402
     DATABASE,
     DEFAULT_MODEL,
+    FAKE_PROVIDER,
     FRONT,
     FRONT_STATIC,
     GATEWAY,
-    LISTENING,
     LITELLM,
     PROJECT,
     ROUTE,
-    SERVICE,
     ProbeFailed,
     answer_text,
     expect,
     hashed,
     mounted_file,
-    person_budget,
     run_scratch_probe,
     wire_body,
 )
+from litellm_caller import CALL_PROGRAM, STREAM_PROGRAM, caller_input  # noqa: E402
 from litellm_failures import FailureProbe  # noqa: E402
+from litellm_key_files import APPS, KeyFiles  # noqa: E402
 from retention_census import ROUTE_SERVICES, Census, Sweep, Target, run_docker  # noqa: E402
 
 from hal.output import write_line  # noqa: E402
 
 HOLD_SECONDS = 45  # B4's hold: over a scan of the route
+STREAM_HOLD_SECONDS = 60  # STR's hold: past it the fake logs `held timed out` and the cell fails
 SCAN_DEADLINE_SECONDS = 60
 UPSTREAM_ERROR = 400
+ROUTE_FILE = REPO / "agent-service" / "litellm" / "front" / "dynamic" / "route.yml"
 
 
 class NonEmptyId:
@@ -100,16 +105,23 @@ SETTINGS_SECTIONS = {
 }
 DEPLOYMENT_KEYS = {"model_name", "litellm_params"}
 DEPLOYMENT_PARAMS = {"model", "api_key", "max_retries", "max_tokens"}
-# The one table of LiteLLM's database that may name a tool (D9), and those that may name a
-# fingerprint (P7).
+# The one table of LiteLLM's database that may name a tool (D9), those that may name a fingerprint
+# (P7), and those a body tag may land in (T3).
 TOOL_TABLE = "LiteLLM_ToolTable"
 FINGERPRINT_TABLES = {"LiteLLM_EndUserTable", "LiteLLM_DailyEndUserSpend"}
+TAG_TABLE, DAILY_TAG_TABLE = "LiteLLM_TagTable", "LiteLLM_DailyTagSpend"
 TOOL_WRITE_SECONDS = 120
-COPY_HEADER = re.compile(r'^COPY public\."?(\w+)"? ')
 STORE_NAMES = re.compile(
     r"DATABASE|REDIS|CALLBACK|LANGFUSE|VERBOSE|SPEND|S3_|LITELLM_PRINT_STANDARD_LOGGING_PAYLOAD",
     re.I,
 )
+# The four body tag forms of decision 10, each a body extra holding the tag `canary`.
+TAG_FORMS = {
+    "T3a root tags": lambda canary: {"tags": [canary]},
+    "T3b metadata.tags": lambda canary: {"metadata": {"tags": [canary]}},
+    "T3c metadata as a JSON string": lambda canary: {"metadata": json.dumps({"tags": [canary]})},
+    "T3d litellm_metadata.tags": lambda canary: {"litellm_metadata": {"tags": [canary]}},
+}
 
 
 def canary(label: str) -> str:
@@ -130,9 +142,23 @@ def deployment_strays(text: str) -> set[str]:
     return strays
 
 
-class RetentionProbe(FailureProbe):
+def front_user_agent() -> str:
+    """The constant the front writes as every request's User-Agent, read from its route file."""
+    middlewares = yaml.safe_load(ROUTE_FILE.read_text(encoding="utf-8"))["http"]["middlewares"]
+    return middlewares["request-headers"]["headers"]["customRequestHeaders"]["User-Agent"]
+
+
+def tool_body(tool: str, user: str, messages: list[dict], description: str = "probe") -> dict:
+    function = {"name": tool, "description": description,
+                "parameters": {"type": "object", "properties": {}}}  # fmt: skip
+    return wire_body(
+        user=user, messages=messages, tools=[{"type": "function", "function": function}]
+    )
+
+
+class RetentionProbe(FailureProbe, KeyFiles):
     """litellm.py's stack with the census run over the route's containers, at the log level
-    compose.yaml ships."""
+    compose.yaml ships, and hopin's key made by the key step."""
 
     LITELLM_LOG_LEVEL = None
 
@@ -171,8 +197,9 @@ class RetentionProbe(FailureProbe):
     # --- the census ---------------------------------------------------------------------------
 
     def targets(self) -> list[Target]:
+        login = self.database_login()
         return [
-            Target(self.container_name(service), has_python)
+            Target(self.container_name(service), has_python, login if service == DATABASE else None)
             for service, has_python in ROUTE_SERVICES.items()
         ]
 
@@ -181,6 +208,15 @@ class RetentionProbe(FailureProbe):
         result = self.census.sweep(self.targets(), tokens)
         expect(not result.problems, f"C: sinks not examined: {list(result.problems)}")
         return result
+
+    def dump_tables(self, sinks: tuple[str, ...]) -> set[str]:
+        """The tables of the database's dump among a canary's sinks; `` for a line outside one."""
+        dump = f"{self.container_name(DATABASE)} dump"
+        return {s.removeprefix(dump).strip() for s in sinks if s.startswith(dump)}
+
+    def outside_the_database(self, sinks: tuple[str, ...]) -> list[str]:
+        """The sinks of a canary that are neither the database's dump nor its volume."""
+        return [s for s in sinks if not s.startswith(f"{self.container_name(DATABASE)} ")]
 
     def expect_nothing_retained(self, cell: str, tokens: Mapping[str, str]) -> None:
         found = self.sweep(tokens).found
@@ -211,32 +247,42 @@ class RetentionProbe(FailureProbe):
     def request_canary_hits(self, since: int) -> int:
         return sum(request["request_canary_hits"] for request in self.provider_requests()[since:])
 
+    # --- the caller with headers or a stream --------------------------------------------------
+
+    def caller(self, program: str, key: str, body: dict, *, front: bool, headers=None):
+        """The argv of one throwaway's request and its own standard input."""
+        self.throwaways += 1
+        name = f"{PROJECT}-caller-{self.throwaways}"
+        argv, _ = self.call_command(name, key, "POST", ROUTE, body, front=front)
+        return argv, caller_input(program, key, body, self.hidden_keys(), headers)
+
+    def call_with_headers(self, key: str, body: dict, headers: dict, *, front: bool) -> dict:
+        argv, program = self.caller(CALL_PROGRAM, key, body, front=front, headers=headers)
+        return json.loads(self.run(argv, stdin=program, timeout=240).stdout.splitlines()[-1])
+
     # --- life cycle ---------------------------------------------------------------------------
 
     def recreate_route(self) -> None:
         """Every container of the route recreated, so that no tmpfs and no log of an earlier cell
         remains."""
-        for service in (GATEWAY, LITELLM, FRONT, SERVICE):
+        for service in (GATEWAY, LITELLM, FRONT):
             self.compose("up", "--detach", "--wait", "--force-recreate", "--no-deps", service)
         self.wait_until_listening()
-        self.wait_until(SERVICE, LISTENING)
-        self.wait_until_the_gateway_answers()
         self.wait_for_front()
 
     # --- the cells ----------------------------------------------------------------------------
 
     def drive(self) -> None:
-        """The controls first, then a recreated route for the clean cells, in the order of the
+        """K0, the controls, then a recreated route for the clean cells, in the order of the
         matrix."""
-        self.wait_until(SERVICE, LISTENING)
         self.wait_until_listening()
-        self.admin("POST", "/budget/new", person_budget())
-        self.key = self.make_key()
+        self.cell_k0()
         self.steer()
         failed = []
         for step in (
-            self.cell_b2, self.cells_b3, self.recreate_route, self.cell_b1, self.cell_b4,
-            self.cell_b5, self.cell_b6, self.cell_b7, self.cell_b9, self.cell_d9, self.cell_b10,
+            self.cell_b2, self.cells_b3, self.recreate_route, self.cell_b1, self.cell_t1,
+            self.cell_b4, self.cell_b5, self.cell_b6, self.cell_b7, self.cell_b9, self.cell_d9,
+            self.cell_str_c, self.cell_str, self.cell_t4, self.cells_t3, self.cell_b10,
             self.cell_b11,
         ):  # fmt: skip
             try:
@@ -245,6 +291,17 @@ class RetentionProbe(FailureProbe):
                 failed.append(step.__name__)
                 write_line(f"{step.__name__} FAILED: {problem}", flush=True)
         expect(not failed, f"cells failed: {', '.join(failed)}")
+
+    def cell_k0(self) -> None:
+        plan = self.read_plan("K0")
+        planned = {(change.subject, change.new) for change in plan.changes}
+        expect(planned == {(self.budget_id, True), *((app, True) for app in APPS)}, f"K0: {plan}")
+        self.run_step(plan)
+        self.key = self.file_keys["hopin"]
+        rows = self.admin("POST", "/v2/key/info", {"keys": [hashed(self.key)]})["info"]
+        expect([row["key_alias"] for row in rows] == ["hopin"], "K0: hopin's key row")
+        self.hold("K0", "the plan named the person budget and the three keys as new; after the "
+                  "run one key has hopin's file hash and alias hopin")  # fmt: skip
 
     def cell_b2(self) -> None:
         tokens = {"file in litellm": canary("b2-litellm"), "file in front": canary("b2-front")}
@@ -299,7 +356,7 @@ class RetentionProbe(FailureProbe):
         result = self.sweep({"probe": canary("b1")})
         resolved = json.loads(self.compose("config", "--format", "json").stdout)["services"]
         lines = []
-        for service in (FRONT, GATEWAY, LITELLM, SERVICE, DATABASE):
+        for service in ROUTE_SERVICES:
             inspected = json.loads(self.run(["docker", "inspect", self.container(service)]).stdout)[
                 0
             ]
@@ -332,6 +389,25 @@ class RetentionProbe(FailureProbe):
                 if volume["type"] == "tmpfs"
             }
         )
+
+    def cell_t1(self) -> None:
+        """Around the front with presentator's key: both header canaries reach their tables."""
+        tool, agent, tag = canary("t1-tool").replace("-", "_"), canary("t1-agent"), canary("t1-tag")
+        body = tool_body(tool, self.fingerprint(), [{"role": "user", "content": "probe"}])
+        headers = {"User-Agent": agent, "x-litellm-tags": tag}
+        presentator = self.file_keys["presentator"]
+        status = self.call_with_headers(presentator, body, headers, front=False)["status"]
+        expect(status == 200, f"T1: LiteLLM answered {status}")
+        self.wait_for_tool(tool)
+        self.wait_for_row(DAILY_TAG_TABLE, "tag", tag)
+        found = self.sweep({"user agent": agent, "tag": tag}).found
+        agent_tables = self.dump_tables(found.get("user agent", ()))
+        expect(TOOL_TABLE in agent_tables, f"T1: the user agent is in {sorted(agent_tables)}")
+        expect(DAILY_TAG_TABLE not in agent_tables, "T1: a tag row holds the user agent")
+        tag_tables = self.dump_tables(found.get("tag", ()))
+        expect(DAILY_TAG_TABLE in tag_tables, f"T1: the tag is in {sorted(tag_tables)}")
+        self.hold("T1", f"around the front, the user agent in {TOOL_TABLE} and no tag row, the "
+                  f"tag header in {DAILY_TAG_TABLE}")  # fmt: skip
 
     def cell_b4(self) -> None:
         request, answer = canary("b4-request"), canary("b4-answer")
@@ -406,118 +482,214 @@ class RetentionProbe(FailureProbe):
                   "retained nowhere")  # fmt: skip
 
     def cell_d9(self) -> None:
-        """D9: no canary of a request or an answer in a `pg_dump`, with a planted row as the
-        search's control; a request and a response tool name appear in the tool table alone. P7:
-        the request's fingerprint only in the end-user tables, no identity string anywhere."""
+        """D9 with T2: no canary of a request, an answer or a header through the front at rest,
+        the dump searched with a planted row as its control; a request and a response tool name
+        in the tool table alone, with the front's user agent. P7 judges the same sweep."""
         canaries = {
             label: canary(f"d9-{label}")
-            for label in ("message", "description", "arguments", "result", "answer", "call")
-        }
+            for label in ("message", "description", "arguments", "result", "answer", "call",
+                          "user agent", "tag")
+        }  # fmt: skip
         tool = canary("d9-tool").replace("-", "_")
         answered = canary("d9-answered").replace("-", "_")
-        planted = canary("d9-planted")
         self.steer(
             marker=canaries["answer"],
             tool_use={"name": answered, "input": {"q": canaries["call"]}},
         )
-        function = {"name": tool, "description": canaries["description"],
-                    "parameters": {"type": "object", "properties": {}}}  # fmt: skip
         arguments = json.dumps({"q": canaries["arguments"]})
         call = {"id": "call_d9", "type": "function",
                 "function": {"name": tool, "arguments": arguments}}  # fmt: skip
         person = self.fingerprint()
-        body = {
-            "model": DEFAULT_MODEL,
-            "user": person,
-            "messages": [
-                {"role": "user", "content": canaries["message"]},
-                {"role": "assistant", "content": None, "tool_calls": [call]},
-                {"role": "tool", "tool_call_id": "call_d9", "content": canaries["result"]},
-            ],
-            "tools": [{"type": "function", "function": function}],
-        }  # fmt: skip
-        status = self.call(self.key, "POST", ROUTE, body)["status"]
+        body = tool_body(tool, person, [
+            {"role": "user", "content": canaries["message"]},
+            {"role": "assistant", "content": None, "tool_calls": [call]},
+            {"role": "tool", "tool_call_id": "call_d9", "content": canaries["result"]},
+        ], description=canaries["description"])  # fmt: skip
+        headers = {"User-Agent": canaries["user agent"], "x-litellm-tags": canaries["tag"]}
+        status = self.call_with_headers(self.key, body, headers, front=True)["status"]
         expect(status == 200, f"D9: the route answered {status}")
         self.steer()
         for name in (tool, answered):
             self.wait_for_tool(name)
         self.wait_for_row("LiteLLM_DailyEndUserSpend", "end_user_id", person)
+        found = self.planted_sweep({
+            **canaries, "request tool": tool, "response tool": answered, "fingerprint": person,
+            "hopin's hash": hashed(self.key),
+            **{f"app key {index}": key for index, key in enumerate(self.app_keys)},
+        })  # fmt: skip
+        held = sorted(set(canaries) & set(found))
+        expect(not held, f"D9: canaries retained: {held}: {[found[label] for label in held]}")
+        for kind in ("request tool", "response tool"):
+            tables = self.dump_tables(found.get(kind, ()))
+            expect(tables == {TOOL_TABLE}, f"D9: the {kind} name is in {sorted(tables)}")
+        agents = self.tool_user_agents(tool, answered)
+        expect(agents == {front_user_agent()}, f"D9: the tool rows' user agents {agents}")
+        raw = [label for label in found if label.startswith("app key")]
+        hash_tables = self.dump_tables(found.get("hopin's hash", ()))
+        expect(not raw and hash_tables, f"D9: raw app keys {raw}, hash in {hash_tables}")
+        self.clean.update({f"D9 {label}": value for label, value in canaries.items()})
+        self.hold("D9", f"none of {len(canaries)} canaries in any sink, the dump included; the "
+                  f"planted row found; the tool names in {TOOL_TABLE} alone with the front's user "
+                  "agent; of the app keys only hashes")  # fmt: skip
+        self.hold("T2", "the User-Agent and x-litellm-tags canaries through the front at rest "
+                  "nowhere")  # fmt: skip
+        self.cell_p7(found.get("fingerprint", ()))
+
+    def planted_sweep(self, tokens: Mapping[str, str]) -> dict[str, tuple[str, ...]]:
+        """C over `tokens`, with a row planted in the database as the dump's control."""
+        planted = canary("d9-planted")
         self.sql(
             f"CREATE TABLE d9_control (value text); INSERT INTO d9_control VALUES ('{planted}')"  # noqa: S608 - the value is a token this probe generated
         )
         try:
-            dump = self.dump()
+            found = self.sweep({**tokens, "planted": planted}).found
         finally:
             self.sql("DROP TABLE d9_control")
-        expect(planted in dump, "D9: the planted row is not in the dump")
-        held = [label for label, value in canaries.items() if value in dump]
-        expect(not held, f"D9: the dump holds the canaries of {held}")
-        self.expect_key_hashes_alone(dump)
-        for kind, name in (("request", tool), ("response", answered)):
-            tables = self.tables_naming(dump, name)
-            expect(tables == {TOOL_TABLE}, f"D9: the {kind} tool name is in {sorted(tables)}")
-        self.expect_nothing_retained("D9", canaries)
-        self.hold(
-            "D9",
-            f"the dump of {len(dump)} characters holds none of {len(canaries)} canaries and the"
-            f" planted row; of {len(self.app_keys)} app keys only hashes; the request and the"
-            f" response tool name are in {TOOL_TABLE} alone",
+        expect(
+            "d9_control" in self.dump_tables(found.get("planted", ())), "the planted row missing"
         )
-        self.cell_p7(dump, person)
+        return {label: sinks for label, sinks in found.items() if label != "planted"}
 
-    def expect_key_hashes_alone(self, dump: str) -> None:
-        """No app key in the dump, and the probe's key there as its hash: the control."""
-        raw = sum(key in dump for key in self.app_keys)
-        expect(raw == 0 and hashed(self.key) in dump, f"D9: {raw} raw app keys in the dump")
+    def tool_user_agents(self, *tools: str) -> set[str]:
+        names = ", ".join(f"'{tool}'" for tool in tools)
+        query = f'SELECT DISTINCT user_agent FROM "{TOOL_TABLE}" WHERE tool_name IN ({names})'  # noqa: S608 - the names are tokens this probe generated
+        return set(self.sql(query, "--tuples-only", "--no-align").stdout.split())
 
-    def cell_p7(self, dump: str, person: str) -> None:
-        """The dump D9 found its planted row in: the fingerprint in the end-user tables alone, no
-        identity string anywhere."""
-        tables = self.tables_naming(dump, person)
+    def cell_p7(self, sinks: tuple[str, ...]) -> None:
+        """The sweep D9 found its planted row in: the fingerprint in the end-user tables alone."""
+        tables, outside = self.dump_tables(sinks), self.outside_the_database(sinks)
         expect(tables == FINGERPRINT_TABLES, f"P7: the fingerprint is in {sorted(tables)}")
-        named = [label for label, value in self.identity.items() if value in dump]
-        expect(not named, f"P7: the dump holds the scratch {named}")
-        self.hold("P7", f"the fingerprint only in {sorted(tables)}; sub, name and mail nowhere; "
-                  "the planted row found")  # fmt: skip
+        expect(not outside, f"P7: the fingerprint is in {outside}")
+        self.hold("P7", f"the fingerprint only in {sorted(tables)}; the planted row found")
+
+    def cell_str_c(self) -> None:
+        self.held_stream("STR-c", front=False)
+
+    def cell_str(self) -> None:
+        tokens, person = self.held_stream("STR", front=True)
+        self.wait_for_row("LiteLLM_DailyEndUserSpend", "end_user_id", person)
+        self.expect_nothing_retained("STR", tokens)
+        self.hold("STR", "the first event reached the caller through the front during the hold; "
+                  "the three canaries retained nowhere")  # fmt: skip
+
+    def held_stream(self, cell: str, *, front: bool) -> tuple[dict[str, str], str]:
+        """One streamed request the fake holds after its first delta, released only once the
+        caller printed that delta while the fake has logged no end of the hold."""
+        tokens = {
+            label: canary(f"{cell.lower()}-{label}") for label in ("request", "first", "rest")
+        }
+        texts = [tokens["first"], tokens["rest"]]
+        self.steer(mode="stream_hold", hold_seconds=STREAM_HOLD_SECONDS, texts=texts,
+                   request_canary=tokens["request"])  # fmt: skip
+        person, before, held = self.fingerprint(), len(self.provider_requests()), self.held_lines()
+        body = wire_body(user=person, messages=[{"role": "user", "content": tokens["request"]}])
+        argv, program = self.caller(STREAM_PROGRAM, self.key, body, front=front)
+        process = subprocess.Popen(  # noqa: S603 - argv is built by the program itself
+            argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            text=True, env=self.environment, cwd=REPO,
+        )  # fmt: skip
+        try:
+            process.stdin.write(program)
+            process.stdin.close()
+            texts = self.read_held_stream(cell, process, tokens["first"], held)
+        finally:
+            process.kill()
+            process.wait()
+        expect(self.held_lines()[len(held) :] == ["held released"], f"{cell}: the hold's end")
+        expect(tokens["rest"] in "".join(texts), f"{cell}: the stream ended without the rest")
+        expect(self.request_canary_hits(before) == 1, f"{cell}: F saw the request canary")
+        self.steer()
+        self.hold(cell, "the first delta reached the caller while F held the rest; released, "
+                  "the stream ended with the second")  # fmt: skip
+        return tokens, person
+
+    def read_held_stream(self, cell: str, process, first: str, held: list[str]) -> list[str]:
+        """The caller's delta texts; on the first canary the fake must still hold, then it is
+        released."""
+        status = json.loads(process.stdout.readline() or "{}").get("status")
+        expect(status == 200, f"{cell}: the stream's status {status}")
+        texts: list[str] = []
+        for line in process.stdout:
+            texts.append(json.loads(line).get("text") or "")
+            if first in texts[-1]:
+                expect(self.held_lines() == held, f"{cell}: the first event came after the hold")
+                self.steer(mode="answer")
+        return texts
+
+    def held_lines(self) -> list[str]:
+        return [
+            line for line in self.log_of(FAKE_PROVIDER).splitlines() if line.startswith("held ")
+        ]
+
+    def cell_t4(self) -> None:
+        """Q after the conforming flows: no tag row of hopin's key, the tag table empty."""
+        tags = self.count(f'SELECT count(*) FROM "{TAG_TABLE}"')
+        hopin = self.count(self.tag_rows_of(self.key))
+        presentator = self.count(self.tag_rows_of(self.file_keys["presentator"]))
+        expect(tags == 0 and hopin == 0, f"T4: {tags} tag table rows, {hopin} of hopin's key")
+        expect(presentator >= 1, "T4: the control finds no tag row of T1")
+        self.hold("T4", f"{TAG_TABLE} empty and no {DAILY_TAG_TABLE} row of hopin's key; "
+                  f"{presentator} of presentator's from T1")  # fmt: skip
+
+    @staticmethod
+    def tag_rows_of(key: str) -> str:
+        return f"SELECT count(*) FROM \"{DAILY_TAG_TABLE}\" WHERE api_key = '{hashed(key)}'"  # noqa: S608 - the hash of a key this probe generated
+
+    def count(self, query: str) -> int:
+        return int(self.sql(query, "--tuples-only", "--no-align").stdout.strip())
+
+    def cells_t3(self) -> None:
+        """Each body tag form on its own non-conforming request through the front."""
+        tags = {form: canary("t3-tag") for form in TAG_FORMS}
+        recorded = {form: self.tagged_request(form, tag) for form, tag in tags.items()}
+        found = self.sweep(tags).found
+        failed = []
+        for form, tag in tags.items():
+            sinks = found.get(form, ())
+            tables, outside = self.dump_tables(sinks), self.outside_the_database(sinks)
+            figures = f"{recorded[form]}, dump tables {sorted(tables) or 'none'}"
+            figures += f", tag row id {self.request_id_form(tag)}"
+            if not tables <= {TAG_TABLE, DAILY_TAG_TABLE} or outside:
+                failed.append(form)
+                write_line(f"{form} FAILED: {figures}, outside the database {outside}", flush=True)
+            else:
+                self.hold(form, figures if tables else f"{figures}: lands nowhere")
+        expect(not failed, f"T3: {failed}")
+
+    def tagged_request(self, form: str, tag: str) -> str:
+        """A, whether the tag reached F, and the batch of the form's fingerprint written."""
+        self.steer(request_canary=tag)
+        person, before = self.fingerprint(), len(self.provider_requests())
+        status = self.complete(self.key, user=person, **TAG_FORMS[form](tag))["status"]
+        reached = self.request_canary_hits(before)
+        if status == 200:
+            self.wait_for_row("LiteLLM_DailyEndUserSpend", "end_user_id", person)
+        self.steer()
+        return f"A {status}, F {reached}"
+
+    def request_id_form(self, tag: str) -> str:
+        query = f"SELECT request_id FROM \"{DAILY_TAG_TABLE}\" WHERE tag = '{tag}'"  # noqa: S608 - a tag this probe generated
+        ids = self.sql(query, "--tuples-only", "--no-align").stdout.split()
+        return "none" if not ids else "the fake's msg_probe" if "msg_probe" in ids else "LiteLLM's"
 
     def wait_for_tool(self, tool: str) -> None:
         self.wait_for_row(TOOL_TABLE, "tool_name", tool)
 
     def wait_for_row(self, table: str, column: str, value: str) -> None:
-        """LiteLLM writes tool names and daily spends with its batched database updates, not with
-        the request."""
+        """LiteLLM writes tool names, tags and daily spends with its batched database updates, not
+        with the request."""
         query = f"SELECT count(*) FROM \"{table}\" WHERE {column} = '{value}'"  # noqa: S608 - the value is a token this probe generated
         deadline = time.monotonic() + TOOL_WRITE_SECONDS
-        while True:
-            counted = self.sql(query, "--tuples-only", "--no-align").stdout.strip()
-            if counted == "1":
-                return
-            expect(time.monotonic() < deadline, f"D9: {value} is not in {table}")
+        while self.count(query) < 1:
+            expect(time.monotonic() < deadline, f"{value} is not in {table}")
             time.sleep(3)
 
-    def dump(self) -> str:
-        return self.run(["docker", "exec", self.container(DATABASE), "pg_dump",
-                         *self.database_options()]).stdout  # fmt: skip
-
-    @staticmethod
-    def tables_naming(dump: str, name: str) -> set[str]:
-        """The tables of a plain-format dump whose rows hold `name`."""
-        tables, current = set(), None
-        for line in dump.splitlines():
-            if header := COPY_HEADER.match(line):
-                current = header[1]
-            elif line == r"\.":
-                current = None
-            elif current and name in line:
-                tables.add(current)
-        return tables
-
     def cell_b10(self) -> None:
-        """Every sink of the route over B4 to B9."""
+        """Every sink of the route over B4 to B9, D9 and STR."""
         found = self.sweep(self.clean).found
         expect(not found, f"B10: retained in {found}")
-        self.hold("B10", f"the mounts and logs of {', '.join(ROUTE_SERVICES)} hold none of "
-                  f"{len(self.clean)} canaries of B4 to B7 and B9")  # fmt: skip
+        self.hold("B10", f"the mounts, logs and dump of {', '.join(ROUTE_SERVICES)} hold none of "
+                  f"{len(self.clean)} canaries of B4 to B7, B9, D9 and STR")  # fmt: skip
 
     def cell_b11(self) -> None:
         litellm, front = self.container_name(LITELLM), self.container_name(FRONT)
@@ -537,7 +709,7 @@ class RetentionProbe(FailureProbe):
         static = self.run(["docker", "exec", front, "cat", FRONT_STATIC]).stdout
         expect("accessLog" not in static and "level: INFO" in static, "B11: the front's log")
         self.hold("B11", "LiteLLM: message logging off, redaction on, no custom_auth, "
-                  "enforce_user_param on, one person budget id, retries 0, "
+                  "enforce_user_param on, one person budget id, no user-agent tag, retries 0, "
                   "no callback, cache or spend and error log, no such environment name, "
                   "log level CRITICAL; the front: INFO and no access log")  # fmt: skip
 
