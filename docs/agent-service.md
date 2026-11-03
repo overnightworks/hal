@@ -287,8 +287,9 @@ step below).
   its cache expires (about a minute, measured), then refuses every request before the provider
   with 503. The operator sets both amounts in `~/.config/hal/config.toml` and `hal apply` writes
   them (the key step, below): a changed app budget binds the key at its next request, a changed
-  person budget once LiteLLM's cache lets it in (up to 60 s per cache layer, two layers read). A
-  budget below the spend refuses from then on, until the reset, and the plan does not warn.
+  person budget once LiteLLM's cache lets it in (up to 60 s per cache layer, two layers read; 44 s
+  in one measured run). A budget below the spend refuses from then on, until the reset, and the
+  plan does not warn.
 - **The key step.** `hal apply` makes each app's key and the person budget from the numbers of
   `[api]` and `[api.<app>]` in `~/.config/hal/config.toml` (`docs/home.md`, „Konfiguration“): per
   number an app's own table, else `[api]`, else the code default in `src/hal/stack/api_limits.py`.

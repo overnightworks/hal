@@ -50,6 +50,10 @@ type Fields = dict[str, dict[str, tuple[object, object]]]
 class LimitsProbe(KeysProbe):
     """litellm_keys.py's stack, the key step planning with the scratch HOME's settings file."""
 
+    # L8 runs while every row is at the code defaults, so its control plans one change.
+    CELLS = ("set_up", "cell_l1", "cell_l2", "cell_l3", "cell_l8", "cell_l4", "cell_l5", "cell_l6",
+             "cell_l7")  # fmt: skip
+
     def __init__(self, scratch: Path) -> None:
         super().__init__(scratch)
         self.l1_saw_its_change = False  # whether D told L1's rows apart, L2's control
@@ -114,19 +118,6 @@ class LimitsProbe(KeysProbe):
         return f"{answer['status']} {error_of(answer)} in {answer['seconds']:.1f} s"
 
     # --- the cells ----------------------------------------------------------------------------
-
-    def drive(self) -> None:
-        self.steer_fake()
-        self.wait_until_listening()
-        self.set_up()
-        self.cell_l1()
-        self.cell_l2()
-        self.cell_l3()
-        self.cell_l8()
-        self.cell_l4()
-        self.cell_l5()
-        self.cell_l6()
-        self.cell_l7()
 
     def set_up(self) -> None:
         """2.4a's S1 with no file, then a spend on each key."""

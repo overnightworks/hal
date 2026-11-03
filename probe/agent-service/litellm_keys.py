@@ -71,6 +71,10 @@ class Seen:
 class KeysProbe(LitellmProbe):
     """litellm.py's stack without the service, and the key step against it."""
 
+    # The cells' methods in the order they run, each on what the ones before left.
+    CELLS = ("cell_s1", "cell_s2", "cell_s3", "cell_s4", "cell_s5", "cell_s6", "cell_s7", "cell_s9",
+             "cell_s8")  # fmt: skip
+
     def __init__(self, scratch: Path) -> None:
         super().__init__(scratch)
         self.home = Path(self.environment["HOME"])
@@ -197,15 +201,8 @@ class KeysProbe(LitellmProbe):
     def drive(self) -> None:
         self.steer_fake()
         self.wait_until_listening()
-        self.cell_s1()
-        self.cell_s2()
-        self.cell_s3()
-        self.cell_s4()
-        self.cell_s5()
-        self.cell_s6()
-        self.cell_s7()
-        self.cell_s9()
-        self.cell_s8()
+        for cell in self.CELLS:
+            getattr(self, cell)()
 
     def cell_s1(self) -> None:
         plan = self.read_plan("S1")
