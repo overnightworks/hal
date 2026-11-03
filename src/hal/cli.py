@@ -9,6 +9,7 @@ from hal import (
     alarm_commands,
     backup_commands,
     check_commands,
+    expire_commands,
     legal_commands,
     migrate_commands,
     rename_commands,
@@ -26,6 +27,7 @@ DESCRIPTION = "hal, the daily door of the workstation."
 COMMANDS = (
     *stack_commands.COMMANDS,
     *backup_commands.COMMANDS,
+    *expire_commands.COMMANDS,
     *check_commands.COMMANDS,
     *alarm_commands.COMMANDS,
     *secrets_commands.COMMANDS,

@@ -233,6 +233,7 @@ configures a callback, cache or spend log; LiteLLM's database holds keys, budget
 spend-log or error-log row and no prompt (`disable_spend_logs`, `disable_error_logs`,
 `store_prompts_in_spend_logs`). Only the per-request logs stop: the daily and the key, user and team
 spend aggregates are written whatever `disable_spend_logs` says, and they hold amounts, never content.
+What the database keeps per person or per tool goes after 90 days without use ([The API route](#the-api-route), What expires).
 The census also searches the database's volume and a `pg_dump` of it; the front logs at INFO without an access log.
 The retention census (`agent-service/retention_census.py`, driven by
 `probe/agent-service/litellm_retention.py` on the fake-only stack) searches a request and an answer canary in every writable mount and every log of
@@ -329,6 +330,20 @@ unit, and no app holds a key in LiteLLM's database.
   waits for the database to be healthy at the start only; with the database gone or the password
   wrong it ends non-zero after Prisma's retries. The database password is an environment value
   of the proxy and its Prisma processes, the same holders as the provider key.
+- **What expires.** `hal expire`, run daily at 04:00 by `hal-expire.timer` (`Persistent=true`
+  catches up a missed run), deletes in one statement, all or nothing, the daily person and tool rows
+  (`LiteLLM_DailyEndUserSpend`, `LiteLLM_DailyToolSpend`) dated more than 90 UTC days back, the tool
+  rows (`LiteLLM_ToolTable`) not used for 90 days, and the customer rows (`LiteLLM_EndUserTable`)
+  whose fingerprint has had no request for 90 days and whose spend is 0. A customer row linked to
+  its own budget stays, and so do keys, budgets and every other table. The period is
+  `RETENTION_DAYS` in `src/hal/litellm_expiry.py`, not a setting, because the privacy text states
+  it. The run prints counts only; with `litellm-db` not running it deletes nothing and exits 0. A
+  backup that copies the database keeps deleted rows until that copy goes, and a restore brings them
+  back until the next daily run deletes them again. A failed run fails `hal-expire.service`, which
+  `hal check` and `hal alarm` report as `job-failed`; its error line says `nothing deleted` only
+  when psql reported the failure, and otherwise that the outcome is unknown and the next run repeats
+  it. `probe/agent-service/litellm_expiry.py` proves it on the fake-only stack; re-run it on every
+  LiteLLM bump, since a schema change shows in production only as a failed unit.
 - **What stays reachable.** The front sees every message and every app key in memory; a
   compromised front could spend credit through LiteLLM, bounded by each key's budget and parallel
   bound. LiteLLM reaches only the front, its database
