@@ -166,6 +166,7 @@ PRESENTATOR = AppClient(
     ),
     f"https://presentator.{DOMAIN}/login",
     default_scopes=SONGMAKER_PRESENTATOR_CLIENT_SCOPES,
+    optional_scopes=frozenset({service_audience_cell.SPEECH_SCOPE}),
 )
 APP_CLIENTS = (SONGMAKER, HOPIN, PRESENTATOR)
 AGENT_WORKLOAD_ROLE = WORKLOAD_ROLES[AGENT_SERVICE]
@@ -201,6 +202,7 @@ CONSOLE_CLIENT_ROLE = f"{CONSOLE_NAME}-client-role"
 SCOPED_CLIENT = "songmaker"  # lists its default scopes, as do hopin and presentator
 SERVICE_ACCOUNT_CLIENT = "songmaker"  # a listed service account
 ENABLED_SERVICE_ACCOUNT_CLIENT = "hopin"  # its service account, which the console turns off
+ENABLED_ACCOUNT_ROLE = "hallucinai: addition service-account realm role service-account-"
 BACKUP_ASKED = ["backup", "keycloak", "--pre-apply", "--json"]  # what hal was asked first
 RESTORE_TEST_ASKED = ["restore", "--test", "keycloak", "--snapshot"]  # then the snapshot just made
 WAY_BACK = 'way back: docs/backup.md "Restore Keycloak" · the next apply repeats the step'
@@ -230,12 +232,9 @@ RESIDUE_OF_THE_APPLY = [
     f"hallucinai: removal service-account client role service-account-{SERVICE_ACCOUNT_CLIENT}/"
     f"{AGENT_SERVICE}/{CONSOLE_CLIENT_ROLE}",
     # the user and the role mappings the apply recreates with the service account
-    "hallucinai: addition service-account realm role service-account-"
-    f"{ENABLED_SERVICE_ACCOUNT_CLIENT}/{AGENT_WORKLOAD_ROLE}",
-    "hallucinai: addition service-account realm role service-account-"
-    f"{ENABLED_SERVICE_ACCOUNT_CLIENT}/default-roles-hallucinai",
-    "hallucinai: addition service-account realm role service-account-"
-    f"{service_audience_cell.SPEECH_CALLER}/{WORKLOAD_ROLES[SPEECH_SERVICE]}",
+    f"{ENABLED_ACCOUNT_ROLE}{ENABLED_SERVICE_ACCOUNT_CLIENT}/{AGENT_WORKLOAD_ROLE}",
+    f"{ENABLED_ACCOUNT_ROLE}{ENABLED_SERVICE_ACCOUNT_CLIENT}/default-roles-hallucinai",
+    f"{ENABLED_ACCOUNT_ROLE}{ENABLED_SERVICE_ACCOUNT_CLIENT}/{WORKLOAD_ROLES[SPEECH_SERVICE]}",
     f"hallucinai: addition service-account user service-account-{ENABLED_SERVICE_ACCOUNT_CLIENT}",
     f"master: removal flow {CONSOLE_SUBFLOW}",
     f"master: removal flow step {FORMS_FLOW}/auth-otp-form#1",
@@ -245,7 +244,7 @@ DROPPED_CLIENT = "hopin"
 DROPPED_GROUP = "services"
 ROLE_HOLDERS = {  # the realm roles earlier applies created, with the service accounts holding each
     AGENT_WORKLOAD_ROLE: [f"service-account-{client.client_id}" for client in APP_CLIENTS],
-    WORKLOAD_ROLES[SPEECH_SERVICE]: [f"service-account-{service_audience_cell.SPEECH_CALLER}"],
+    WORKLOAD_ROLES[SPEECH_SERVICE]: service_audience_cell.SPEECH_CALLER_ACCOUNTS,
 }
 CHANGED_CONFIG = "browser-mfa-without-passkey"
 # 6.5.1 reads the managed-role switch only when the file has a roles section, so an empty

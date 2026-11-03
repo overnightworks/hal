@@ -342,21 +342,37 @@ def test_the_account_console_offers_no_groups_page():
     assert "groups" not in [entry["label"] for entry in json.loads(content.read_text())]
 
 
-def test_hopin_has_a_workload_service_account_in_no_group_and_without_personal_scopes():
-    """#506: the account holds only declared workload roles; no `email`, `web-origins` or
-    `acr`."""
+@pytest.mark.parametrize(
+    ("app", "personal_scopes"),
+    [("hopin", {"email", "web-origins", "acr"}), ("presentator", set())],
+)
+def test_a_speech_caller_has_a_workload_service_account_in_no_group_and_without_personal_scopes(
+    app, personal_scopes
+):
+    """#506, #941: the account holds only declared workload roles, and an app that reads no
+    `email`, `web-origins` or `acr` has none of them."""
     realm = yaml.safe_load((REPOSITORY / "keycloak/realm.yaml").read_text())
-    account = next(user for user in realm["users"] if user["username"] == "service-account-hopin")
+    account = next(user for user in realm["users"] if user["username"] == f"service-account-{app}")
 
-    assert account["serviceAccountClientId"] == "hopin"
+    assert account["serviceAccountClientId"] == app
     declared_roles = {role["name"] for role in realm["roles"]["realm"]}
     assert set(account["realmRoles"]) == {"agent-workload", "speech-workload"}
     assert set(account["realmRoles"]) <= declared_roles
     assert "groups" not in account
-    assert realm_clients()["hopin"]["serviceAccountsEnabled"] is True
-    assert not {"email", "web-origins", "acr"} & set(
-        realm_clients()["hopin"]["defaultClientScopes"]
-    )
+    assert realm_clients()[app]["serviceAccountsEnabled"] is True
+    assert not personal_scopes & set(realm_clients()[app]["defaultClientScopes"])
+
+
+@pytest.mark.parametrize(
+    ("app", "offered"),
+    [
+        ("hopin", ["speech-service-audience"]),
+        ("presentator", ["speech-service-audience"]),
+        ("songmaker", []),
+    ],
+)
+def test_only_the_speech_callers_can_ask_for_the_speech_audience(app, offered):
+    assert realm_clients()[app]["optionalClientScopes"] == offered
 
 
 def test_only_songmaker_allows_the_device_grant():

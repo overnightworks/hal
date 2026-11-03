@@ -1,7 +1,7 @@
 """Cells SP1-SP6, SP8 and W4 of probe.py: a service's audience reaches a token only
 through the client scope that names it. The agent service's scope is a default of every app
-client; the speech service's is an optional scope of hopin alone, so a token carries
-`speech-service` only when hopin asks for it, and songmaker and presentator cannot ask. Each
+client; the speech service's is an optional scope of hopin and presentator alone, so a token
+carries `speech-service` only when one of them asks for it, and songmaker cannot ask. Each
 service is a bearer-only client, and `/services/speech-service` has no subgroup. The held lines
 print the decoded claims the speech service reads and never a token. After them, hopin's branch
 runs the measurements of `scope_measurement_cell` on clients the probe makes."""
@@ -22,7 +22,9 @@ AGENT_SERVICE = "agent-service"
 SPEECH_SERVICE = "speech-service"
 WORKLOAD_ROLES = {AGENT_SERVICE: "agent-workload", SPEECH_SERVICE: "speech-workload"}
 SPEECH_SCOPE = "speech-service-audience"
-SPEECH_CALLER = "hopin"
+SPEECH_CALLERS = ("hopin", "presentator")
+SPEECH_CALLER_ACCOUNTS = [f"service-account-{name}" for name in SPEECH_CALLERS]
+SPEECH_PROOF_CLIENT = SPEECH_CALLERS[0]  # the caller whose branch also runs SP3, SP4 and SP8
 SPEECH_GROUP = f"/services/{SPEECH_SERVICE}"
 USERNAME = "probe-hopin-speech-member"
 BEARER_ONLY_PROOFS = {AGENT_SERVICE: "W4", SPEECH_SERVICE: "SP6"}
@@ -212,11 +214,14 @@ def prove(
     person_access_token: str,
 ) -> None:
     cell = ServiceAudienceCell(probe, expect, client)
-    if client.client_id != SPEECH_CALLER:
+    if client.client_id not in SPEECH_CALLERS:
         cell.client_without_the_scope(person_access_token)
         return
-    cell.bearer_only_services()
+    runs_whole_proof = client.client_id == SPEECH_PROOF_CLIENT
+    if runs_whole_proof:
+        cell.bearer_only_services()
     cell.workload_with_and_without_the_scope()
-    cell.member_token_with_the_scope()
-    cell.person_token_without_the_scope(person_access_token)
-    scope_measurement_cell.prove(probe, expect)
+    if runs_whole_proof:
+        cell.member_token_with_the_scope()
+        cell.person_token_without_the_scope(person_access_token)
+        scope_measurement_cell.prove(probe, expect)

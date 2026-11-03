@@ -199,6 +199,7 @@ users:
     serviceAccountClientId: presentator
     realmRoles:
       - agent-workload
+      - speech-workload
   - username: service-account-hopin
     enabled: true
     serviceAccountClientId: hopin
@@ -300,7 +301,9 @@ clients:
     optionalClientScopes:
       - speech-service-audience
   # One client for presentator's two hosts (agent-presentator#242). It is logged out like hopin, on
-  # presentator's own port, over its own back-channel network.
+  # presentator's own port, over its own back-channel network. Its service account is a workload of
+  # the agent service and of the speech service (#941), whose audience it asks for by the optional
+  # scope speech-service-audience.
   - clientId: presentator
     name: presentator
     enabled: true
@@ -322,7 +325,8 @@ clients:
       backchannel.logout.url: "http://presentator.hallucinai.de:8000/auth/backchannel-logout"
       backchannel.logout.session.required: "false"
     defaultClientScopes: *songmaker_presentator_scopes
-    optionalClientScopes: []
+    optionalClientScopes:
+      - speech-service-audience
   # The public sign-in of a person's own AI agents: the authorization code with PKCE at one fixed
   # loopback address, no secret, no refresh token (so none is offline either), and the realm's
   # lifespan. A token carries the audience of an app's /mcp only for the optional scope mcp-<app>;

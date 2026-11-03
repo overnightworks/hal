@@ -73,15 +73,15 @@ design; the secret stays the app's own file. hopin's default scopes are exactly 
 `groups`, `roles`, `service_account` and `agent-service-audience`: it reads no email, web origin or
 acr.
 
-hopin is also the caller of the speech service (#674). Its service account holds the realm role
-`speech-workload` beside `agent-workload`, and `speech-service-audience` is an optional scope of
-hopin alone, so a token carries the `speech-service` audience only when its request names the scope:
-`scope=speech-service-audience` on the `client_credentials` grant, or `openid speech-service-audience`
+hopin and presentator are the callers of the speech service (#674, #941). Their service accounts hold the
+realm role `speech-workload` beside `agent-workload`, and `speech-service-audience` is an optional scope of
+these two clients alone, so a token carries the `speech-service` audience only when its request names the
+scope: `scope=speech-service-audience` on the `client_credentials` grant, or `openid speech-service-audience`
 on the authorization request. The scope is an `oidc-audience-mapper` on the access token only, like
-the agent service's. songmaker and presentator cannot ask for it: the request is refused with
+the agent service's. songmaker cannot ask for it: the request is refused with
 `invalid_scope`. The speech service is a bearer-only client `speech-service` like `agent-service`, and
 the group `/services/speech-service` has no subgroup: the service admits exactly that path. A person
-reaches the service by being a member of the group and signing in to hopin with the scope.
+reaches the service by being a member of the group and signing in to hopin or presentator with the scope.
 
 What an audience scope does under other settings was measured on Keycloak 26.8.1 (cells U3, U4 and RF1
 to RF2 of the Keycloak probe, #674). They run on clients, a scope and a realm role the probe makes: the
