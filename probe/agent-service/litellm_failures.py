@@ -477,6 +477,17 @@ class FailureProbe(LitellmProbe):
         expect(not outside, f"F19: {len(outside)} processes outside the main tree")
         expect(proxy in holders and 1 not in holders, f"F19: holders {sorted(holders)}")
         expect(set(rows[proxy]["holds"]) == set(SECRET_NAMES), f"F19: proxy {rows[proxy]['holds']}")
+        user = self.expect_holders(rows, holders, proxy, container)
+        names = sorted(rows[pid]["executable"] for pid in holders)
+        self.hold(
+            "F19",
+            f"init and a main tree of {len(rows) - 1}; holders {names}, all uid {user} with core"
+            " size 0",
+        )
+
+    def expect_holders(self, rows: dict, holders: set[int], proxy: int, container: str) -> int:
+        """The proxy and its one query engine are the only holders, all as the configured user with
+        core size 0; returns that user."""
         engines = [pid for pid in holders if self.is_engine(rows[pid], proxy)]
         strays = [rows[pid]["name"] for pid in holders - {proxy, *engines}]
         expect(len(engines) == 1, f"F19: {len(engines)} query engines hold the secrets")
@@ -486,12 +497,7 @@ class FailureProbe(LitellmProbe):
             all(rows[pid]["uid"] == user and rows[pid]["core"] == ["0", "0"] for pid in holders),
             "F19: a holder is not the configured user or has a core size",
         )
-        names = sorted(rows[pid]["executable"] for pid in holders)
-        self.hold(
-            "F19",
-            f"init and a main tree of {len(rows) - 1}; holders {names}, all uid {user} with core"
-            " size 0",
-        )
+        return user
 
     @staticmethod
     def is_engine(row: dict, proxy: int) -> bool:
