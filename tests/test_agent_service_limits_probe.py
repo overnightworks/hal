@@ -1,4 +1,4 @@
-"""The deadline of L7 in the API numbers probe (#889): a person's refusal counts only when it
+"""The deadline of L7 in the API numbers probe: a person's refusal counts only when it
 came within the window the item sets."""
 
 from __future__ import annotations

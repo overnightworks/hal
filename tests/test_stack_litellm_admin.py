@@ -21,25 +21,15 @@ from support.litellm_fake import (
     scene_fixture,  # noqa: F401 the fixture, requested by name below
     short_requests_fixture,  # noqa: F401 the fixture, requested by name below
 )
+from support.stack_litellm_found import BUDGET_ID, found_key
 
 from hal.stack import litellm_admin as admin
-from hal.stack import litellm_keys
-from hal.stack.api_limits import NONE_SET
-
-BUDGET_ID = "scenario-budget"
-
-
-def desired_row(app: str) -> dict:
-    return {
-        name: list(value) if isinstance(value, tuple) else value
-        for name, value in litellm_keys.desired_key(app, MODELS, NONE_SET.limits_of(app)).items()
-    }
 
 
 def plant_keys(scene: Scene, **overrides: dict) -> None:
     for app, key in scene.app_keys.items():
         scene.fake.keys[hashed(key)] = (
-            desired_row(app) | overrides.get(app, {}) | {"spend": 3.0, "user_id": None}
+            found_key(app) | overrides.get(app, {}) | {"spend": 3.0, "user_id": None}
         )
 
 
@@ -75,7 +65,7 @@ def test_the_read_reports_each_apps_live_key_by_its_hash_the_person_budget_and_t
     assert run.document == {
         "apps": {
             app: {
-                "key": {name: value for name, value in desired_row(app).items()}
+                "key": {name: value for name, value in found_key(app).items()}
                 | ({"max_budget": 7.0} if app == "hopin" else {}),
                 "name_taken": False,
             }
@@ -343,7 +333,7 @@ def test_the_write_makes_the_changes_in_their_given_order_and_reports_each_done(
 ) -> None:
     budget_fields = {"max_budget": 2.0, "budget_duration": "1mo"}
     key_fields = {
-        app: {name: value for name, value in desired_row(app).items() if value is not None}
+        app: {name: value for name, value in found_key(app).items() if value is not None}
         for app in APPS
     }
     changes = [
