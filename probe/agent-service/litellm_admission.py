@@ -74,6 +74,7 @@ PICTURE_USAGE = {"input_tokens": 1000, "output_tokens": 1000}
 # songmaker's cover, which the route must carry.
 SLOW_PICTURE_SECONDS, MAX_PICTURE_SECONDS = 95, 88
 MODERATION_CODE = "moderation_blocked"  # OpenAI's code of a safety refusal; the fake sends it
+MODERATION_TYPE = "image_generation_user_error"  # and its type, which LiteLLM passes through
 
 
 def refused(answer: dict) -> str:
@@ -407,10 +408,11 @@ class AdmissionProbe(PictureCalls):
         answer = self.picture(key, self.fingerprint())
         self.steer_fake(PICTURE_HOST)
         seen = len(self.picture_requests()) - pictures
-        expect(
-            answer["status"] != 200 and seen == 1, f"P-moderation: {answer['status']}, FP {seen}"
-        )
         shown = (answer["status"], error_of(answer))
+        expect(
+            shown[0] == 400 and shown[1].split("/")[0] == MODERATION_TYPE and seen == 1,
+            f"P-moderation: {shown}, FP {seen}",
+        )
         expect(shown != (over_budget["status"], error_of(over_budget)),
                f"P-moderation: {shown} equals the over-budget refusal")  # fmt: skip
         message = error_message(answer) or ""

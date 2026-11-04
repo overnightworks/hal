@@ -439,7 +439,7 @@ services:
       - ./agent-service/egress/traefik.yml:/etc/traefik/traefik.yml:ro
       - ./agent-service/egress/dynamic:/egress/dynamic:ro
 
-  # The one-route front of LiteLLM (agent-service/litellm/front/): the apps' only way to the
+  # The two-route front of LiteLLM (agent-service/litellm/front/): the apps' only way to the
   # inference gateway, on each app's agent network. It reads no secret and reaches only `litellm`,
   # at its fixed address, never by DNS. The unit `litellm` of fleet.yaml starts it.
   litellm-front:

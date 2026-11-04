@@ -376,7 +376,7 @@ and the admin budget with its customer rows (the key step below).
   `allowed_ips`, global `allowed_routes`, key `tags`, `model_max_budget`, `/key/regenerate`). It
   waits for the database to be healthy at the start only; with the database gone or the password
   wrong it ends non-zero after Prisma's retries. The database password is an environment value
-  of the proxy and its Prisma processes, the same holders as the provider key.
+  of the proxy and its Prisma processes, the same holders as the provider keys.
 - **What expires.** `hal expire`, run daily at 04:00 by `hal-expire.timer` (`Persistent=true`
   catches up a missed run), deletes in one statement, all or nothing, the daily person and tool rows
   (`LiteLLM_DailyEndUserSpend`, `LiteLLM_DailyToolSpend`) dated more than 90 UTC days back, the tool
