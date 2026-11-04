@@ -43,7 +43,7 @@ def test_a_forget_drops_by_full_id_only_the_apps_pre_apply_snapshots_older_than_
     assert outcome.exit_code == 0, outcome.err
     assert machine.forgotten == [older]
     by_id = [argv for label, argv in machine.calls if label == "restic forget"][-1]
-    assert by_id[by_id.index("forget") + 1 :] == [older, "--prune"]
+    assert by_id[by_id.index("forget") + 1 :] == [older, "--prune", "--max-unused", "0"]
 
 
 def test_a_time_with_nanoseconds_and_an_offset_counts_as_the_instant_it_names(edge_backup, machine):

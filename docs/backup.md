@@ -105,7 +105,7 @@ read by anyone, ever:** losing the key loses every backup, and restic has no rec
 
 | Timer | When | Does |
 |---|---|---|
-| `hal-backup.timer` | Sunday 03:00, `Persistent=true` | dump, count, back up; then, for each app that backed up, `forget --keep-weekly 4 --keep-monthly 3 --keep-tag pre-apply --prune` and the forget of its pre-apply snapshots past 90 days; then `check`, whatever another app did |
+| `hal-backup.timer` | Sunday 03:00, `Persistent=true` | dump, count, back up; then, for each app that backed up, `forget --keep-weekly 4 --keep-monthly 3 --keep-tag pre-apply --prune --max-unused 0` and the forget of its pre-apply snapshots past 90 days; then `check`, whatever another app did |
 | `hal-backup-restore-test.timer` | first Sunday of the month 05:00, `Persistent=true` | restore the last successful backup's snapshot, load and verify it; then `check --read-data-subset=10%` |
 
 A missed run (PC off) runs at the next boot. If Docker or the app's database is not up yet, the backup
@@ -158,6 +158,9 @@ policy, then lists the app's pre-apply snapshots of host `hal` (both tags) and f
 with its own `--prune`, each one taken before the host clock minus 90 days; when none is, no second
 forget runs. The last 10 apply within the bound. Past it, a rollback through that snapshot is lost
 (for Keycloak, an older realm state); the weekly snapshots stay.
+Every prune keeps no unused data (`--max-unused 0`): it repacks each pack that still holds a
+forgotten blob, so a forgotten snapshot's bytes leave the repository at that prune, and the bound
+reaches them too. That repack on the live repository is not measured, like the prune itself.
 
 The bound is measured on the host clock, and no guard checks that clock: one set far ahead makes
 the age pass forget every pre-apply snapshot of each app forgotten in that run, irreversibly (the
@@ -173,8 +176,6 @@ What the bound does not reach:
 - An app that left `apps.toml` keeps its snapshots until the operator removes them; removing them is
   a deletion that waits for his word.
 - The snapshots an earlier version wrote under its old host name keep their own exit (below).
-- restic's `prune` leaves up to 5 % unused data (`--max-unused`), so a forgotten snapshot's bytes can
-  stay, encrypted, in a pack until a later repack (not measured).
 
 ### What a backup holds, and its limit
 
