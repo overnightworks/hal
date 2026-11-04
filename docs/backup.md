@@ -65,7 +65,7 @@ off-site copy is a later slice (architecture.md, gap 19).
 - *One app fails alone.* An app whose volume or database container is missing fails only itself; the others still back up and are forgotten, and the repository is checked. The failed app is not forgotten in that run, so a partial snapshot of it never displaces its last good one.
 - *Restore goes to a new folder.* `hal restore --target` refuses a directory that exists; loading it into the live app is a separate step.
 - *0 rows is valid.* The restore test requires rows only where the record says `require_rows = true`.
-- *One retention.* Every app's snapshots follow the same policy, 4 weekly and 3 monthly, and pre-apply snapshots keep their own last 10, none older than 90 days (below). There is no per-app retention of backup snapshots; privacy values are app-owned (architecture.md, section 2).
+- *One retention.* Every app's snapshots follow the same policy, 4 weekly and 3 monthly, and pre-apply snapshots keep their own last 10, and each forget of an app drops those older than 90 days (below). There is no per-app retention of backup snapshots; privacy values are app-owned (architecture.md, section 2).
 - *Separate backups.* All secrets are backed up once as their own encrypted off-disk backup with its own password; the data backup has its own. Of the backup credentials only these two passwords sit in the password manager, and a restore after a disk loss brings the secrets back first, then the data. The secrets backup does not exist yet: `~/.secrets` is in no backup today (architecture.md, section 6).
 
 `backup/apps.toml` declares each app as a validated record (compose project, database service, dump kind,
@@ -150,8 +150,10 @@ third tag forms another group and keeps its own ten. An app cannot be named `pre
 refuses it. The weekly policy keeps every `pre-apply`
 snapshot (`--keep-tag pre-apply`). Restore one with `hal restore <app> --snapshot <ID> --target <dir>`.
 
-No pre-apply snapshot stays longer than `PRE_APPLY_MAX_AGE` (`src/hal/backup/restic.py`), 90 days, for
-every app (operator ruling 04.11.2026). Every forget of an app, weekly and pre-apply, first runs its
+Every forget of an app forgets its pre-apply snapshots older than `PRE_APPLY_MAX_AGE`
+(`src/hal/backup/restic.py`), 90 days (operator ruling 04.11.2026). A snapshot therefore stays until
+the first successful forget of its app after it passes the bound, up to about a week longer with
+healthy weekly backups. Every forget of an app, weekly and pre-apply, first runs its
 policy, then lists the app's pre-apply snapshots of host `hal` (both tags) and forgets by full ID,
 with its own `--prune`, each one taken before the host clock minus 90 days; when none is, no second
 forget runs. The last 10 apply within the bound. Past it, a rollback through that snapshot is lost
@@ -160,7 +162,8 @@ forget runs. The last 10 apply within the bound. Past it, a rollback through tha
 The bound is measured on the host clock, and no guard checks that clock: one set far ahead forgets
 every pre-apply snapshot of each app forgotten in that run, irreversibly (the weekly snapshots stay);
 one set far back forgets nothing until it is right. A snapshot taken after the host clock is never
-forgotten.
+forgotten by the age bound; the policy forget that runs first still keeps only the last 10, future-dated
+ones included.
 
 What the bound does not reach:
 

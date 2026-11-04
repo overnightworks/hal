@@ -28,6 +28,7 @@ PRE_APPLY_MAX_AGE = timedelta(days=90)
 # A snapshot's full ID, the only form a forget is ever named: never a prefix or an option.
 _FULL_ID = re.compile(r"[0-9a-f]{64}")
 CHECK_READ_DATA_SUBSET = "10%"
+_SNAPSHOTS_LABEL = "restic snapshots"
 # The snapshot layout under an app's source path: the dump and manifest (DB_FOLDER), the audio,
 # and a SQLite app's files volume under its compose volume name.
 AUDIO_FOLDER = "audio"
@@ -166,7 +167,7 @@ def forget(settings: Settings, app: str, *, pre_apply: bool = False) -> None:
 def _pre_apply_older_than(settings: Settings, app: str, bound: datetime) -> list[str]:
     """The full IDs of the app's pre-apply snapshots of this host taken before the bound."""
     listing = _restic(
-        settings, "restic snapshots", ["snapshots", "--json", *_scope(app, pre_apply=True)]
+        settings, _SNAPSHOTS_LABEL, ["snapshots", "--json", *_scope(app, pre_apply=True)]
     )
     return [snapshot_id for snapshot_id, taken in _taken(listing) if taken < bound]
 
@@ -174,7 +175,10 @@ def _pre_apply_older_than(settings: Settings, app: str, bound: datetime) -> list
 def _taken(listing: bytes) -> list[tuple[str, datetime]]:
     """Each listed snapshot's full ID and the instant it was taken; anything else fails loud."""
     try:
-        return [_id_and_time(snapshot) for snapshot in json.loads(listing)]
+        snapshots = json.loads(listing)
+        if not isinstance(snapshots, list):
+            raise ValueError("a listing that is no array")
+        return [_id_and_time(snapshot) for snapshot in snapshots]
     except (ValueError, KeyError, TypeError) as error:
         raise host.UnreadableOutputError("restic snapshots output is unreadable") from error
 
@@ -212,7 +216,7 @@ def has_snapshot(settings: Settings, app: str, snapshot_id: str) -> bool:
 
 
 def snapshot_ids(settings: Settings, app: str, *options: str) -> list[str]:
-    output = _restic(settings, "restic snapshots", ["snapshots", "--json", *options, *_scope(app)])
+    output = _restic(settings, _SNAPSHOTS_LABEL, ["snapshots", "--json", *options, *_scope(app)])
     try:
         return [snapshot["id"] for snapshot in json.loads(output)]
     except (ValueError, KeyError, TypeError) as error:
@@ -230,7 +234,7 @@ def restore(settings: Settings, app: str, snapshot_id: str, target: Path) -> Non
 
 
 def snapshots(settings: Settings) -> str:
-    return _restic(settings, "restic snapshots", ["snapshots", "--host", RESTIC_HOSTNAME]).decode()
+    return _restic(settings, _SNAPSHOTS_LABEL, ["snapshots", "--host", RESTIC_HOSTNAME]).decode()
 
 
 def unlock(settings: Settings) -> None:

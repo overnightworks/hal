@@ -71,6 +71,15 @@ def test_no_forget_by_id_runs_when_no_pre_apply_snapshot_is_past_the_bound(
     assert machine.forgotten == []
 
 
+def _assert_forget_failed_unreadable_and_forgot_nothing(outcome, machine):
+    assert outcome.exit_code == 3
+    assert outcome.status["failing_phase"] == "forget"
+    assert outcome.out.splitlines()[-1] == (
+        "  ✗ repository      not pruned     forget: restic snapshots output is unreadable"
+    )
+    assert machine.forgotten == []
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [("time", None), ("time", "18.07.2026"), ("time", "2026-07-18T03:00:00"), ("id", "1a2b3c4d")],
@@ -84,12 +93,29 @@ def test_an_unreadable_pre_apply_listing_fails_the_forget_and_forgets_nothing_by
 
     outcome = edge_backup("backup")
 
-    assert outcome.exit_code == 3
-    assert outcome.status["failing_phase"] == "forget"
-    assert outcome.out.splitlines()[-1] == (
-        "  ✗ repository      not pruned     forget: restic snapshots output is unreadable"
-    )
-    assert machine.forgotten == []
+    _assert_forget_failed_unreadable_and_forgot_nothing(outcome, machine)
+
+
+@pytest.mark.parametrize("answer", [b"{}", b'""', b"null"], ids=["object", "string", "null"])
+def test_a_pre_apply_listing_that_is_no_array_fails_the_forget_and_forgets_nothing_by_id(
+    edge_backup, machine, answer
+):
+    machine.plant("songmaker", _bound(machine) - SECOND)
+    machine.snapshot_listing = answer
+
+    outcome = edge_backup("backup")
+
+    _assert_forget_failed_unreadable_and_forgot_nothing(outcome, machine)
+
+
+def test_an_expired_entry_followed_by_an_unreadable_one_forgets_nothing_by_id(edge_backup, machine):
+    machine.plant("songmaker", _bound(machine) - SECOND)
+    machine.plant("songmaker", _bound(machine) - SECOND)
+    machine.snapshots[-1]["time"] = None
+
+    outcome = edge_backup("backup")
+
+    _assert_forget_failed_unreadable_and_forgot_nothing(outcome, machine)
 
 
 def test_every_app_that_backed_up_is_forgotten_and_the_repository_checked(

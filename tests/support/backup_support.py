@@ -159,6 +159,8 @@ class Machine:
     restore_diagnostic: str = ""
     """What pg_restore would print to stderr when it fails, as postgres quotes row values."""
     snapshots: list[dict] = field(default_factory=list)
+    snapshot_listing: bytes | None = None
+    """What `restic snapshots --json` answers instead of the planted snapshots, when set."""
     forgotten: list[str] = field(default_factory=list)
     """The snapshot IDs `restic forget` was named, in order; restic lists them no more."""
     calls: list[tuple[str, list[str]]] = field(default_factory=list)
@@ -453,6 +455,8 @@ class Machine:
     def _snapshots(self, argv, **_) -> bytes:
         """As restic selects: the host, and every tag of the comma list; never a forgotten one."""
         kept = [s for s in self.snapshots if s["id"] not in self.forgotten]
+        if "--json" in argv and self.snapshot_listing is not None:
+            return self.snapshot_listing
         if "--json" in argv:
             wanted = set(argv[argv.index("--tag") + 1].split(","))
             host_name = argv[argv.index("--host") + 1]
