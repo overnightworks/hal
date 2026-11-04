@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from hal.backup.restic import PRE_APPLY_MAX_AGE
 from hal.stack import appkit_step, catalog, legal_pages, legal_step
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -205,7 +206,6 @@ def test_a_shared_section_precedes_songmaker_and_is_in_the_table_of_contents(sec
         "12 Stunden nach dem letzten Fehlversuch",
         "es bleibt bestehen, bis der Container neu erstellt wird",
         "den Zeitpunkt des letzten Fehlversuchs",
-        "es bleiben die letzten zehn",
         "KC_STATE_CHECKER",
         "etwa drei Monate",
     ],
@@ -216,6 +216,11 @@ def test_the_shared_sign_in_section_names_what_keycloak_keeps_and_for_how_long(s
     assert '<a href="#anmeldung">Anmeldung (Keycloak)</a>' in shared
     assert sentence in shared.split('id="anmeldung"')[1]
     assert 'id="anmeldung"' not in songmaker
+
+
+def test_the_sign_in_section_states_the_age_bound_of_the_snapshots_before_an_update():
+    section = read_page("datenschutz").split('id="anmeldung"')[1].split("<h2")[0]
+    assert f"auch sie löschen wir nach {PRE_APPLY_MAX_AGE.days} Tagen" in section
 
 
 @pytest.mark.parametrize("name", TEXT_PAGES)
