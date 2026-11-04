@@ -1,8 +1,0 @@
-claim_id = "fdaae78fe56f4830bc98da67b8bd85dd"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "e086a0ba4b324f8df07eb47a5bce63b083b0a25c"
-branch = "claude/issue-1002-presentator-enable"
-scope = ["backup/apps.toml", "docs/architecture.md", "docs/backup.md", "docs/external.md", "fleet.yaml", "quality/baseline.toml", "tests/support/backup_support.py", "tests/test_backup_runner.py", "tests/test_stack_catalog_hosts.py"]
-opened_commit = "cfd633a1eefd990e1c40dd4107a11b11d10a1618"
-whole_reason = "The catalog flag and the backup record land together: a record without a deployed volume fails every Sunday run, and an enabled app without its record goes live without the backup that head decision (c) requires."
