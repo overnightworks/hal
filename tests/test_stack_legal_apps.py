@@ -11,8 +11,8 @@ import support.stack_apply_apps as stack_apply_apps_support
 import support.stack_apps as stack_apps_support
 from support.app_support import KEY
 from support.git_support import plain_git
-from support.stack_apply import REPOSITORY
 from support.stack_apply import (
+    REPOSITORY,
     at_terminal,  # noqa: F401 the fixture, requested by name below
     home,  # noqa: F401 the fixture, requested by name below
     ingress,  # noqa: F401 the fixture, requested by name below

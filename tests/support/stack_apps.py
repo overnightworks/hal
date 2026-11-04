@@ -125,7 +125,9 @@ class HostOnlyCheckout:
     def commit(self, files: dict[str, str]) -> str:
         """A commit on HEAD carrying `files`; its full sha."""
         if not (self.tree / ".git").exists():
-            plain_git(self.tree.parent, "init", "--quiet", "--initial-branch", "main", str(self.tree))
+            plain_git(
+                self.tree.parent, "init", "--quiet", "--initial-branch", "main", str(self.tree)
+            )
             for key, value in (("user.name", "edge test"), ("user.email", "test@edge.invalid")):
                 plain_git(self.tree, "config", key, value)
         for name, content in files.items():
@@ -162,9 +164,7 @@ class LegalApps:
         app = FLEET.replace("run: {enabled: true}", f"run: {{enabled: {str(enabled).lower()}}}")
         legal = "  legal:\n    run: {enabled: true}\n"
         host_only = HOST_ONLY_ENTRY if self.host_only else ""
-        write_fleet(
-            self.world.repository, f"cloudflare:\n  zone: {ZONE}\n{app}{host_only}{legal}"
-        )
+        write_fleet(self.world.repository, f"cloudflare:\n  zone: {ZONE}\n{app}{host_only}{legal}")
 
     def release(self, tag: str, privacy: str | None = None) -> str:
         """A release `tag`, its privacy file `privacy` or the previous release's; its sha."""

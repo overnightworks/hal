@@ -1,6 +1,7 @@
 """The legal step of `hal apply --local`: the three pages built from `legal/frame`, the
 sections of `legal/sections` and each app's own `legal/` files at the release it shows
-(`apps.ShownRelease`; a host-only app's is HEAD of its checkout), compared with `legal/built`, and written there after the operator's `yes`.
+(`apps.ShownRelease`; a host-only app's is HEAD of its checkout), compared with `legal/built`, and
+written there after the operator's `yes`.
 
 The step runs only while `services.legal` is in the catalog and enabled. Every refusal comes at
 plan time, before the question, and nothing is written on one.
