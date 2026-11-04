@@ -45,9 +45,6 @@ SQLITE_OWNER_LABEL = "SQLite owner read"
 DATABASE_START_LABEL = "database start"
 SESSION_COUNT_LABEL = "pg_restore session count"
 LIVE_LOAD_LABEL = "live load"
-# Bounds the one wait a load into a switched-off database can meet, a lock another session holds;
-# past it the load fails in its transaction.
-LIVE_LOCK_TIMEOUT = timedelta(seconds=60)
 # pg_restore names its session so (postgres src/bin/pg_dump/pg_backup_db.c); no PGAPPNAME hides it.
 PG_RESTORE_APPLICATION = "pg_restore"
 _SCANNED = "/scanned"
@@ -232,8 +229,9 @@ def load_live(container_id: str, database: PostgresDatabase, dump: Path) -> int 
     """The dump loaded into the live database in one transaction; the exit code pg_restore
     printed, or None when no code line came. The client runs in its own session, so a Ctrl-C
     at the terminal reaches only hal; a failed client raises `HostCommandError`."""
-    lock_timeout = f"lock_timeout={int(LIVE_LOCK_TIMEOUT.total_seconds())}s"
-    options = " ".join((*_SILENT_SERVER_SETTINGS, "-c", lock_timeout))
+    # No lock_timeout: pg_restore sets it to 0 in its session (postgres
+    # src/bin/pg_dump/pg_backup_archiver.c:3296), so a lock another session holds is waited for.
+    options = " ".join(_SILENT_SERVER_SETTINGS)
     output = host.run(
         ["docker", "exec", "-i", "--env", f"PGOPTIONS={options}", container_id,
          *_REPORTING_SHELL, "pg_restore", "--clean", "--if-exists", "--single-transaction",

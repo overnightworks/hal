@@ -22,7 +22,10 @@ front are stopped, so its own writes cannot move it: just before and just after 
 two equal. The probe never runs `hal stop` or `hal start`, which act on the live project: it writes
 the switch marker under the scratch HOME, stops and starts its own containers, and answers the
 question at a pseudo-terminal. A stall is a probe session holding ACCESS SHARE on the keys table
-in an open transaction. Exit 0: every cell held.
+in an open transaction; it lasts until the probe ends it, since the load waits on a held lock
+without bound. L2's load fails on a view of the keys table that the dump does not hold. A live run
+gets LIVE_SECONDS, 120 s, from its answer to its end once no stall holds it: the database start and
+the load of the probe's few rows take seconds. Exit 0: every cell held.
 """
 
 from __future__ import annotations
@@ -67,7 +70,7 @@ from scratch_secrets import write_new
 
 from hal.backup.apps import DB_FOLDER, parse_apps
 from hal.backup.cli import DEFAULT_APPS
-from hal.backup.docker import LIVE_LOCK_TIMEOUT, PG_RESTORE_APPLICATION
+from hal.backup.docker import PG_RESTORE_APPLICATION
 from hal.backup.runner import MIN_SNAPSHOT_PREFIX, STAGING_PREFIX
 from hal.backup.settings import Settings
 from hal.backup.verify import DUMP_NAME
@@ -92,8 +95,10 @@ DUMP_SECONDS = 120
 LISTED = re.compile(r'^\d+; \d+ \d+ (TABLE|VIEW) (\S+) "?([^"\s]+)"? \S+$')
 # D: hal's six tables, the keys among them.
 DIGEST_TABLES = tuple(dict.fromkeys((*TABLES, *HAL_TABLES)))
-STALLED_TABLE = "LiteLLM_VerificationToken"
-LIVE_SECONDS = int(LIVE_LOCK_TIMEOUT.total_seconds()) + HAL_SECONDS
+KEYS_TABLE = "LiteLLM_VerificationToken"
+# A view the dump does not hold: `--clean`'s DROP TABLE of the keys table fails on it.
+BLOCKING_VIEW = "probe_l2_keys"
+LIVE_SECONDS = 120
 QUIET_SECONDS = 3
 INTERRUPT = b"\x03"  # the pseudo-terminal's interrupt character, Ctrl-C
 
@@ -177,7 +182,7 @@ class Stall:
             text=True, env=environment,
         )  # fmt: skip
         self.process.stdin.write(
-            f"BEGIN;\nLOCK TABLE \"{STALLED_TABLE}\" IN ACCESS SHARE MODE;\nSELECT 'stalled';\n"
+            f"BEGIN;\nLOCK TABLE \"{KEYS_TABLE}\" IN ACCESS SHARE MODE;\nSELECT 'stalled';\n"
         )
         self.process.stdin.flush()
         for line in self.process.stdout:
@@ -347,16 +352,13 @@ class BackupProbe(KeysProbe, AdmissionProbe):
                 self.snapshot_b1, "--apps", str(self.apps_file)]  # fmt: skip
         return LiveRun(argv, {**self.environment, "NO_COLOR": "1"})
 
-    def live_answered(self, cell: str, typed: bytes, wanted: int, stall: bool = False) -> str:
+    def live_answered(self, cell: str, typed: bytes, wanted: int) -> str:
         """A live run answered `typed`, its exit `wanted`; its output, which holds no secret,
-        key hash or P. With `stall` the load meets a stall that outlives LIVE_LOCK_TIMEOUT."""
-        held = Stall(self.database_argv(), self.environment) if stall else None
+        key hash or P."""
         run = self.live_run()
         run.read_until("Type yes")
         run.type(typed)
         code, output = run.finish()
-        if held:
-            held.end()
         self.expect_no_leak(cell, output)
         expect(code == wanted, f"{cell}: exit {code}, wanted {wanted}: {output.strip()[-300:]!r}")
         return output
@@ -568,18 +570,22 @@ class BackupProbe(KeysProbe, AdmissionProbe):
 
     def cell_l2(self) -> None:
         changed = self.changed_digest("L2")
-        output = " ".join(self.live_answered("L2", b"yes\n", ExitCode.FAILURE, stall=True).split())
+        self.query(f'CREATE VIEW "{BLOCKING_VIEW}" AS SELECT * FROM "{KEYS_TABLE}";')  # noqa: S608 - the names are this probe's literals
+        try:
+            output = " ".join(self.live_answered("L2", b"yes\n", ExitCode.FAILURE).split())
+            digest = self.database_digest()
+        finally:
+            self.query(f'DROP VIEW "{BLOCKING_VIEW}";')
         failed = (
             "litellm load failed · pg_restore ended with exit 1 · a rerun loads the snapshot whole"
         )
         rerun = (f"next: {command(Verb.RESTORE, APP, '--live', '--snapshot')} "
                  f"{self.snapshot_b1[:MIN_SNAPSHOT_PREFIX]}")  # fmt: skip
         expect(failed in output and rerun in output, f"L2: {output[-300:]!r}")
-        digest = self.database_digest()
         expect(digest == changed, f"L2: D {digest} is not D' {changed}")
         expect(self.state_of(LITELLM) == "exited", "L2: litellm runs")
         expect(self.person not in self.log_of(DATABASE), "L2: P in the database's log")
-        self.hold("L2", f"a stall past {LIVE_LOCK_TIMEOUT.total_seconds():.0f} s: exit 3, "
+        self.hold("L2", "a view on the keys table the dump does not hold: exit 3, "
                   f"error: {failed}, {rerun}; D equals D' ({digest}); litellm stopped; P in "
                   "neither the output nor the database's log")  # fmt: skip
 
@@ -605,15 +611,12 @@ class BackupProbe(KeysProbe, AdmissionProbe):
         killed.read_until("Type yes")
         killed.type(b"yes\n")
         self.wait_until_stalled("L5")
-        stalled = time.monotonic()
         killed.kill()
         left = self.staging()
         expect(len(left) == 1, f"L5: {len(left)} staging directories after the kill")
         second = self.live_answered("L5", b"yes\n", ExitCode.REFUSED)
         expect("a load is still running" in second, f"L5: {second.strip()[-300:]!r}")
         stall.end()
-        expect(time.monotonic() - stalled < LIVE_LOCK_TIMEOUT.total_seconds(),
-               "L5: the stall outlived LIVE_LOCK_TIMEOUT, so the killed load met it")  # fmt: skip
         self.wait_for("L5", "no pg_restore session", lambda: not self.restore_sessions())
         expect(self.database_digest() == self.digest_b1, "L5: the killed run's load is not in")
         self.changed_digest("L5")
