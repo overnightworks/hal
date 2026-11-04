@@ -15,8 +15,10 @@ from support.terminal_support import type_at_prompt
 
 from hal import backup_commands
 from hal.backup import host
+from hal.backup import live as live_step
 from hal.backup.docker import LIVE_LOAD_LABEL, SESSION_COUNT_LABEL
-from hal.backup.runner import RUN_MARK_SUFFIX, STAGING_PREFIX
+from hal.backup.runner import RUN_MARK_SUFFIX, STAGING_PREFIX, StepFailed
+from hal.backup.status import ExitCategory
 from hal.stack import compose, terminal, unit_plans
 
 APP = "litellm"
@@ -204,6 +206,18 @@ def test_a_failure_before_the_spawn_names_the_app_and_not_the_plain_restore(live
 
     assert outcome.exit_code == 3
     assert outcome.err.splitlines() == [f"error: {APP}: restic restore ended with exit 1"]
+
+
+def test_a_reason_holding_the_name_inside_another_word_still_names_the_app(live, monkeypatch):
+    def failing_step(*_arguments, **_guards):
+        raise StepFailed(ExitCategory.NOT_READY, f"{SERVICE} did not answer")
+
+    monkeypatch.setattr(live_step, "restore_live", failing_step)
+
+    outcome = live()
+
+    assert outcome.exit_code == 3
+    assert outcome.err.splitlines() == [f"error: {APP}: {SERVICE} did not answer"]
 
 
 def test_without_a_terminal_it_refuses_and_restores_nothing(live, machine, monkeypatch, home):

@@ -7,6 +7,7 @@ terminal, and hands plain values to the step."""
 import argparse
 import functools
 import os
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -227,13 +228,18 @@ def _tell_live_ended(app: str) -> Callable[[Ended], None]:
         match ended:
             case StepFailed():
                 reason = str(ended)
-                write_error(reason if app in reason else f"{app}: {reason}")
+                write_error(reason if _names(reason, app) else f"{app}: {reason}")
             case Interrupted():
                 write_error("interrupted · nothing loaded")
             case _:
                 write_error("interrupted")
 
     return tell
+
+
+def _names(reason: str, app: str) -> bool:
+    """Whether the reason holds the app's name as a word of its own, not inside `<app>-db`."""
+    return re.search(rf"(?<![\w-]){re.escape(app)}(?![\w-])", reason) is not None
 
 
 def _run(
