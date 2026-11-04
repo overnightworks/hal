@@ -1,0 +1,7 @@
+claim_id = "6a37f1d61d0d4e6f8e92d717d2df0e2d"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "dee813f8d5cc3ffe2dc524f06aa09b9d901db50a"
+branch = "claude/issue-993-songmaker-text-direct-route"
+scope = ["legal/sections/songmaker/datenschutz.html", "tests/test_stack_legal_unit.py"]
+opened_commit = "62abc200bfcf219288c5425465acab2817e502ff"
