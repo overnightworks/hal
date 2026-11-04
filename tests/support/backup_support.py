@@ -395,7 +395,9 @@ class Machine:
 
     def _live_load(self, argv, *, stdin, **_) -> bytes:
         """The shell around pg_restore: it prints pg_restore's code as its last line."""
-        assert argv[argv.index("sh") - 1] not in self.stopped_containers, "a load into a stopped database"
+        assert argv[argv.index("sh") - 1] not in self.stopped_containers, (
+            "a load into a stopped database"
+        )
         self.live_loads.append(stdin.read_bytes())
         if self.during_live_load:
             self.during_live_load()

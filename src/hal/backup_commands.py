@@ -69,7 +69,7 @@ def _configure_restore(parser: argparse.ArgumentParser) -> None:
         "--live",
         action="store_true",
         help="load the snapshot into the app's live database while the app is switched off "
-        "(hal stop <app>); asks yes at a terminal",
+        f"({command(Verb.STOP, '<app>')}); asks yes at a terminal",
     )
     _add_apps(parser)
 
