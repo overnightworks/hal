@@ -26,7 +26,7 @@ from support.stack_apply import (
 from support.stack_apply_fakes import RealmBackup
 from support.stack_plan_rows import find_row, plain
 
-from hal.stack import apply, compose, litellm_keys
+from hal.stack import api_limits, apply, compose, litellm_keys
 from hal.stack import cli as stack_cli
 from hal.stack.external import cli as external_cli
 from hal.stack.plan_rows import KeysEvent, PlanEvent
@@ -211,7 +211,7 @@ def plain_apply(
 
     def run() -> tuple[int, str, list[object]]:
         at_terminal("yes")
-        exit_code = stack_cli.apply_units(local=False)
+        exit_code = stack_cli.apply_units(local=False, api=api_limits.NONE_SET)
         return exit_code, capsys.readouterr().err, published
 
     return run
