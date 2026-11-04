@@ -6,6 +6,8 @@ import yaml
 
 from hal.backup.apps import PRE_APPLY_TAG, App, AppsError, PostgresDatabase, parse_apps
 from hal.backup.cli import DEFAULT_APPS
+from hal.stack import catalog
+from hal.stack.compose import profile_services
 
 COMPOSE = Path(__file__).parent.parent / "compose.yaml"
 
@@ -97,3 +99,18 @@ def test_a_shipped_stack_record_names_its_compose_project_service_user_database_
         service["environment"]["POSTGRES_DB"],
         int(image_major[1]),
     )
+
+
+@pytest.mark.parametrize(
+    "app",
+    [app for app in _shipped_stack_apps() if app.database.audio is None],
+    ids=lambda app: app.name,
+)
+def test_a_db_only_stack_record_is_a_unit_whose_profile_holds_its_database(app):
+    """`hal restore <app> --live` reads the unit's switch by the record's name and starts only
+    its database container."""
+    profiles = profile_services(yaml.safe_load(COMPOSE.read_text()))
+    units = {unit.key for unit in catalog.load(COMPOSE.parent, profiles)}
+
+    assert app.name in units
+    assert app.database.db_service in profiles[app.name]
