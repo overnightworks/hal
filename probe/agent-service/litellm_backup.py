@@ -44,7 +44,7 @@ from hal.backup.settings import Settings
 from hal.backup.verify import DUMP_NAME
 from hal.grammar import ExitCode
 from hal.stack import litellm_keys
-from hal.stack.litellm_keys import KeysDone, Target
+from hal.stack.litellm_keys import ADMIN_BUDGET_ID, KeysDone, Target
 
 APP = "litellm"
 HAL_TABLES = (
@@ -148,11 +148,12 @@ class BackupProbe(KeysProbe, AdmissionProbe):
         return self.count("LiteLLM_DailyEndUserSpend", f"end_user_id = '{self.person}'")
 
     def make_keys(self, cell: str, apps: tuple[str, ...], budget_new: bool) -> None:
-        """The key step plans exactly these new keys (and the person budget when `budget_new`)
-        and makes them."""
+        """The key step plans exactly these new keys (and the person budget and the admin group's
+        when `budget_new`) and makes them."""
         plan = self.read_plan(cell)
         budget = [(Target.BUDGET, self.budget_id, True)] if budget_new else []
-        wanted = [*budget, *((Target.KEY, app, True) for app in apps)]
+        admin = [(Target.BUDGET, ADMIN_BUDGET_ID, True)] if budget_new else []
+        wanted = [*budget, *((Target.KEY, app, True) for app in apps), *admin]
         planned = [(change.target, change.subject, change.new) for change in plan.changes]
         expect(planned == wanted, f"{cell}: planned {planned}")
         result = self.run_step(plan)
