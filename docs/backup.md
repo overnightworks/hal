@@ -240,10 +240,13 @@ places as Keycloak's. LiteLLM writes spend to its database in batches every 10 s
 
 presentator's copy is its SQLite database and its built decks (`builds`, without the half-built
 `staged-*` directories). The database holds the people's sessions, their Keycloak `sub`s and the
-source secrets, which are encrypted with presentator's master key (`PRESENTATOR_SECRET_KEY`). The
-master key is not in the data backup, so a restored copy cannot read those secrets without it. Until
-the separate backups of secrets and data of #291 exist, the master key and the data backups sit on the
-same disk. In plain text the copy exists in the same three 0700 places as Keycloak's.
+source secrets, which are encrypted with presentator's master key (the file
+`~/.secrets/presentator/secret-key`). The master key is not in the data backup, so a restored copy
+cannot read those secrets without it. Until the separate backups of secrets and data of #291 exist,
+the master key and the data backups sit on the same disk. The session ids (the session cookie
+values) and the Keycloak refresh and ID tokens are stored as plain text in the copy: whoever holds a
+staged, restored or `--target` copy can take over live sessions and refresh Keycloak tokens. In plain
+text the copy exists in the same three 0700 places as Keycloak's.
 
 A row that `hal expire` deletes ([agent-service.md](agent-service.md), „What expires“) stays in
 every snapshot taken before the delete, until retention forgets that snapshot:

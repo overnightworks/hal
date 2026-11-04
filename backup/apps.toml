@@ -42,9 +42,8 @@ postgres_major = 17       # compose.yaml's litellm-db
 count_table = "LiteLLM_VerificationToken"
 require_rows = true   # a LiteLLM without a key is no backup
 
-# presentator's SQLite database (sessions, Keycloak `sub`s, source secrets encrypted with the
-# master key, which is not in this copy) and its built decks, minus the half-built `staged-*`
-# directories of a running build.
+# presentator's SQLite database and its built decks, minus the half-built `staged-*` directories
+# of a running build. What the copy holds is in docs/backup.md.
 [app.presentator]
 compose_project = "presentator"
 dump = "sqlite_online_copy"

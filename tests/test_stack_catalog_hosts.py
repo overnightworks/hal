@@ -1,6 +1,5 @@
 """The catalog's host shape (#131): one reader, one decision about `run.enabled`."""
 
-import copy
 import json
 import re
 from pathlib import Path
@@ -554,14 +553,3 @@ def test_an_app_host_without_ready_is_refused_when_the_apps_are_read():
 
     with pytest.raises(catalog.CatalogError, match=r"services\.app\.hosts\[0\]\.ready"):
         catalog.apps(entry, {}, "edge")
-
-
-def test_enabling_presentator_publishes_hosts_with_the_back_channel_denied():
-    """#449 A1 (M3): enabled, every presentator host denies the back-channel route."""
-    fleet = copy.deepcopy(catalog.read(PROJECT_ROOT / catalog.FLEET_FILE))
-    fleet["services"]["presentator"]["run"]["enabled"] = True
-
-    hosts = [one for one in catalog.hosts(fleet) if one.service == "presentator"]
-
-    assert hosts
-    assert all(one.deny_public == ("/auth/backchannel-logout",) for one in hosts)

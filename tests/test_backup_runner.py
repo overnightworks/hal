@@ -1019,6 +1019,10 @@ def test_a_backup_run_saves_the_keycloak_dump_without_any_audio_volume(edge_back
         "audio_files": None,
     }
     assert keycloak["audio"] == {}
+    assert not any(
+        label == "docker volume ls" and "label=com.docker.compose.project=keycloak" in argv
+        for label, argv in machine.calls
+    )
     assert app_history(outcome.status, "keycloak")["last_snapshot_id"] == keycloak["id"]
     keycloak_backup = next(
         argv for label, argv in machine.calls if label == "restic backup" and "keycloak" in argv
