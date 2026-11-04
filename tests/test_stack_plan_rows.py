@@ -11,6 +11,7 @@ from support.stack_plan_rows import (
     KEYCLOAK,
     NEW,
     OLD,
+    STEP_CA_IMAGE,
     app_plan,
     groups_of,
     kept,
@@ -48,6 +49,7 @@ from hal.stack.plan_rows import (
     checkout_row,
     update_rows,
 )
+from hal.stack.realm.reconcile import KEYCLOAK as KEYCLOAK_UNIT
 from hal.stack.realm.reconcile import REALM_UNIT, RealmAction, RealmPlan
 from hal.stack.unit_plans import Action, ImageReference, KeptImage, Recreate, Restart
 
@@ -154,28 +156,28 @@ def test_the_rows_stand_in_the_order_the_work_runs_notes_then_switch_offs_then_t
     ("image", "fact"),
     [
         pytest.param(
-            kept(ImageReference(KEYCLOAK, DIGEST_A), ImageReference(KEYCLOAK, DIGEST_B)),
-            f"{KEYCLOAK}@79c6… · compose.yaml @a78d…",
+            kept(ImageReference(STEP_CA_IMAGE, DIGEST_A), ImageReference(STEP_CA_IMAGE, DIGEST_B)),
+            f"{STEP_CA_IMAGE}@79c6… · compose.yaml @a78d…",
             id="same name",
         ),
         pytest.param(
             kept(
-                ImageReference(KEYCLOAK, DIGEST_A),
-                ImageReference(f"docker.io/{KEYCLOAK}", DIGEST_B),
+                ImageReference(STEP_CA_IMAGE, DIGEST_A),
+                ImageReference(f"docker.io/{STEP_CA_IMAGE}", DIGEST_B),
             ),
-            f"{KEYCLOAK}@79c6… · compose.yaml docker.io/{KEYCLOAK}@a78d…",
+            f"{STEP_CA_IMAGE}@79c6… · compose.yaml docker.io/{STEP_CA_IMAGE}@a78d…",
             id="differing names",
         ),
         pytest.param(
-            kept(ImageReference(KEYCLOAK, DIGEST_A), ImageReference(KEYCLOAK, None)),
-            f"{KEYCLOAK}@79c6… · compose.yaml {KEYCLOAK}",
+            kept(ImageReference(STEP_CA_IMAGE, DIGEST_A), ImageReference(STEP_CA_IMAGE, None)),
+            f"{STEP_CA_IMAGE}@79c6… · compose.yaml {STEP_CA_IMAGE}",
             id="without a digest",
         ),
     ],
 )
 def test_a_kept_image_is_one_needs_you_row_with_both_versions(image: KeptImage, fact: str) -> None:
     assert unit_rows_of(images=(image,)) == (
-        Row(Glyph.NEEDS_YOU, "keycloak", PlanEvent.OLD_IMAGE, fact),
+        Row(Glyph.NEEDS_YOU, "step-ca", PlanEvent.OLD_IMAGE, fact),
     )
 
 
@@ -242,7 +244,7 @@ def test_a_realm_plan_is_one_row_for_its_action_and_none_when_nothing_changes(
 
 
 def test_the_kept_images_come_before_the_realm_row_and_the_units_before_the_apps() -> None:
-    image = kept(ImageReference(KEYCLOAK, DIGEST_A), ImageReference(KEYCLOAK, DIGEST_B))
+    image = kept(ImageReference(STEP_CA_IMAGE, DIGEST_A), ImageReference(STEP_CA_IMAGE, DIGEST_B))
     realm = RealmPlan(RealmAction.RUN, why="x")
 
     _, _, units, _, apps = groups_of(images=(image,), realm=realm, plans=(app_plan(AppKind.ON),))
@@ -266,6 +268,11 @@ def built(**overrides: Any) -> BuiltRecreate:
     return BuiltRecreate(**{**fields, **overrides})
 
 
+def moved_keycloak(**overrides: Any) -> Recreate:
+    running, configured = ImageReference(KEYCLOAK, DIGEST_A), ImageReference(KEYCLOAK, DIGEST_B)
+    return Recreate("keycloak", "keycloak", KeptImage("keycloak", running, configured), **overrides)
+
+
 @pytest.mark.parametrize(
     ("parts", "row"),
     [
@@ -273,6 +280,31 @@ def built(**overrides: Any) -> BuiltRecreate:
             {"recreates": (Recreate("keycloak", "keycloak-db"),)},
             Row(Glyph.CHANGE, "keycloak-db", PlanEvent.RECREATE, "definition changed"),
             id="recreate",
+        ),
+        pytest.param(
+            {"recreates": (Recreate("keycloak", "keycloak-db", snapshot=KEYCLOAK_UNIT),)},
+            Row(
+                Glyph.CHANGE,
+                "keycloak-db",
+                PlanEvent.RECREATE,
+                "definition changed · snapshot first",
+            ),
+            id="a database unit's first recreate after its snapshot",
+        ),
+        pytest.param(
+            {"recreates": (moved_keycloak(snapshot=KEYCLOAK_UNIT),)},
+            Row(
+                Glyph.CHANGE,
+                "keycloak",
+                PlanEvent.RECREATE,
+                f"image {KEYCLOAK}@79c6… → @a78d… · snapshot first",
+            ),
+            id="a moved image after the snapshot",
+        ),
+        pytest.param(
+            {"recreates": (moved_keycloak(),)},
+            Row(Glyph.CHANGE, "keycloak", PlanEvent.RECREATE, f"image {KEYCLOAK}@79c6… → @a78d…"),
+            id="a moved image after an earlier recreate of its unit",
         ),
         pytest.param(
             {"built": (built(definition_changed=True),)},
@@ -369,7 +401,7 @@ def test_a_unit_part_is_one_row_of_its_typed_fields(parts: dict[str, Any], row: 
 
 
 def test_the_unit_rows_stand_built_then_recreates_then_plans_then_images_then_the_realm() -> None:
-    image = kept(ImageReference(KEYCLOAK, DIGEST_A), ImageReference(KEYCLOAK, DIGEST_B))
+    image = kept(ImageReference(STEP_CA_IMAGE, DIGEST_A), ImageReference(STEP_CA_IMAGE, DIGEST_B))
 
     _, _, units, _, apps = groups_of(
         built=(built(rebuilt=True),),
@@ -385,7 +417,7 @@ def test_the_unit_rows_stand_built_then_recreates_then_plans_then_images_then_th
         ("keycloak-db", PlanEvent.RECREATE),
         ("step-ca", PlanEvent.SWITCH_ON),
         ("step-ca", PlanEvent.STAYS_STOPPED),
-        ("keycloak", PlanEvent.OLD_IMAGE),
+        ("step-ca", PlanEvent.OLD_IMAGE),
         (REALM_UNIT, PlanEvent.REALM_APPLY),
     ]
     assert apps.rows

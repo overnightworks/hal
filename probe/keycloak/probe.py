@@ -74,10 +74,10 @@ from service_audience_cell import (  # noqa: E402
 from test_rp import token_claims as claims  # noqa: E402
 
 from hal.output import write_line  # noqa: E402
-from hal.stack import checkout, compose, core, switches  # noqa: E402
+from hal.stack import checkout, compose, core, pre_apply, switches  # noqa: E402
 from hal.stack.realm import OBSERVER_SERVICE, change_lines, new_digest_key, reconcile  # noqa: E402
 from hal.stack.realm.observe import CLIENT, FLOW, GROUP, IMPORT_CHECKSUM, Inventory  # noqa: E402
-from hal.stack.result_rows import SNAPSHOT_SHORT_ID, result_rows  # noqa: E402
+from hal.stack.result_rows import result_rows  # noqa: E402
 
 PROJECT = "edge-kc-probe"
 KEYCLOAK_PROFILE = "keycloak"
@@ -1047,7 +1047,7 @@ class RealmStepStand:
         return reconcile.Realm(
             engine,
             reconcile.Observer(engine),
-            reconcile.Backup(self.backup_command, self.run_backup),
+            pre_apply.Backup(self.backup_command, self.run_backup),
             core.Record(state),
             self.configuration,
             core.Checkout(self.repository, self.kinds),
@@ -2480,7 +2480,7 @@ class Probe:
         expect(isinstance(getattr(reset, "leftovers", None), reconcile.Leftovers), f"step: {reset}")
         removal = (
             f"{REALM}: removal protocol mapper scope groups/{STEP_CONSOLE_MAPPER}: "
-            f"reset to the file, pre-apply snapshot {reset.snapshot[:SNAPSHOT_SHORT_ID]}"
+            f"reset to the file, pre-apply snapshot {reset.snapshot[: pre_apply.SNAPSHOT_SHORT_ID]}"
         )
         expect(removal in result_rows(reset)[0].details, "the reset is not listed as such")
         self.held(
@@ -2516,12 +2516,12 @@ class Probe:
     def failed_realm_step_shows_its_way_back(self, stand: RealmStepStand) -> None:
         """Proof 12e: the red row of a config-cli that fails shows the snapshot it proved."""
         before, failed = len(stand.asked), stand.apply()
-        proved = stand.asked[-1][-1]
+        proved, short = stand.asked[-1][-1], pre_apply.SNAPSHOT_SHORT_ID
         shown = [row.details for row in result_rows(failed)]
         self.say(f"failed realm step: {[(row.fact, *row.details) for row in result_rows(failed)]}")
         expect(
             isinstance(failed, reconcile.RealmFailed)
-            and shown == [(f"pre-apply snapshot {proved[:SNAPSHOT_SHORT_ID]} · proven", WAY_BACK)]
+            and shown == [(f"pre-apply snapshot {proved[:short]} · proven", WAY_BACK)]
             and stand.asked[before:] == [BACKUP_ASKED, [*RESTORE_TEST_ASKED, proved]]
             and stand.plan().action is reconcile.RealmAction.RUN,
             f"the failed step shows {shown} of {failed}, asked hal {stand.asked[before:]}",

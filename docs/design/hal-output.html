@@ -1046,7 +1046,7 @@ edge apply: nothing published</pre>
 <span class="b">  ~</span> agent-service   recreate       <span class="d">image edge-agent-service:0.7.0-2.1.302 → edge-agent-service:0.10.0-2.1.302 · in-flight requests end</span>
 <span class="b">  ~</span> legal           recreate       <span class="d">definition changed</span>
 <span class="g">  +</span> agent-service   switch on      <span class="d">agent-egress, agent-service</span>
-<span class="y">  !</span> keycloak        old image      <span class="d">quay.io/keycloak/keycloak:26.8.1@79c6… · compose.yaml @a78d…</span>
+<span class="y">  !</span> step-ca         old image      <span class="d">smallstep/step-ca:0.30.2@a2b1… · compose.yaml @7c4e…</span>
 <span class="y">  !</span> keycloak        realm skipped  <span class="d">the realm observer failed (…)</span>
 <span class="hd">apps</span>
 <span class="b">  ~</span> hopin           update         <span class="d">v2026.10.26.1 → v2026.10.27.1</span>
@@ -1126,7 +1126,7 @@ Type <span class="w">yes</span> to apply 1 change: yes
         <figcaption><span class="tag new">neu</span> der häufigste Fall: nichts zu tun</figcaption>
 <pre class="term"><span class="p">$</span> <span class="u">hal apply</span>
 <span class="g">  ✓</span> checkout        current        <span class="d">c280a80 · origin/main</span>
-<span class="y">  !</span> keycloak        old image      <span class="d">quay.io/keycloak/keycloak:26.8.1@79c6… · compose.yaml @a78d…</span>
+<span class="y">  !</span> step-ca         old image      <span class="d">smallstep/step-ca:0.30.2@a2b1… · compose.yaml @7c4e…</span>
 <span class="w">✓ nothing to change</span> <span class="d">· units, apps and cloudflare checked · 21s</span></pre>
       </figure>
       <figure>

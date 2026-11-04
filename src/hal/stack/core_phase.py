@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from hal.output import write_row
-from hal.stack import barrier, compose, core, switches
+from hal.stack import barrier, compose, core, pre_apply, switches
 from hal.stack.plan import Plan
 from hal.stack.result_rows import recreated_row
 from hal.stack.service_recreate import Recreated, ServiceRecreator
@@ -24,12 +24,14 @@ def _say_recreated(recreated: Recreated) -> None:
 @dataclass(frozen=True)
 class CorePhase:
     """Recreate each changed core service with a live container, then each changed follower whose
-    unit is on, before any unit is touched; record the followers a switch-on started."""
+    unit is on, before any unit is touched; record the followers a switch-on started. `backup`
+    takes and proves a database unit's pre-apply snapshot, here and in the realm step."""
 
     record: core.Record
     repository: Path
     verifier: barrier.Verifier
     watch: compose.Watch
+    backup: pre_apply.Backup
 
     def run(
         self,
@@ -54,7 +56,7 @@ class CorePhase:
     ) -> str | None:
         config = planned.fleet.config
         recreator = ServiceRecreator(
-            engine, marks, planned.read, config, self.watch, progress, _say_recreated
+            engine, marks, planned.read, config, self.watch, progress, _say_recreated, self.backup
         )
         followers = [
             plan for plan in planned.followers if plan.action is core.FollowerAction.RECREATE
