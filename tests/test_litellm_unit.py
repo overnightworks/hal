@@ -242,7 +242,9 @@ def test_only_litellm_reads_the_provider_keys_and_only_it_and_the_key_step_the_m
         for secret in (*KEY_SECRETS, MASTER_SECRET)
     }
 
-    assert holders == dict.fromkeys(KEY_SECRETS, {LITELLM}) | {MASTER_SECRET: {LITELLM, KEYS}}
+    assert holders == {secret: {LITELLM} for secret in KEY_SECRETS} | {
+        MASTER_SECRET: {LITELLM, KEYS}
+    }
 
 
 def test_the_fronts_http_block_global_and_log_are_those_of_the_public_traefik(front_static):
@@ -271,7 +273,9 @@ def test_each_router_of_the_front_posts_one_exact_path_to_litellm_and_nothing_el
 
 def test_the_key_steps_routes_are_the_paths_the_front_serves():
     routers = load(ROUTE_FILE)["http"]["routers"].values()
-    paths = [path for router in routers for path in re.findall(r"Path\(`([^`]+)`\)", router["rule"])]
+    paths = [
+        path for router in routers for path in re.findall(r"Path\(`([^`]+)`\)", router["rule"])
+    ]
 
     assert sorted(paths) == sorted(litellm_keys.ROUTES)
 
