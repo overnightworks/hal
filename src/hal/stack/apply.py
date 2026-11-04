@@ -36,10 +36,12 @@ a run that starts LiteLLM or recreates it or its database leaves the read to the
 An app (an entry with `repo`) is planned last, in the same plan and under the same `yes`: its
 newest release tag is checked out, built, started and recorded once its containers are settled
 (`apps.py`).
-While `services.legal` is enabled the three legal pages are built from `legal/frame` and
-`legal/sections` through the validator (`legal_step.py`); a refused section is exit 2, and the
-plan names each page that is new or changes. After `yes` the pages are written to `legal/built/`
-before any unit switches, which the legal unit serves. The appkit step (`appkit_step.py`) comes
+While `services.legal` is enabled the three legal pages are built from `legal/frame`,
+`legal/sections` and each app's own `legal/` files at its release through the validator
+(`legal_step.py`); a refused section is exit 2, and the plan names each page that is new or
+changes. After `yes` the pages are written to `legal/built/`, which the legal unit serves, before
+any unit switches and before the core phase and the apps: a new app release that fails leaves its
+new text live while the old version runs. The appkit step (`appkit_step.py`) comes
 first and runs with or without the legal unit: it writes the installed appkit's tokens and fonts
 to `appkit-<version>/` in `legal/assets/` and in both Keycloak themes; a missing appkit is exit 2.
 
@@ -215,7 +217,7 @@ def _plan(
     keys = litellm_keys.plan_keys(engine, states, repository, gates, plans, unit_services.recreates)
     app_plans = plan_apps(repository, fleet, app_runtime, marks)
     appkit = plan_appkit(repository, rename=rename)
-    legal = plan_legal(repository, record.directory / RECORD_FILE, fleet)
+    legal = plan_legal(repository, record.directory / RECORD_FILE, fleet, app_plans)
     return Plan(
         fleet,
         tracked,

@@ -306,7 +306,8 @@ def _legal_rows(plan: LegalPlan) -> tuple[Row, ...]:
 
 def _block_change_line(change: BlockChange) -> str:
     anchor = f"#{change.anchor}" if change.anchor else ""
-    return f"{change.path}{anchor} {change.change}"
+    tag = f" at {change.tag}" if change.tag else ""
+    return f"{change.path}{anchor} {change.change}{tag}"
 
 
 def _core_rows(plan: Plan) -> tuple[Row, ...]:

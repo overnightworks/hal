@@ -270,11 +270,17 @@ with no sections. A page's blocks stand as the general part (`allgemein`, edge's
 (`agent-service` under `#agent-dienst`, `keycloak` under `#anmeldung`), then the apps (their catalog key
 is the anchor), each group sorted by anchor. A section directory with no catalog entry builds no block. Edge's
 services and songmaker's text, which edge holds until songmaker ships its own, are built while their entry is in
-the catalog, enabled or not. Apps' own texts are not read yet (edge#110).
+the catalog, enabled or not. An app (an entry with `repo`) brings its own text: `legal/datenschutz.html` and,
+optionally, `legal/nutzungsbedingungen.html` of a release, read from `~/srv/<key>/.git` at the release's commit, never
+from the working tree. That release is the planned one of an enabled app, the one a settled app runs, or the one a
+stopped (`hal stop`) or disabled app last deployed, from its record; an app never deployed has no block, and a release
+without the privacy file has none yet. A symlink at either path refuses the run. An app's key that also has
+`legal/sections/<key>/` refuses the run, naming both, since one block has one owner; so does a stopped or disabled app
+whose checkout or recorded commit is gone, naming the path.
 
 What `hal apply` does: it validates every section, builds the pages and compares them with `legal/built/`. The
-plan prints one row per kind, without a heading, above `core`: `+ legal  2 new pages`, `~ legal  1 edited page` and `~ legal  3 new records` (a page that matches while its record is missing, unreadable or stale), each with the page names. Under an edited page, from a record of what the last write was made of, each block stands as a dim line, new, changed or left (`legal/sections/songmaker/datenschutz.html#songmaker changed`), and a changed page frame (its skeleton or a table-of-contents template) as its own line; a missing or stale record makes every block new. It prints no legal row when nothing changes. The record is `legal-built.json` in the apply state beside `applied.json` (not beside `legal/built/`, which nginx serves), written after the pages; a page whose bytes already match is still planned (and the record written) while its entry is missing, unreadable or stale. After
-`yes`, before any unit switches, it writes each changed page (a temporary file, mode 0644, renamed over the page)
+plan prints one row per kind, without a heading, above `core`: `+ legal  2 new pages`, `~ legal  1 edited page` and `~ legal  3 new records` (a page that matches while its record is missing, unreadable or stale), each with the page names. Under an edited page, from a record of what the last write was made of, each block stands as a dim line, new, changed or left (`legal/sections/songmaker/datenschutz.html#songmaker changed`; an app's block with the tag it is read at, `~/srv/hopin/legal/datenschutz.html#hopin changed at v2026.11.04.1`, and a new tag with the same bytes changes no block), and a changed page frame (its skeleton or a table-of-contents template) as its own line; a missing or stale record makes every block new. It prints no legal row when nothing changes. The record is `legal-built.json` in the apply state beside `applied.json` (not beside `legal/built/`, which nginx serves), written after the pages; a page whose bytes already match is still planned (and the record written) while its entry is missing, unreadable or stale. After
+`yes`, before any unit switches, the core phase or an app, it writes each changed page (a temporary file, mode 0644, renamed over the page), so a new tag that then fails leaves the app's new text live while its old version runs,
 and prints `✓ legal  pages written` naming the pages whose bytes were written, `✓ legal  record written` for pages
 that gained only their record. Without an enabled `legal` unit there is no step and no line. A refusal comes before
 the question (exit 3) and changes nothing; a failed write is `✗ legal  not written` with the path and the reason, then
@@ -329,7 +335,7 @@ edge never rewrites a text to drop the link.
 | /nutzungsbedingungen | `recht` |
 | /impressum | `verantwortlich`, `kontakt` |
 
-**Stand** is the newest commit date of the page's section files (`git log -1 --format=%cs`); a commit that
+**Stand** is the newest commit date of the page's section files (`git log -1 --format=%cs`), an app's file dated at the release it is read at; a commit that
 changes only the frame does not move it. The imprint has none.
 
 **Refusal line**, never quoting the text: `error: cannot plan, legal: legal/sections/songmaker/datenschutz.html: line 14: <img> is not allowed (allowed: h2 h3 section p ul ol li strong em code br a)`.
@@ -341,7 +347,8 @@ accepts more is announced.
 as this checkout (or `TREE`) builds them and with its own held block for `KEY` left out. It prints the same refusal as above
 as `error: legal: <path relative to DIR>: line N: <rule>` and exits 1, prints the row `✓ KEY  legal valid  <pages>` and
 exits 0, and exits 3 when `DIR` does not exist; it writes nothing. A path under `legal/sections/` or `legal/frame/`
-in the line is edge's, not the app's. Apps' own texts are not read from their releases yet.
+in the line is edge's, not the app's. `hal apply` refuses what this refuses in an app's release, but a release without
+the privacy file is no refusal there yet.
 
 ### Hopin as the worked example: what it needs before its entry works
 

@@ -1,5 +1,6 @@
-"""The legal step of `hal apply --local`: the three pages built from `legal/frame` and
-`legal/sections`, compared with `legal/built`, and written there after the operator's `yes`.
+"""The legal step of `hal apply --local`: the three pages built from `legal/frame`, the
+sections of `legal/sections` and each app's own `legal/` files at the release it shows
+(`apps.ShownRelease`), compared with `legal/built`, and written there after the operator's `yes`.
 
 The step runs only while `services.legal` is in the catalog and enabled. Every refusal comes at
 plan time, before the question, and nothing is written on one.
@@ -15,7 +16,7 @@ from enum import Enum, StrEnum
 from hashlib import sha256
 from pathlib import Path
 
-from hal.stack import catalog, checkout
+from hal.stack import apps, catalog, checkout, deploy_checkout
 from hal.stack.legal_pages import (
     TEMPLATES,
     Block,
@@ -62,6 +63,7 @@ class BlockChange:
     path: str
     change: Change
     anchor: str = ""
+    tag: str = ""  # the release an app's block is read at; empty for edge's own
 
 
 @dataclass(frozen=True)
@@ -101,15 +103,23 @@ def plan_legal(
     repository: Path,
     record: Path,
     fleet: Fleet,
+    released: apps.AppsPlan,
     run_git: checkout.Runner = checkout.run_git,
 ) -> LegalPlan:
     """What the step would write; a plan without pages while the legal unit does not run."""
     if not any(unit.key == LEGAL_UNIT and unit.enabled for unit in fleet.units):
         return LegalPlan(repository, record, {}, {})
+    _refuse_two_owners(repository, {app.key for app in released.catalogued})
     git = checkout.Git(repository, run_git)
     all_blocks = read_blocks(
         repository, _catalog_keys(repository), lambda path: _commit_date(git, path)
     )
+    zone = catalog.zone(catalog.read(repository / catalog.FLEET_FILE))
+    tags: dict[str, str] = {}
+    for shown in released.shown:
+        app = _release_blocks(shown, zone)
+        all_blocks += app
+        tags |= {block.path: shown.tag for block in app}
     frame = read_frame(repository)
     pages = build_pages(frame, all_blocks)
     fingerprints = fingerprint_pages(frame, all_blocks, pages)
@@ -121,7 +131,7 @@ def plan_legal(
         if change := _change(built, previous, text):
             changed[page] = change
             if change is PageChange.CHANGED:
-                named[page] = block_changes(page, previous, fingerprints[page])
+                named[page] = block_changes(page, previous, fingerprints[page], tags)
     return LegalPlan(repository, record, pages, changed, named, fingerprints)
 
 
@@ -175,31 +185,76 @@ def unit_block(path: str, data: bytes, page: str, unit: str, zone: str, written:
     return Block(path, page, kind, parse_fragment(path, data, anchor, zone), written)
 
 
-def app_blocks(directory: Path, key: str, zone: str, written: date) -> list[Block]:
-    """The blocks of an app's own `legal` files; the privacy file is required, the terms are not."""
+def app_blocks(
+    read: Callable[[str], bytes | None],
+    key: str,
+    zone: str,
+    date_of: Callable[[str], date],
+    shown_under: str,
+) -> list[Block]:
+    """The blocks of the app's own `legal` files that exist; `read` gives a file's bytes by its
+    path inside the app, None when it is absent, and `shown_under` prefixes the path a block is
+    named by."""
     blocks = []
     for page in SECTION_PAGES:
-        path = f"{APP_DIRECTORY}/{page}.html"
-        file = directory / path
-        if not file.is_symlink() and not file.exists():
-            if page == PRIVACY_PAGE:
-                raise LegalError(f"{path} is missing; every app needs a privacy section")
-            continue
-        if file.is_symlink() or not file.is_file():
-            raise LegalError(f"{path} is not a regular file")
-        blocks.append(unit_block(path, _read(directory, path), page, key, zone, written))
+        inside = f"{APP_DIRECTORY}/{page}.html"
+        if (data := read(inside)) is not None:
+            path = f"{shown_under}{inside}"
+            blocks.append(unit_block(path, data, page, key, zone, date_of(inside)))
     return blocks
 
 
 def check_app(repository: Path, key: str, directory: Path, today: date) -> tuple[str, ...]:
     """Builds the pages with the app's files in place of the checkout's own block for `key`;
-    returns the files that were valid, and raises LegalError for what `hal apply` would refuse."""
+    returns the files that were valid, and raises LegalError for what `hal apply` would refuse
+    and for a missing privacy file, which every app needs."""
     zone = catalog.zone(catalog.read(repository / catalog.FLEET_FILE))
     others = _catalog_keys(repository) - {key}
     blocks = read_blocks(repository, others, lambda _path: today)
-    app = app_blocks(directory, key, zone, today)
+    app = app_blocks(lambda inside: _app_file(directory, inside), key, zone, lambda _: today, "")
+    if PRIVACY_PAGE not in {block.page for block in app}:
+        raise LegalError(
+            f"{APP_DIRECTORY}/{PRIVACY_PAGE}.html is missing; every app needs a privacy section"
+        )
     build_pages(read_frame(repository), [*blocks, *app])
     return tuple(block.path for block in app)
+
+
+def _app_file(directory: Path, inside: str) -> bytes | None:
+    file = directory / inside
+    if not file.is_symlink() and not file.exists():
+        return None
+    if file.is_symlink() or not file.is_file():
+        raise LegalError(f"{inside} is not a regular file")
+    return _read(directory, inside)
+
+
+def _release_blocks(shown: apps.ShownRelease, zone: str) -> list[Block]:
+    """The app's blocks read at the release the pages show, from its checkout `~/srv/<key>`."""
+    where = f"~/srv/{shown.key}"
+    git = shown.checkout.git
+    if not (git.tree / ".git").is_dir():
+        raise LegalError(f"{where} is no git checkout; its {shown.tag} ({shown.sha}) is unread")
+    try:
+        return app_blocks(
+            lambda inside: shown.checkout.file_at(shown.sha, inside),
+            shown.key,
+            zone,
+            lambda inside: _commit_date(git, inside, shown.sha),
+            f"{where}/",
+        )
+    except (checkout.GitError, deploy_checkout.CheckoutRefused) as error:
+        raise LegalError(f"{where}: cannot read {shown.tag} ({shown.sha}): {error}") from error
+
+
+def _refuse_two_owners(repository: Path, app_keys: Collection[str]) -> None:
+    """An app's text is its release's own; edge holding a section for the key too is refused."""
+    for key in sorted(app_keys):
+        if (repository / SECTIONS_DIRECTORY / key).exists():
+            raise LegalError(
+                f"{SECTIONS_DIRECTORY}/{key}/ and ~/srv/{key}/{APP_DIRECTORY}/ both hold the text "
+                f"of {key}; one block has one owner, so remove {SECTIONS_DIRECTORY}/{key}/"
+            )
 
 
 def _catalog_keys(repository: Path) -> set[str]:
@@ -219,9 +274,11 @@ def _read(repository: Path, relative: str) -> bytes:
         raise LegalError(f"{relative}: cannot read it ({error.strerror})") from error
 
 
-def _commit_date(git: checkout.Git, relative: str) -> date:
-    """The committer date of the newest commit that touched the file, in git's `%cs` form."""
-    answer = git.call(["log", "-1", "--format=%cs", "--", relative]).stdout.decode().strip()
+def _commit_date(git: checkout.Git, relative: str, revision: str = "HEAD") -> date:
+    """The committer date of the newest commit up to `revision` that touched the file, in git's
+    `%cs` form."""
+    newest = ["log", "-1", "--format=%cs", revision, "--", relative]
+    answer = git.call(newest).stdout.decode().strip()
     try:
         return date.fromisoformat(answer)
     except ValueError as error:
@@ -287,11 +344,15 @@ def write_record(target: Path, fingerprints: Mapping[str, PageFingerprint]) -> N
 
 
 def block_changes(
-    page: str, previous: PageFingerprint | None, current: PageFingerprint
+    page: str,
+    previous: PageFingerprint | None,
+    current: PageFingerprint,
+    tags: Mapping[str, str],
 ) -> tuple[BlockChange, ...]:
-    """What the new build changes on the page against what was written."""
+    """What the new build changes on the page against what was written; `tags` names the release
+    of each app block by its path."""
     if previous is None:
-        return tuple(_block_change(block, Change.NEW) for block in current.blocks)
+        return tuple(_block_change(block, Change.NEW, tags) for block in current.blocks)
     before = {(block.path, block.anchor): block for block in previous.blocks}
     after = {(block.path, block.anchor): block for block in current.blocks}
     changes = []
@@ -299,14 +360,14 @@ def block_changes(
         changes.append(BlockChange(frame_page_path(page), Change.CHANGED))
     for key, block in after.items():
         if key not in before:
-            changes.append(_block_change(block, Change.NEW))
+            changes.append(_block_change(block, Change.NEW, tags))
         elif before[key] != block:
-            changes.append(_block_change(block, Change.CHANGED))
+            changes.append(_block_change(block, Change.CHANGED, tags))
     changes += (
-        _block_change(block, Change.LEFT) for key, block in before.items() if key not in after
+        _block_change(block, Change.LEFT, {}) for key, block in before.items() if key not in after
     )
     return tuple(changes)
 
 
-def _block_change(block: BlockFingerprint, change: Change) -> BlockChange:
-    return BlockChange(block.path, change, block.anchor)
+def _block_change(block: BlockFingerprint, change: Change, tags: Mapping[str, str]) -> BlockChange:
+    return BlockChange(block.path, change, block.anchor, tags.get(block.path, ""))

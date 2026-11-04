@@ -8,10 +8,20 @@ from pathlib import Path
 
 import pytest
 import support.throwaway_home as throwaway_home
-from support.app_support import COMPOSE, URL, Origin, origin_at
+from support.app_support import (
+    COMPOSE,
+    FLEET,
+    KEY,
+    URL,
+    Origin,
+    ScriptedDocker,
+    origin_at,
+    runtime_of,
+)
 from support.git_support import plain_git
+from support.stack_apps import EDGE_FLEET
 
-from hal.stack import checkout, deploy_checkout
+from hal.stack import apps, checkout, deploy_checkout, switches
 
 home = throwaway_home.home
 
@@ -221,7 +231,7 @@ def test_a_linked_worktree_is_no_main_worktree(app):
         app.prepare()
 
 
-def test_the_compose_file_is_read_at_the_commit_not_from_the_tree(origin, fetched):
+def test_a_file_is_read_at_the_commit_not_from_the_tree(origin, fetched):
     origin.push("master")
     origin.tag("v2026.10.22.1")
     fetched.fetch()
@@ -229,32 +239,55 @@ def test_the_compose_file_is_read_at_the_commit_not_from_the_tree(origin, fetche
     fetched.check_out(sha)
     (fetched.git.tree / "compose.yaml").write_text("edited after the checkout")
 
-    assert fetched.compose_file(sha) == COMPOSE
+    assert fetched.file_at(sha, "compose.yaml") == COMPOSE.encode()
 
 
-def test_a_commit_without_a_regular_compose_file_has_none(origin, fetched):
-    plain_git(origin.work, "rm", "--quiet", "compose.yaml")
-    (origin.work / "elsewhere").write_text("x")
-    (origin.work / "compose.yaml").symlink_to("elsewhere")
-    origin.commit({})
+def test_a_path_the_commit_does_not_have_is_absent(origin, fetched):
+    origin.commit({"legal/nutzungsbedingungen.html": "x"})
     origin.push("master")
     origin.tag("v2026.10.22.1")
     fetched.fetch()
 
-    assert fetched.compose_file(fetched.commit_of("v2026.10.22.1")) is None
+    assert fetched.file_at(fetched.commit_of("v2026.10.22.1"), "legal/datenschutz.html") is None
 
 
-def test_a_compose_file_that_is_no_utf8_is_refused(origin, fetched):
-    (origin.work / "compose.yaml").write_bytes(b"services: \xff\xfe\n")
-    plain_git(origin.work, "add", "--all")
+def a_symlink(work: Path) -> None:
+    (work / "legal").mkdir()
+    (work / "legal/datenschutz.html").symlink_to("../compose.yaml")
+
+
+def a_directory(work: Path) -> None:
+    (work / "legal/datenschutz.html").mkdir(parents=True)
+    (work / "legal/datenschutz.html/inside").write_text("x")
+
+
+@pytest.mark.parametrize(("make", "kind"), [(a_symlink, "a symlink"), (a_directory, "no regular")])
+def test_an_entry_that_is_no_regular_file_is_refused_not_read_as_absent(
+    origin, fetched, make, kind
+):
+    make(origin.work)
     origin.commit({})
     origin.push("master")
     origin.tag("v2026.10.22.1")
     fetched.fetch()
     sha = fetched.commit_of("v2026.10.22.1")
 
-    with pytest.raises(deploy_checkout.CheckoutRefused, match=r"compose\.yaml is not UTF-8"):
-        fetched.compose_file(sha)
+    with pytest.raises(
+        deploy_checkout.CheckoutRefused, match=f"legal/datenschutz.html at {sha} is {kind}"
+    ):
+        fetched.file_at(sha, "legal/datenschutz.html")
+
+
+def test_a_compose_file_that_is_no_utf8_refuses_the_plan_of_its_app(origin, home, tmp_path):
+    (origin.work / "compose.yaml").write_bytes(b"services: \xff\xfe\n")
+    origin.release("v2026.10.22.1")
+    repository, state = tmp_path / "edge", tmp_path / "state"
+    repository.mkdir()
+    (repository / "fleet.yaml").write_text(FLEET)
+    runtime = runtime_of(home, state, ScriptedDocker(state, home / "srv" / KEY))
+
+    with pytest.raises(apps.AppError, match=r"compose\.yaml is not UTF-8"):
+        apps.plan_apps(repository, EDGE_FLEET, runtime, switches.Switches(state))
 
 
 def test_a_tag_listing_that_git_does_not_give_in_three_fields_is_an_error(app):
