@@ -246,32 +246,65 @@ def backup(
                 pre_apply=pre_apply,
             )
             report(_backed_up_row(app, summary, started))
-    if run.failed_apps:
+    _forget_and_check(settings, targets, run, pre_apply=pre_apply, report=report)
+    run.raise_first_app_failure()
+
+
+def _forget_and_check(
+    settings: Settings,
+    targets: tuple[App, ...],
+    run: Run,
+    *,
+    pre_apply: bool,
+    report: Callable[[Row], None],
+) -> None:
+    """Forgets each app that backed up and checks the repository, whatever another app did.
+
+    A failed app is not forgotten, so a partial snapshot of it never displaces its last good one.
+    A forget or check failure is the run's verdict, also after an app failure.
+    """
+    failed = set(run.failed_apps)
+    for app in run.failed_apps:
         report(
             Row(
                 Glyph.UNCHANGED,
-                REPOSITORY,
+                app,
                 BackupEvent.NOT_PRUNED,
-                fields=((Field.REASON, "a backup failed"),),
+                fields=((Field.REASON, "its backup failed"),),
             )
         )
-    run.raise_first_app_failure()
-    maintenance_started = host.monotonic()
-    for app in targets:
-        with run.phase(Phase.FORGET):
-            restic.forget(settings, app.name, pre_apply=pre_apply)
-    with run.phase(Phase.CHECK):
+    if not (backed_up := [app for app in targets if app.name not in failed]):
+        return
+    started = host.monotonic()
+    with _repository_row_on_failure(report, BackupEvent.NOT_PRUNED):
+        for app in backed_up:
+            with run.phase(Phase.FORGET):
+                restic.forget(settings, app.name, pre_apply=pre_apply)
+    with _repository_row_on_failure(report, RestoreEvent.NOT_CHECKED), run.phase(Phase.CHECK):
         restic.check(settings, read_data=False)
-    maintenance = host.monotonic() - maintenance_started
     report(
         Row(
             Glyph.DONE,
             REPOSITORY,
             BackupEvent.PRUNED,
             "checked",
-            fields=((Field.SECONDS, maintenance),),
+            fields=((Field.SECONDS, host.monotonic() - started),),
         )
     )
+
+
+@contextmanager
+def _repository_row_on_failure(
+    report: Callable[[Row], None], event: BackupEvent | RestoreEvent
+) -> Iterator[None]:
+    """A repository step that fails says so in a row; an unusable repository ends the run with
+    the rows printed so far."""
+    try:
+        yield
+    except StepFailed as failure:
+        if not failure.shared:
+            report(Row(Glyph.FAILED, REPOSITORY, event, fields=((Field.REASON, str(failure)),)))
+        raise
 
 
 def _backed_up_row(app: App, summary: restic.BackupSummary, started: float) -> Row:
@@ -569,7 +602,9 @@ def _verify_postgres(
             docker.count_files(settings, MountKind.BIND, str(restored_audio)),
             "audio files",
         )
-    with docker.restore_server(RESTORE_IMAGES[database.postgres_major]) as server:
+    with docker.restore_server(
+        RESTORE_IMAGES[database.postgres_major], settings.lock_file
+    ) as server:
         _wait_until_ready(
             lambda: _ready_or_raise(server),
             _Deadline.start(RESTORE_SERVER_TIMEOUT),

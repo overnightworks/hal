@@ -308,7 +308,7 @@ definition covers a secret's attachment, not the content of its file; change a r
 for the next realm change.
 
 The plan names the step in one line. After your yes it takes a Keycloak-only backup tagged
-`pre-apply` (the last ten are kept) and restore-tests that snapshot, observes both realms, runs
+`pre-apply` (the last ten within 90 days are kept) and restore-tests that snapshot, observes both realms, runs
 config-cli, observes again and prints one line per change. A Keycloak that should run and cannot be read is skipped: the step prints a `!` row,
 `keycloak  realm skipped` with the reason, and the run ends partial (`error: partial, keycloak realm
 skipped`, `next: hal apply`) and hal exits 3; when that is the only change, hal asks no yes and ends

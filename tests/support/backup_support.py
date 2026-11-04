@@ -14,18 +14,18 @@ from pathlib import Path
 import pytest
 
 from hal.backup import host, sqlite_copy
-from hal.backup.apps import parse_apps
+from hal.backup.apps import PRE_APPLY_TAG, parse_apps
 from hal.backup.cli import DEFAULT_APPS
 from hal.backup.docker import (
     FILE_COUNT_LABEL,
     RESTORE_OWNER_LABEL,
     RESTORE_OWNER_ROLE,
-    RESTORE_SERVER,
     SERVER_REMOVAL_LABEL,
     SERVER_START_LABEL,
     SQLITE_CHECK_LABEL,
     SQLITE_COPY_LABEL,
     SQLITE_OWNER_LABEL,
+    restore_server_name,
 )
 from hal.backup.settings import RESTIC_HOSTNAME
 
@@ -90,6 +90,8 @@ count_table = "users"
 SQLITE_COPY = b"SQLite rows=7"
 # The real boundary, kept before the `machine` fixture swaps it: exits and files go through it.
 REAL_HOST_RUN = host.run
+# restic's full snapshot ID: what `forget` is named, never a prefix.
+FULL_SNAPSHOT_ID = re.compile(r"[0-9a-f]{64}")
 
 
 @dataclass
@@ -133,9 +135,14 @@ class Machine:
     hanging: set[str] = field(default_factory=set)
     """Labels of probes that never answer; only a timeout ends them."""
     leftover_servers: list[str] = field(default_factory=list)
-    """Throwaway servers a killed restore test left behind; they carry the owner label."""
-    created_servers: list[str] = field(default_factory=list)
-    """Throwaway servers `docker run` created; they carry the owner label too."""
+    """Throwaway servers a killed restore test of this home left behind, under this home's name;
+    they carry the owner label."""
+    created_servers: list[tuple[str, str]] = field(default_factory=list)
+    """Throwaway servers `docker run` created, with the name it gave; they carry the owner label
+    too."""
+    other_home_servers: dict[str, str] = field(default_factory=dict)
+    """Throwaway servers of another home's run by ID, each under that home's name; they carry the
+    owner label too."""
     foreign_server_name: bool = False
     """A container that is not edge-backup's already holds the throwaway server's name."""
     server_start_output: bytes = f"{RESTORE_SERVER_ID}\n".encode()
@@ -152,6 +159,8 @@ class Machine:
     restore_diagnostic: str = ""
     """What pg_restore would print to stderr when it fails, as postgres quotes row values."""
     snapshots: list[dict] = field(default_factory=list)
+    forgotten: list[str] = field(default_factory=list)
+    """The snapshot IDs `restic forget` was named, in order; restic lists them no more."""
     calls: list[tuple[str, list[str]]] = field(default_factory=list)
     status_seen_during_backup: dict | None = None
     status_file: Path | None = None
@@ -220,7 +229,7 @@ class Machine:
             "psql": self._psql,
             SERVER_REMOVAL_LABEL: self._silent,
             "restic init": self._silent,
-            "restic forget": self._maintenance,
+            "restic forget": self._forget,
             "restic check": self._maintenance,
             "restic unlock": self._silent,
         }
@@ -240,6 +249,34 @@ class Machine:
     def lose_keycloak_database(self) -> None:
         """The shipped keycloak app's project has no database container."""
         self.other_db_containers[KEYCLOAK_PROJECT] = []
+
+    def plant(
+        self,
+        app: str,
+        taken: datetime,
+        *,
+        pre_apply: bool = True,
+        hostname: str = RESTIC_HOSTNAME,
+    ) -> str:
+        """A snapshot of the app that an earlier run took at `taken`; returns its full ID."""
+        snapshot_id = f"{len(self.snapshots) + 1:064x}"
+        self.snapshots.append(
+            {
+                "id": snapshot_id,
+                "app": app,
+                "host": hostname,
+                "pre_apply": pre_apply,
+                "time": restic_time(taken),
+                "db": {},
+                "audio": {},
+            }
+        )
+        return snapshot_id
+
+    def forget_scopes(self) -> list[str]:
+        """The tag scope of each policy forget, in order; a forget by ID has none."""
+        return [argv[argv.index("--tag") + 1] for label, argv in self.calls
+                if label == "restic forget" and "--tag" in argv]  # fmt: skip
 
     def _host_lock_is_free(self) -> bool:
         lock = self.status_file.with_name("backup.lock")
@@ -277,10 +314,14 @@ class Machine:
         return b"sha256:0\n"
 
     def _containers(self, argv, **_) -> bytes:
-        if any(RESTORE_SERVER in argument for argument in argv):
-            ours = f"label={RESTORE_OWNER_LABEL}={RESTORE_OWNER_ROLE}" in argv
-            foreign = [] if ours or not self.foreign_server_name else ["f0re1gn"]
-            return "\n".join([*self._owned_servers(), *foreign]).encode()
+        if names := [a.removeprefix("name=") for a in argv if a.startswith("name=")]:
+            owned_only = f"label={RESTORE_OWNER_LABEL}={RESTORE_OWNER_ROLE}" in argv
+            found = [
+                container_id
+                for container_id, name, owned in self._servers()
+                if re.search(names[0], name) and (owned or not owned_only)
+            ]
+            return "\n".join(found).encode()
         if self.absent_polls:
             self.absent_polls -= 1
             return b""
@@ -367,6 +408,8 @@ class Machine:
                 "id": snapshot_id,
                 "app": app,
                 "host": argv[argv.index("--hostname") + 1],
+                "pre_apply": PRE_APPLY_TAG in argv[argv.index("--tag") + 1].split(","),
+                "time": restic_time(self.clock.now()),
                 "db": {
                     path.name: path.read_bytes()
                     for path in staging.iterdir()
@@ -408,23 +451,34 @@ class Machine:
         return kept
 
     def _snapshots(self, argv, **_) -> bytes:
+        """As restic selects: the host, and every tag of the comma list; never a forgotten one."""
+        kept = [s for s in self.snapshots if s["id"] not in self.forgotten]
         if "--json" in argv:
-            tag = argv[argv.index("--tag") + 1]
+            wanted = set(argv[argv.index("--tag") + 1].split(","))
             host_name = argv[argv.index("--host") + 1]
             tagged = [
                 s
-                for s in self.snapshots
-                if s.get("app", "songmaker") == tag and s.get("host", RESTIC_HOSTNAME) == host_name
+                for s in kept
+                if wanted <= set(_tags(s)) and s.get("host", RESTIC_HOSTNAME) == host_name
             ]
             listed = tagged[-1:] if "--latest" in argv else tagged
-            return json.dumps([{"id": s["id"]} for s in listed]).encode()
+            return json.dumps([self._listed(s) for s in listed]).encode()
         shown = [
             s
-            for s in self.snapshots
+            for s in kept
             if "--host" not in argv
             or s.get("host", RESTIC_HOSTNAME) == argv[argv.index("--host") + 1]
         ]
         return "".join(f"{s['id']} {s.get('host', RESTIC_HOSTNAME)}\n" for s in shown).encode()
+
+    def _listed(self, snapshot: dict) -> dict:
+        """The fields of restic's `snapshots --json` that hal reads."""
+        return {
+            "id": snapshot["id"],
+            "time": snapshot.get("time", restic_time(self.clock.now())),
+            "tags": _tags(snapshot),
+            "hostname": snapshot.get("host", RESTIC_HOSTNAME),
+        }
 
     def _restore(self, argv, **_) -> bytes:
         snapshot_id = argv[argv.index("restore") + 1].split(":")[0]
@@ -447,16 +501,32 @@ class Machine:
         self.clock.sleep(self.maintenance_seconds)
         return b""
 
+    def _forget(self, argv, **_) -> bytes:
+        """A forget by ID names full IDs; a policy forget names none."""
+        named = argv[argv.index("forget") + 1 :]
+        self.forgotten += [argument for argument in named if FULL_SNAPSHOT_ID.fullmatch(argument)]
+        return self._maintenance(argv)
+
     def _start_server(self, argv, **_) -> bytes:
-        if self.foreign_server_name or self._owned_servers():
+        name = argv[argv.index("--name") + 1]
+        if any(standing == name for _, standing, _ in self._servers()):
             return exit_with(SERVER_START_LABEL, 125)
         self.server_accepting = False
-        self.created_servers.append(RESTORE_SERVER_ID)
+        self.created_servers.append((RESTORE_SERVER_ID, name))
         return self.server_start_output
 
-    def _owned_servers(self) -> list[str]:
+    def _servers(self) -> list[tuple[str, str, bool]]:
+        """Each throwaway server container standing: its ID, its name and whether it carries the
+        owner label. A foreign container holding this home's name never goes."""
+        own_name = restore_server_name(self.status_file.with_name("backup.lock"))
+        owned = [
+            *((container_id, own_name) for container_id in self.leftover_servers),
+            *self.created_servers,
+            *self.other_home_servers.items(),
+        ]
         removed = set(removed_servers(self))
-        return [s for s in [*self.leftover_servers, *self.created_servers] if s not in removed]
+        foreign = [("f0re1gn", own_name, False)] if self.foreign_server_name else []
+        return [(i, name, True) for i, name in owned if i not in removed] + foreign
 
     def _pg_isready(self, argv, **_) -> bytes:
         assert argv[argv.index("pg_isready") + 1 :] == ["--host", "127.0.0.1", "--quiet"]
@@ -491,6 +561,17 @@ class Machine:
         if sql not in answers:
             pytest.fail(f"the throwaway server was asked an unexpected query: {sql}")
         return answers[sql]
+
+
+def _tags(snapshot: dict) -> list[str]:
+    """The app's name, and the pre-apply tag on a snapshot taken before an apply."""
+    app = snapshot.get("app", "songmaker")
+    return [app, PRE_APPLY_TAG] if snapshot.get("pre_apply") else [app]
+
+
+def restic_time(moment: datetime) -> str:
+    """A snapshot's time as restic's JSON writes it: RFC 3339, `Z` for UTC."""
+    return moment.isoformat().replace("+00:00", "Z")
 
 
 def _skipped(name: str, glob: str | None) -> bool:

@@ -4,7 +4,9 @@ The password reaches restic only as a read-only file behind `--password-file`.
 """
 
 import json
+import re
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
 
@@ -21,6 +23,10 @@ KEEP_WEEKLY = 4
 KEEP_MONTHLY = 3
 # A snapshot taken right before a change is applied carries this tag besides its app's name.
 KEEP_PRE_APPLY = 10
+# The longest any pre-apply snapshot stays, measured on the host clock: the privacy text states it.
+PRE_APPLY_MAX_AGE = timedelta(days=90)
+# A snapshot's full ID, the only form a forget is ever named: never a prefix or an option.
+_FULL_ID = re.compile(r"[0-9a-f]{64}")
 CHECK_READ_DATA_SUBSET = "10%"
 # The snapshot layout under an app's source path: the dump and manifest (DB_FOLDER), the audio,
 # and a SQLite app's files volume under its compose volume name.
@@ -138,7 +144,12 @@ def backup(
 
 
 def forget(settings: Settings, app: str, *, pre_apply: bool = False) -> None:
-    """The weekly policy never deletes a pre-apply snapshot; a pre-apply run thins only those."""
+    """The weekly policy never deletes a pre-apply snapshot; a pre-apply run thins only those.
+
+    Either then forgets the app's pre-apply snapshots past PRE_APPLY_MAX_AGE by ID: restic applies
+    no host or tag to an ID, so the listing alone scopes the delete, and it prunes only what the
+    same call forgot. A forget with neither IDs nor a policy is refused, so none runs empty.
+    """
     _restic(
         settings,
         "restic forget",
@@ -148,6 +159,31 @@ def forget(settings: Settings, app: str, *, pre_apply: bool = False) -> None:
             "--prune",
         ],
     )  # fmt: skip
+    if expired := _pre_apply_older_than(settings, app, host.now() - PRE_APPLY_MAX_AGE):
+        _restic(settings, "restic forget", ["forget", *expired, "--prune"])
+
+
+def _pre_apply_older_than(settings: Settings, app: str, bound: datetime) -> list[str]:
+    """The full IDs of the app's pre-apply snapshots of this host taken before the bound."""
+    listing = _restic(
+        settings, "restic snapshots", ["snapshots", "--json", *_scope(app, pre_apply=True)]
+    )
+    return [snapshot_id for snapshot_id, taken in _taken(listing) if taken < bound]
+
+
+def _taken(listing: bytes) -> list[tuple[str, datetime]]:
+    """Each listed snapshot's full ID and the instant it was taken; anything else fails loud."""
+    try:
+        return [_id_and_time(snapshot) for snapshot in json.loads(listing)]
+    except (ValueError, KeyError, TypeError) as error:
+        raise host.UnreadableOutputError("restic snapshots output is unreadable") from error
+
+
+def _id_and_time(snapshot: dict[str, str]) -> tuple[str, datetime]:
+    snapshot_id, taken = snapshot["id"], datetime.fromisoformat(snapshot["time"])
+    if not _FULL_ID.fullmatch(snapshot_id) or taken.utcoffset() is None:
+        raise ValueError("a snapshot without its full ID or an instant")
+    return snapshot_id, taken
 
 
 def _pre_apply_policy() -> list[str]:

@@ -62,10 +62,10 @@ off-site copy is a later slice (architecture.md, gap 19).
 
 - *Data classes.* An app's record in `backup/apps.toml` names its persistent data: the database and the audio or files volume. That is backed up and restore-tested. What the record does not name, such as caches and model weights, is rebuildable and is not backed up; no key marks it.
 - *Online.* No service is stopped: a PostgreSQL app is dumped transactionally, a SQLite app is copied through SQLite's online backup, and volumes are read live. The app keeps running.
-- *One app fails alone.* An app whose volume or database container is missing fails only itself; the others still back up, and a run with any failure prunes nothing.
+- *One app fails alone.* An app whose volume or database container is missing fails only itself; the others still back up and are forgotten, and the repository is checked. The failed app is not forgotten in that run, so a partial snapshot of it never displaces its last good one.
 - *Restore goes to a new folder.* `hal restore --target` refuses a directory that exists; loading it into the live app is a separate step.
 - *0 rows is valid.* The restore test requires rows only where the record says `require_rows = true`.
-- *One retention.* Every app's snapshots follow the same policy, 4 weekly and 3 monthly, and pre-apply snapshots keep their own last 10 (below). There is no per-app retention of backup snapshots; privacy values are app-owned (architecture.md, section 2).
+- *One retention.* Every app's snapshots follow the same policy, 4 weekly and 3 monthly, and pre-apply snapshots keep their own last 10, none older than 90 days (below). There is no per-app retention of backup snapshots; privacy values are app-owned (architecture.md, section 2).
 - *Separate backups.* All secrets are backed up once as their own encrypted off-disk backup with its own password; the data backup has its own. Of the backup credentials only these two passwords sit in the password manager, and a restore after a disk loss brings the secrets back first, then the data. The secrets backup does not exist yet: `~/.secrets` is in no backup today (architecture.md, section 6).
 
 `backup/apps.toml` declares each app as a validated record (compose project, database service, dump kind,
@@ -105,7 +105,7 @@ read by anyone, ever:** losing the key loses every backup, and restic has no rec
 
 | Timer | When | Does |
 |---|---|---|
-| `hal-backup.timer` | Sunday 03:00, `Persistent=true` | dump, count, back up; then `forget --keep-weekly 4 --keep-monthly 3 --keep-tag pre-apply --prune` and `check`, only when every app backed up |
+| `hal-backup.timer` | Sunday 03:00, `Persistent=true` | dump, count, back up; then, for each app that backed up, `forget --keep-weekly 4 --keep-monthly 3 --keep-tag pre-apply --prune` and the forget of its pre-apply snapshots past 90 days; then `check`, whatever another app did |
 | `hal-backup-restore-test.timer` | first Sunday of the month 05:00, `Persistent=true` | restore the last successful backup's snapshot, load and verify it; then `check --read-data-subset=10%` |
 
 A missed run (PC off) runs at the next boot. If Docker or the app's database is not up yet, the backup
@@ -133,7 +133,7 @@ and the password is never read into one; restic's and Docker's own stderr stays 
 
 `hal backup <app>` and `hal restore --test <app>` work on that app alone: its dump, its
 snapshot, its retention and its restore test. On a stand-in repository of a few MiB this took seconds; the structure check
-and the prune (from the 11th pre-apply snapshot on) on the live repository are not measured. The
+and the prune (from the 11th pre-apply snapshot on, or once one is past 90 days) on the live repository are not measured. The
 other apps' entries in the status file stay as they are, and a name `apps.toml` does not declare is refused before anything runs. The one-app
 `hal restore --test` checks the repository's structure but does not read data (`check` without
 `--read-data-subset`); the monthly run keeps that. Without a name both commands do what the timers do.
@@ -147,12 +147,35 @@ just made, so a timer backup in between cannot swap the snapshot under test.
 keeps the last 10 pre-apply snapshots of that app (`forget --keep-last 10`, scoped to both tags),
 without touching the app's other snapshots. The 10 apply per complete tag set: a snapshot with a
 third tag forms another group and keeps its own ten. An app cannot be named `pre-apply`; `apps.toml`
-refuses it. The weekly retention never deletes a `pre-apply`
+refuses it. The weekly policy keeps every `pre-apply`
 snapshot (`--keep-tag pre-apply`). Restore one with `hal restore <app> --snapshot <ID> --target <dir>`.
+
+No pre-apply snapshot stays longer than `PRE_APPLY_MAX_AGE` (`src/hal/backup/restic.py`), 90 days, for
+every app (operator ruling 04.11.2026). Every forget of an app, weekly and pre-apply, first runs its
+policy, then lists the app's pre-apply snapshots of host `hal` (both tags) and forgets by full ID,
+with its own `--prune`, each one taken before the host clock minus 90 days; when none is, no second
+forget runs. The last 10 apply within the bound. Past it, a rollback through that snapshot is lost
+(for Keycloak, an older realm state); the weekly snapshots stay.
+
+The bound is measured on the host clock, and no guard checks that clock: one set far ahead forgets
+every pre-apply snapshot of each app forgotten in that run, irreversibly (the weekly snapshots stay);
+one set far back forgets nothing until it is right. A snapshot taken after the host clock is never
+forgotten.
+
+What the bound does not reach:
+
+- An app whose backups keep failing keeps its snapshots, pre-apply ones included, until it backs up
+  again; `hal check` names it `backup-stale` after 8 days and `hal alarm` mails it.
+- An app that left `apps.toml` keeps its snapshots until the operator removes them; removing them is
+  a deletion that waits for his word.
+- The snapshots an earlier version wrote under its old host name keep their own exit (below).
+- restic's `prune` leaves up to 5 % unused data (`--max-unused`), so a forgotten snapshot's bytes can
+  stay, encrypted, in a pack until a later repack (not measured).
 
 ### What a backup holds, and its limit
 
-Every restic command that selects snapshots (`forget`, `snapshots --json`) is scoped to host `hal`: `forget`
+Every restic command that selects snapshots (`forget`, `snapshots --json`) is scoped to host `hal`, and a
+forget by ID names only what such a listing found: `forget`
 never thins an older snapshot of another host, and `hal restore` and `hal restore --test`
 see only host `hal`, and so does `hal restore --list`. Snapshots that an earlier version wrote under host
 `edge-backup` are invisible to hal and stay in the repository; they are deleted once
@@ -199,7 +222,8 @@ repository it exists only encrypted. In plain text it exists in exactly three pl
 the staging directory during a backup, the restore test's directory during a restore test (both removed
 when the run ends), and the target of `hal restore keycloak --target`, which you delete yourself.
 If Keycloak is off or its database is down, the weekly run waits 10 minutes, reports keycloak as failed
-and still backs up Songmaker. A failed run skips retention and the repository check for every app.
+and still backs up and forgets Songmaker and checks the repository; Keycloak's snapshots stay untouched
+in that run.
 
 ### The restore test
 
@@ -223,6 +247,11 @@ and checks:
 - for an app with audio: the restored audio file count equals the manifest's, and every audio file the
   restored database references (`generations.mp3_path`) exists in the copy with a size above zero.
 
+The throwaway server is named `hal-backup-restore-test-<8 hex>`, the first 8 hex digits of the sha256
+of the home's lock file path, and carries the label `hal-backup.role=restore-test`. A run removes only
+its own home's container of that name and label, before it starts and when it ends, so a run under
+another HOME (a probe's) never removes this home's server; the lock serialises the runs of one home.
+
 The restore test never touches a live database or volume. (The SQLite backup's copy only reads the
 database file, as described above.) Backup and restore test stage their plaintext in
 `~/.cache/edge-backup` and remove it when they end. A run killed outright cannot, so the plaintext stays
@@ -241,9 +270,11 @@ path or file name.
 - `exit_category` is one of `configuration`, `not-ready`, `command-failed`, `verification-failed`,
   `interrupted`, `internal`; `failing_app` is `null` for a failure that belongs to no app.
 - When the backup succeeded but prune or check failed, the apps' backup times have moved on and
-  `state` is `failed`.
+  `state` is `failed`, with `failing_phase` `forget` or `check` and no `failing_app`, also after an
+  app failed: a failed forget or check is the run's verdict, otherwise the first failed app is.
 - An app that fails does not stop the others, and each app's snapshot is recorded right after its own
-  `restic backup` exits 0, so earlier successes stay. A run with any failure prunes nothing. An app
+  `restic backup` exits 0, so earlier successes stay. A failed app is not forgotten in that run, so
+  its recorded snapshot stays. An app
   removed from `apps.toml` keeps its entry; renaming an app makes it a new app.
 - A status file that cannot be read (mode 000, corrupt JSON, an unknown `schema`) is never overwritten:
   backup, restore test and restore fail with one line and exit 3. Past successes are never
@@ -261,8 +292,8 @@ path or file name.
   `last_successful_restore_test` no older than about 5 weeks.
 
 `hal backup` prints a row per app (`✓ <app>  backed up  <snapshot> · <size> · <time>` or `✗ <app>  not backed up  <reason>`;
-a failed app does not stop the others; the size is restic's `total_bytes_processed`, the source size, and the time is the app's whole span from readiness to the status write; a backup summary without the id or the size fails the app), a `repository` row (`pruned  checked · <time>` after forget and check, the time being their span, `not pruned`
-when an app failed) and, on success, `✓ backup done · N apps · <time>`.
+a failed app does not stop the others; the size is restic's `total_bytes_processed`, the source size, and the time is the app's whole span from readiness to the status write; a backup summary without the id or the size fails the app), then `· <app>  not pruned  its backup failed` per failed app, a `repository` row (`✓ repository  pruned  checked · <time>` after forget and check, the time being their span; `✗ repository  not pruned  <reason>`
+when a forget failed, `✗ repository  not checked  <reason>` when the check did; none when every app of the run failed or the repository is unusable) and, on success, `✓ backup done · N apps · <time>`.
 
 `hal restore --test` prints the same way: `✓ <app>  restore proven  <snapshot>` or `✗ <app>  not proven  <reason>`
 per app, `✓ repository  checked` (`✗ repository  not checked  <reason>` when the check failed after an app
@@ -273,7 +304,7 @@ when one app ran, or `error: 1 of N apps not proven` when several did, and `next
 Exit 0: every phase succeeded. Exit 3: a run failed; `error: <app> not backed up · last good backup DD.MM. HH:MM` when one app ran, or
 `error: 1 of N apps not backed up · <app>'s last good backup DD.MM. HH:MM` when several did, with `next: hal backup <app>` after the rows
 (the first failed app's `last_successful_backup` from the status file, in local time and with the year when it is not this one; without one the fact reads `<app> has no good backup recorded`, or `no good backup recorded` when one app ran;
-`--pre-apply --json` keeps `error: <app>: <reason>`), or `error: <reason>` when the run failed before any app
+`--pre-apply --json` keeps `error: <app>: <reason>`), or `error: <reason>` when the run failed before any app or in its forget or check
 (`hal restore --list`, the real `hal restore`, `hal backup --init` and `--unlock` still print `error: hal <verb>: failed: …`). Exit 2: the flags do not fit together (`--pre-apply` without an app, for
 example); nothing ran. Exit 130: Ctrl-C or SIGTERM; `backup` and the restore test record it in the status file as interrupted.
 
