@@ -26,12 +26,18 @@ tool call of that name, as a model that calls a tool absent from the request's `
 and `marker`, which stand in for the values of `expect.json`, `secrets` (keys that
 must not arrive, counted as `secret_hits`) and `request_canary`, whose occurrences in a request the
 log line counts.
+A request with `"stream": true` in mode `answer` or `stream_hold` gets Anthropic's event stream as
+server-sent events, ended by closing the connection: `message_start`, `content_block_start`, one
+`content_block_delta` per text of `texts` (else the marker), `content_block_stop`, `message_delta`
+with the usage and `message_stop`. `stream_hold` writes up to the first delta, then holds as `hold`
+does while the control file says `stream_hold`, logs the same `held` line, and writes the rest.
 The error bodies are Anthropic's own shapes, https://docs.anthropic.com/en/api/errors: 500
 `api_error`, 529 `overloaded_error`, 402 `billing_error`; `low_credit` is the other answer a
 used-up balance gets, as clients report it: 400 `invalid_request_error` saying the credit balance
 is too low.
 """
 
+import contextlib
 import http.server
 import json
 import re
@@ -49,6 +55,10 @@ ANSWER_MODEL = "claude-probe"
 CONTROL = "/fake/control.json"
 HOLD_SECONDS = 120
 HOLD_POLL_SECONDS = 0.2
+STREAM_HOLD = "stream_hold"
+STREAM_MODES = frozenset({"answer", STREAM_HOLD})
+FIRST_DELTA = 3  # message_start, content_block_start and the first delta
+TEXT_BLOCK = {"type": "text", "text": ""}
 ERRORS = {
     400: "invalid_request_error", 402: "billing_error", 500: "api_error", 529: "overloaded_error",
 }  # fmt: skip
@@ -79,12 +89,12 @@ def quoted(steering: dict, body: bytes) -> str:
     return canary if canary.encode() in body else "probe"
 
 
-def wait_for_disconnect(connection: socket.socket, seconds: float) -> str:
-    """Holds until the client closes its side or the control file stops saying `hold`, and says
+def wait_for_disconnect(connection: socket.socket, seconds: float, mode: str = "hold") -> str:
+    """Holds until the client closes its side or the control file stops saying `mode`, and says
     so; gives up after `seconds`."""
     deadline = time.monotonic() + min(seconds, HOLD_SECONDS)
     while time.monotonic() < deadline:
-        if control().get("mode") != "hold":
+        if control().get("mode") != mode:
             return "released"
         readable, _, _ = select.select([connection], [], [], HOLD_POLL_SECONDS)
         if readable:
@@ -133,6 +143,58 @@ def message(expect: dict) -> bytes:
     }).encode()  # fmt: skip
 
 
+def server_sent(kind: str, data: dict) -> bytes:
+    return f"event: {kind}\ndata: {json.dumps({'type': kind, **data})}\n\n".encode()
+
+
+def stream_events(expect: dict) -> list[bytes]:
+    """Anthropic's event stream of an answer: one text delta per steered text."""
+    usage = expect.get("usage", {"input_tokens": 1, "output_tokens": 1})
+    started = {
+        "id": "msg_probe", "type": "message", "role": "assistant", "model": ANSWER_MODEL,
+        "content": [], "stop_reason": None, "stop_sequence": None,
+        "usage": {"input_tokens": usage["input_tokens"], "output_tokens": 0},
+    }  # fmt: skip
+    deltas = [
+        server_sent("content_block_delta", {"index": 0, "delta": {"type": "text_delta", "text": t}})
+        for t in expect.get("texts") or [expect["marker"]]
+    ]  # fmt: skip
+    return [
+        server_sent("message_start", {"message": started}),
+        server_sent("content_block_start", {"index": 0, "content_block": TEXT_BLOCK}),
+        *deltas,
+        server_sent("content_block_stop", {"index": 0}),
+        server_sent("message_delta", {
+            "delta": {"stop_reason": "end_turn", "stop_sequence": None},
+            "usage": {"output_tokens": usage["output_tokens"]},
+        }),
+        server_sent("message_stop", {}),
+    ]  # fmt: skip
+
+
+def asks_for_stream(body: bytes) -> bool:
+    try:
+        document = json.loads(body)
+    except ValueError:
+        return False
+    return isinstance(document, dict) and document.get("stream") is True
+
+
+def stream(request: http.server.BaseHTTPRequestHandler, answer: dict) -> None:
+    """The event stream; the first delta goes out before a `stream_hold` holds the rest."""
+    request.send_response(200)
+    request.send_header("Content-Type", "text/event-stream")
+    request.end_headers()
+    events = stream_events(answer)
+    request.wfile.write(b"".join(events[:FIRST_DELTA]))
+    if answer.get("mode") == STREAM_HOLD:
+        seconds = answer.get("hold_seconds", HOLD_SECONDS)
+        held = wait_for_disconnect(request.connection, seconds, STREAM_HOLD)
+        print(f"held {held}", flush=True)  # noqa: T201 - this in-container program prints its own request log
+    with contextlib.suppress(OSError):  # a client that left gets no rest
+        request.wfile.write(b"".join(events[FIRST_DELTA:]))
+
+
 def handler(role: str, expect: dict) -> type[http.server.BaseHTTPRequestHandler]:
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_POST(self) -> None:
@@ -142,6 +204,9 @@ def handler(role: str, expect: dict) -> type[http.server.BaseHTTPRequestHandler]
                 steering = control()
                 record = provider_record({**expect, **steering}, self, body)
                 print(json.dumps(record), flush=True)  # noqa: T201 - this in-container program prints its own request log
+                if asks_for_stream(body) and steering.get("mode", "answer") in STREAM_MODES:
+                    stream(self, {**expect, **steering})
+                    return
                 status, reply = self.provider_answer(steering, body)
             if status:
                 self.send_response(status)

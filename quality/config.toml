@@ -94,6 +94,11 @@ rule = "test-layout"
 reason = "it tests the agent service's image recipe, its probe and scripts/agent_service_lock.py, outside src/hal, which no module of src/hal mirrors"
 
 [[layout.allow]]
+path = "tests/test_agent_service_api_canary.py"
+rule = "test-layout"
+reason = "it tests agent-service/api_canary.py and its compose one-off agent-canary, outside src/hal, which no module of src/hal mirrors"
+
+[[layout.allow]]
 path = "tests/test_agent_service_live_canary.py"
 rule = "test-layout"
 reason = "it tests agent-service/live_canary.py, outside src/hal, which no module of src/hal mirrors"
@@ -196,7 +201,7 @@ reason = "it tests the litellm-front service of compose.yaml, outside src/hal, w
 [[layout.allow]]
 path = "tests/test_litellm_unit.py"
 rule = "test-layout"
-reason = "it tests the LiteLLM services of compose.yaml, agent-service/litellm/start.sh and agent-service/api_canary.py, outside src/hal, which no module of src/hal mirrors"
+reason = "it tests the LiteLLM services of compose.yaml, agent-service/litellm/start.sh and the fake provider of its probe, outside src/hal, which no module of src/hal mirrors"
 
 [[layout.allow]]
 path = "tests/test_old_names.py"

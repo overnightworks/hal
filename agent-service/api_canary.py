@@ -1,65 +1,37 @@
-"""The API route's canary: one run of a person on the API route, and only verdict lines on stdout.
+"""The canary of the direct route: one completion an app would ask, through the front with the app's
+key, and only verdict lines on stdout.
 
-    python -B /opt/canary/api_canary.py --marker TEXT [--request-marker TEXT] [--cancel]
+    python -I -B /opt/canary/api_canary.py --key-file PATH --model NAME --marker TEXT
 
-Stdin holds the person's token and then the workload's, as smoke.py reads them. It prints
-`answer <status>`, one `event <name>` per frame, `route <word>` for the route `run_started` names,
-`code <code>` for a failed run and `marker yes|no`: whether the text of the answer holds TEXT. It
-never prints a message, a token or a run id. `--request-marker` asks for its text alone, so a
-retention census can look for the request's content and the answer. Exit 0 when the run succeeded
-and the answer held the marker. An exception ends the run with the one line
-`crashed <ExceptionName>` and exit 1: the type's name only, never its text.
-
-With `--cancel` it holds the stream open for smoke.py's hold, then closes it, reads the run's record
-(`GET /runs/{id}`) until it has ended and prints `status <state>`: a client that closes its stream
-sees no terminal frame. A refused or unusable record prints `status other`, and no ended record
-within the polls `status not_ended`. Exit 0 when the ended record's state is `cancelled`.
+It reads the key from PATH and posts one buffered OpenAI chat completion to the front, at the
+address docs/agent-service.md gives apps, with the key as bearer. The body is `model`, one user
+message asking for exactly TEXT, and `user`, a fresh random fingerprint; no other field and no
+`x-litellm-*` or `anthropic-*` header. It prints `answer <status>` and `marker yes|no`: whether the
+first choice's content holds TEXT. Exit 0 only for a 200 whose answer held it. An exception ends
+the run with the one line `crashed <ExceptionName>` and exit 1: the type's name only, never its
+text. It never prints the key, the message or the answer. Standard library only.
 """
 
 import argparse
+import http
 import http.client
+import json
 import re
+import secrets
 import sys
-import time
-from collections.abc import Iterable
+from pathlib import Path
 
-from smoke import (
-    ANSWER_PROMPT,
-    CANCEL_HOLD_SECONDS,
-    SERVICE_HOST,
-    SERVICE_PORT,
-    WORKLOAD_TOKEN_HEADER,
-    Frame,
-    frames,
-    read_run_record,
-    read_tokens,
-    request_body,
-    text_of,
-)
-
-TIMEOUT_SECONDS = 120
-STATUS_POLLS = 60
-STATUS_POLL_SECONDS = 0.5
-CANCELLED = "cancelled"
-NOT_ENDED = "not_ended"
-OTHER = "other"
-REQUEST_PROMPT = "Reply with exactly this text and nothing else:"
-CLOSED_WORD = re.compile(r"[a-z_]{1,40}")
+FRONT_HOST, FRONT_PORT, COMPLETIONS_PATH = "litellm-front", 4000, "/v1/chat/completions"
+TIMEOUT_SECONDS = 300
+PROMPT = "Reply with exactly this text and nothing else:"
+FINGERPRINT_BYTES = 32  # the recipe's form: `fp-` and 64 hex digits
 EXCEPTION_NAME = re.compile(r"[A-Za-z]{1,60}")
 # The value each line of the canary's stdout may carry, by the line's name.
 LINE_VALUES = {
     "answer": re.compile(r"\d{1,3}"),
-    "event": CLOSED_WORD,
-    "route": CLOSED_WORD,
-    "code": CLOSED_WORD,
     "marker": re.compile(r"yes|no"),
-    "status": CLOSED_WORD,
     "crashed": EXCEPTION_NAME,
 }
-
-
-def closed(word: object) -> str:
-    return word if isinstance(word, str) and CLOSED_WORD.fullmatch(word) else OTHER
 
 
 def verdicts(stdout: str, exit_code: int) -> dict[str, str]:
@@ -76,98 +48,56 @@ def verdicts(stdout: str, exit_code: int) -> dict[str, str]:
     return {**found, "exit": str(exit_code), "unknown": str(unknown)}
 
 
-def ended_state(headers: dict[str, str], run_id: object) -> str:
-    """The state of the run's record once it has ended; `other` for a refused or unusable
-    record, NOT_ENDED when no record ended within the polls."""
-    for _ in range(STATUS_POLLS):
-        connection = http.client.HTTPConnection(SERVICE_HOST, SERVICE_PORT, timeout=TIMEOUT_SECONDS)
-        try:
-            status, record = read_run_record(connection, run_id, headers)
-        except ValueError:
-            return OTHER
-        if status != http.HTTPStatus.OK:
-            return OTHER
-        if record.get("ended_at") is not None:
-            return closed(record.get("state"))
-        time.sleep(STATUS_POLL_SECONDS)
-    return NOT_ENDED
-
-
-def cancel_after_start(
-    connection: http.client.HTTPConnection, headers: dict[str, str], run_id: object, out
-) -> int:
-    time.sleep(CANCEL_HOLD_SECONDS)
-    connection.close()
-    state = ended_state(headers, run_id)
-    print(f"status {state}", file=out, flush=True)
-    return 0 if state == CANCELLED else 1
-
-
-def read_answer(
-    answer: Iterable[Frame],
-    connection: http.client.HTTPConnection,
-    headers: dict[str, str],
-    arguments: argparse.Namespace,
-    out,
-) -> int:
-    """The verdict lines of one answer's frames, then the exit code of the run."""
-    seen, ended = False, ""
-    for frame in answer:
-        ended = frame.event
-        print(f"event {closed(frame.event)}", file=out, flush=True)
-        if frame.event == "run_started":
-            print(f"route {closed(frame.data.get('route'))}", file=out, flush=True)
-            if arguments.cancel:
-                return cancel_after_start(connection, headers, frame.data.get("run_id"), out)
-        if frame.event == "failed":
-            print(f"code {closed(frame.data.get('code'))}", file=out, flush=True)
-        if frame.event in {"assistant_text", "succeeded"}:
-            seen = seen or arguments.marker in text_of(frame, "text")
-    print(f"marker {'yes' if seen else 'no'}", file=out, flush=True)
-    return 0 if ended == "succeeded" and seen else 1
-
-
-def crashed_line(failure: Exception) -> str:
+def crashed_line(failure: BaseException) -> str:
     """The one line a crash prints: the type's name only, never its text."""
     name = type(failure).__name__
     return f"crashed {name if EXCEPTION_NAME.fullmatch(name) else 'Exception'}"
 
 
-def main(argv: list[str], stdin=sys.stdin, out=sys.stdout) -> int:
+def request_body(model: str, marker: str) -> bytes:
+    return json.dumps({
+        "model": model,
+        "messages": [{"role": "user", "content": f"{PROMPT} {marker}"}],
+        "user": f"fp-{secrets.token_hex(FINGERPRINT_BYTES)}",
+    }).encode()  # fmt: skip
+
+
+def answer_content(body: bytes) -> object:
+    """The first choice's content, or None for an answer without one."""
     try:
-        return run(argv, stdin, out)
+        return json.loads(body)["choices"][0]["message"]["content"]
+    except ValueError, KeyError, IndexError, TypeError:
+        return None
+
+
+def run(argv: list[str], out) -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--key-file", type=Path, required=True)
+    parser.add_argument("--model", required=True)
+    parser.add_argument("--marker", required=True)
+    arguments = parser.parse_args(argv)
+    key = arguments.key_file.read_text(encoding="utf-8").strip()
+    connection = http.client.HTTPConnection(FRONT_HOST, FRONT_PORT, timeout=TIMEOUT_SECONDS)
+    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {key}"}
+    connection.request(
+        "POST", COMPLETIONS_PATH, request_body(arguments.model, arguments.marker), headers
+    )
+    response = connection.getresponse()
+    content = answer_content(response.read())
+    connection.close()
+    held = response.status == http.HTTPStatus.OK and isinstance(content, str)
+    held = held and arguments.marker in content
+    print(f"answer {response.status}", file=out, flush=True)
+    print(f"marker {'yes' if held else 'no'}", file=out, flush=True)
+    return 0 if held else 1
+
+
+def main(argv: list[str], out=sys.stdout) -> int:
+    try:
+        return run(argv, out)
     except Exception as failure:
         print(crashed_line(failure), file=out)
         return 1
-
-
-def run(argv: list[str], stdin, out) -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--marker", required=True)
-    parser.add_argument("--request-marker", default="")
-    parser.add_argument("--cancel", action="store_true")
-    arguments = parser.parse_args(argv)
-    tokens = read_tokens(stdin)
-    connection = http.client.HTTPConnection(SERVICE_HOST, SERVICE_PORT, timeout=TIMEOUT_SECONDS)
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {tokens.person}",
-        WORKLOAD_TOKEN_HEADER: tokens.workload,
-    }
-    connection.request(
-        "POST",
-        "/runs",
-        request_body(
-            f"{REQUEST_PROMPT} {arguments.request_marker}"
-            if arguments.request_marker
-            else ANSWER_PROMPT
-        ),
-        headers,
-    )
-    response = connection.getresponse()
-    print(f"answer {response.status}", file=out, flush=True)
-    answer = frames(response) if response.status == http.HTTPStatus.OK else ()
-    return read_answer(answer, connection, headers, arguments, out)
 
 
 if __name__ == "__main__":

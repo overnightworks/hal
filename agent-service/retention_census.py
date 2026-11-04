@@ -1,15 +1,16 @@
 """The retention census of a container set (#814, S1c of #299): whether a unique canary is in any
 sink of the containers, on the paths a run exercised.
 
-The host asks `docker` for each container's inspection, its complete mount table and its log. A
+The host asks `docker` for each container's inspection, its complete mount table and its log, and
+for a database target a plain `pg_dump`, searched in memory and never kept. A
 container with Python is searched by `tree_census.py`'s retention mode, which walks each writable
 mount by descriptor and reads the table before any filter. A container without Python has its
 writable points streamed out as a tar archive and searched here. Every writable entry of the table
 is accounted for by exactly one of: a destination of `docker inspect`'s Mounts or Tmpfs, one of
 Docker's own mounts (DOCKER_OWN), a path `docker inspect` lists as masked, or a filesystem that
 holds no content (`tree_census.EXCLUDED_FILESYSTEMS`). Anything else, any skip the census did not
-resolve and any sink that could not be read completely is a problem; the verdict is never "clean"
-over a sink it did not examine.
+resolve and any sink that could not be read completely, a failed or unreadable dump included, is a
+problem; the verdict is never "clean" over a sink it did not examine.
 
 Only the verdict leaves this module: labels, container names, mount points and closed phrases, never
 a canary, a log line or a file name from a container.
@@ -19,6 +20,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import subprocess
 import tarfile
 from collections.abc import Callable, Mapping, Sequence
@@ -40,9 +42,12 @@ MOUNT_TABLE = "/proc/1/mountinfo"
 DOCKER_SECONDS = 300
 FRONT, GATEWAY, LITELLM, AGENT_SERVICE = "litellm-front", "agent-egress", "litellm", "agent-service"
 DATABASE = "litellm-db"
-# The compose services of the API route, each with whether its container holds Python. LiteLLM
-# cannot run without its database, so the database is searched with the rest.
-ROUTE_SERVICES = {FRONT: False, GATEWAY: False, LITELLM: True, AGENT_SERVICE: True, DATABASE: False}
+# The compose services of the direct route an app request takes, each with whether its container
+# holds Python. LiteLLM cannot run without its database, so the database is searched with the rest.
+ROUTE_SERVICES = {FRONT: False, GATEWAY: False, LITELLM: True, DATABASE: False}
+COPY_HEADER = re.compile(r'^COPY public\."?(\w+)"? ')
+COPY_END = "\\."
+DUMP = "dump"
 
 Entry = tuple[str, str, bool]  # mount point, filesystem type, writable
 
@@ -64,9 +69,34 @@ def run_docker(command: Sequence[str], stdin: bytes | None = None) -> Completed:
 
 
 @dataclass(frozen=True)
+class DatabaseLogin:
+    """The user and database a `pg_dump` of a PostgreSQL container logs in as."""
+
+    user: str
+    database: str
+
+    @classmethod
+    def of(cls, service: Mapping) -> DatabaseLogin:
+        """The login a resolved compose service's environment gives its database."""
+        environment = service["environment"]
+        return cls(environment["POSTGRES_USER"], environment["POSTGRES_DB"])
+
+    def options(self) -> list[str]:
+        return [f"--username={self.user}", f"--dbname={self.database}"]
+
+
+@dataclass(frozen=True)
 class Target:
     name: str
     has_python: bool
+    login: DatabaseLogin | None = None  # a database whose dump is one more sink
+
+
+def route_target(service: str, name: str, services: Mapping[str, Mapping]) -> Target:
+    """The census target of a route service's container: the database comes with the login the
+    resolved compose services give it, so that its dump is searched."""
+    login = DatabaseLogin.of(services[DATABASE]) if service == DATABASE else None
+    return Target(name, ROUTE_SERVICES[service], login)
 
 
 @dataclass
@@ -155,6 +185,22 @@ def contains(data: bytes, tokens: Mapping[str, str]) -> set[str]:
     return {label for label, text in tokens.items() if text.encode() in data}
 
 
+def dump_sinks(dump: str, tokens: Mapping[str, str]) -> dict[str, set[str]]:
+    """Each label whose canary a plain-format dump holds, with where: `dump <table>` for a row of a
+    table's COPY block, `dump` for any other line."""
+    found: dict[str, set[str]] = {}
+    table = None
+    for line in dump.splitlines():
+        if header := COPY_HEADER.match(line):
+            table = header[1]
+        elif line == COPY_END:
+            table = None
+        for label, text in tokens.items():
+            if text in line:
+                found.setdefault(label, set()).add(f"{DUMP} {table}" if table else DUMP)
+    return found
+
+
 class Census:
     def __init__(self, run: Run, key: bytes) -> None:
         self.run = run
@@ -189,6 +235,8 @@ class Census:
                 elif point not in inside[1]:
                     sweep.problem(f"{name} {point}", "the census did not walk the mount")
         self._log(name, tokens, sweep)
+        if target.login is not None:
+            self._dump(name, target.login, tokens, sweep)
 
     def _inspection(self, name: str) -> dict | None:
         result = self.run(["docker", "inspect", name], None)
@@ -275,6 +323,25 @@ class Census:
             sweep.problem(name, "the log could not be read")
             return
         sweep.hit(contains(result.stdout + result.stderr, tokens), f"{name} log")
+
+    def _dump(
+        self, name: str, login: DatabaseLogin, tokens: Mapping[str, str], sweep: Sweep
+    ) -> None:
+        """The plain dump of the database, searched here; no text of it leaves this method."""
+        sink = f"{name} {DUMP}"
+        result = self.run(["docker", "exec", name, "pg_dump", *login.options()], None)
+        if result.returncode != 0:
+            sweep.problem(sink, "the dump failed")
+            return
+        try:
+            dump = result.stdout.decode()
+        except UnicodeDecodeError:
+            sweep.problem(sink, "the dump could not be read")
+            return
+        sweep.inventory[name] = (*sweep.inventory.get(name, ()), DUMP)
+        for label, sinks in dump_sinks(dump, tokens).items():
+            for where in sorted(sinks):
+                sweep.hit({label}, f"{name} {where}")
 
 
 def _last_line(result: Completed) -> dict | None:
