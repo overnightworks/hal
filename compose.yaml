@@ -475,7 +475,7 @@ services:
   # agent-egress, the provider. A change of its files reaches it only through a recreate. Not
   # started by any unit yet.
   litellm:
-    image: ghcr.io/berriai/litellm:v1.106.6@sha256:37e2dafb088a7723beb998590682957386dfc83ffea1848486f8e0e5cfac0b06
+    image: ghcr.io/berriai/litellm:v1.106.7@sha256:be24d7da11f4063ca23fbff6689bac5ded14fe4fc645e07f36588636969f1c27
     profiles: [litellm]
     user: "1000:1000"
     init: true
