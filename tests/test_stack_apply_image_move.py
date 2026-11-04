@@ -28,8 +28,7 @@ from support.stack_plan_rows import find_row, plain
 
 from hal import cli
 from hal.grammar import ExitCode
-from hal.stack import api_limits, apply, compose, litellm_keys
-from hal.stack import cli as stack_cli
+from hal.stack import apply, compose, litellm_keys
 from hal.stack.external import cli as external_cli
 from hal.stack.plan_rows import KeysEvent, PlanEvent
 from hal.stack.realm.reconcile import KEYCLOAK, REALM_UNIT
