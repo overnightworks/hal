@@ -36,7 +36,6 @@ sys.path[:0] = [str(Path(__file__).resolve().parent), str(REPO / "probe"), str(R
 
 import edge_copy  # noqa: E402
 from edge_copy import HAL_DECLINED, HAL_FAILURE, HAL_OK, HAL_REFUSED, expect, publish  # noqa: E402
-from scratch_secrets import private_folder, write_new  # noqa: E402
 
 from hal.output import write_line  # noqa: E402
 from hal.stack import catalog, core, litellm_keys  # noqa: E402
@@ -185,10 +184,16 @@ class Probe:
             time.sleep(3)
 
     def write_secret(self, relative: Path, value: str) -> None:
+        """A new file at `relative`, as `hal setup` writes one: 0644 in 0700 folders."""
         path = self.home / relative
-        private_folder(self.home, relative.parent)
+        folder = self.home
+        for part in relative.parent.parts:
+            folder /= part
+            folder.mkdir(mode=0o700, exist_ok=True)
         path.unlink(missing_ok=True)
-        write_new(path, (value + "\n").encode(), 0o644)
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+        with os.fdopen(descriptor, "w") as file:
+            file.write(value + "\n")
         self.files[relative] = value
 
     def edit_compose(self, old: str, new: str, message: str) -> None:
@@ -255,6 +260,7 @@ class Probe:
         )
 
     def teardown(self) -> None:
+        started = time.monotonic()
         stray = self.run(
             ["docker", "ps", "-aq", "--filter", f"label={LABEL}"], check=False
         ).stdout.split()
@@ -270,7 +276,7 @@ class Probe:
         expect(not (left or volumes), f"the teardown left {left} {volumes}")
         self.guard.expect_clean_teardown()
         write_line(
-            f"teardown: project {PROJECT} removed; "
+            f"teardown: project {PROJECT} removed in {time.monotonic() - started:.0f} s; "
             + edge_copy.expect_live_project_unchanged(self.live_before, REPO)
         )
 
@@ -324,10 +330,9 @@ class Probe:
         rows = (SWITCH_ON, f"~ {FRONT} starts later", STARTS_NOW, "aborted, nothing changed")
         expect(all(row in output for row in rows), f"U2: {output[-400:]}")
         expect((self.running(), created) == (set(), 0), "U2: something started")
-        self.hold(
-            "U2",
-            "the switch-on, the front's start and `keys later` rows; aborted, exit 1, nothing runs",
-        )
+        first = min(output.index(SWITCH_ON), output.index(f"~ {FRONT}"))
+        plan = output[first : output.index("Type yes")]
+        self.hold("U2", f"{plan}; aborted, exit 1, nothing runs")
 
     def cell_u3(self) -> None:
         output, created = self.apply("U3", HAL_OK)
