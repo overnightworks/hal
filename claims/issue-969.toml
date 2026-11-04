@@ -1,0 +1,8 @@
+claim_id = "ae928a00f8984b9c9ba52448c01c0b8b"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "470f6d54f1a742208fce779033982a5e1296a0d4"
+branch = "claude/issue-969-backup-retention-bound"
+scope = ["docs/architecture.md", "docs/backup.md", "docs/design/hal-output.html", "docs/keycloak.md", "probe/backup/retention.py", "sonar-project.properties", "src/hal/backup/docker.py", "src/hal/backup/restic.py", "src/hal/backup/runner.py", "tests/support/backup_support.py", "tests/test_backup_restore_server.py", "tests/test_backup_retention.py", "tests/test_backup_runner.py", "tests/test_hal_backup.py", "tests/test_hal_log_events.py"]
+opened_commit = "ba0c0282e1a077bb328b4e2da5bb2156f029e67f"
+whole_reason = "The backup's retention and its throwaway server, held per app and per home: a bound the privacy text can state, one failure that holds only itself, and runs of other homes that cannot touch each other."
