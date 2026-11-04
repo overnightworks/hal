@@ -40,6 +40,7 @@ from support.stack_apply_fakes import (
 from support.stack_plan_rows import detail_lines, find_row, plain, row_at
 
 from hal.stack import appkit_step, apply
+from hal.stack.legal_section import MAXIMUM_BYTES
 from hal.stack.legal_step import RECORD_FILE
 from hal.stack.plan_rows import LegalEvent
 from hal.stack.result_rows import ResultEvent
@@ -367,16 +368,16 @@ def link_to_the_agent_service(text: bytes) -> bytes:
 
 
 @pytest.mark.parametrize(
-    ("path", "change", "line"),
+    ("path", "change", "fragments"),
     [
-        (AGENT, add_image, f"{AGENT}: line 2: <img> is not allowed"),
-        (AGENT, grow_beyond_the_limit, f"{AGENT}: is 7"),
-        (AGENT, write_a_non_breaking_space, f"{AGENT}: line 2: not in canonical form"),
-        (PRIVACY, link_to_a_missing_id, f"{PRIVACY}: line 2: link to #nirgends"),
+        (AGENT, add_image, (f"{AGENT}: line 2: <img> is not allowed",)),
+        (AGENT, grow_beyond_the_limit, (f"{AGENT}: is ", f"over the {MAXIMUM_BYTES} byte limit")),
+        (AGENT, write_a_non_breaking_space, (f"{AGENT}: line 2: not in canonical form",)),
+        (PRIVACY, link_to_a_missing_id, (f"{PRIVACY}: line 2: link to #nirgends",)),
     ],
 )
 def test_a_refused_section_stops_the_run_before_the_question_and_writes_nothing(
-    world, path, change, line
+    world, path, change, fragments
 ):
     """L11."""
     world.edit(path, change)
@@ -384,7 +385,8 @@ def test_a_refused_section_stops_the_run_before_the_question_and_writes_nothing(
     exit_code, out, err = world.switch()
 
     assert exit_code == 2
-    assert f"cannot plan, legal: {line}" in err
+    assert "cannot plan, legal: " in err
+    assert all(fragment in err for fragment in fragments)
     assert "Type yes" not in plain(out)
     assert world.built_names() == [".gitkeep"]
 
