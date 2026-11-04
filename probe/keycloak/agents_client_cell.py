@@ -348,19 +348,42 @@ class AgentsClientCell:
             f"the memberships of the seeded member changed: {self.admin.group_paths(keeper.id)}",
         )
         self.probe.held("D3", f"a member of {memberships} keeps them through that apply")
+        refreshed = {}
         for client, token in refresh_tokens.items():
             answers = [self.refresh(client, token), self.refresh(client, token)]
             with ThreadPoolExecutor(max_workers=2) as pool:
                 answers += [
                     f.result() for f in [pool.submit(self.refresh, client, token) for _ in "ab"]
                 ]
-            for answer in answers:
+            refreshed[client] = [
                 self.probe.tokens_from(f"agents {client.client_id} refresh", answer)
+                for answer in answers
+            ]
             self.probe.held(
                 "D1",
                 f"{client.client_id}: a session signed in before the apply refreshes twice in turn "
                 f"and twice at once with one refresh token: {[a.status for a in answers]}",
             )
+        self.refreshed_id_tokens_hold_no_nonce(refreshed)
+
+    def refreshed_id_tokens_hold_no_nonce(
+        self, refreshed: dict[AppClient, list[dict[str, Any]]]
+    ) -> None:
+        """webauth's group check refuses a refreshed ID token that has a `nonce` key, so a Keycloak
+        that adds one fails the probe instead of being recorded as a version's answer."""
+        for client, answers in refreshed.items():
+            for tokens in answers:
+                self.expect("id_token" in tokens, f"{client.client_id}: a refresh sent no id_token")
+                self.expect(
+                    "nonce" not in token_claims(tokens["id_token"]),
+                    f"{client.client_id}: a refreshed ID token carries a nonce key",
+                )
+        count = sum(len(answers) for answers in refreshed.values())
+        self.probe.held(
+            "N1",
+            f"{sorted(c.client_id for c in refreshed)}: none of the {count} refreshed ID tokens "
+            "carries a nonce key, though each session signed in with one",
+        )
 
     # --- B and A -------------------------------------------------------------------------------
 
