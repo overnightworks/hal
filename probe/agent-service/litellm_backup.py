@@ -100,6 +100,7 @@ KEYS_TABLE = "LiteLLM_VerificationToken"
 BLOCKING_VIEW = "probe_l2_keys"
 LIVE_SECONDS = 120
 QUIET_SECONDS = 3
+QUESTION = "Type yes"  # the start of hal's question, which the load waits to be answered
 INTERRUPT = b"\x03"  # the pseudo-terminal's interrupt character, Ctrl-C
 
 
@@ -123,8 +124,14 @@ class LiveRun:
             start_new_session=True, preexec_fn=_take_terminal, close_fds=True,
         )  # fmt: skip
         os.close(secondary)
-        self.primary = primary
+        self.primary: int | None = primary
         self.printed = b""
+
+    def __enter__(self) -> LiveRun:
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.close()
 
     @property
     def text(self) -> str:
@@ -151,8 +158,9 @@ class LiveRun:
     def quiet_for(self, seconds: float) -> str:
         """What hal printed in the next `seconds`."""
         before, deadline = len(self.printed), time.monotonic() + seconds
-        while time.monotonic() < deadline and self.read(deadline - time.monotonic()):
-            pass
+        while time.monotonic() < deadline:
+            if not self.read(deadline - time.monotonic()):
+                break
         return self.printed[before:].decode(errors="replace")
 
     def type(self, typed: bytes) -> None:
@@ -163,13 +171,18 @@ class LiveRun:
         while self.read(1):
             expect(time.monotonic() < deadline, f"hal ran past {seconds} s")
         code = self.process.wait(timeout=HAL_SECONDS)
-        os.close(self.primary)
+        self.close()
         return code, self.text
 
-    def kill(self) -> None:
-        self.process.kill()
+    def close(self) -> None:
+        """Ends hal by its pid if it still runs, waits for it and closes the terminal; the
+        client of a load it spawned has a session of its own and runs to its end."""
+        if self.process.poll() is None:
+            self.process.kill()
         self.process.wait(timeout=HAL_SECONDS)
-        os.close(self.primary)
+        if self.primary is not None:
+            os.close(self.primary)
+            self.primary = None
 
 
 class Stall:
@@ -181,19 +194,37 @@ class Stall:
             argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             text=True, env=environment,
         )  # fmt: skip
-        self.process.stdin.write(
-            f"BEGIN;\nLOCK TABLE \"{KEYS_TABLE}\" IN ACCESS SHARE MODE;\nSELECT 'stalled';\n"
-        )
-        self.process.stdin.flush()
-        for line in self.process.stdout:
-            if line.strip() == "stalled":
-                return
-        raise ProbeFailed(f"the stall's session ended with {self.process.wait()}")
+        try:
+            self.process.stdin.write(
+                f"BEGIN;\nLOCK TABLE \"{KEYS_TABLE}\" IN ACCESS SHARE MODE;\nSELECT 'stalled';\n"
+            )
+            self.process.stdin.flush()
+            for line in self.process.stdout:
+                if line.strip() == "stalled":
+                    return
+            raise ProbeFailed(f"the stall's session ended with {self.process.wait()}")
+        except BaseException:
+            self.close()
+            raise
+
+    def __enter__(self) -> Stall:
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.close()
 
     def end(self) -> None:
         self.process.stdin.write("COMMIT;\n")
         self.process.stdin.close()
         self.process.wait(timeout=HAL_SECONDS)
+
+    def close(self) -> None:
+        """Ends the session by its pid if it still runs, waits for it and closes its pipes."""
+        if self.process.poll() is None:
+            self.process.kill()
+        self.process.wait(timeout=HAL_SECONDS)
+        self.process.stdin.close()
+        self.process.stdout.close()
 
 
 def toml_table(name: str, record: dict) -> str:
@@ -299,10 +330,12 @@ class BackupProbe(KeysProbe, AdmissionProbe):
             ["docker", "inspect", "--format", "{{.State.Status}}", found]
         ).stdout.strip()
 
-    def started_at(self) -> dict[str, str]:
-        found = self.compose("ps", "--all", "--quiet").stdout.split()
+    def started_at(self, *services: str) -> dict[str, str]:
+        """Each container's start moment by its id: of the named services, else of the project."""
+        found = self.compose("ps", "--all", "--quiet", *services).stdout.split()
         lines = self.run(["docker", "inspect", "--format", "{{.Id}} {{.State.StartedAt}}", *found])
-        return dict(line.split(" ", 1) for line in lines.stdout.splitlines())
+        pairs = (line.split(" ", 1) for line in lines.stdout.splitlines())
+        return {container: moment for container, moment in pairs}
 
     def stop_app(self) -> None:
         """The probe's own stop of LiteLLM and its front; `hal stop` would act on the live
@@ -349,10 +382,10 @@ class BackupProbe(KeysProbe, AdmissionProbe):
     def live_answered(self, cell: str, typed: bytes, wanted: int) -> str:
         """A live run answered `typed`, its exit `wanted`; its output, which holds no secret,
         key hash or P."""
-        run = self.live_run()
-        run.read_until("Type yes")
-        run.type(typed)
-        code, output = run.finish()
+        with self.live_run() as run:
+            run.read_until(QUESTION)
+            run.type(typed)
+            code, output = run.finish()
         self.expect_no_leak(cell, output)
         expect(code == wanted, f"{cell}: exit {code}, wanted {wanted}: {output.strip()[-300:]!r}")
         return output
@@ -534,8 +567,8 @@ class BackupProbe(KeysProbe, AdmissionProbe):
     def cell_l0(self) -> None:
         self.stop_app()
         digest, started = self.database_digest(), self.started_at()
-        run = self.live_run()
-        code, output = run.finish()
+        with self.live_run() as run:
+            code, output = run.finish()
         refusal = f"stop it first: {command(Verb.STOP, APP)}"
         expect(code == ExitCode.REFUSED and refusal in output, f"L0: exit {code}: {output!r}")
         expect(self.started_at() == started, "L0: a container's StartedAt changed")
@@ -600,17 +633,18 @@ class BackupProbe(KeysProbe, AdmissionProbe):
 
     def cell_l5(self) -> None:
         self.changed_digest("L5")
-        stall = Stall(self.database_argv(), self.environment)
-        killed = self.live_run()
-        killed.read_until("Type yes")
-        killed.type(b"yes\n")
-        self.wait_until_stalled("L5")
-        killed.kill()
-        left = self.staging()
-        expect(len(left) == 1, f"L5: {len(left)} staging directories after the kill")
-        second = self.live_answered("L5", b"yes\n", ExitCode.REFUSED)
-        expect("a load is still running" in second, f"L5: {second.strip()[-300:]!r}")
-        stall.end()
+        litellm_started = self.started_at(LITELLM)
+        with Stall(self.database_argv(), self.environment) as stall:
+            with self.live_run() as killed:
+                killed.read_until(QUESTION)
+                killed.type(b"yes\n")
+                self.wait_until_stalled("L5")
+                killed.close()
+            left = self.staging()
+            expect(len(left) == 1, f"L5: {len(left)} staging directories after the kill")
+            second = self.live_answered("L5", b"yes\n", ExitCode.REFUSED)
+            expect("a load is still running" in second, f"L5: {second.strip()[-300:]!r}")
+            stall.end()
         self.wait_for("L5", "no pg_restore session", lambda: not self.restore_sessions())
         expect(self.database_digest() == self.digest_b1, "L5: the killed run's load is not in")
         self.changed_digest("L5")
@@ -618,30 +652,30 @@ class BackupProbe(KeysProbe, AdmissionProbe):
         expect(self.database_digest() == self.digest_b1, "L5: the third run did not load")
         expect(not left & self.staging(), "L5: the killed run's directory is still there")
         expect(self.state_of(LITELLM) == "exited", "L5: litellm runs")
+        expect(self.started_at(LITELLM) == litellm_started, "L5: litellm was started")
         self.hold("L5", "the killed run's load ran to its own end (D equals D at B1); the second "
                   "run refused `a load is still running`, exit 4; the third loaded, exit 0, D "
                   "equals D at B1; the killed run's directory gone; litellm stopped")  # fmt: skip
 
     def cell_l6(self) -> None:
         changed = self.changed_digest("L6")
-        control = self.live_run()
-        control.read_until("Type yes")
-        control.type(INTERRUPT)
-        code, output = control.finish()
+        with self.live_run() as control:
+            control.read_until(QUESTION)
+            control.type(INTERRUPT)
+            code, output = control.finish()
         expect(code == ExitCode.INTERRUPTED and "interrupted · nothing loaded" in output,
                f"L6: control exit {code}: {output.strip()[-300:]!r}")  # fmt: skip
         expect(self.database_digest() == changed, "L6: the control changed D")
-        stall = Stall(self.database_argv(), self.environment)
-        run = self.live_run()
-        run.read_until("Type yes")
-        run.type(b"yes\n")
-        self.wait_until_stalled("L6")
-        run.type(INTERRUPT)
-        time.sleep(1)
-        run.process.send_signal(signal.SIGTERM)
-        printed = run.quiet_for(QUIET_SECONDS)
-        stall.end()
-        code, output = run.finish()
+        with Stall(self.database_argv(), self.environment) as stall, self.live_run() as run:
+            run.read_until(QUESTION)
+            run.type(b"yes\n")
+            self.wait_until_stalled("L6")
+            run.type(INTERRUPT)
+            time.sleep(1)
+            run.process.send_signal(signal.SIGTERM)
+            printed = run.quiet_for(QUIET_SECONDS)
+            stall.end()
+            code, output = run.finish()
         self.expect_no_leak("L6", output)
         expect(printed == "", f"L6: hal printed {printed!r} during the load")
         expect(code == ExitCode.OK and "✓ litellm" in output and "loaded" in output,

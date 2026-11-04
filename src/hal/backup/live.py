@@ -41,6 +41,15 @@ class Guards:
     at_terminal: bool
 
 
+@dataclass
+class _Client:
+    """Whether the step spawned the client, and the exit it decided once it had: the one fact
+    that tells an interrupt that loaded nothing from one that came after the load."""
+
+    spawned: bool = False
+    exit: StepExit | None = None
+
+
 @dataclass(frozen=True)
 class _Load:
     app: App
@@ -52,22 +61,26 @@ class _Load:
 
 
 def restore_live(settings: Settings, arguments: argparse.Namespace, guards: Guards) -> StepExit:
-    apps = apps_of(arguments.apps)
-    app = runner.declared_app(apps, arguments.app)
-    database = _database_only(app)
-    container = _resolved(lambda: docker.only_database_container(app, database))
-    if not guards.at_terminal:
-        write_error("restore --live asks yes at a terminal · nothing changed")
-        return StepExit.REFUSED
-    staging = ExitStack()
+    client = _Client()
     try:
-        with staging:
+        with ExitStack() as staging:
+            apps = apps_of(arguments.apps)
+            app = runner.declared_app(apps, arguments.app)
+            database = _database_only(app)
+            container = _resolved(lambda: docker.only_database_container(app, database))
+            if not guards.at_terminal:
+                write_error("restore --live asks yes at a terminal · nothing changed")
+                return StepExit.REFUSED
             load = _staged(settings, apps, app, database, container, arguments.snapshot, staging)
             if isinstance(load, StepExit):
                 return load
-            return _held(load, guards, staging)
+            return _held(load, guards, staging, client)
     except KeyboardInterrupt as interrupt:
-        raise Interrupted(app.name) from interrupt
+        if not client.spawned:
+            raise Interrupted(arguments.app) from interrupt
+        if client.exit is None:
+            raise
+        return client.exit
 
 
 def _database_only(app: App) -> PostgresDatabase:
@@ -120,25 +133,18 @@ def _staged(
     return _Load(app, database, container, dump, snapshot, shown)
 
 
-def _held(load: _Load, guards: Guards, staging: ExitStack) -> StepExit:
-    """The re-check of the switch, then the hold, and only inside it the client. The exit is
-    decided once the client was spawned, so a `KeyboardInterrupt` with no exit decided came at
-    the hold's entry and rises; one at its release leaves the decided exit."""
+def _held(load: _Load, guards: Guards, staging: ExitStack, client: _Client) -> StepExit:
+    """The re-check of the switch, then the hold, and only inside it the client."""
     if not guards.switch_unchanged():
         write_error(f"{load.app.name}'s switch changed · nothing loaded")
         return StepExit.REFUSED
-    decided: StepExit | None = None
-    try:
-        with guards.hold():
-            decided = _load(load, staging)
-    except KeyboardInterrupt:
-        if decided is None:
-            raise
-    return decided
+    with guards.hold():
+        return _load(load, staging, client)
 
 
-def _load(load: _Load, staging: ExitStack) -> StepExit:
-    """Spawns the client, prints the outcome, removes the plaintext, then decides the exit."""
+def _load(load: _Load, staging: ExitStack, client: _Client) -> StepExit:
+    """Spawns the client, prints the outcome and decides the exit, then removes the plaintext."""
+    client.spawned = True
     try:
         cause = _cause(docker.load_live(load.container, load.database, load.dump))
     except host.HostError as error:
@@ -152,8 +158,9 @@ def _load(load: _Load, staging: ExitStack) -> StepExit:
             f"{app} load failed · {cause} · a rerun loads the snapshot whole",
             command(Verb.RESTORE, app, "--live", "--snapshot", short),
         )
+    client.exit = StepExit.OK if cause is None else StepExit.FAILED
     staging.close()
-    return StepExit.OK if cause is None else StepExit.FAILED
+    return client.exit
 
 
 def _cause(code: int | None) -> str | None:

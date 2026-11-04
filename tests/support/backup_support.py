@@ -33,6 +33,7 @@ from hal.backup.docker import (
 from hal.backup.settings import RESTIC_HOSTNAME
 
 CANARY_PASSWORD = "canary-7f3e-never-print-me"
+LIVE_ROW_VALUE_CANARY = "row-value-canary-2b9d-never-print-me"
 DUMP = b"PGDMP custom archive"
 AUDIO = {"u1/one.mp3": b"ID3 one", "u1/two.mp3": b"ID3 two", "u2/cover.png": b"PNG"}
 SONGMAKER_CONTAINER = "c0ffee"
@@ -397,8 +398,11 @@ class Machine:
     def _session_count(self, argv, **_) -> bytes:
         return f"{self.restore_sessions}\n".encode()
 
-    def _live_load(self, argv, *, stdin, **_) -> bytes:
-        """The shell around pg_restore: it prints pg_restore's code as its last line."""
+    def _live_load(self, argv, *, stdin, discard_stderr, **_) -> bytes:
+        """The shell around pg_restore: it prints pg_restore's code as its last line, and its
+        diagnostics on stderr quote a row value unless the caller discards them."""
+        if not discard_stderr:
+            sys.stderr.write(f"{LIVE_ROW_VALUE_CANARY}\n")
         assert argv[argv.index("sh") - 1] not in self.stopped_containers, (
             "a load into a stopped database"
         )

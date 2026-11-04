@@ -5,22 +5,27 @@ outcome table. `docker compose config` answers the checkout's compose.yaml as it
 import dataclasses
 import os
 import signal
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
 import pytest
 import yaml
-from support.backup_support import DUMP, declare_apps, declare_shipped_apps
+from support.backup_support import (
+    DUMP,
+    LIVE_ROW_VALUE_CANARY,
+    declare_apps,
+    declare_shipped_apps,
+)
 from support.terminal_support import type_at_prompt
 
 from hal import backup_commands
-from hal.backup import host
+from hal.backup import host, runner
 from hal.backup import live as live_step
 from hal.backup.docker import LIVE_LOAD_LABEL, SESSION_COUNT_LABEL
 from hal.backup.runner import RUN_MARK_SUFFIX, STAGING_PREFIX, StepFailed
 from hal.backup.settings import Settings
 from hal.backup.status import ExitCategory
-from hal.stack import compose, terminal, unit_plans
+from hal.stack import compose, switches, terminal, unit_plans
 
 APP = "litellm"
 SERVICE = "litellm-db"
@@ -122,6 +127,34 @@ def test_a_unit_that_is_on_is_refused_before_anything_runs(live, machine, home):
         [f"error: stop it first: hal stop {APP}"],
     )
     assert machine.calls[calls:] == []
+
+
+def test_a_unit_that_is_on_is_refused_before_the_host_lock_is_taken(live, monkeypatch, home):
+    (home / ".local/state/edge/stopped" / APP).unlink()
+    locked = []
+    real_lock = host.exclusive_lock
+
+    @contextmanager
+    def watched(path):
+        locked.append(path)
+        with real_lock(path):
+            yield
+
+    monkeypatch.setattr(host, "exclusive_lock", watched)
+
+    assert live().exit_code == 4
+    assert locked == []
+
+
+def test_a_guard_that_cannot_read_fails_with_its_error_as_the_line(live, monkeypatch):
+    def unreadable(engine, repository):
+        raise compose.ComposeError("the fleet cannot be read")
+
+    monkeypatch.setattr(unit_plans, "read_fleet", unreadable)
+
+    outcome = live()
+
+    assert (outcome.exit_code, outcome.err) == (3, "error: the fleet cannot be read\n")
 
 
 def test_a_disabled_unit_is_refused_before_anything_runs(live, machine, monkeypatch):
@@ -263,6 +296,18 @@ def test_ctrl_c_at_the_question_loads_nothing(live, machine, monkeypatch, home):
     assert list(work_directory(home).iterdir()) == []
 
 
+def test_a_snapshot_without_a_dump_is_refused_before_the_question(live, machine):
+    machine.snapshots[-1]["db"] = {}
+
+    outcome = live()
+
+    assert (outcome.exit_code, outcome.err.splitlines()) == (
+        3,
+        [f"error: {APP}: the snapshot holds no database dump"],
+    )
+    assert not live_loads_started(machine)
+
+
 def test_a_load_still_running_is_refused(live, machine):
     machine.restore_sessions = 1
 
@@ -282,6 +327,23 @@ def test_a_switch_changed_after_the_guard_is_refused(live, machine, monkeypatch,
         switch_off(home)
 
     type_at_prompt(monkeypatch, "yes", while_waiting=stop_again)
+
+    outcome = live()
+
+    assert (outcome.exit_code, outcome.err.splitlines()) == (
+        4,
+        [f"error: {APP}'s switch changed · nothing loaded"],
+    )
+    assert not live_loads_started(machine)
+
+
+def test_a_switch_that_cannot_be_read_at_the_recheck_is_refused_as_changed(
+    live, machine, monkeypatch
+):
+    def unreadable(self, unit, read):
+        raise switches.SwitchError("the switch cannot be read")
+
+    monkeypatch.setattr(switches.Switches, "changed", unreadable)
 
     outcome = live()
 
@@ -414,6 +476,92 @@ def test_an_interrupt_at_the_host_lock_claims_nothing_or_keeps_the_outcome(
     outcome = live()
 
     assert (outcome.exit_code, outcome.err.splitlines()) == (exit_code, lines)
+
+
+@pytest.mark.parametrize("where", ["after the step returned", "at the exit of the staging"])
+def test_an_interrupt_after_the_client_was_spawned_never_says_nothing_loaded(
+    live, machine, monkeypatch, where
+):
+    if where == "after the step returned":
+        real_held = live_step._held
+
+        def held_then_interrupted(*arguments):
+            real_held(*arguments)
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(live_step, "_held", held_then_interrupted)
+    else:
+
+        class InterruptedAtExit(ExitStack):
+            def __exit__(self, *exception):
+                super().__exit__(*exception)
+                raise KeyboardInterrupt
+
+        monkeypatch.setattr(live_step, "ExitStack", InterruptedAtExit)
+
+    outcome = live()
+
+    assert f"✓ {APP} loaded" in squeezed(outcome.out)
+    assert "nothing loaded" not in outcome.err
+    assert (outcome.exit_code, outcome.err) == (0, "")
+
+
+def test_an_interrupt_in_the_client_itself_is_plain_and_never_says_nothing_loaded(
+    live, machine, monkeypatch
+):
+    def interrupted(*_):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(live_step.docker, "load_live", interrupted)
+
+    outcome = live()
+
+    assert (outcome.exit_code, outcome.err.splitlines()) == (130, ["error: interrupted"])
+
+
+@pytest.mark.parametrize("code", [0, 1], ids=["loaded", "failed load"])
+def test_a_signal_during_the_removal_of_the_directory_leaves_the_outcome_as_it_is(
+    live, machine, home, monkeypatch, code
+):
+    machine.live_code = code
+    quiet = live()
+    assert quiet.exit_code == (0 if code == 0 else 3)
+    real_removal = runner._remove_staging
+
+    def signalled_removal(mark):
+        os.kill(os.getpid(), signal.SIGINT)
+        real_removal(mark)
+
+    monkeypatch.setattr(runner, "_remove_staging", signalled_removal)
+    type_at_prompt(monkeypatch, "yes")
+
+    outcome = live()
+
+    assert (outcome.exit_code, outcome.err) == (quiet.exit_code, quiet.err)
+    assert squeezed(outcome.out).splitlines()[-2:] == squeezed(quiet.out).splitlines()[-2:]
+    assert list(work_directory(home).iterdir()) == []
+
+
+def test_an_interrupt_while_the_container_is_discovered_loads_nothing(live, machine, home):
+    machine.failing["docker ps"] = KeyboardInterrupt
+
+    outcome = live()
+
+    assert (outcome.exit_code, outcome.err.splitlines()) == (
+        130,
+        ["error: interrupted · nothing loaded"],
+    )
+    assert not live_loads_started(machine)
+
+
+@pytest.mark.parametrize("code", [0, 1], ids=["loaded", "failed load"])
+def test_no_row_value_of_the_restored_tables_reaches_the_output(live, machine, code):
+    machine.live_code = code
+
+    outcome = live()
+
+    assert LIVE_ROW_VALUE_CANARY not in outcome.out + outcome.err
+    assert machine.live_loads == [DUMP]
 
 
 def test_a_killed_runs_plaintext_is_swept_by_the_next_run(live, home):
