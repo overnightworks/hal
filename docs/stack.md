@@ -33,7 +33,7 @@ and `hal apply --local` writes it again.
   the imprint, the privacy notice and the terms from `legal/built/` for `Host: <zone>` on `127.0.0.1:8081`; the stylesheet and appkit's
   tokens and fonts (`legal/assets/appkit-<version>/`, which `hal apply` writes from the installed appkit) answer under `/_rechtliches/`, every other path with 404. The catalog gives
   it the apex as its host, which the Cloudflare redirect leaves to it for the three pages, `/favicon.ico` (answered 404) and
-  `/_rechtliches/` (`cloudflare.redirect.serve`). The pages are built by `hal apply` from `legal/frame` and `legal/sections` (the plan names each page that is
+  `/_rechtliches/` (`cloudflare.redirect.serve`). The pages are built by `hal apply` from `legal/frame`, `legal/sections` and each app's own `legal/` files at its release (the plan names each page that is
   new or changes) and go live when it has written them; every answer carries `Cache-Control: no-cache`, so a cache that
   stored a page asks again before it shows it; before the first build they answer 404. The stylesheet goes live once `hal update` has brought the live checkout in; a changed `legal/nginx/default.conf` needs the container restarted with `hal stop legal` and
   `hal start legal`.
