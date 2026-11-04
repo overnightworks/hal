@@ -208,7 +208,7 @@ class AppsPlan:
     offs: tuple[OffPlan, ...] = ()
     catalogued: tuple[catalog.App, ...] = ()  # every app of the catalog, for its barriers
     switched_off_still_running: tuple[str, ...] = ()  # the keys apply refuses to go on with
-    shown: tuple[ShownRelease, ...] = ()  # an app never deployed has none
+    shown: tuple[ShownRelease, ...] = ()  # a stopped or disabled app never deployed has none
 
     @property
     def changes_nothing(self) -> bool:

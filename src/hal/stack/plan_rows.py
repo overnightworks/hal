@@ -295,9 +295,9 @@ def _legal_rows(plan: LegalPlan) -> tuple[Row, ...]:
                 tuple(
                     _block_change_line(change)
                     for page in pages
-                    for change in plan.changed_blocks[page]
+                    for change in plan.changed_blocks.get(page, ())
                 )
-                if kind is PageChange.CHANGED
+                if kind in (PageChange.CHANGED, PageChange.NEW)
                 else ()
             )
             rows.append(Row(glyph, LEGAL_UNIT, event, ", ".join(pages), len(pages), details))

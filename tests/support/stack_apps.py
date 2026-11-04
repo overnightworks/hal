@@ -2,9 +2,7 @@
 
 import dataclasses
 import json
-import os
 import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -152,17 +150,8 @@ class LegalApps:
 
     def dated_release(self, tag: str, privacy: str, when: str) -> None:
         """A release `tag` carrying `privacy`, its commit dated `when` (ISO 8601)."""
-        work = self.origin.work
-        (work / PRIVACY_FILE).parent.mkdir(parents=True, exist_ok=True)
-        (work / PRIVACY_FILE).write_text(privacy)
-        plain = {name: value for name, value in os.environ.items() if not name.startswith("GIT_")}
-        dated = plain | {"GIT_AUTHOR_DATE": when, "GIT_COMMITTER_DATE": when}
-        no_hooks = ["-c", "core.hooksPath=/dev/null"]
-        for arguments in (["add", "--all"], [*no_hooks, "commit", "--quiet", "-m", tag]):
-            subprocess.run(
-                ["git", "-C", str(work), *arguments],
-                check=True, capture_output=True, stdin=subprocess.DEVNULL, env=dated,
-            )  # fmt: skip
+        dates = {"GIT_AUTHOR_DATE": when, "GIT_COMMITTER_DATE": when}
+        self.origin.commit({PRIVACY_FILE: privacy}, tag, environment=dates)
         self.origin.push("master")
         self.origin.tag(tag)
 

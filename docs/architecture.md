@@ -273,18 +273,19 @@ services and songmaker's text, which edge holds until songmaker ships its own, a
 the catalog, enabled or not. An app (an entry with `repo`) brings its own text: `legal/datenschutz.html` and,
 optionally, `legal/nutzungsbedingungen.html` of a release, read from `~/srv/<key>/.git` at the release's commit, never
 from the working tree. That release is the planned one of an enabled app, the one a settled app runs, or the one a
-stopped (`hal stop`) or disabled app last deployed, from its record; an app never deployed has no block, and a release
-without the privacy file has none yet. A symlink at either path refuses the run. An app's key that also has
+stopped (`hal stop`) or disabled app last deployed, from its record; a stopped or disabled app never deployed has none (an enabled one gets its block at its planned tag), and a
+release without the privacy file has no block at all, its terms file included, yet; a terms file that is present is
+still validated. A symlink at either path refuses the run. An app's key that also has
 `legal/sections/<key>/` refuses the run, naming both, since one block has one owner; so does a stopped or disabled app
-whose checkout or recorded commit is gone, naming the path.
+whose checkout or recorded commit is gone, or whose `.git` is a symlink or no repository, naming the path.
 
 What `hal apply` does: it validates every section, builds the pages and compares them with `legal/built/`. The
-plan prints one row per kind, without a heading, above `core`: `+ legal  2 new pages`, `~ legal  1 edited page` and `~ legal  3 new records` (a page that matches while its record is missing, unreadable or stale), each with the page names. Under an edited page, from a record of what the last write was made of, each block stands as a dim line, new, changed or left (`legal/sections/songmaker/datenschutz.html#songmaker changed`; an app's block with the tag it is read at, `~/srv/hopin/legal/datenschutz.html#hopin changed at v2026.11.04.1`, and a new tag with the same bytes changes no block), and a changed page frame (its skeleton or a table-of-contents template) as its own line; a missing or stale record makes every block new. It prints no legal row when nothing changes. The record is `legal-built.json` in the apply state beside `applied.json` (not beside `legal/built/`, which nginx serves), written after the pages; a page whose bytes already match is still planned (and the record written) while its entry is missing, unreadable or stale. After
+plan prints one row per kind, without a heading, above `core`: `+ legal  2 new pages`, `~ legal  1 edited page` and `~ legal  3 new records` (a page that matches while its record is missing, unreadable or stale), each with the page names. Under an edited page, from a record of what the last write was made of, each block stands as a dim line, new, changed or left (`legal/sections/songmaker/datenschutz.html#songmaker changed`; an app's block with the tag it is read at, `~/srv/hopin/legal/datenschutz.html#hopin changed at v2026.11.04.1`, and a new tag with the same bytes changes no block; a new page lists the app blocks it first publishes, each with its tag), and a changed page frame (its skeleton or a table-of-contents template) as its own line; a missing or stale record makes every block new. It prints no legal row when nothing changes. The record is `legal-built.json` in the apply state beside `applied.json` (not beside `legal/built/`, which nginx serves), written after the pages; a page whose bytes already match is still planned (and the record written) while its entry is missing, unreadable or stale. After
 `yes`, before any unit switches, the core phase or an app, it writes each changed page (a temporary file, mode 0644, renamed over the page), so a new tag that then fails leaves the app's new text live while its old version runs,
 and prints `✓ legal  pages written` naming the pages whose bytes were written, `✓ legal  record written` for pages
 that gained only their record. Without an enabled `legal` unit there is no step and no line. A refusal comes before
-the question (exit 3) and changes nothing; a failed write is `✗ legal  not written` with the path and the reason, then
-partial with no unit switched (exit 3). A page goes live only that way, and a
+the question (exit 2, `CANNOT_PLAN`) and changes nothing; a failed write is `✗ legal  not written` with the path and the reason, then
+partial with no unit switched (exit 1, `REFUSED`). A page goes live only that way, and a
 wrong text is taken back by the next change of the text: there is no override.
 
 **Format.** German, UTF-8 without a byte order mark, at most 65,536 bytes, LF line ends, no control character

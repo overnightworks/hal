@@ -61,11 +61,20 @@ class AppCheckout:
                 return
         except OSError as error:
             raise CheckoutRefused(f"cannot be made ({error.strerror})") from error
-        if not marker.is_dir() or marker.is_symlink():
-            raise CheckoutRefused("is not a main worktree (its .git is not a directory)")
+        self.require_repository()
         self._refuse_foreign_origin()
         self._refuse_unusual_head()
         self._refuse_changes()
+
+    def require_repository(self) -> None:
+        """Refuses unless the checkout's own `.git` is a real directory holding a repository; git
+        would otherwise discover a repository above an invalid one, or follow a symlink."""
+        marker = self.git.tree / ".git"
+        if not marker.is_dir() or marker.is_symlink():
+            raise CheckoutRefused("is not a main worktree (its .git is not a directory)")
+        valid = ["--git-dir=" + str(marker), "rev-parse", "--git-dir"]
+        if self.git.call(valid, accepted=(0, 128)).returncode:
+            raise CheckoutRefused("is not a main worktree (its .git is no repository)")
 
     def fetch(self) -> None:
         branch, mirror = self.branch, f"{TAG_NAMESPACE}v*"

@@ -10,6 +10,7 @@ import pytest
 import support.stack_apply_apps as stack_apply_apps_support
 import support.stack_apps as stack_apps_support
 from support.app_support import KEY
+from support.git_support import plain_git
 from support.stack_apply import (
     at_terminal,  # noqa: F401 the fixture, requested by name below
     home,  # noqa: F401 the fixture, requested by name below
@@ -68,6 +69,22 @@ def test_an_enabled_apps_privacy_file_at_its_planned_tag_is_its_block_named_with
     assert "new" in line
     assert FIRST in line
     assert TEXT in legal_apps.page()
+
+
+def test_a_first_build_names_the_app_block_with_its_tag_before_the_question(legal_apps):
+    """M1, L3: a page that is built for the first time names the text it first publishes."""
+    for built in (legal_apps.world.repository / "legal/built").glob("*.html"):
+        built.unlink()
+    legal_apps.release(FIRST, PRIVACY)
+    legal_apps.catalog(enabled=True)
+
+    exit_code, out, err = legal_apps.world.apply()
+
+    assert exit_code == 0, err
+    assert find_row(out, "legal", LegalEvent.NEW_PAGE)
+    [line] = block_lines(out)
+    assert PRIVACY_FILE in line
+    assert FIRST in line
 
 
 def test_a_new_tag_with_the_same_privacy_file_changes_no_page(legal_apps):
@@ -152,9 +169,16 @@ def test_a_disabled_app_with_a_record_keeps_its_block(legal_apps):
     assert TEXT in legal_apps.page()
 
 
-def test_a_release_without_a_privacy_file_has_no_block_and_is_no_refusal(legal_apps):
-    """M8, head decision 4: before C."""
-    legal_apps.release(FIRST)
+TERMS_FILE = "legal/nutzungsbedingungen.html"
+TERMS = f'<h2 id="{KEY}">Hopin</h2>\n<p>Die Nutzung ist frei.</p>\n'
+
+
+@pytest.mark.parametrize(
+    "files", [{}, {TERMS_FILE: TERMS}], ids=["no legal file", "terms without privacy"]
+)
+def test_a_release_without_a_privacy_file_has_no_block_and_is_no_refusal(legal_apps, files):
+    """M8, head decision 4: before C, a release has either the whole block or none."""
+    legal_apps.origin.release(FIRST, {"release": FIRST, **files})
     legal_apps.catalog(enabled=True)
 
     exit_code, _, err = legal_apps.world.apply()
@@ -162,6 +186,20 @@ def test_a_release_without_a_privacy_file_has_no_block_and_is_no_refusal(legal_a
     assert exit_code == 0, err
     assert deployed_tag(legal_apps) == FIRST
     assert BLOCK not in legal_apps.page()
+    assert BLOCK not in legal_apps.page("nutzungsbedingungen")
+
+
+def test_an_invalid_terms_file_refuses_the_run_even_without_a_privacy_file(legal_apps):
+    """M9, L11: a broken file never waits silently."""
+    broken = f'<h2 id="{KEY}">Hopin</h2>\n<script>x</script>\n'
+    legal_apps.origin.release(FIRST, {"release": FIRST, TERMS_FILE: broken})
+    legal_apps.catalog(enabled=True)
+
+    exit_code, out, err = legal_apps.world.apply()
+
+    assert exit_code == 2
+    assert TERMS_FILE in err
+    assert "Type yes" not in plain(out)
 
 
 @pytest.mark.parametrize(
@@ -251,6 +289,41 @@ def test_a_stopped_app_whose_recorded_release_cannot_be_read_refuses_naming_the_
     assert TEXT in legal_apps.page()
 
 
+def test_a_stopped_app_whose_git_directory_is_invalid_refuses_even_under_a_parent_repository(
+    legal_apps,
+):
+    """M12, head decision 2: git must not discover the repository above the checkout."""
+    legal_apps.deploy(FIRST, PRIVACY)
+    legal_apps.stop()
+    checkout, parent = legal_apps.world.srv, legal_apps.world.srv.parent
+    plain_git(parent, "init", "--quiet")
+    plain_git(parent, "fetch", "--quiet", legal_apps.origin.bare.as_uri(), "master")
+    shutil.rmtree(checkout / ".git")
+    (checkout / ".git").mkdir()
+
+    exit_code, out, err = legal_apps.world.apply()
+
+    assert exit_code == 2
+    assert f"~/srv/{KEY}" in err
+    assert "Type yes" not in plain(out)
+
+
+def test_a_stopped_app_whose_git_directory_is_a_symlink_refuses_naming_the_path(legal_apps):
+    """M12, head decision 2."""
+    legal_apps.deploy(FIRST, PRIVACY)
+    legal_apps.stop()
+    git_directory = legal_apps.world.srv / ".git"
+    moved = legal_apps.world.srv.parent / "moved.git"
+    git_directory.rename(moved)
+    git_directory.symlink_to(moved)
+
+    exit_code, out, err = legal_apps.world.apply()
+
+    assert exit_code == 2
+    assert f"~/srv/{KEY}" in err
+    assert "Type yes" not in plain(out)
+
+
 def test_the_stand_is_the_newest_commit_date_over_every_section_the_apps_included(legal_apps):
     """M13, L12."""
     legal_apps.dated_release(FIRST, PRIVACY, "2031-05-06T12:00:00+00:00")
@@ -262,17 +335,24 @@ def test_the_stand_is_the_newest_commit_date_over_every_section_the_apps_include
     assert '<p class="stand">Stand: 6. Mai 2031</p>' in legal_apps.page()
 
 
-def test_an_apps_section_is_published_byte_for_byte(legal_apps):
-    """M14, L14: the frame renders the headings; the text below them stands unchanged."""
-    paragraph = (
-        "<p>Start, Ziel &amp; Uhrzeit <strong>deiner</strong> Fahrt,\n  über zwei Zeilen.</p>\n"
-    )
-    section = f'<section id="{KEY}-daten">\n<h3>Welche Daten</h3>\n{paragraph}</section>\n'
-    legal_apps.release(FIRST, HEADING + section)
+def test_every_block_of_an_apps_section_is_published_byte_for_byte(legal_apps):
+    """M14, L14: the frame renders the headings and the section tags; every block inside them
+    stands unchanged."""
+    blocks = [
+        "<p>Start, Ziel &amp; Uhrzeit <strong>deiner</strong> Fahrt,\n  über zwei Zeilen.</p>\n",
+        "<ul>\n  <li>Start</li>\n  <li>Ziel <em>und</em> Zeit</li>\n</ul>\n",
+        "<ol>\n<li>Eins</li>\n<li><code>zwei</code></li>\n</ol>\n",
+    ]
+    inner = [
+        "<p>Gespeichert, bis die Fahrt endet.<br>\nDanach gelöscht.</p>\n",
+        '<p><a href="https://example.org/a?b=1&amp;c=2">Mehr</a></p>\n',
+    ]
+    subsection = f'<section id="{KEY}-daten">\n<h3>Welche Daten</h3>\n{"".join(inner)}</section>\n'
+    legal_apps.release(FIRST, HEADING + "".join(blocks) + subsection)
     legal_apps.catalog(enabled=True)
 
     exit_code, _, err = legal_apps.world.apply()
 
     assert exit_code == 0, err
-    built = legal_apps.world.repository / "legal/built/datenschutz.html"
-    assert paragraph.encode() in built.read_bytes()
+    built = legal_apps.page()
+    assert [block for block in (*blocks, *inner) if block not in built] == []

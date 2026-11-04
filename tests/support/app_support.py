@@ -10,7 +10,7 @@ import fcntl
 import json
 import os
 import subprocess
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -52,7 +52,12 @@ class Origin:
     bare: Path
     work: Path
 
-    def commit(self, files: dict[str, str], message: str = "change") -> str:
+    def commit(
+        self,
+        files: dict[str, str],
+        message: str = "change",
+        environment: Mapping[str, str] | None = None,
+    ) -> str:
         for name, content in files.items():
             path = self.work / name
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -62,7 +67,7 @@ class Origin:
             plain_git(self.work, "add", "--force", "--", *files)  # also what .gitignore ignores
         plain_git(
             self.work, "-c", "core.hooksPath=/dev/null", "commit", "--quiet", "--allow-empty",
-            "-m", message,
+            "-m", message, environment=environment,
         )  # fmt: skip
         return plain_git(self.work, "rev-parse", "HEAD").stdout.strip()
 

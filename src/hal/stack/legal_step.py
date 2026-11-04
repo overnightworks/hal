@@ -132,6 +132,10 @@ def plan_legal(
             changed[page] = change
             if change is PageChange.CHANGED:
                 named[page] = block_changes(page, previous, fingerprints[page], tags)
+            elif change is PageChange.NEW:
+                named[page] = tuple(
+                    one for one in block_changes(page, None, fingerprints[page], tags) if one.tag
+                )
     return LegalPlan(repository, record, pages, changed, named, fingerprints)
 
 
@@ -233,10 +237,9 @@ def _release_blocks(shown: apps.ShownRelease, zone: str) -> list[Block]:
     """The app's blocks read at the release the pages show, from its checkout `~/srv/<key>`."""
     where = f"~/srv/{shown.key}"
     git = shown.checkout.git
-    if not (git.tree / ".git").is_dir():
-        raise LegalError(f"{where} is no git checkout; its {shown.tag} ({shown.sha}) is unread")
     try:
-        return app_blocks(
+        shown.checkout.require_repository()
+        blocks = app_blocks(
             lambda inside: shown.checkout.file_at(shown.sha, inside),
             shown.key,
             zone,
@@ -245,6 +248,8 @@ def _release_blocks(shown: apps.ShownRelease, zone: str) -> list[Block]:
         )
     except (checkout.GitError, deploy_checkout.CheckoutRefused) as error:
         raise LegalError(f"{where}: cannot read {shown.tag} ({shown.sha}): {error}") from error
+    # Without the privacy file the release has no block at all, its terms included.
+    return blocks if any(block.page == PRIVACY_PAGE for block in blocks) else []
 
 
 def _refuse_two_owners(repository: Path, app_keys: Collection[str]) -> None:
