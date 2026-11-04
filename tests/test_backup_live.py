@@ -18,6 +18,7 @@ from hal.backup import host
 from hal.backup import live as live_step
 from hal.backup.docker import LIVE_LOAD_LABEL, SESSION_COUNT_LABEL
 from hal.backup.runner import RUN_MARK_SUFFIX, STAGING_PREFIX, StepFailed
+from hal.backup.settings import Settings
 from hal.backup.status import ExitCategory
 from hal.stack import compose, terminal, unit_plans
 
@@ -55,6 +56,10 @@ def switch_off(home: Path, unit: str = APP) -> Path:
     return marker
 
 
+def work_directory(home: Path) -> Path:
+    return Settings.for_home(home, os.getuid(), os.getgid()).work_dir
+
+
 def snapshot(machine) -> str:
     return machine.snapshots[-1]["id"][:8]
 
@@ -78,7 +83,7 @@ def test_a_loaded_snapshot_starts_only_the_stopped_database_and_names_hal_start(
     assert machine.live_loads == [DUMP]
     assert machine.live_new_session == [True]
     assert LIVE_LOAD_LABEL not in machine.lock_free_during
-    assert list((home / ".cache/edge-backup").iterdir()) == []
+    assert list(work_directory(home).iterdir()) == []
 
 
 def test_a_running_database_is_left_as_it_is(live, machine):
@@ -255,7 +260,7 @@ def test_ctrl_c_at_the_question_loads_nothing(live, machine, monkeypatch, home):
         ["error: interrupted · nothing loaded"],
     )
     assert not live_loads_started(machine)
-    assert list((home / ".cache/edge-backup").iterdir()) == []
+    assert list(work_directory(home).iterdir()) == []
 
 
 def test_a_load_still_running_is_refused(live, machine):
@@ -310,7 +315,7 @@ def test_a_failed_load_names_its_cause_and_the_rerun_of_its_snapshot(
         f"next: hal restore {APP} --live --snapshot {snapshot(machine)}",
     ]
     assert "loaded" not in outcome.out
-    assert list((home / ".cache/edge-backup").iterdir()) == []
+    assert list(work_directory(home).iterdir()) == []
 
 
 @pytest.mark.parametrize("number", [signal.SIGINT, signal.SIGTERM], ids=["SIGINT", "SIGTERM"])
@@ -412,7 +417,7 @@ def test_an_interrupt_at_the_host_lock_claims_nothing_or_keeps_the_outcome(
 
 
 def test_a_killed_runs_plaintext_is_swept_by_the_next_run(live, home):
-    work = home / ".cache/edge-backup"
+    work = work_directory(home)
     left = work / f"{STAGING_PREFIX}killed"
     left.mkdir(parents=True)
     (left / "db.dump").write_bytes(DUMP)
