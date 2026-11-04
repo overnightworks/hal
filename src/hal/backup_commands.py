@@ -1,27 +1,40 @@
 """`hal backup` and `hal restore`: the backup runner behind hal's door. The steps are the typed
-functions of `hal.backup.cli`; this module adds the grammar, the one host lock around every run,
-the SIGTERM that systemd stops a unit with, and the exit code."""
+functions of `hal.backup.cli` and `hal.backup.live`; this module adds the grammar, the one host
+lock around every run, the SIGTERM that systemd stops a unit with, and the exit code. For
+`restore --live` it reads what `hal.backup` may not: the unit's switch, the catalog and the
+terminal, and hands plain values to the step."""
 
 import argparse
+import functools
 import os
+import re
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 from hal.backup import cli as steps
-from hal.backup import host, restic
+from hal.backup import host, live, restic
 from hal.backup.apps import PRE_APPLY_TAG
+from hal.backup.cli import StepExit
 from hal.backup.runner import Interrupted, StepFailed
 from hal.backup.settings import Settings
 from hal.grammar import Asks, Command, ExitCode
 from hal.output import write_error
 from hal.output.command import Verb, command
-from hal.stack.external.apply import terminate_like_interrupt
+from hal.stack import catalog, compose, switches, terminal, unit_plans
+from hal.stack.external.apply import signals_ignored, terminate_like_interrupt
 
 HAL_BACKUP = command(Verb.BACKUP)
 HAL_RESTORE = command(Verb.RESTORE)
 Ended = StepFailed | Interrupted | KeyboardInterrupt
 
-Step = Callable[[Settings, argparse.Namespace], None]
+Step = Callable[[Settings, argparse.Namespace], StepExit]
+EXIT_OF_STEP: dict[StepExit, ExitCode] = {
+    StepExit.OK: ExitCode.OK,
+    StepExit.DECLINED: ExitCode.FINDINGS,
+    StepExit.REFUSED: ExitCode.REFUSED,
+    StepExit.FAILED: ExitCode.FAILURE,
+}
 
 
 def _configure_backup(parser: argparse.ArgumentParser) -> None:
@@ -30,7 +43,8 @@ def _configure_backup(parser: argparse.ArgumentParser) -> None:
         "--pre-apply",
         action="store_true",
         help=f"tag the snapshot {PRE_APPLY_TAG} and keep the last {restic.KEEP_PRE_APPLY} "
-        "such snapshots of the app (needs the app's name)",
+        f"such snapshots of the app within {restic.PRE_APPLY_MAX_AGE.days} days (needs the "
+        "app's name)",
     )
     parser.add_argument("--init", action="store_true", help="create the restic repository once")
     parser.add_argument("--unlock", action="store_true", help="remove stale restic locks")
@@ -52,6 +66,12 @@ def _configure_restore(parser: argparse.ArgumentParser) -> None:
         "is good, without keeping the data",
     )
     parser.add_argument("--list", action="store_true", help="list the repository's snapshots")
+    parser.add_argument(
+        "--live",
+        action="store_true",
+        help="load the snapshot into the app's live database while the app is switched off "
+        f"({command(Verb.STOP, '<app>')}); asks yes at a terminal",
+    )
     _add_apps(parser)
 
 
@@ -92,7 +112,7 @@ def _restore_step(arguments: argparse.Namespace) -> Step | str:
             return "--snapshot needs the name of an app"
         return steps.restore_test
     if arguments.app is None or arguments.target is None:
-        return "restore needs the name of an app and --target"
+        return "restore needs the name of an app and --target or --live"
     return steps.restore
 
 
@@ -103,6 +123,8 @@ def _backup(arguments: argparse.Namespace) -> ExitCode:
 
 
 def _restore(arguments: argparse.Namespace) -> ExitCode:
+    if arguments.live:
+        return _restore_live(arguments)
     step = _restore_step(arguments)
     tell_ended = (
         _tell_restore_test_ended if step is steps.restore_test else _tell_ended_plainly(HAL_RESTORE)
@@ -144,6 +166,82 @@ def _tell_ended_plainly(program: str) -> Callable[[Ended], None]:
     return tell
 
 
+@dataclass(frozen=True)
+class _Refusal:
+    exit_code: ExitCode
+    line: str
+
+
+def _switched_off(app: str) -> switches.Mark | _Refusal:
+    """The marker of the enabled unit `app` names, read as `hal stop` finds its unit; the global
+    switch is not read, so a unit on is refused whatever the tunnel."""
+    try:
+        fleet = unit_plans.read_fleet(compose.Compose(), compose.REPOSITORY)
+        unit = next((unit for unit in fleet.units if unit.key == app), None)
+        if unit is None:
+            known = ", ".join(sorted(unit.key for unit in fleet.units))
+            return _Refusal(ExitCode.REFUSED, f"{app} is not a unit of fleet.yaml (units: {known})")
+        if not unit.enabled:
+            return _Refusal(ExitCode.REFUSED, f"{app} is disabled in the catalog")
+        mark = switches.Switches(switches.default_state_directory()).mark(app)
+    except (compose.ComposeError, catalog.CatalogError, switches.SwitchError) as error:
+        return _Refusal(ExitCode.FAILURE, str(error))
+    if mark is None:
+        return _Refusal(ExitCode.REFUSED, f"stop it first: {command(Verb.STOP, app)}")
+    return mark
+
+
+def _live_usage(arguments: argparse.Namespace) -> str | None:
+    if arguments.app is None:
+        return "--live needs the name of an app"
+    if arguments.target is not None or arguments.test or arguments.list:
+        return "--live loads into the app's database, so --target, --test and --list do not apply"
+    return None
+
+
+def _restore_live(arguments: argparse.Namespace) -> ExitCode:
+    if usage := _live_usage(arguments):
+        return _run(HAL_RESTORE, usage, arguments, _tell_live_ended(""))
+    app = arguments.app
+    mark = _switched_off(app)
+    if isinstance(mark, _Refusal):
+        write_error(mark.line)
+        return mark.exit_code
+    marks = switches.Switches(switches.default_state_directory())
+
+    def switch_unchanged() -> bool:
+        try:
+            return marks.changed(app, mark) is None
+        except switches.SwitchError:
+            return False
+
+    guards = live.Guards(signals_ignored, switch_unchanged, terminal.at_terminal())
+    step = functools.partial(live.restore_live, guards=guards)
+    return _run(HAL_RESTORE, step, arguments, _tell_live_ended(app))
+
+
+def _tell_live_ended(app: str) -> Callable[[Ended], None]:
+    """A failure before the spawn names the app once; only an interrupt the step raised before
+    it spawned the client says that nothing was loaded."""
+
+    def tell(ended: Ended) -> None:
+        match ended:
+            case StepFailed():
+                reason = str(ended)
+                write_error(reason if _names(reason, app) else f"{app}: {reason}")
+            case Interrupted():
+                write_error("interrupted · nothing loaded")
+            case _:
+                write_error("interrupted")
+
+    return tell
+
+
+def _names(reason: str, app: str) -> bool:
+    """Whether the reason holds the app's name as a word of its own, not inside `<app>-db`."""
+    return re.search(rf"(?<![\w-]){re.escape(app)}(?![\w-])", reason) is not None
+
+
 def _run(
     program: str,
     step: Step | str,
@@ -154,18 +252,23 @@ def _run(
         write_error(step, f"{program} --help")
         return ExitCode.USAGE
     settings = Settings.for_home(Path.home(), os.getuid(), os.getgid())
+    decided: ExitCode | None = None
     with terminate_like_interrupt():
         try:
             # Every run holds the one host lock, so no two runs share the repository.
             with host.exclusive_lock(settings.lock_file):
-                step(settings, arguments)
+                decided = EXIT_OF_STEP[step(settings, arguments)]
         except StepFailed as failure:
             tell_ended(failure)
             return ExitCode.FAILURE
         except (Interrupted, KeyboardInterrupt) as interrupt:
+            # Once the step returned, its outcome line stands: an interrupt at the lock's
+            # release changes neither that line nor its exit.
+            if decided is not None:
+                return decided
             tell_ended(interrupt)
             return ExitCode.INTERRUPTED
-    return ExitCode.OK
+    return decided
 
 
 COMMANDS = (
@@ -179,10 +282,11 @@ COMMANDS = (
     ),
     Command(
         Verb.RESTORE,
-        "restore one app's backup, prove the backups with --test, or list them with --list",
+        "restore one app's backup, load it into its live database with --live, prove the "
+        "backups with --test, or list them with --list",
         _restore,
         _configure_restore,
         json=False,
-        asks=Asks.NEVER,
+        asks=Asks.YES,
     ),
 )

@@ -59,12 +59,12 @@ def test_backup_puts_dump_manifest_and_audio_into_one_snapshot(edge_backup, mach
 def test_backup_forgets_by_host_and_app_tag_then_checks(edge_backup, machine):
     edge_backup("backup")
 
-    assert machine.labels()[-2:] == ["restic forget", "restic check"]
+    assert machine.labels()[-3:] == ["restic forget", "restic snapshots", "restic check"]
     forget = machine.argv_of("restic forget")
-    expected_scope = ["--host", "hal", "--tag", "songmaker", "--group-by", "host,tags"]
     assert forget[forget.index("forget") + 1 :] == [
-        *expected_scope,
-        *["--keep-weekly", "4", "--keep-monthly", "3", "--keep-tag", "pre-apply", "--prune"],
+        *["--host", "hal", "--tag", "songmaker", "--group-by", "host,tags"],
+        *["--keep-weekly", "4", "--keep-monthly", "3", "--keep-tag", "pre-apply"],
+        *["--prune", "--max-unused", "0"],
     ]
     assert "--retry-lock" in forget
     assert "--no-lock" not in forget
@@ -132,7 +132,7 @@ def test_pre_apply_backup_tags_the_snapshot_prints_its_id_and_thins_only_pre_app
     forget = machine.argv_of("restic forget")
     assert forget[forget.index("forget") + 1 :] == [
         *["--host", "hal", "--tag", "radio,pre-apply", "--group-by", "host,tags"],
-        *["--keep-last", "10", "--prune"],
+        *["--keep-last", "10", "--prune", "--max-unused", "0"],
     ]
 
 
@@ -396,7 +396,7 @@ def test_host_run_returns_stdout_or_writes_it_into_a_new_private_file(tmp_path):
 
 
 def _fail_radio_readiness(machine: Machine) -> None:
-    machine.other_db_containers["radio"] = ["beef01", "beef02"]
+    machine.other_db_containers[("radio", "postgres")] = ["beef01", "beef02"]
 
 
 def test_an_app_that_fails_to_back_up_keeps_the_others_and_every_earlier_success(
@@ -422,7 +422,7 @@ def test_an_app_that_fails_to_back_up_keeps_the_others_and_every_earlier_success
     songmaker = app_history(outcome.status)
     assert songmaker["last_snapshot_id"] == machine.snapshots[-1]["id"]
     assert songmaker["last_successful_backup"] > app_history(first.status)["last_successful_backup"]
-    assert "restic forget" not in machine.labels()
+    assert machine.forget_scopes() == ["songmaker"]
 
 
 def test_backup_continues_with_the_next_app_after_one_failed(edge_backup, machine, home):
@@ -1030,14 +1030,14 @@ def test_the_restore_test_loads_keycloaks_dump_into_a_postgres_of_its_own_major(
     edge_backup, machine
 ):
     """#107 T4: keycloak's dump loads into a throwaway postgres of its own major."""
-    shipped = declare_shipped_apps()
-    edge_backup(*shipped, "backup")
+    shipped_apps = parse_apps(cli.DEFAULT_APPS.read_text())
+    edge_backup(*declare_shipped_apps(), "backup")
 
-    outcome = edge_backup(*shipped, "restore", "--test")
+    outcome = edge_backup(*declare_shipped_apps(), "restore", "--test")
 
     assert outcome.exit_code == 0, outcome.err
     servers = [argv[-5] for label, argv in machine.calls if label == docker.SERVER_START_LABEL]
-    assert servers == [RESTORE_IMAGES[major] for major in PostgresMajor]
+    assert servers == [RESTORE_IMAGES[app.database.postgres_major] for app in shipped_apps]
     assert app_history(outcome.status, "keycloak")["last_successful_restore_test"] is not None
 
 
@@ -1109,7 +1109,7 @@ def test_keycloak_reported_failed_while_songmaker_is_still_backed_up_when_keyclo
 ):
     """#107 T7: keycloak is recorded failed, songmaker is still backed up."""
     machine.lose_keycloak_database()
-
+    shipped = {app.name for app in parse_apps(cli.DEFAULT_APPS.read_text())}
     outcome = edge_backup(*declare_shipped_apps(), "backup")
 
     assert outcome.exit_code == 3
@@ -1118,7 +1118,7 @@ def test_keycloak_reported_failed_while_songmaker_is_still_backed_up_when_keyclo
         "keycloak",
         "not-ready",
     )
-    assert [s["app"] for s in machine.snapshots] == ["songmaker"]
+    assert {s["app"] for s in machine.snapshots} == shipped - {"keycloak"}
     assert app_history(outcome.status)["last_snapshot_id"] == machine.snapshots[0]["id"]
 
 

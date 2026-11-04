@@ -1,6 +1,6 @@
-"""The key step's host side (#964, #889): the desired key and person budget from the numbers of
-the operator's record, the diff against what the one-off read, and whether the step reads at all
-(decision 14)."""
+"""The key step's host side (#964, #965, #889): the desired key, person budget and admin budget
+from the numbers of the operator's record, the diff against what the one-off read, and the admin
+group's members and their rows."""
 
 import json
 import subprocess
@@ -9,47 +9,40 @@ from pathlib import Path
 
 import pytest
 import yaml
+from agent_runtime_client import turn as client_turn
+from agent_runtime_client.turn import Principal, person_fingerprint
+from support.stack_litellm_found import (
+    APPS,
+    BUDGET_ID,
+    HELD,
+    MODELS,
+    changed_fields,
+    found,
+    found_budget,
+    found_key,
+)
 
-from hal.stack import api_limits, compose, litellm_keys
+from hal.stack import api_limits, compose, core, litellm_keys
 from hal.stack.api_limits import NONE_SET, ApiSettings, AppLimits, AppNumbers
-from hal.stack.litellm_keys import Change, FieldChange, Found, KeysPlan, Target
+from hal.stack.litellm_keys import (
+    AdminFound,
+    AdminHeld,
+    Change,
+    CustomerRow,
+    FieldChange,
+    Found,
+    KeysPlan,
+    KeysStep,
+    NotRead,
+    Target,
+)
+from hal.stack.realm import OBSERVER_SERVICE
+from hal.stack.realm import observe as observer
+from hal.stack.realm.declared import declared_realm
+from hal.stack.realm.reconcile import KEYCLOAK_SERVICE, NO_MEMBERS, REALM_UNIT, MembersNotRead
+from hal.stack.unit_plans import Recreate
 
-APPS = ("hopin", "presentator", "songmaker")
-MODELS = ("text/haiku", "text/opus", "text/sonnet")
-BUDGET_ID = "scenario-budget"
 ROOT = Path(__file__).resolve().parents[1]
-
-
-def found_key(app: str, **overrides: object) -> dict:
-    """The live row of `app` as the one-off reports it: the desired settings, overridden."""
-    desired = litellm_keys.desired_key(app, MODELS, NONE_SET.limits_of(app))
-    return {
-        name: list(value) if isinstance(value, tuple) else value for name, value in desired.items()
-    } | overrides
-
-
-def found_budget(**overrides: object) -> dict:
-    return dict(litellm_keys.desired_budget(NONE_SET.person_budget())) | overrides
-
-
-def found(
-    keys: dict | None = None,
-    taken: tuple[str, ...] = (),
-    budget: dict | None = None,
-    models: tuple[str, ...] = MODELS,
-) -> Found:
-    keys = {app: found_key(app) for app in APPS} if keys is None else keys
-    return Found(
-        keys={app: keys.get(app) for app in APPS},
-        name_taken=frozenset(taken),
-        budget=found_budget() if budget is None else budget,
-        models=models,
-    )
-
-
-def changed_fields(change: Change | None) -> dict[str, object]:
-    assert change is not None
-    return {field_change.name: field_change.new for field_change in change.fields}
 
 
 def test_a_new_key_carries_its_app_as_name_its_numbers_and_every_model_litellm_lists() -> None:
@@ -188,7 +181,11 @@ def test_the_plan_makes_absent_keys_and_names_taken_names(
 def test_the_person_budget_comes_first_then_the_apps_in_name_order() -> None:
     plan = litellm_keys.planned(
         Found(
-            keys=dict.fromkeys(reversed(APPS)), name_taken=frozenset(), budget=None, models=MODELS
+            keys=dict.fromkeys(reversed(APPS)),
+            name_taken=frozenset(),
+            budget=None,
+            models=MODELS,
+            admin=HELD,
         ),
         BUDGET_ID,
         NONE_SET,
@@ -222,67 +219,50 @@ def test_a_changed_person_budget_is_changed_in_its_amount_alone() -> None:
     )
 
 
-def test_a_number_the_record_changes_is_sent_alone_and_never_with_a_period() -> None:
-    api = ApiSettings(AppNumbers(4.0, 3), {"hopin": AppNumbers(budget_dollars=6.0)}, 1.5)
-
-    plan = litellm_keys.planned(found(), BUDGET_ID, api)
-
-    assert {change.subject: changed_fields(change) for change in plan.changes} == {
-        BUDGET_ID: {"max_budget": 1.5},
-        "hopin": {"max_budget": 6.0, "max_parallel_requests": 3},
-        "presentator": {"max_budget": 4.0, "max_parallel_requests": 3},
-        "songmaker": {"max_budget": 4.0, "max_parallel_requests": 3},
-    }
-
-
-def test_an_app_table_naming_no_app_read_cannot_be_planned_and_names_the_apps_read() -> None:
-    api = ApiSettings(apps={"hopn": AppNumbers(budget_dollars=1.0)})
-    rows = found()
-
-    with pytest.raises(litellm_keys.UnknownApps) as raised:
-        litellm_keys.planned(rows, BUDGET_ID, api)
-
-    assert "[api.hopn]" in str(raised.value)
-    assert all(app in str(raised.value) for app in APPS)
-
-
-def test_an_app_whose_name_is_taken_gets_no_change_whatever_its_table_says() -> None:
-    api = ApiSettings(apps={"hopin": AppNumbers(budget_dollars=6.0)})
-
-    plan = litellm_keys.planned(found(taken=("hopin",)), BUDGET_ID, api)
-
-    assert plan.changes == ()
-    assert plan.name_taken == ("hopin",)
-
-
 # --- whether the step reads (decision 14) ------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Answer:
+    exit_code: int = 0
+    stdout: str = ""
+    stderr: str = ""
 
 
 @dataclass
 class OneOff:
-    """Compose's runner, answering the key step's one-off with `answer` and every other call with
-    nothing; it records what ran."""
+    """Compose's runner: the key step's one-off answers `answer` on stdout, failing with `stderr`
+    as its last words when `exit_code` is set, and the realm observer answers `observer`; it
+    records what ran."""
 
     answer: str = ""
     exit_code: int = 0
+    observer: Answer = Answer()
+    stderr: str = "litellm-keys: status 502 at /v2/key/info\n"
     calls: list[tuple[list[str], str | None]] = field(default_factory=list)
 
     def __call__(
         self, command: list[str], _timeout: int, stdin: str | None = None
     ) -> subprocess.CompletedProcess[str]:
         self.calls.append((command, stdin))
-        if self.exit_code:
+        if OBSERVER_SERVICE in command:
+            observed = self.observer
             return subprocess.CompletedProcess(
-                command, self.exit_code, "", "litellm-keys: status 502 at /v2/key/info\n"
+                command, observed.exit_code, observed.stdout, observed.stderr
             )
-        return subprocess.CompletedProcess(command, 0, self.answer, "")
+        stderr = self.stderr if self.exit_code else ""
+        return subprocess.CompletedProcess(command, self.exit_code, self.answer, stderr)
 
     @property
     def one_offs(self) -> list[list[str]]:
         return [command for command, _ in self.calls if litellm_keys.KEYS_SERVICE in command]
 
+    def stdin_of(self, service: str) -> str | None:
+        (stdin,) = [stdin for command, stdin in self.calls if service in command]
+        return stdin
 
-def read_answer(found_state: Found) -> str:
+
+def read_answer(found_state: Found, admin: dict | None = None) -> str:
     return json.dumps({
         "apps": {
             app: {"key": row, "name_taken": app in found_state.name_taken}
@@ -290,6 +270,7 @@ def read_answer(found_state: Found) -> str:
         },
         "budget": found_state.budget,
         "models": list(found_state.models),
+        "admin": admin,
     })  # fmt: skip
 
 
@@ -303,28 +284,11 @@ def repository(tmp_path: Path) -> Path:
     return tmp_path
 
 
-@pytest.mark.parametrize("state", ["exited", "created", None])
-def test_no_key_step_runs_while_litellm_does_not_run(repository: Path, state: str | None) -> None:
-    runner = OneOff()
-    states = {} if state is None else {litellm_keys.LITELLM_SERVICE: {state}}
-
-    assert (
-        litellm_keys.plan_keys(
-            compose.Compose(run=runner, repository=repository), states, repository, NONE_SET
-        )
-        == KeysPlan()
-    )
-    assert runner.one_offs == []
-
-
 def test_while_litellm_runs_the_step_reads_with_the_budget_id_config_yaml_names(
     repository: Path,
 ) -> None:
     runner = OneOff(read_answer(found(keys={}, budget={})))
-    states = {litellm_keys.LITELLM_SERVICE: {"running"}}
-    plan = litellm_keys.plan_keys(
-        compose.Compose(run=runner, repository=repository), states, repository, NONE_SET
-    )
+    plan = plan_with(runner, repository, LITELLM_RUNNING, None)
 
     assert [command[-3:] for command in runner.one_offs] == [
         [litellm_keys.KEYS_SERVICE, "--read", BUDGET_ID]
@@ -353,17 +317,10 @@ def test_while_litellm_runs_the_step_reads_with_the_budget_id_config_yaml_names(
 def test_a_read_that_fails_while_litellm_runs_plans_nothing_and_says_why(
     repository: Path, answer: str, exit_code: int, reason: str
 ) -> None:
-    runner = OneOff(answer, exit_code)
-    plan = litellm_keys.plan_keys(
-        compose.Compose(run=runner, repository=repository),
-        {litellm_keys.LITELLM_SERVICE: {"running"}},
-        repository,
-        NONE_SET,
-    )
+    plan = plan_with(OneOff(answer, exit_code), repository, LITELLM_RUNNING, None)
 
-    assert plan.changes == ()
-    assert plan.not_read is not None
-    assert reason in plan.not_read
+    assert isinstance(plan, NotRead)
+    assert reason in plan.cause
 
 
 @pytest.mark.parametrize("settings", [{}, {litellm_keys.BUDGET_ID_SETTING: ""}])
@@ -373,24 +330,19 @@ def test_a_config_yaml_without_the_budget_id_is_a_step_not_read(
     config = repository / litellm_keys.CONFIG_FILE
     config.write_text(yaml.safe_dump({"litellm_settings": settings}))
     runner = OneOff()
-    states = {litellm_keys.LITELLM_SERVICE: {"running"}}
-    plan = litellm_keys.plan_keys(
-        compose.Compose(run=runner, repository=repository), states, repository, NONE_SET
-    )
+    plan = plan_with(runner, repository, LITELLM_RUNNING, None)
 
-    assert plan.not_read is not None
-    assert litellm_keys.BUDGET_ID_SETTING in plan.not_read
+    assert isinstance(plan, NotRead)
+    assert litellm_keys.BUDGET_ID_SETTING in plan.cause
     assert runner.one_offs == []
 
 
 def test_an_app_table_naming_no_app_read_is_no_step_not_read(repository: Path) -> None:
     runner = OneOff(read_answer(found()))
-    states = {litellm_keys.LITELLM_SERVICE: {"running"}}
-    stack = compose.Compose(run=runner, repository=repository)
     api = ApiSettings(apps={"hopn": AppNumbers(budget_dollars=1.0)})
 
     with pytest.raises(litellm_keys.UnknownApps):
-        litellm_keys.plan_keys(stack, states, repository, api)
+        plan_with(runner, repository, LITELLM_RUNNING, None, api=api)
 
 
 def test_the_shipped_config_yaml_names_the_person_budget_id() -> None:
@@ -444,3 +396,362 @@ def test_the_run_sends_the_changes_in_their_planned_order_and_folds_the_answer()
     ((command, stdin),) = runner.calls
     assert command[-2:] == [litellm_keys.KEYS_SERVICE, "--write"]
     assert [change["subject"] for change in json.loads(stdin or "")] == ["hopin", "songmaker"]
+
+
+# --- the admin group's rows (#965) ---------------------------------------------------------------
+
+
+ISSUER = "https://auth.hallucinai.test/realms/hallucinai"
+ADMIN = litellm_keys.ADMIN_BUDGET_ID
+LITELLM_RUNNING = {litellm_keys.LITELLM_SERVICE: {"running"}}
+KEYCLOAK_RUNNING = LITELLM_RUNNING | {KEYCLOAK_SERVICE: {"running"}}
+
+
+def fingerprint_of(subject: str) -> str:
+    return person_fingerprint(Principal(iss=ISSUER, sub=subject))
+
+
+NO_ROW, UNLINKED, ELSEWHERE, LINKED, FORMER, FORMER_2 = map(
+    fingerprint_of, ("o", "o2", "o3", "linked", "x", "x2")
+)
+
+
+def admin_found(
+    members: dict[str, CustomerRow | None],
+    others: tuple[str, ...] = (),
+    budget: dict | None = None,
+) -> AdminFound:
+    desired = dict(litellm_keys.desired_admin_budget())
+    return AdminFound(desired if budget is None else budget, members, others)
+
+
+def row_changes(plan: KeysPlan) -> list[tuple[str, bool, str | None]]:
+    wires = (change.wire() for change in plan.changes)
+    return [
+        (wire["subject"], wire["new"], wire["fields"]["budget_id"])
+        for wire in wires
+        if wire["target"] == Target.CUSTOMER
+    ]
+
+
+def members_answer(*subjects: str) -> Answer:
+    return Answer(0, json.dumps({"issuer": ISSUER, "members": list(subjects)}))
+
+
+def plan_with(
+    runner: OneOff,
+    repository: Path,
+    states: dict[str, set[str]] = KEYCLOAK_RUNNING,
+    gate: core.Gate | None = core.Gate.ON,
+    recreates: tuple[Recreate, ...] = (),
+    api: ApiSettings = NONE_SET,
+) -> KeysStep:
+    """The step with the unit `litellm` on and running; `gate` is Keycloak's, None outside the
+    catalog."""
+    engine = compose.Compose(run=runner, repository=repository)
+    keycloak = {} if gate is None else {REALM_UNIT: gate}
+    gates = {litellm_keys.UNIT: core.Gate.ON} | keycloak
+    return litellm_keys.plan_keys(engine, states, repository, api, gates, (), recreates)
+
+
+def test_the_admin_budget_has_no_limit_and_the_person_budgets_period() -> None:
+    admin = litellm_keys.desired_admin_budget()
+
+    assert admin["max_budget"] is None
+    assert (
+        admin["budget_duration"]
+        == litellm_keys.desired_budget(NONE_SET.person_budget())["budget_duration"]
+    )
+
+
+@pytest.mark.parametrize(
+    ("budget", "new", "fields"),
+    [
+        pytest.param(None, True, {"budget_duration": "1mo"}, id="a new one sends no limit"),
+        pytest.param(
+            {"max_budget": 5.0, "budget_duration": "1mo"},
+            False,
+            {"max_budget": None},
+            id="a limit set by hand is cleared",
+        ),
+    ],
+)
+def test_the_admin_budget_is_made_or_changed_to_have_no_limit(
+    budget: dict | None, new: bool, fields: dict
+) -> None:
+    admin = AdminFound(budget, {}, ())
+    plan = litellm_keys.planned(found(admin=admin), BUDGET_ID, NONE_SET)
+
+    assert [change.wire() for change in plan.changes] == [
+        {"target": "budget", "subject": ADMIN, "new": new, "fields": fields}
+    ]
+
+
+@pytest.mark.parametrize(
+    ("members", "others", "expected"),
+    [
+        pytest.param(
+            {NO_ROW: None}, (), {(NO_ROW, True, ADMIN)}, id="a member with no row gets one"
+        ),
+        pytest.param(
+            {UNLINKED: CustomerRow(None)},
+            (),
+            {(UNLINKED, False, ADMIN)},
+            id="an unlinked row is linked",
+        ),
+        pytest.param(
+            {ELSEWHERE: CustomerRow("by-hand")},
+            (),
+            {(ELSEWHERE, False, ADMIN)},
+            id="a row linked to another budget is linked to the admin budget",
+        ),
+        pytest.param({LINKED: CustomerRow(ADMIN)}, (), set(), id="a linked row stays"),
+        pytest.param(
+            {}, (FORMER,), {(FORMER, False, None)}, id="a non-member on the admin budget unlinked"
+        ),
+        pytest.param({}, (), set(), id="a non-member the read names nowhere is untouched"),
+        pytest.param(
+            {},
+            (FORMER, FORMER_2),
+            {(FORMER, False, None), (FORMER_2, False, None)},
+            id="the group present and empty unlinks every row on the admin budget",
+        ),
+    ],
+)
+def test_the_members_rows_are_linked_and_every_other_row_on_the_admin_budget_unlinked(
+    members: dict, others: tuple[str, ...], expected: set
+) -> None:
+    plan = litellm_keys.planned(found(admin=admin_found(members, others)), BUDGET_ID, NONE_SET)
+
+    assert set(row_changes(plan)) == expected
+    assert plan.admin is None
+
+
+def test_the_admin_budget_follows_the_person_budget_and_the_keys_then_unlinks_then_links() -> None:
+    admin = admin_found({ELSEWHERE: CustomerRow("by-hand"), NO_ROW: None}, (FORMER,), budget={})
+    plan = litellm_keys.planned(
+        found(keys={}, budget=found_budget(max_budget=1.5), admin=admin), BUDGET_ID, NONE_SET
+    )
+
+    assert [(change.wire()["target"], change.wire()["subject"]) for change in plan.changes] == [
+        (Target.BUDGET, BUDGET_ID),
+        *((Target.KEY, app) for app in APPS),
+        (Target.BUDGET, ADMIN),
+        (Target.CUSTOMER, FORMER),
+        (Target.CUSTOMER, ELSEWHERE),
+        (Target.CUSTOMER, NO_ROW),
+    ]
+
+
+def test_with_keycloak_running_the_read_gets_the_fingerprints_of_the_groups_members(
+    repository: Path,
+) -> None:
+    subjects = ("subject-p", "subject-q")
+    admin = {
+        "budget": None,
+        "members": [{"budget_id": "elsewhere"}, None],
+        "others": [{"fingerprint": FORMER, "spend": 1.0}],
+    }
+    runner = OneOff(read_answer(found(), admin), observer=members_answer(*subjects))
+    plan = plan_with(runner, repository)
+
+    observer_call = next(command for command, _ in runner.calls if OBSERVER_SERVICE in command)
+    assert observer_call[-3:] == [OBSERVER_SERVICE, "--members", litellm_keys.ADMIN_GROUP]
+    asked = json.loads(runner.stdin_of(litellm_keys.KEYS_SERVICE) or "")
+    assert asked == {"budget": ADMIN, "members": sorted(map(fingerprint_of, subjects))}
+    words = [word for command, _ in runner.calls for word in command]
+    secrets = (*asked["members"], *subjects)
+    assert not any(secret in word for secret in secrets for word in words)
+    assert set(row_changes(plan)) == {
+        (fingerprint_of(subjects[0]), False, ADMIN),
+        (fingerprint_of(subjects[1]), True, ADMIN),
+        (FORMER, False, None),
+    }
+
+
+def keycloak_running(observed: Answer, cause: str, id: str) -> object:
+    return pytest.param(KEYCLOAK_RUNNING, (), observed, cause, id=id)
+
+
+@pytest.mark.parametrize(
+    ("states", "recreates", "observed", "cause"),
+    [
+        pytest.param(LITELLM_RUNNING, (), Answer(), "Keycloak is not running", id="not running"),
+        pytest.param(
+            LITELLM_RUNNING,
+            (Recreate(REALM_UNIT, KEYCLOAK_SERVICE),),
+            Answer(),
+            "Keycloak starts in this run",
+            id="started by this run",
+        ),
+        keycloak_running(
+            Answer(1, json.dumps({"issuer": ISSUER, "members": ["subject-p"]}), "x: stopped\n"),
+            "realm-observer exited 1: x: stopped",
+            id="a failed read with members already on its stdout",
+        ),
+        keycloak_running(
+            Answer(1, "", f"realm-observer: hallucinai has no group {litellm_keys.ADMIN_GROUP}\n"),
+            f"realm-observer exited 1: realm-observer: hallucinai has no group "
+            f"{litellm_keys.ADMIN_GROUP}",
+            id="the group absent",
+        ),
+        keycloak_running(
+            Answer(0, json.dumps({"issuer": ISSUER, "members": "subject-p"})),
+            NO_MEMBERS,
+            id="a members value that is no list",
+        ),
+        keycloak_running(
+            Answer(0, "subject-p is not JSON"), NO_MEMBERS, id="an answer that is not JSON"
+        ),
+        keycloak_running(
+            Answer(0, json.dumps({"members": ["subject-p"]})),
+            NO_MEMBERS,
+            id="an answer without issuer",
+        ),
+        keycloak_running(
+            Answer(0, json.dumps({"issuer": ISSUER})), NO_MEMBERS, id="an answer without members"
+        ),
+        keycloak_running(
+            Answer(0, json.dumps({"issuer": ISSUER, "members": ["subject-p", 7]})),
+            NO_MEMBERS,
+            id="a member that is a number",
+        ),
+        keycloak_running(
+            Answer(0, json.dumps({"issuer": ISSUER, "members": ["subject-p", ""]})),
+            NO_MEMBERS,
+            id="an empty subject",
+        ),
+        keycloak_running(
+            Answer(0, json.dumps({"issuer": "", "members": ["subject-p"]})),
+            NO_MEMBERS,
+            id="an empty issuer",
+        ),
+    ],
+)
+def test_members_not_read_leave_the_admin_rows_and_still_plan_the_keys_and_the_person_budget(
+    repository: Path, states: dict, recreates: tuple[Recreate, ...], observed: Answer, cause: str
+) -> None:
+    runner = OneOff(read_answer(found(keys={})), observer=observed)
+    plan = plan_with(runner, repository, states, recreates=recreates)
+
+    assert plan.admin == MembersNotRead(cause)
+    assert "subject-p" not in cause + repr(plan)
+    assert json.loads(runner.stdin_of(litellm_keys.KEYS_SERVICE) or "") is None
+    assert row_changes(plan) == []
+    assert [change.subject for change in plan.changes] == list(APPS)
+
+
+@pytest.mark.parametrize(
+    ("gate", "states"),
+    [
+        pytest.param(core.Gate.OFF, LITELLM_RUNNING, id="Keycloak off"),
+        pytest.param(core.Gate.SWITCHED_OFF, KEYCLOAK_RUNNING, id="switched off by this run"),
+    ],
+)
+def test_keycloak_held_holds_the_admin_rows_and_reads_no_members(
+    repository: Path, gate: core.Gate, states: dict
+) -> None:
+    runner = OneOff(read_answer(found()), observer=members_answer("p"))
+    plan = plan_with(runner, repository, states, gate)
+
+    assert plan.admin == AdminHeld(gate)
+    assert all(OBSERVER_SERVICE not in command for command, _ in runner.calls)
+    assert json.loads(runner.stdin_of(litellm_keys.KEYS_SERVICE) or "") is None
+    assert plan.changes == ()
+
+
+def test_keycloak_that_is_no_unit_of_the_catalog_counts_as_on(repository: Path) -> None:
+    admin = {"budget": None, "members": [None], "others": []}
+    runner = OneOff(read_answer(found(), admin), observer=members_answer("p"))
+    plan = plan_with(runner, repository, gate=None)
+
+    assert row_changes(plan) == [(fingerprint_of("p"), True, ADMIN)]
+
+
+@pytest.mark.parametrize(
+    ("observed", "fingerprint", "reason"),
+    [
+        pytest.param(
+            members_answer("subject-\ud800"),
+            None,
+            "a member's subject fails the client's check",
+            id="a subject the client refuses",
+        ),
+        pytest.param(
+            members_answer("p"),
+            "fp-" + "A" * 64,
+            "a member's fingerprint is not fp- and 64 lowercase hex",
+            id="a fingerprint of another form",
+        ),
+    ],
+)
+def test_a_value_that_fails_its_form_check_fails_the_read_naming_the_check_alone(
+    repository: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    observed: Answer,
+    fingerprint: str | None,
+    reason: str,
+) -> None:
+    if fingerprint is not None:
+        monkeypatch.setattr(client_turn, "person_fingerprint", lambda _principal: fingerprint)
+    runner = OneOff(read_answer(found()), observer=observed)
+    plan = plan_with(runner, repository)
+
+    assert plan == NotRead(reason)
+    assert runner.one_offs == []
+
+
+def test_a_failed_read_names_its_exit_and_last_error_line_never_the_fingerprints_on_stdout(
+    repository: Path,
+) -> None:
+    on_stdout = json.dumps({"admin": {"others": [{"fingerprint": FORMER, "spend": 1.0}]}})
+    runner = OneOff(on_stdout, 1, members_answer("p"), "litellm-keys: status 502 at /customer/list")
+    plan = plan_with(runner, repository)
+
+    assert plan == NotRead("litellm-keys exited 1: litellm-keys: status 502 at /customer/list")
+
+
+@pytest.mark.parametrize(
+    ("members", "others"),
+    [
+        pytest.param([], [{"fingerprint": FORMER}], id="no row for a member"),
+        pytest.param([None], [{"fingerprint": 7}], id="other not text"),
+        pytest.param([{"budget_id": 7}], [], id="budget id a number"),
+    ],
+)
+def test_a_read_whose_admin_rows_do_not_fit_is_an_unexpected_shape(
+    repository: Path, members: list, others: list
+) -> None:
+    admin = {"budget": None, "members": members, "others": others}
+    runner = OneOff(read_answer(found(), admin), observer=members_answer("p"))
+    plan = plan_with(runner, repository)
+
+    assert plan == NotRead("the key step answered an unexpected shape")
+
+
+def test_a_failed_write_names_its_exit_and_last_error_line_never_the_fingerprints_on_stdout() -> (
+    None
+):
+    plan = litellm_keys.planned(found(admin=admin_found({}, (FORMER,))), BUDGET_ID, NONE_SET)
+    done = [{"target": "customer", "subject": FORMER, "outcome": "done"}]
+    runner = OneOff(json.dumps(done), 130, stderr="litellm-keys: stopped\n")
+    result = litellm_keys.run_keys(plan, compose.Compose(run=runner))
+
+    assert result == litellm_keys.KeysFailed(
+        (), None, "litellm-keys exited 130: litellm-keys: stopped", (), ()
+    )
+
+
+@pytest.mark.parametrize("admin", [HELD, MembersNotRead("Keycloak is not running")])
+def test_a_plan_that_changes_nothing_but_leaves_the_admin_rows_unsettled_ends_with_them(
+    admin: AdminHeld | MembersNotRead,
+) -> None:
+    result = litellm_keys.run_keys(KeysPlan(admin=admin), compose.Compose(run=OneOff()))
+
+    assert result == litellm_keys.KeysDone((), (), admin)
+
+
+def test_the_admin_group_is_one_the_realm_declares() -> None:
+    declared = declared_realm((ROOT / "keycloak/realm.yaml").read_text())
+
+    assert litellm_keys.ADMIN_GROUP in declared.identities[observer.GROUP.name]

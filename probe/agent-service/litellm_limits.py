@@ -138,7 +138,8 @@ class LimitsProbe(KeysProbe):
         """2.4a's S1 with no file, then a spend on each key."""
         self.write_settings(None)
         plan = self.read_plan("set-up")
-        expect(len(plan.changes) == len(APPS) + 1, f"set-up: planned {plan.changes}")
+        # the person budget, each app's key and the admin budget
+        expect(len(plan.changes) == len(APPS) + 2, f"set-up: planned {plan.changes}")
         expect(isinstance(self.run_step(plan), KeysDone), "set-up: the run failed")
         for app, spend in SET_UP_SPEND.items():
             self.set_key(app, f"spend = {spend}")

@@ -8,7 +8,12 @@ import sys
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from support.backup_support import declare_shipped_apps, declare_two_apps, no_restore_server_left
+from support.backup_support import (
+    declare_shipped_apps,
+    declare_songmaker_and_keycloak,
+    declare_two_apps,
+    no_restore_server_left,
+)
 
 
 @pytest.mark.parametrize(
@@ -16,7 +21,7 @@ from support.backup_support import declare_shipped_apps, declare_two_apps, no_re
     [("backup",), ("restore", "--test"), ("backup", "--unlock"), ("restore", "--list")],
     ids=" ".join,
 )
-def test_no_backup_command_reads_stdin(edge_backup, monkeypatch, command):
+def test_no_backup_command_but_the_live_restore_reads_stdin(edge_backup, monkeypatch, command):
     class Forbidden:
         def __getattr__(self, name):
             raise AssertionError(f"read stdin ({name})")
@@ -57,6 +62,8 @@ def test_an_undeclared_app_runs_nothing_and_writes_no_status(
 
 
 TARGETLESS = "--test restores to a throwaway, so --target does not apply"
+NEEDS_TARGET_OR_LIVE = "restore needs the name of an app and --target or --live"
+LIVE_ALONE = "--live loads into the app's database, so --target, --test and --list do not apply"
 STANDALONE = "--init and --unlock stand alone, without an app, --pre-apply or --json"
 
 
@@ -92,9 +99,14 @@ STANDALONE = "--init and --unlock stand alone, without an app, --pre-apply or --
         (("restore", "--list", "--test"), "--list stands alone"),
         (("restore", "--list", "--snapshot", ""), "--list stands alone"),
         (("restore", "--list", "--target", ""), "--list stands alone"),
-        (("restore",), "restore needs the name of an app and --target"),
-        (("restore", "radio"), "restore needs the name of an app and --target"),
-        (("restore", "--target", "somewhere"), "restore needs the name of an app and --target"),
+        (("restore",), NEEDS_TARGET_OR_LIVE),
+        (("restore", "radio"), NEEDS_TARGET_OR_LIVE),
+        (("restore", "--target", "somewhere"), NEEDS_TARGET_OR_LIVE),
+        (("restore", "--live"), "--live needs the name of an app"),
+        (("restore", "--live", "--snapshot", "0" * 8), "--live needs the name of an app"),
+        (("restore", "radio", "--live", "--target", "somewhere"), LIVE_ALONE),
+        (("restore", "radio", "--live", "--test"), LIVE_ALONE),
+        (("restore", "radio", "--live", "--list"), LIVE_ALONE),
     ],
 )
 def test_a_wrong_flag_combination_is_a_usage_error_that_runs_nothing(
@@ -233,25 +245,25 @@ def test_an_unreadable_backup_summary_fails_the_app_as_not_backed_up(
     )
 
 
-def test_a_failed_app_has_its_row_while_the_others_are_backed_up_and_the_repository_is_not_pruned(
-    edge_backup, machine
+def test_a_failed_app_has_its_rows_while_the_others_are_backed_up_and_the_repository_pruned(
+    edge_backup, machine, home
 ):
     machine.lose_keycloak_database()
 
-    outcome = edge_backup(*declare_shipped_apps(), "backup")
+    outcome = edge_backup(*declare_songmaker_and_keycloak(home), "backup")
 
     rows = outcome.out.splitlines()
     assert outcome.exit_code == 3
     assert rows == [
         f"  ✓ songmaker       backed up      {machine.snapshots[-1]['id'][:8]} · 4.2 MiB · <1s",
         "  ✗ keycloak        not backed up  no database container after 10 min",
-        "  · repository      not pruned     a backup failed",
+        "  · keycloak        not pruned     its backup failed",
+        "  ✓ repository      pruned         checked · <1s",
     ]
     assert outcome.err.splitlines() == [
         "error: 1 of 2 apps not backed up · keycloak has no good backup recorded",
         "next: hal backup keycloak",
     ]
-    assert "restic forget" not in machine.labels()
 
 
 def test_a_single_failed_app_is_named_on_the_error_line(edge_backup, machine):
@@ -266,10 +278,10 @@ def test_a_single_failed_app_is_named_on_the_error_line(edge_backup, machine):
     ]
 
 
-def _fail_keycloak_after_a_good_run(edge_backup, machine, *arguments):
-    edge_backup(*declare_shipped_apps(), "backup")
+def _fail_keycloak_after_a_good_run(edge_backup, machine, home, *arguments):
+    edge_backup(*declare_songmaker_and_keycloak(home), "backup")
     machine.lose_keycloak_database()
-    return edge_backup(*declare_shipped_apps(), "backup", *arguments)
+    return edge_backup(*declare_songmaker_and_keycloak(home), "backup", *arguments)
 
 
 @pytest.mark.parametrize(
@@ -291,9 +303,9 @@ def _fail_keycloak_after_a_good_run(edge_backup, machine, *arguments):
     ids=["several apps", "one app", "one app before apply"],
 )
 def test_the_error_line_names_the_failed_apps_last_good_backup_in_local_time(
-    edge_backup, machine, berlin_time, arguments, error_line
+    edge_backup, machine, home, berlin_time, arguments, error_line
 ):
-    outcome = _fail_keycloak_after_a_good_run(edge_backup, machine, *arguments)
+    outcome = _fail_keycloak_after_a_good_run(edge_backup, machine, home, *arguments)
 
     assert outcome.exit_code == 3
     assert outcome.err.splitlines()[0] == error_line
@@ -423,11 +435,11 @@ def test_a_good_restore_test_prints_a_row_per_app_the_repository_row_and_the_ver
 
 
 def test_a_failed_app_has_its_row_while_the_others_are_proven_and_the_repository_is_checked(
-    edge_backup, machine
+    edge_backup, machine, home
 ):
     edge_backup("backup")
 
-    outcome = edge_backup(*declare_shipped_apps(), "restore", "--test")
+    outcome = edge_backup(*declare_songmaker_and_keycloak(home), "restore", "--test")
 
     assert outcome.exit_code == 3
     assert outcome.out.splitlines() == [
@@ -503,12 +515,12 @@ def test_an_interrupted_restore_test_names_the_app_it_stopped_in(
 
 
 def test_a_repository_that_fails_its_check_after_a_failed_app_has_its_row_and_the_app_count(
-    edge_backup, machine
+    edge_backup, machine, home
 ):
     edge_backup("backup")
     machine.failing["restic check"] = 1
 
-    outcome = edge_backup(*declare_shipped_apps(), "restore", "--test")
+    outcome = edge_backup(*declare_songmaker_and_keycloak(home), "restore", "--test")
 
     rows = outcome.out.splitlines()
     assert outcome.exit_code == 3

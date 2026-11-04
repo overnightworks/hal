@@ -206,7 +206,7 @@ def require_password_file(settings: Settings) -> None:
 
 
 @dataclass(frozen=True)
-class _Deadline:
+class Deadline:
     """One waiting budget that several consecutive waits draw from."""
 
     timeout: timedelta
@@ -231,7 +231,7 @@ def backup(
     targets = _targets(apps, only)
     with run.phase(Phase.PREPARE, failing=ExitCategory.CONFIGURATION):
         require_secret_and_repository(settings)
-    first_readiness = _Deadline.start(READINESS_TIMEOUT)
+    first_readiness = Deadline.start(READINESS_TIMEOUT)
     _require_docker_with_pinned_images(run, targets, first_readiness)
     with run.phase(Phase.PREPARE):
         run.attribute_legacy_evidence(settings, apps)
@@ -242,36 +242,69 @@ def backup(
                 settings,
                 app,
                 run,
-                first_readiness if index == 0 else _Deadline.start(),
+                first_readiness if index == 0 else Deadline.start(),
                 pre_apply=pre_apply,
             )
             report(_backed_up_row(app, summary, started))
-    if run.failed_apps:
+    _forget_and_check(settings, targets, run, pre_apply=pre_apply, report=report)
+    run.raise_first_app_failure()
+
+
+def _forget_and_check(
+    settings: Settings,
+    targets: tuple[App, ...],
+    run: Run,
+    *,
+    pre_apply: bool,
+    report: Callable[[Row], None],
+) -> None:
+    """Forgets each app that backed up and checks the repository, whatever another app did.
+
+    A failed app is not forgotten, so a partial snapshot of it never displaces its last good one.
+    A forget or check failure is the run's verdict, also after an app failure.
+    """
+    failed = set(run.failed_apps)
+    for app in run.failed_apps:
         report(
             Row(
                 Glyph.UNCHANGED,
-                REPOSITORY,
+                app,
                 BackupEvent.NOT_PRUNED,
-                fields=((Field.REASON, "a backup failed"),),
+                fields=((Field.REASON, "its backup failed"),),
             )
         )
-    run.raise_first_app_failure()
-    maintenance_started = host.monotonic()
-    for app in targets:
-        with run.phase(Phase.FORGET):
-            restic.forget(settings, app.name, pre_apply=pre_apply)
-    with run.phase(Phase.CHECK):
+    if not (backed_up := [app for app in targets if app.name not in failed]):
+        return
+    started = host.monotonic()
+    with _repository_row_on_failure(report, BackupEvent.NOT_PRUNED):
+        for app in backed_up:
+            with run.phase(Phase.FORGET):
+                restic.forget(settings, app.name, pre_apply=pre_apply)
+    with _repository_row_on_failure(report, RestoreEvent.NOT_CHECKED), run.phase(Phase.CHECK):
         restic.check(settings, read_data=False)
-    maintenance = host.monotonic() - maintenance_started
     report(
         Row(
             Glyph.DONE,
             REPOSITORY,
             BackupEvent.PRUNED,
             "checked",
-            fields=((Field.SECONDS, maintenance),),
+            fields=((Field.SECONDS, host.monotonic() - started),),
         )
     )
+
+
+@contextmanager
+def _repository_row_on_failure(
+    report: Callable[[Row], None], event: BackupEvent | RestoreEvent
+) -> Iterator[None]:
+    """A repository step that fails says so in a row; an unusable repository ends the run with
+    the rows printed so far."""
+    try:
+        yield
+    except StepFailed as failure:
+        if not failure.shared:
+            report(Row(Glyph.FAILED, REPOSITORY, event, fields=((Field.REASON, str(failure)),)))
+        raise
 
 
 def _backed_up_row(app: App, summary: restic.BackupSummary, started: float) -> Row:
@@ -315,7 +348,7 @@ def restore_test(
     targets = _targets(apps, only)
     with run.phase(Phase.PREPARE, failing=ExitCategory.CONFIGURATION):
         require_secret_and_repository(settings)
-    _require_docker_with_pinned_images(run, targets, _Deadline.start())
+    _require_docker_with_pinned_images(run, targets, Deadline.start())
     with run.phase(Phase.PREPARE):
         run.attribute_legacy_evidence(settings, apps)
     verified = []
@@ -361,11 +394,11 @@ def _targets(apps: tuple[App, ...], only: str | None) -> tuple[App, ...]:
 
 
 def _require_docker_with_pinned_images(
-    run: Run, apps: tuple[App, ...], readiness: _Deadline
+    run: Run, apps: tuple[App, ...], readiness: Deadline
 ) -> None:
     """A daemon that is still starting is waited for; only then are missing images pulled."""
     with run.phase(Phase.READINESS):
-        _wait_until_ready(docker.require_daemon, readiness, READINESS_POLL_SECONDS)
+        wait_until_ready(docker.require_daemon, readiness, READINESS_POLL_SECONDS)
     with run.phase(Phase.PREPARE, failing=ExitCategory.CONFIGURATION):
         _resolved(lambda: docker.ensure_pinned_images(apps))
 
@@ -413,14 +446,19 @@ def restore(
     if target.exists():
         raise StepFailed(ExitCategory.CONFIGURATION, "the target already exists")
     require_secret_and_repository(settings)
-    snapshot_id = (
-        _last_successful_snapshot(settings, app, _recorded_snapshot(settings, apps, app))
-        if snapshot_prefix is None
-        else _chosen_snapshot(settings, app, snapshot_prefix)
-    )
+    snapshot_id = snapshot_to_restore(settings, apps, app, snapshot_prefix)
     target.mkdir(mode=0o700, parents=True)
     restic.restore(settings, app.name, snapshot_id, target)
     return snapshot_id
+
+
+def snapshot_to_restore(
+    settings: Settings, apps: tuple[App, ...], app: App, snapshot_prefix: str | None
+) -> str:
+    """The last successful backup's snapshot of the app, or the one of it the operator names."""
+    if snapshot_prefix is None:
+        return _last_successful_snapshot(settings, app, _recorded_snapshot(settings, apps, app))
+    return _chosen_snapshot(settings, app, snapshot_prefix)
 
 
 @dataclass(frozen=True)
@@ -437,12 +475,12 @@ class _SqliteTarget:
     kept: KeptVolume | None
 
 
-def _ready_target(app: App, readiness: _Deadline) -> _PostgresTarget | _SqliteTarget:
+def _ready_target(app: App, readiness: Deadline) -> _PostgresTarget | _SqliteTarget:
     match app.database:
         case PostgresDatabase(audio=audio) as database:
             return _PostgresTarget(
                 database,
-                _wait_until_ready(
+                wait_until_ready(
                     lambda: docker.database_container(app, database),
                     readiness,
                     READINESS_POLL_SECONDS,
@@ -462,11 +500,11 @@ def _kept_volume(app: App, folder: str, volume: str, skip: str | None) -> KeptVo
 
 
 def _back_up(
-    settings: Settings, app: App, run: Run, readiness: _Deadline, *, pre_apply: bool
+    settings: Settings, app: App, run: Run, readiness: Deadline, *, pre_apply: bool
 ) -> restic.BackupSummary:
     with run.phase(Phase.READINESS):
         target = _ready_target(app, readiness)
-    with _private_directory(settings.work_dir) as staging:
+    with private_directory(settings.work_dir) as staging:
         with run.phase(Phase.DUMP):
             _dump(settings, target, staging)
         with run.phase(Phase.MANIFEST):
@@ -514,7 +552,7 @@ def _restore_test(settings: Settings, app: App, run: Run, snapshot_prefix: str |
             if snapshot_prefix is None
             else _chosen_snapshot(settings, app, snapshot_prefix)
         )
-    with _private_directory(settings.work_dir) as restored:
+    with private_directory(settings.work_dir) as restored:
         with run.phase(Phase.RESTORE):
             restic.restore(settings, app.name, snapshot_id, restored)
         with run.phase(Phase.VERIFY):
@@ -569,10 +607,12 @@ def _verify_postgres(
             docker.count_files(settings, MountKind.BIND, str(restored_audio)),
             "audio files",
         )
-    with docker.restore_server(RESTORE_IMAGES[database.postgres_major]) as server:
-        _wait_until_ready(
+    with docker.restore_server(
+        RESTORE_IMAGES[database.postgres_major], settings.lock_file
+    ) as server:
+        wait_until_ready(
             lambda: _ready_or_raise(server),
-            _Deadline.start(RESTORE_SERVER_TIMEOUT),
+            Deadline.start(RESTORE_SERVER_TIMEOUT),
             RESTORE_SERVER_POLL_SECONDS,
         )
         with run.phase(Phase.VERIFY, failing=ExitCategory.VERIFICATION_FAILED):
@@ -642,7 +682,7 @@ def _chosen_snapshot(settings: Settings, app: App, prefix: str) -> str:
     return matches[0]
 
 
-def _wait_until_ready[T](probe: Callable[[], T], deadline: _Deadline, poll_seconds: float) -> T:
+def wait_until_ready[T](probe: Callable[[], T], deadline: Deadline, poll_seconds: float) -> T:
     while True:
         try:
             return _resolved(probe)
@@ -694,7 +734,7 @@ def sweep_leftover_staging(parent: Path) -> None:
 
 
 @contextmanager
-def _private_directory(parent: Path) -> Iterator[Path]:
+def private_directory(parent: Path) -> Iterator[Path]:
     """A 0700 directory for dumps and restored copies, removed on success and on failure.
 
     The directory is reserved under a fresh name before it is marked, so the mark never

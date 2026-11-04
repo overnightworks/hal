@@ -1,5 +1,6 @@
 """The apps' containers and volumes, found by compose labels, and the throwaway restore server."""
 
+import hashlib
 import re
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -24,7 +25,10 @@ SERVICE_LABEL = "com.docker.compose.service"
 VOLUME_LABEL = "com.docker.compose.volume"
 # `docker compose run` leaves one-off containers with the same project and service labels.
 ONEOFF_LABEL = "com.docker.compose.oneoff"
-RESTORE_SERVER = "hal-backup-restore-test"
+# A throwaway server's name carries its home, so a run under another HOME (a probe's) never meets
+# it; the runs of one home are serialised by its lock.
+RESTORE_SERVER_PREFIX = "hal-backup-restore-test"
+_HOME_DIGEST_LENGTH = 8
 # Marks a throwaway server as hal backup's own: only a container carrying it is ever removed.
 RESTORE_OWNER_LABEL = "hal-backup.role"
 RESTORE_OWNER_ROLE = "restore-test"
@@ -38,11 +42,17 @@ FILE_COUNT_LABEL = "file count"
 SERVER_START_LABEL = "throwaway database start"
 SERVER_REMOVAL_LABEL = "throwaway database removal"
 SQLITE_OWNER_LABEL = "SQLite owner read"
+DATABASE_START_LABEL = "database start"
+SESSION_COUNT_LABEL = "pg_restore session count"
+LIVE_LOAD_LABEL = "live load"
+# pg_restore names its session so (postgres src/bin/pg_dump/pg_backup_db.c); no PGAPPNAME hides it.
+PG_RESTORE_APPLICATION = "pg_restore"
 _SCANNED = "/scanned"
 _SQLITE_SCRIPT = "/sqlite_copy.py"
 _SQLITE_DATA = "/data"
 _OWNER = re.compile(r"(\d+):(\d+)\n")
-_READY_STATES = frozenset({"running", "running healthy"})
+_RUNNING = "running"
+_READY_STATES = frozenset({_RUNNING, "running healthy"})
 # What `docker run --detach` prints: the full ID, never a name or a shortened one.
 _CONTAINER_ID = re.compile(r"[0-9a-f]{64}")
 
@@ -114,31 +124,57 @@ def database_container(app: App, database: PostgresDatabase) -> str:
 def service_container(project: str, service: str, name: str) -> str:
     """The one ready database container of the project's service; `name` stands in messages."""
     try:
-        ids = _lines(
-            host.run(
-                ["docker", "ps", "--all", "--quiet", "--no-trunc",
-                 *_label_filter(PROJECT_LABEL, project),
-                 *_label_filter(SERVICE_LABEL, service),
-                 *_label_filter(ONEOFF_LABEL, "False")],
-                label="docker ps",
-                timeout=PROBE_TIMEOUT,
-            )
-        )  # fmt: skip
+        ids = _service_containers(project, service)
         if len(ids) > 1:
             raise TargetError(f"{len(ids)} database containers for {name} instead of exactly one")
         if not ids:
             raise NotReadyError("no database container")
-        state = host.run(
-            ["docker", "inspect", "--format",
-             "{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}", ids[0]],
-            label="docker inspect",
-            timeout=PROBE_TIMEOUT,
-        )  # fmt: skip
+        state = _state(ids[0])
     except host.HostCommandError as error:
         raise DockerSilentError(f"docker does not answer: {error}") from error
-    if state.decode().strip() not in _READY_STATES:
+    if state not in _READY_STATES:
         raise NotReadyError("database not ready")
     return ids[0]
+
+
+def only_database_container(app: App, database: PostgresDatabase) -> str:
+    """The one database container of the app's service in any state, running or stopped."""
+    ids = _service_containers(app.compose_project, database.db_service)
+    if len(ids) != 1:
+        raise TargetError(f"{len(ids)} database containers for {app.name} instead of exactly one")
+    return ids[0]
+
+
+def start_if_stopped(container_id: str) -> bool:
+    """Starts the container by its ID unless it runs; whether it had to."""
+    if _state(container_id).split()[0] == _RUNNING:
+        return False
+    host.run(["docker", "start", container_id], label=DATABASE_START_LABEL, discard_stderr=True)
+    return True
+
+
+def _service_containers(project: str, service: str) -> list[str]:
+    return _lines(
+        host.run(
+            ["docker", "ps", "--all", "--quiet", "--no-trunc",
+             *_label_filter(PROJECT_LABEL, project),
+             *_label_filter(SERVICE_LABEL, service),
+             *_label_filter(ONEOFF_LABEL, "False")],
+            label="docker ps",
+            timeout=PROBE_TIMEOUT,
+        )
+    )  # fmt: skip
+
+
+def _state(container_id: str) -> str:
+    """`<status>` or `<status> <health>`, as `docker inspect` reports them."""
+    state = host.run(
+        ["docker", "inspect", "--format",
+         "{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}", container_id],
+        label="docker inspect",
+        timeout=PROBE_TIMEOUT,
+    )  # fmt: skip
+    return state.decode().strip()
 
 
 def app_volume(app: App, volume: str) -> str:
@@ -164,6 +200,52 @@ def dump_database(database: PostgresDatabase, container_id: str, target: Path) -
         label="pg_dump",
         stdout=target,
     )  # fmt: skip
+
+
+def restore_sessions(container_id: str, database: PostgresDatabase) -> int:
+    """How many sessions of `pg_restore` the live database holds, a killed run's load among them."""
+    output = host.run(
+        ["docker", "exec", container_id, "psql",
+         "--username", database.db_user, "--dbname", database.db_name,
+         "--no-psqlrc", "--tuples-only", "--no-align", "--set", "ON_ERROR_STOP=1",
+         "--command", "SELECT count(*) FROM pg_stat_activity"  # noqa: S608 - the name is this module's constant and psql's --command takes no variables
+         f" WHERE application_name = '{PG_RESTORE_APPLICATION}'"],
+        label=SESSION_COUNT_LABEL,
+        timeout=PROBE_TIMEOUT,
+        discard_stderr=True,
+    )  # fmt: skip
+    try:
+        return int(output)
+    except ValueError as error:
+        raise host.UnreadableOutputError("the pg_restore session count is unreadable") from error
+
+
+# The shell parses no argument: pg_restore's argv are its positional parameters. Its messages
+# quote row values, so they go to /dev/null; its exit code is the shell's last stdout line.
+_REPORTING_SHELL = ("sh", "-c", '"$@" >/dev/null 2>&1; echo $?', "sh")
+
+
+def load_live(container_id: str, database: PostgresDatabase, dump: Path) -> int | None:
+    """The dump loaded into the live database in one transaction; the exit code pg_restore
+    printed, or None when no code line came. The client runs in its own session, so a Ctrl-C
+    at the terminal reaches only hal; a failed client raises `HostCommandError`."""
+    # No lock_timeout: pg_restore sets it to 0 in its session (postgres
+    # src/bin/pg_dump/pg_backup_archiver.c:3296), so a lock another session holds is waited for.
+    options = " ".join(_SILENT_SERVER_SETTINGS)
+    output = host.run(
+        ["docker", "exec", "-i", "--env", f"PGOPTIONS={options}", container_id,
+         *_REPORTING_SHELL, "pg_restore", "--clean", "--if-exists", "--single-transaction",
+         "--exit-on-error", "--username", database.db_user, "--dbname", database.db_name],
+        label=LIVE_LOAD_LABEL,
+        stdin=dump,
+        discard_stderr=True,
+        new_session=True,
+    )  # fmt: skip
+    match output.decode(errors="replace").split():
+        case [*_, last] if last.isdigit():
+            return int(last)
+        case _:
+            return None
 
 
 def _sqlite_argv(
@@ -273,16 +355,25 @@ _SILENT_SERVER_SETTINGS = (
 )  # fmt: skip
 
 
-@contextmanager
-def restore_server(image: str) -> Iterator[RestoreServer]:
-    """A PostgreSQL without network or volume of ours; removed again whatever happens.
+def restore_server_name(lock_file: Path) -> str:
+    """The home's own name: the first hex digits of the sha256 of its lock file's absolute path."""
+    digest = hashlib.sha256(str(lock_file.absolute()).encode()).hexdigest()
+    return f"{RESTORE_SERVER_PREFIX}-{digest[:_HOME_DIGEST_LENGTH]}"
 
-    Removal goes by container ID and only to containers with our owner label: a foreign
-    container holding the name makes the start fail instead of being deleted.
+
+@contextmanager
+def restore_server(image: str, lock_file: Path) -> Iterator[RestoreServer]:
+    """A PostgreSQL without network or volume of ours, under the name of the home whose lock is
+    held; removed again whatever happens.
+
+    Removal goes by container ID and only to containers with our owner label and this home's
+    name: a foreign container holding the name makes the start fail instead of being deleted,
+    and another home's server is never seen.
     """
-    _remove_owned_restore_servers()
+    name = restore_server_name(lock_file)
+    _remove_owned_restore_servers(name)
     started = host.run(
-        ["docker", "run", "--detach", "--name", RESTORE_SERVER, "--network", "none",
+        ["docker", "run", "--detach", "--name", name, "--network", "none",
          "--label", f"{RESTORE_OWNER_LABEL}={RESTORE_OWNER_ROLE}",
          # No container log and no server-side error logging: a failed COPY logs row values.
          "--log-driver", "none",
@@ -296,7 +387,7 @@ def restore_server(image: str) -> Iterator[RestoreServer]:
     finally:
         # By name and owner label, not by the reported ID: the server goes even when
         # docker run's output could not be read.
-        _remove_owned_restore_servers()
+        _remove_owned_restore_servers(name)
 
 
 @dataclass(frozen=True)
@@ -374,11 +465,11 @@ def _started_container(run_output: bytes) -> str:
             raise host.UnreadableOutputError("docker run reported no container id")
 
 
-def _remove_owned_restore_servers() -> None:
+def _remove_owned_restore_servers(name: str) -> None:
     for container_id in _lines(
         host.run(
             ["docker", "ps", "--all", "--quiet", "--no-trunc",
-             "--filter", f"name=^{RESTORE_SERVER}$",
+             "--filter", f"name=^{name}$",
              *_label_filter(RESTORE_OWNER_LABEL, RESTORE_OWNER_ROLE)],
             label="docker ps",
         )

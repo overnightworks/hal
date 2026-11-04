@@ -27,11 +27,13 @@ before a fresh plan is shown. A unit with an emergency switch (`hal stop`) or a 
 left is never started and its switch is never cleared here: only `hal start` ends it. If it is
 enabled in the catalog, declares a setup, and its containers still run while it is not set up,
 the run is refused: nothing is asked or published. After the setups, and before the plan is
-shown, a service this run creates that names a secret file which does not exist refuses the run
-with that path and `next: hal setup`, where Compose would refuse it at `up`.
-While the `litellm` container runs, the key step (`litellm_keys.py`) plans each app's LiteLLM key
+shown, a service this run creates, or the key step's one-off when the step reads, that names a
+secret file which does not exist refuses the run with that path and `next: hal setup`, where
+Compose would refuse it at `up`.
+While the unit `litellm` is on, the key step (`litellm_keys.py`) plans each app's LiteLLM key
 and the person budget, with the numbers of `[api]` in `~/.config/hal/config.toml` that `hal`'s door
-read, in the same plan and makes them after the realm step and before the apps.
+read, in the same plan and makes them after the realm step and before the apps;
+a run that starts LiteLLM or recreates it or its database leaves the read to the next apply.
 An app (an entry with `repo`) is planned last, in the same plan and under the same `yes`: its
 newest release tag is checked out, built, started and recorded once its containers are settled
 (`apps.py`).
@@ -131,6 +133,7 @@ from hal.stack.unit_plans import (
     plan_switches,
     plan_unit_services,
     read_fleet,
+    restart_of,
     switch,
     switched_off_units,
     unit_gates,
@@ -208,15 +211,14 @@ def _plan(
     core_plans = core.plan_core(fleet.config, containers, hashes, tracked, record)
     follower_plans = core.plan_followers(fleet.config, containers, hashes, tracked, record, gates)
     unit_services = plan_unit_services(fleet, containers, hashes, plans, followers, gates, engine)
+    keycloak_gate = gates.get(reconcile.REALM_UNIT)
+    keycloak_restart = restart_of(plans, unit_services.recreates, reconcile.KEYCLOAK)
     realm = reconcile.plan_realm(
-        reconcile.Observer(engine),
-        record,
-        fleet.config,
-        tracked,
-        gates.get(reconcile.REALM_UNIT),
-        reconcile.restart_of(plans, unit_services.recreates),
+        reconcile.Observer(engine), record, fleet.config, tracked, keycloak_gate, keycloak_restart
     )
-    keys = litellm_keys.plan_keys(engine, states, repository, api)
+    keys = litellm_keys.plan_keys(
+        engine, states, repository, api, gates, plans, unit_services.recreates
+    )
     app_plans = plan_apps(repository, fleet, app_runtime, marks)
     appkit = plan_appkit(repository, rename=rename)
     legal = plan_legal(repository, record.directory / RECORD_FILE, fleet)
@@ -431,14 +433,20 @@ def _plan_and_apply(
 
 def _refused_unsettled(planned: Plan) -> int | None:
     """How a plan that changes nothing ends when a step could not settle it, None when every step
-    did: an unread realm, unread keys, or an app whose key name another key holds."""
+    did: an unread realm, unread keys, the admin group's members not read, or an app whose key
+    name another key holds."""
     keys = planned.keys
     if (realm := planned.realm).action is reconcile.RealmAction.UNREADABLE:
         write_error(
             f"realm: Keycloak could not be read; not checked ({realm.error})", command(Verb.APPLY)
         )
-    elif keys.not_read is not None:
-        write_error(f"litellm: keys not read ({keys.not_read})", command(Verb.APPLY))
+    elif isinstance(keys, litellm_keys.NotRead):
+        write_error(f"litellm: keys not read ({keys.cause})", command(Verb.APPLY))
+    elif not isinstance(keys, litellm_keys.KeysPlan):
+        return None
+    elif isinstance(keys.admin, reconcile.MembersNotRead):
+        cause = f"members not read from Keycloak ({keys.admin.cause})"
+        write_error(f"{litellm_keys.ADMIN_BUDGET_ID}: {cause}", command(Verb.APPLY))
     elif keys.name_taken:
         write_error(f"litellm: {', '.join(keys.name_taken)} name taken; nothing changed")
     else:

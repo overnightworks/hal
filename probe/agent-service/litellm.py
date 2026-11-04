@@ -52,7 +52,8 @@ from agent_networks import AGENT_NETWORKS, EMBEDDED_RESOLVER, gateway_listeners,
 from egress import LABEL, PROJECT, ProbeFailed, expect, run_scratch_probe  # noqa: E402
 from egress_observe import socket_name  # noqa: E402
 from issuer import ISSUER_SERVICE, SERVICE, IssuerProbe  # noqa: E402
-from retention_census import DATABASE, FRONT, GATEWAY, LITELLM  # noqa: E402
+from litellm_caller import CALL_PROGRAM, caller_input  # noqa: E402
+from retention_census import DATABASE, FRONT, GATEWAY, LITELLM, DatabaseLogin  # noqa: E402
 from scratch_secrets import issue_certificate, write_new  # noqa: E402
 
 from hal.output import write_line  # noqa: E402
@@ -71,6 +72,7 @@ FRONT_PORT = 4000
 # The scenario of an app key and a person (docs/agent-service.md, "The API route"): each app key
 # has a money budget per month and a parallel bound, each person a budget per month.
 APP_BUDGET, PERSON_BUDGET, PERIOD, PARALLEL = 10.0, 2.0, "1mo", 5
+PERSON_PUSH = {"input_tokens": 600_000, "output_tokens": 1}  # on text/opus, past PERSON_BUDGET
 OPERATOR_BUDGET = "probe-operator"  # a budget with no max_budget, linked to the operator's row
 RESCHEDULER_SECONDS = 3
 SPEND_SECONDS = 90
@@ -128,39 +130,6 @@ import os
 from prisma.client import BINARY_PATHS
 from prisma.engine import utils
 print(os.path.realpath(utils.ensure(BINARY_PATHS.query_engine)))
-"""
-# One HTTP/1.0 request, so no answer is chunked. The program on standard input starts with
-# `BEARER = ...` (a key, or None), `BODY = ...` (the request's JSON, or None) and `HIDDEN = [...]`
-# (the keys its output shows as `<key>`), so no key reaches argv or the output. argv: host, port,
-# method, path; prints {"status", "retry_after", "seconds", "document"}, the answer's JSON or None.
-CALL_PROGRAM = """\
-import json, socket, sys, time
-host, port, method, path = sys.argv[1:5]
-payload = b"" if BODY is None else BODY.encode()
-head = f"{method} {path} HTTP/1.0\\r\\nHost: {host}:{port}\\r\\n"
-if BEARER:
-    head += f"Authorization: Bearer {BEARER}\\r\\n"
-head += f"Content-Type: application/json\\r\\nContent-Length: {len(payload)}\\r\\n\\r\\n"
-started = time.monotonic()
-with socket.create_connection((host, int(port)), timeout=150) as raw:
-    raw.sendall(head.encode() + payload)
-    reply = b""
-    while chunk := raw.recv(65536):
-        reply += chunk
-top, _, content = reply.partition(b"\\r\\n\\r\\n")
-lines = top.decode().splitlines()
-headers = {k.lower(): v for k, _, v in (line.partition(": ") for line in lines[1:])}
-try:
-    document = json.loads(content)
-except ValueError:
-    document = None
-shown = json.dumps({
-    "status": int(lines[0].split(" ", 2)[1]), "retry_after": headers.get("retry-after"),
-    "seconds": time.monotonic() - started, "document": document,
-})
-for key in HIDDEN:
-    shown = shown.replace(key, "<key>")
-print(shown, flush=True)
 """
 # The step-ca root inside a client container, at the path of compose.yaml's secret mount.
 CA_IN_CLIENT = "/run/secrets/step_ca_root_certificate"
@@ -491,10 +460,11 @@ class LitellmProbe(IssuerProbe):
             "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", self.image,
             "python", "-I", "-", host, port, method, path,
         ]  # fmt: skip
-        payload = None if body is None else json.dumps(body)
-        hidden = [*self.app_keys, self.master_key]
-        preamble = f"BEARER = {bearer!r}\nBODY = {payload!r}\nHIDDEN = {hidden!r}\n"
-        return argv, preamble + CALL_PROGRAM
+        return argv, caller_input(CALL_PROGRAM, bearer, body, self.hidden_keys())
+
+    def hidden_keys(self) -> list[str]:
+        """The keys a caller's output shows as `<key>`."""
+        return [*self.app_keys, self.master_key]
 
     def call(
         self, bearer: str | None, method: str, path: str, body: dict | None = None,
@@ -540,6 +510,24 @@ class LitellmProbe(IssuerProbe):
 
     def customer_spend(self, user: str) -> float:
         return (self.customer_row(user) or {"spend": 0.0})["spend"]
+
+    def push(self, key: str, user: str, usage: dict) -> None:
+        """One served request whose steered usage LiteLLM prices."""
+        self.steer_fake(usage=usage)
+        answer = self.complete(key, user=user)
+        self.steer_fake()
+        expect(answer["status"] == 200, f"the push was refused: {answer['status']}")
+
+    def push_person(self, cell: str, key: str, user: str) -> float:
+        self.push(key, user, PERSON_PUSH)
+        self.wait_for(cell, "the person's spend past the budget",
+                      lambda: self.customer_spend(user) > PERSON_BUDGET)  # fmt: skip
+        return self.customer_spend(user)
+
+    def move_due(self, table: str, column: str, value: str) -> None:
+        """Moves a budget's reset into the past in LiteLLM's database."""
+        moved = "budget_reset_at = now() - interval '1 minute'"
+        self.sql(f"UPDATE \"{table}\" SET {moved} WHERE {column} = '{value}'")  # noqa: S608 - the probe names the table and the value
 
     def complete(self, key: str | None, model: str = DEFAULT_MODEL, user: str | None = None,
                  path: str = ROUTE, front: bool = True, network: str | None = None,
@@ -663,15 +651,13 @@ class LitellmProbe(IssuerProbe):
         self.hold("D1", f"LiteLLM runs as {user} on a read-only root; {finished} of {total} "
                   "migrations finished")  # fmt: skip
 
-    def database_options(self) -> list[str]:
-        """The user and database `compose.yaml` gives `litellm-db`, as the options of psql and
-        pg_dump."""
+    def database_login(self) -> DatabaseLogin:
+        """The user and database `compose.yaml` gives `litellm-db`."""
         resolved = json.loads(self.compose("config", "--format", "json").stdout)["services"]
-        environment = resolved[DATABASE]["environment"]
-        return [
-            f"--username={environment['POSTGRES_USER']}",
-            f"--dbname={environment['POSTGRES_DB']}",
-        ]
+        return DatabaseLogin.of(resolved[DATABASE])
+
+    def database_options(self) -> list[str]:
+        return self.database_login().options()
 
     def sql(self, statement: str, *options: str) -> subprocess.CompletedProcess:
         return self.run([

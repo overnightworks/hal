@@ -37,6 +37,8 @@ litellm_settings:
   turn_off_message_logging: true
   redact_messages_in_exceptions: true
   max_end_user_budget_id: person-monthly
+  # No request tag comes from the user agent, so a conforming request writes no daily tag row.
+  disable_add_user_agent_to_request_tags: true
 
 general_settings:
   enforce_user_param: true

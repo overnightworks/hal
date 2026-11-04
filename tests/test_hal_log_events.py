@@ -19,6 +19,7 @@ from support.backup_support import (
     SQLITE_TOML,
     declare_apps,
     declare_shipped_apps,
+    declare_songmaker_and_keycloak,
     declare_two_apps,
 )
 
@@ -300,15 +301,18 @@ def test_a_good_run_under_the_environment_a_backup_unit_declares_is_json_events(
 
 
 @pytest.mark.usefixtures("json_log")
-def test_a_failed_app_is_an_error_row_beside_an_info_row_and_the_error_event(edge_backup, machine):
+def test_a_failed_app_is_an_error_row_beside_an_info_row_and_the_error_event(
+    edge_backup, machine, home
+):
     machine.lose_keycloak_database()
 
-    outcome = edge_backup(*declare_shipped_apps(), "backup")
+    outcome = edge_backup(*declare_songmaker_and_keycloak(home), "backup")
 
     assert outcome.exit_code == ExitCode.FAILURE
     assert [(priority, event["subject"]) for priority, event in events(outcome.out)] == [
         (6, "songmaker"),
         (3, "keycloak"),
+        (6, "keycloak"),
         (6, "repository"),
     ]
     [(priority, event)] = events(outcome.err)
@@ -537,7 +541,7 @@ def text_reason_of(output: str, event: str) -> str:
     return line.split(f"{event} ", 1)[1].strip()
 
 
-def test_a_failed_app_carries_its_reason_and_the_skipped_prune_carries_its_own(
+def test_a_failed_app_carries_its_reason_and_its_skipped_prune_carries_its_own(
     edge_backup, machine, monkeypatch
 ):
     machine.lose_keycloak_database()
@@ -552,7 +556,7 @@ def test_a_failed_app_carries_its_reason_and_the_skipped_prune_carries_its_own(
     assert failed["reason"] == text_reason_of(in_text.out, "not backed up")
     assert "fact" not in failed
     priority, skipped = the_event(in_json.out, "not pruned")
-    assert (priority, skipped["reason"]) == (6, "a backup failed")
+    assert (priority, skipped["subject"], skipped["reason"]) == (6, "keycloak", "its backup failed")
     assert "fact" not in skipped
 
 

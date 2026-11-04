@@ -14,11 +14,13 @@ from pathlib import Path
 import pytest
 import support.stack_apply_publish as stack_apply_publish_support
 from support.stack_apply import (
+    LITELLM_ON,
     at_terminal,  # noqa: F401 the fixture, requested by name below
     ingress,  # noqa: F401 the fixture, requested by name below
     litellm_running,
     scripted,  # noqa: F401 the fixture, requested by name below
     scripted_git,  # noqa: F401 the fixture, requested by name below
+    secret_files,  # noqa: F401 the fixture, requested by name below
     setup_check,  # noqa: F401 the fixture, requested by name below
     setup_run,  # noqa: F401 the fixture, requested by name below
     state,  # noqa: F401 the fixture, requested by name below
@@ -436,10 +438,13 @@ def test_both_branches_hand_the_settings_file_to_the_key_step(
     world,
     repository,
     home,  # noqa: F811
+    secret_files,  # noqa: F811
     arguments,
 ):
     """#889 C6: `[api.hopin]` of `config.toml` reaches the key step's write on either branch."""
-    keys = litellm_running(repository, world.scripted)
+    fleet = repository / "fleet.yaml"
+    fleet.write_text(fleet.read_text() + LITELLM_ON)
+    keys = litellm_running(repository, world.scripted, secret_files)
     write_hal_config(home, "[api.hopin]\nbudget_dollars = 6\n")
 
     world.run("yes", "yes", arguments=arguments)

@@ -191,12 +191,19 @@ person's fingerprint with its counters, but no spend-log or error-log row and no
 `store_prompts_in_spend_logs`). Only the per-request logs stop: the daily and the key, user and team
 spend aggregates are written whatever `disable_spend_logs` says, and they hold amounts, never content.
 What the database keeps per person or per tool goes after 90 days without use ([The API route](#the-api-route), What expires).
-The census also searches the database's volume and a `pg_dump` of it; the front logs at INFO without an access log.
+The front logs at INFO without an access log.
 The retention census (`agent-service/retention_census.py`, driven by
-`probe/agent-service/litellm_retention.py` on the fake-only stack) searches a request and an answer canary in every writable mount and every log of
-the front, the gateway, LiteLLM and the service. After a success, an upstream 500, an upstream error
-body that echoes the request, a refused model and a refusal of LiteLLM's guard it finds none, and each
-search is proven by a control that plants a canary where it must be found. LiteLLM runs at log level
+`probe/agent-service/litellm_retention.py` on the fake-only stack with hopin's key) searches its canaries in every writable mount and every log of
+the front, the gateway, LiteLLM and its database, the database's volume among them, and in a `pg_dump` of the database, naming the table a
+hit sits in. The canaries sit in the message, the tool description, the tool-call arguments, the tool result, the answer, a streamed
+answer, `User-Agent` and `x-litellm-tags`. After a success, an upstream 500, an upstream error body that echoes the request, a refused
+model, a refusal of LiteLLM's guard, a tool call and a streamed answer it finds none, and each search is proven by a control that plants
+a canary where it must be found. The front's constant user agent lands in the tool rows, beside each tool name. LiteLLM writes no request
+tag from the user agent (`disable_add_user_agent_to_request_tags`), so a conforming request writes no tag row. A key holder who does not
+conform can send a tag in the body: a root `tags` list, `metadata.tags` and `litellm_metadata.tags` each land in `LiteLLM_DailyTagSpend`
+with LiteLLM's own request id, and so in the database's volume, in no other table, log or mount, and `metadata` as a JSON string lands
+in no sink at all; none reaches the provider. Those rows are outside the
+four tables `hal expire` prunes, so the 90 days above do not cover them. LiteLLM runs at log level
 `CRITICAL`: its own logging sites and uvicorn's write no error line that could carry a provider's
 text, and a provider failure shows at the caller. One channel stays open: `logging.lastResort` and
 `warnings.warn` reach LiteLLM's standard error, and whether a real path sends a provider's text
@@ -214,10 +221,13 @@ privacy section, which owns it.
 **Whose account.** Only the operator and his own test accounts are members of `/services/agent-service/subscription`, so his
 Claude subscription serves only his own use. Every other person reaches the provider only through the
 API route, under Anthropic's commercial API terms: an app's own key at LiteLLM, not the service
-(see „The API route“). Nothing runs that route yet. The operator ruled on 28.10.2026
-([#299 comment](https://github.com/overnightworks/hal/issues/299#issuecomment-6464712955)) that the
-agent service writes its own privacy section, `agent-dienst` in `legal/sections/agent-service/datenschutz.html`,
-and describes only the API route; it does not speak of the subscription, which no user can ever use, and no
+(see „The API route“). No app takes that route yet. The privacy section `agent-dienst` in
+`legal/sections/agent-service/datenschutz.html` describes only that route as an app takes it, through the
+front, LiteLLM with its database and the gateway to Anthropic: what a request carries, what LiteLLM keeps
+per app and per person, when that is deleted, how long the backup keeps it and the legal basis of the budget per person (Art. 6 Abs. 1 lit. f DSGVO, with the right to object in the general part). The Keycloak section states the same backup bound for a snapshot before an update. hal writes it itself
+(operator, 03.11.2026, [#110](https://github.com/overnightworks/hal/issues/110)); by the operator's ruling
+of 28.10.2026 ([#299 comment](https://github.com/overnightworks/hal/issues/299#issuecomment-6464712955))
+it does not speak of the subscription, which no user can ever use, and no
 text a person reads speaks of the subscription. Every other app or service links
 `/datenschutz#agent-dienst` and says in its own text only what it sends. Who may use the subscription is decided by the service's subscription group, and who may
 use the API route by LiteLLM's keys and budgets, the same in every app; an app adds no AI group of its own. Membership in the app (`/apps/<name>`) stays separate access to the app.
@@ -243,17 +253,17 @@ host process can reach it, because the network has no host address and publishes
 An app that calls LiteLLM directly holds only its own key, the file `~/.secrets/litellm/apps/<app>` (`songmaker`,
 `hopin`, `presentator`). `hal setup` creates a missing one with the prefix `sk-` that LiteLLM requires of a custom
 key, mode 0644 in a 0700 folder so the app's container reads it as its own user. `hal apply`'s key step reads it to
-make the app's key in LiteLLM (see "The API route"). On the same agent network the app posts to
-`http://litellm-front:4000/v1/chat/completions` with that key as bearer; nothing starts the front yet.
+make the app's key in LiteLLM (see "The API route"); hopin's file is also read by `agent-canary`, the live canary's one-off. On the same agent network the app posts to
+`http://litellm-front:4000/v1/chat/completions` with that key as bearer; the unit `litellm` starts the front.
 
 ## The API route
 
 An app reaches the provider through LiteLLM with its own key. The path starts on the app's own
 agent network, `hal_agent_<app>`, and is `litellm-front`, `litellm`, `agent-egress`, the provider,
 over the internal, isolated networks `litellm-backend` and `litellm-egress`; `litellm` also reaches its own Postgres, `litellm-db`, over
-`litellm-db`, a network with those two members. Nothing runs it yet: the profile `litellm` is in no
-unit. While its container runs, `hal apply` makes each app's key and the person budget (the key
-step below).
+`litellm-db`, a network with those two members. The unit `litellm` of `fleet.yaml` runs the front,
+LiteLLM and its database. While the unit is on, `hal apply` makes each app's key, the person budget
+and the admin budget with its customer rows (the key step below).
 
 - **The boundary.** `litellm-front` is the same pinned Traefik as the gateway with one router,
   `POST /v1/chat/completions` (`agent-service/litellm/front/`); every other method and path ends in
@@ -263,9 +273,9 @@ step below).
   names `text/opus`, `text/sonnet`, `text/haiku` of `config.yaml`; 403 otherwise), a path among
   the key's `allowed_routes` (403 otherwise, the provider routes `/v1/messages` and
   `/v1/completions` included), and a `user`, the person's fingerprint (`enforce_user_param`; 401
-  without one). LiteLLM also routes by a `model` in the query string, which the key's `models` do
-  not bind: one unknown to `config.yaml` is refused with 400, but a configured name outside the
-  key's `models` is served by that model and its spend counts on the key, and a key or person
+  without one), which LiteLLM sends on to the provider as `metadata.user_id`. The privacy text rests on the client wheel v0.20.0 (`pyproject.toml`): the fingerprint is `person_fingerprint`, a SHA-256 of issuer and subject, the same in every app, and the gateway backend sends the app's key as the only bearer, the fingerprint in the body's `user`. LiteLLM also routes
+  by a `model` in the query string, which the key's `models` do not bind: one unknown to
+  `config.yaml` is refused with 400, but a configured name outside the key's `models` is served by that model and its spend counts on the key, and a key or person
   past its budget is refused (measured). The front therefore answers any query string on its
   route itself with 400 and no `Location`, so nothing of such a request reaches LiteLLM. It sets
   `User-Agent` to one constant, `litellm-front`, and removes `x-litellm-tags`, which LiteLLM would
@@ -281,7 +291,9 @@ step below).
   (`budget_exceeded_status_code` stays unset). A person's spend across all keys is bounded by the
   budget that `max_end_user_budget_id` in `config.yaml` names, refused the same way; a row LiteLLM
   makes for a new fingerprint resets with that budget. A fingerprint whose own row links a budget
-  without `max_budget`, the operator's, is bound by its app key's budget alone. Both periods reset on the 1st
+  without `max_budget` is bound by its app key's budget alone: the rows of the members of the
+  Keycloak group `/services/litellm/admin` link the admin budget `litellm-admin`, which has no
+  `max_budget` and the person budget's `1mo`, so their spend resets with it. The periods reset on the 1st
   of the month at 00:00 UTC, through LiteLLM's own reset job. A recreate keeps the refusals: spend
   lives in the database. Without its database a running proxy keeps admitting a cached key until
   its cache expires (about a minute, measured), then refuses every request before the provider
@@ -301,8 +313,8 @@ step below).
   row with old and new, and the next apply sets it without a recreate. An `[api.<name>]` naming no
   app the one-off read ends `hal apply` with `cannot plan` before the question while LiteLLM runs:
   a table for an app compose does not mount yet stops the setups that run would offer, and a
-  retired app's leftover table stops every `hal apply` until the operator removes it. With LiteLLM
-  stopped the name is not checked and nothing is set. The apps are the
+  retired app's leftover table stops every `hal apply` until the operator removes it. While the
+  step does not read (below) the name is not checked and nothing is set. The apps are the
   key files compose mounts into the one-off `litellm-keys` (profile `apply`, on `litellm-backend`
   alone), which holds them and the master key; hal's own process opens neither. At plan time the
   one-off reads each app's live key by the SHA-256 of its file, in a request body, so a deleted key
@@ -316,16 +328,42 @@ step below).
   old key is the operator's call). Keys that cannot be read while LiteLLM runs end as an unread
   realm does: alone, `error:` and `next: hal apply` without a question; beside other changes,
   skipped and `partial`. Output names apps, budget ids and models, never a key or its hash. The
-  step reads only while the `litellm` container runs; nothing in `hal apply` starts it yet. After
-  LiteLLM's first start it migrates its database and answers 502 meanwhile, so a second `hal
-  apply` makes the keys.
+  step reads while the unit is on and the run neither starts LiteLLM nor recreates it or its
+  database. Such a run's plan says `keys later` and the next apply checks them, so a first start
+  takes two applies. While the unit is off or switched off the step does nothing. A file of the
+  one-off that is missing refuses the run before the yes, with `next: hal setup`. After `hal setup`
+  writes a new master key, the running LiteLLM still holds the old one and the step's read ends
+  `keys not read`: `hal stop litellm`, then `hal start litellm`, and the next apply reads.
+- **A start of LiteLLM.** It migrates its database before it listens; meanwhile the front answers
+  502 and the key step reads nothing. A changed LiteLLM image is named `!` and not swapped, as
+  `docs/stack.md` "Images" says; Dependabot proposes no LiteLLM image, so a bump is a pull request
+  opened by hand. A change of `config.yaml` or `start.sh` alone does not recreate it.
+- **The admin group's rows.** After the apps the step makes `litellm-admin` and links to it exactly
+  the customer rows of the direct members of `/services/litellm/admin`, read at each plan through
+  the realm observer's members mode; each fingerprint is `person_fingerprint` of agent-runtime's
+  client, from the realm's issuer and the member's id, checked as `fp-` and 64 lowercase hex. A
+  member's row is made, or linked when it is unlinked or linked to another budget; a row on
+  `litellm-admin` that is no member's is unlinked, before any link; no other row is touched, so a
+  row linked to another budget by hand stays linked. LiteLLM's update cannot clear a link, so an
+  unlink deletes the row and makes it again from a read taken right before, with its own fields and
+  its spend, the current month's; a lost answer between the two calls, or a remake LiteLLM refuses
+  (a `default_model` gone from the router), loses that row and its month spend. The plan counts the
+  rows linked and unlinked, never which. With Keycloak's unit off or switched off the rows are
+  held, a row says so, and the run ends as it would. With the members not read (Keycloak not running
+  at plan time, started by this run, the read failing, or the group absent) the rows stay and the run
+  ends `partial` naming Keycloak with `next: hal apply`, exit 1, also when nothing else changes; an
+  apply whose realm step makes the group, or which starts Keycloak, ends so. The members'
+  fingerprints pass through hal's memory and the one-off's standard input and output; no printed
+  line carries a fingerprint or a member, failures included.
 - **The output default.** Each name sets `max_tokens` 16384 in `config.yaml`: what a request that
   names none gets, and the output LiteLLM reserves against a budget, so the ceiling of a conforming
   app. An app that names more is bound by the budgets alone.
 - **The database.** `litellm-db` is Postgres 17 at the image and hardening of `keycloak-db` (one
   `x-postgres` anchor in `compose.yaml`), with its own volume and the file secret `litellm/db-password`,
   which `start.sh` turns into `DATABASE_URL`. It holds the keys (their hashes only), the budgets, and
-  each person's fingerprint with its counters. LiteLLM stays the official image by its digest: BerriAI ships one
+  each person's fingerprint with its counters; the weekly backup copies it whole, and
+  `hal restore litellm --live` loads a snapshot back while LiteLLM is switched off, so a lost
+  volume gets its month's spend back ([backup.md](backup.md), „Restore LiteLLM“). LiteLLM stays the official image by its digest: BerriAI ships one
   image whose enterprise part a licence key switches on, and hal sets no key and uses no enterprise
   function, so it builds no image of its own. It runs with no `LITELLM_LICENSE` and none of the settings behind its premium check (`enforced_params`,
   `allowed_ips`, global `allowed_routes`, key `tags`, `model_max_budget`, `/key/regenerate`). It
@@ -337,12 +375,12 @@ step below).
   (`LiteLLM_DailyEndUserSpend`, `LiteLLM_DailyToolSpend`) dated more than 90 UTC days back, the tool
   rows (`LiteLLM_ToolTable`) not used for 90 days, and the customer rows (`LiteLLM_EndUserTable`)
   whose fingerprint has had no request for 90 days and whose spend is 0. A customer row linked to
-  its own budget, as the operator's is, stays, and so do keys, budgets and every other table. The period is
+  a budget, as an admin's is, stays, and so do keys, budgets and every other table. The period is
   `RETENTION_DAYS` in `src/hal/litellm_expiry.py`, not a setting, because the privacy text states
   it. The run prints counts only; with `litellm-db` not running it deletes nothing and exits 0. A
-  backup that copies the database keeps deleted rows until that copy goes, and a restore brings them
-  back until the next daily run deletes them again. A failed run fails `hal-expire.service`, which
-  `hal check` and `hal alarm` report as `job-failed`; its error line says `nothing deleted` only
+  deleted row stays in the backup's snapshots as long as [backup.md](backup.md), „What a backup
+  holds, and its limit“, states, and a restore brings it back until the next daily run deletes it
+  again. A failed run fails `hal-expire.service`, which `hal check` and `hal alarm` report as `job-failed`; its error line says `nothing deleted` only
   when psql reported the failure, and otherwise that the outcome is unknown and the next run repeats
   it. `probe/agent-service/litellm_expiry.py` proves it on the fake-only stack; re-run it on every
   LiteLLM bump, since a schema change shows in production only as a failed unit.
@@ -385,10 +423,16 @@ step below).
   key; `litellm_apps.py` puts one fake app with a key of its own on each app network and proves
   that each reaches the front alone and that an app's alias `litellm` captures nothing.
   `litellm_admission.py` drives the key's models, the budgets, the person budget, the operator's
-  exception and the bound, `litellm_failures.py` the failure and key cases, and
-  `litellm_retention.py` the retention census of the route, `litellm_keys.py` the key step through
-  `hal apply`'s own plan and run, and `litellm_limits.py` the operator's numbers from `config.toml`
-  through that step, on the same stack and with the same caller. Re-run them for every LiteLLM,
+  exception and the bound, `litellm_failures.py` the failure and key cases,
+  `litellm_retention.py` the retention census of the route and `litellm_live_canary.py` the live canary, both with hopin's key made by
+  the key step, `litellm_keys.py` the key step through
+  `hal apply`'s own plan and run, and that LiteLLM calls no provider from its start to the first app
+  call (S0), `litellm_limits.py` the operator's numbers from `config.toml` through that step, and
+  `litellm_backup.py` the backup, its restore test and a lost volume, on the same
+  stack and with the same caller. `litellm_unit.py` drives the copy's real `hal apply` with the
+  shipped unit `litellm`: its first start and the second apply, the refusals of a missing file, the
+  switch-off and the stop that hold the key step, the recreates that make it wait, a start after a
+  failed one and the way on after a new master key. Re-run them for every LiteLLM,
   Traefik or Docker bump. The CI job `front` runs the front's table of requests
   (`tests/test_litellm_front.py`) for every Traefik bump; a LiteLLM bump still needs the probes.
 
@@ -397,10 +441,21 @@ step below).
 Re-run the probes in `probe/agent-service/` for every Traefik, Docker, agent-runtime or LiteLLM upgrade.
 `litellm_keys.py` proves `hal apply`'s key step on the fake-only stack: its plan and run, a lost answer,
 a pure limit change, a taken name, a failed write and a deleted key, and that no key or hash reaches an
-argument, the step's input or output, or LiteLLM's log. `litellm_limits.py` proves the numbers of
+argument, the step's input or output, or LiteLLM's log; and the admin group's rows with the members as
+scenario data: the links and the unlink, the refusal of a former admin past the person budget, the
+monthly reset, the members not read, and that no printed line carries a fingerprint or a member. It runs
+in hal's environment, which holds the agent-runtime client. Cell LM1 of the Keycloak probe proves the
+members mode against a real Keycloak. `litellm_limits.py` proves the numbers of
 `[api]` and `[api.<app>]` through that step: their precedence, their return to the defaults, no
 recreate and no moved reset, an app budget below spend, a bound and a budget of 0, a person budget
 below spend binding within LiteLLM's cache lifetime, and an app table naming no app.
+`litellm_backup.py` proves `hal backup litellm`,
+its pre-apply snapshot and `hal restore --test litellm` under a scratch HOME, that the dump holds every
+table and no key in clear, and that a lost volume rebuilds through the key step with budgets at zero.
+Its load cells prove `hal restore litellm --live`: only while LiteLLM is switched off, a key and a
+person past their budgets still refused after a load into the rebuilt volume, a failed load that
+changes nothing, the question's no and the missing terminal, a killed run's load that runs to its
+own end, and an interrupt that waits for the load.
 
 **The live smoke** is one command, run in the live checkout after `hal apply` and with the image
 built: `cd ~/srv/hal && python3 agent-service/live_smoke.py`. It signs you in as yourself (the
@@ -433,17 +488,14 @@ capability. It needs `[apps.songmaker] mcp_origin` in `service.toml`. It also re
 songmaker's own call is the proof.
 
 **The live canary** is `cd ~/srv/hal && python3 agent-service/live_canary.py`, for the operator at the go
-to let people in; it has not been run. It and its probe are frozen until HAL-2.8: LiteLLM no longer
-admits the service's call, which carries no app key and no `user`. It makes a paid call, so it runs only when the operator says so, as a
-person of the API group outside the subscription group: you sign in as for the live smoke, but the
-prompt is the only thing on standard error and no browser starts, you open its link yourself. It
-checks that the route's five containers run and that the running service's `[api]` names
-`litellm-front` as its gateway and that the service started after that file last changed (C0), runs `agent-canary` once with a random value as both the request
-and the answer it asks for (C1; any route but `api` fails), waits a few seconds, and runs the retention census
-over the five containers for that value (C2). Nothing is recreated; a failed canary ends the run, and a
-new run uses a new value. It prints only verdict lines of a closed grammar and a last line,
-`canary and census held` or `canary and census FAILED`, matching the exit code; no exception text, token or
-container output reaches the terminal. The probe `probe/agent-service/litellm_live_canary.py` runs it
+to let people in; it has not been run. It makes a paid call from hopin's app budget, so it runs only when the operator says so,
+after `hal apply` has made hopin's key. No one signs in: it checks that the front, the gateway, LiteLLM and its database each run once
+(C0), runs `agent-canary` once, which posts a random value to the front with hopin's key, the way an app does, and asks for it back (C1),
+waits 34 seconds, the longest interval of the writers a request feeds, and runs the retention census over those four containers for that value (C2), a `pg_dump` of the database among
+the sinks. The dump reads the whole store into the program's memory and never leaves it. Each run leaves one customer row for its throwaway
+fingerprint, which `hal expire` removes like any other. Nothing is recreated; a failed canary ends the run, and a new run uses a new value.
+It prints only verdict lines of a closed grammar and a last line, `canary and census held` or `canary and census FAILED`, matching the exit
+code; no exception text, key or container output reaches the terminal. The probe `probe/agent-service/litellm_live_canary.py` runs it
 against the fake-only stack.
 
 **The login command** is `python3 probe/agent-service/cells_12b.py --login-directory DIR`; its docstring gives the

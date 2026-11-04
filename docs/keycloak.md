@@ -83,6 +83,12 @@ the agent service's. songmaker cannot ask for it: the request is refused with
 the group `/services/speech-service` has no subgroup: the service admits exactly that path. A person
 reaches the service by being a member of the group and signing in to hopin or presentator with the scope.
 
+The group `/services/litellm/admin` has one reader, `hal apply`'s key step (docs/agent-service.md,
+„The API route“): at each plan the realm observer's members mode reads the ids of its direct members
+and the realm's issuer from its discovery document, the one GET the observer sends without a token,
+and the step links those members' LiteLLM customer rows to the admin budget. The group starts empty;
+who joins it is decided in the admin console.
+
 What an audience scope does under other settings was measured on Keycloak 26.8.1 (cells U3, U4 and RF1
 to RF2 of the Keycloak probe, #674). They run on clients, a scope and a realm role the probe makes: the
 scope is a copy of `speech-service-audience` read from `realm.yaml` (so `include.in.token.scope` is
@@ -99,6 +105,8 @@ scope: the answer is a 200 whose `aud` is `account` alone. A new authorization r
 scope, in that session's browser, is answered with a redirect carrying a code, with no login page.
 The answers belong to this Keycloak version: the probe holds only that each ran, so an image upgrade
 (#610) can change one without failing it.
+
+The cell N1 is not version-bound: webauth's group check (`current_groups`) refuses a refreshed ID token with a `nonce` key, so each app client's refreshed ID tokens must have none, and a Keycloak upgrade that adds the key fails the probe.
 
 Every login app follows the same shape. It gets its own client in `realm.yaml`, with its secret in its own file under `~/.secrets/keycloak/clients/`. Its `backchannel.logout.url` is `http://<app>.hallucinai.de:<port>/auth/backchannel-logout`, with `backchannel.logout.session.required: "false"`; the host is an alias the app's web service gives itself. The call travels over the app's own internal network `hal_backchannel_<app>`, which only `keycloak` joins on edge's side and the app joins as an external network, so no app sees another's. The public host lists the path in `deny_public` (`fleet.yaml`). An app that holds a refresh token per session names `use.refresh.tokens: "true"` (hopin); one without the line keeps Keycloak's default.
 
@@ -306,7 +314,7 @@ definition covers a secret's attachment, not the content of its file; change a r
 for the next realm change.
 
 The plan names the step in one line. After your yes it takes a Keycloak-only backup tagged
-`pre-apply` (the last ten are kept) and restore-tests that snapshot, observes both realms, runs
+`pre-apply` (the last ten are kept, and those older than 90 days are dropped at the next forget of the app) and restore-tests that snapshot, observes both realms, runs
 config-cli, observes again and prints one line per change. A Keycloak that should run and cannot be read is skipped: the step prints a `!` row,
 `keycloak  realm skipped` with the reason, and the run ends partial (`error: partial, keycloak realm
 skipped`, `next: hal apply`) and hal exits 3; when that is the only change, hal asks no yes and ends
@@ -371,8 +379,8 @@ trace, not Keycloak, and it is also the setup check of `hal apply --local` for t
    with exit 0.
 2. **Bump the pin** of `quay.io/keycloak/keycloak` in `compose.yaml` (version and digest), and of
    keycloak-config-cli if a build for the new version exists.
-3. **Re-run the probe.** It runs beside the live edge, which stays up:
-   [probe/keycloak/README.md](../probe/keycloak/README.md).
+3. **Re-run the probe.** It runs beside the live edge, which stays up, and its cell N1 fails on a
+   refreshed ID token with a `nonce` key: [probe/keycloak/README.md](../probe/keycloak/README.md).
 4. **Start** as in [stack.md](stack.md) and wait until Keycloak answers the master realm on 8090;
    Keycloak migrates its database on the first start of the new version.
 

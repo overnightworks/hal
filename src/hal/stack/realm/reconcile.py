@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeGuard
 
 from hal.output import LOG_FORMAT_VARIABLE, LogFormat, printable
 from hal.output.command import PROGRAM, Verb, command
@@ -50,10 +50,11 @@ from hal.stack.realm.observe import (
     Inventory,
     keys,
 )
-from hal.stack.unit_plans import Action, Recreate, UnitPlan
+from hal.stack.unit_plans import DatabaseUnit, Restart
 
 REALM_UNIT = "keycloak"
 KEYCLOAK_SERVICE = "keycloak"
+KEYCLOAK = DatabaseUnit(REALM_UNIT, KEYCLOAK_SERVICE, "keycloak-db", "Keycloak")
 CONFIG_CLI = "keycloak-config-cli"
 # config-cli imports these from its directory bind of keycloak/, which `core.file_binds` skips.
 REALM_FILES = ("keycloak/master.yaml", "keycloak/realm.yaml")
@@ -62,6 +63,7 @@ BACKUP_SECONDS = 1800
 STOP_GRACE_SECONDS = 120  # what hal backup gets to remove its staging and restore container
 COLLECT_SECONDS = 5  # what the output of a killed hal backup gets before its pipes are closed
 _ERROR_LINE = re.compile(r"^error: (.+)$", re.MULTILINE)
+NO_MEMBERS = "the realm observer answered no members"
 
 type Checksums = dict[str, dict[str, str]]  # realm -> import-checksum attribute -> value
 type Waiting = Callable[[float], None]  # told the seconds a stopped hal is given to clean up
@@ -138,23 +140,31 @@ class RealmAction(StrEnum):
     UNREADABLE = "unreadable"  # Keycloak should run and cannot be read
 
 
-class RealmRestart(StrEnum):
-    KEYCLOAK = "Keycloak starts now"
-    DATABASE = "its database restarts now"
-
-
 @dataclass(frozen=True)
 class RealmPlan:
     action: RealmAction = RealmAction.NOTHING
     why: str = ""  # why the realm is applied or held, for RUN and HELD
     error: str = ""  # why Keycloak could not be read, for UNREADABLE
-    restart: RealmRestart | None = None  # the Keycloak unit start of this run, for NOT_CHECKED
+    restart: Restart | None = None  # the Keycloak unit start of this run, for NOT_CHECKED
     gate: core.Gate | None = None  # the Keycloak unit's gate, for HELD
     entry: dict[str, str] = field(default_factory=dict)  # the inputs as planned, for the record
 
     @property
     def settled(self) -> bool:
         return self.action not in (RealmAction.RUN, RealmAction.UNREADABLE)
+
+
+@dataclass(frozen=True)
+class Members:
+    """hallucinai's issuer and the ids of one group's direct members, which are never printed."""
+
+    issuer: str
+    subjects: tuple[str, ...] = field(repr=False)
+
+
+@dataclass(frozen=True)
+class MembersNotRead:
+    cause: str  # one line naming the failure, never a member
 
 
 class Observer:
@@ -171,6 +181,24 @@ class Observer:
     def checksums(self) -> Checksums:
         return self._read(["--import-checksums"], "")
 
+    def members(self, group: str) -> Members | MembersNotRead:
+        """The members mode's answer; its standard output carries subjects, so a failure is
+        named by the one-off's exit and standard error alone, and a malformed answer by its
+        check."""
+        try:
+            output = self.engine.run_once(OBSERVER_SERVICE, ["--members", group], "")
+        except compose.ComposeError as error:
+            return MembersNotRead(error.one_off_cause(OBSERVER_SERVICE))
+        try:
+            answer = json.loads(output)
+            issuer, subjects = answer["issuer"], answer["members"]
+        except ValueError, KeyError, TypeError:
+            return MembersNotRead(NO_MEMBERS)
+        texts = [issuer, *subjects] if isinstance(subjects, list) else None
+        if texts is None or not all(isinstance(text, str) and text for text in texts):
+            return MembersNotRead(NO_MEMBERS)
+        return Members(issuer, tuple(subjects))
+
     def _read(self, arguments: list[str], stdin: str) -> dict:
         try:
             return json.loads(self.engine.run_once(OBSERVER_SERVICE, arguments, stdin))
@@ -180,16 +208,10 @@ class Observer:
             raise RealmError("the realm observer answered no JSON") from error
 
 
-def restart_of(plans: Iterable[UnitPlan], recreates: Iterable[Recreate]) -> RealmRestart | None:
-    """What this run starts of the Keycloak unit, None when nothing: Keycloak itself when its
-    unit is switched on or its service recreated, else only another service of the unit."""
-    realm_recreates = [recreate for recreate in recreates if recreate.unit == REALM_UNIT]
-    switched_on = any(plan.unit.key == REALM_UNIT and plan.action is Action.ON for plan in plans)
-    if switched_on or any(recreate.service == KEYCLOAK_SERVICE for recreate in realm_recreates):
-        return RealmRestart.KEYCLOAK
-    if realm_recreates:
-        return RealmRestart.DATABASE
-    return None
+def keycloak_held(gate: core.Gate | None) -> TypeGuard[core.Gate]:
+    """Whether Keycloak's gate holds what reads it; a gate of None, Keycloak outside the
+    catalog, counts as on."""
+    return gate is not None and gate is not core.Gate.ON
 
 
 def plan_realm(
@@ -198,7 +220,7 @@ def plan_realm(
     config: Mapping[str, Any],
     checkout: core.Checkout,
     gate: core.Gate | None,
-    restart: RealmRestart | None,
+    restart: Restart | None,
 ) -> RealmPlan:
     """What the step does: `gate` is the Keycloak unit's, None when the catalog has none, and
     `restart` says what this run starts of its unit, None when nothing."""
@@ -208,7 +230,7 @@ def plan_realm(
         return RealmPlan(RealmAction.NOT_CHECKED, restart=restart)
     inputs = read_inputs(config, checkout)
     reading = record.read()
-    if gate is not core.Gate.ON:
+    if keycloak_held(gate):
         if why := _why(reading, inputs, None):
             return RealmPlan(RealmAction.HELD, why=why, gate=gate)
         return RealmPlan()

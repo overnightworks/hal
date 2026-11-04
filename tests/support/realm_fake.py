@@ -3,6 +3,7 @@ serves, the faults it injects, and the server that runs it."""
 
 import json
 import os
+import re
 import signal
 import threading
 import time
@@ -20,6 +21,9 @@ SECRET = "the-config-cli-secret"
 TOKEN = "an-access-token-from-the-fake"
 REFUSAL_BODY = "invalid_client: the reply body the observer must not print"
 KEY = new_digest_key()
+# The public issuer the fake's discovery documents name, as Keycloak's KC_HOSTNAME makes it.
+PUBLIC_ORIGIN = "https://auth.hallucinai.test"
+DISCOVERY = re.compile(r"/realms/([^/]+)/\.well-known/openid-configuration")
 # Values the observer reads but must never let out (rule 4).
 PLANTED = {
     "client secret": "planted-client-secret",
@@ -238,6 +242,8 @@ HALLUCINAI_GROUPS = (
     "/services/agent-service",
     "/services/agent-service/subscription",
     "/services/agent-service/api",
+    "/services/litellm",
+    "/services/litellm/admin",
 )
 
 
@@ -438,6 +444,7 @@ class FakeKeycloak(ThreadingHTTPServer):
         self.realms = keycloak_realms()
         self.faults = Faults()
         self.requests: list[tuple[str, str]] = []
+        self.authorizations: list[str | None] = []  # each request's Authorization header
         self.gets = 0
 
     @property
@@ -460,6 +467,7 @@ class AdminApi(BaseHTTPRequestHandler):
         parsed = super().parse_request()
         if parsed:
             self.server.requests.append((self.command, unquote(urlsplit(self.path).path)))
+            self.server.authorizations.append(self.headers.get("Authorization"))
         return parsed
 
     def do_POST(self) -> None:
@@ -472,6 +480,8 @@ class AdminApi(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         split = urlsplit(self.path)
         path, query = unquote(split.path), parse_qs(split.query)
+        if discovery := DISCOVERY.fullmatch(path):
+            return self.discovery(path, discovery[1])
         faults = self.server.faults
         self.server.gets += 1
         expired = (
@@ -502,6 +512,12 @@ class AdminApi(BaseHTTPRequestHandler):
         # After the reply, so the observer's abandoned connection never breaks the fake's write.
         if path in faults.stop:
             os.kill(os.getpid(), faults.stop[path])
+
+    def discovery(self, path: str, realm: str) -> None:
+        """A realm's public OpenID document, which Keycloak serves without a token."""
+        if path in self.server.faults.status:
+            return self.reply({"error": "server error"}, self.server.faults.status[path])
+        return self.reply({"issuer": f"{PUBLIC_ORIGIN}/realms/{realm}"})
 
     def refuse_a_write(self) -> None:
         self.rfile.read(int(self.headers.get("Content-Length") or 0))

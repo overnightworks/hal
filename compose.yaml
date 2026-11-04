@@ -265,7 +265,8 @@ services:
   # Reads both realms through the admin API, GET only, and prints one JSON inventory
   # (src/hal/stack/realm/observe.py). No depends_on: an observe never starts Keycloak. Run it as
   # `compose run -T --rm --no-deps realm-observer` with the per-run digest key on stdin, or with
-  # `--import-checksums` after it, which needs no key and prints config-cli's import checksums.
+  # `--import-checksums` after it, which needs no key and prints config-cli's import checksums, or
+  # with `--members PATH`, which prints the issuer and the subjects of the group at PATH.
   realm-observer:
     # The probe's python pin (probe/keycloak/compose.probe.yaml); ci.yml checks the two are equal.
     # agent-probe below carries the same pin; Dependabot moves all of them in one pull.
@@ -296,8 +297,8 @@ services:
   # hal apply's key step (src/hal/stack/litellm_admin.py): reads and makes each app's LiteLLM key
   # and the person budget through LiteLLM's admin routes with the master key. The apps are the key
   # files mounted below, one secret each. No depends_on: the step never starts LiteLLM. Run it as
-  # `compose run -T --rm --no-deps litellm-keys` with `--read <budget id>`, or with `--write` and
-  # the changes on stdin.
+  # `compose run -T --rm --no-deps litellm-keys` with `--read <budget id>` and the admin group's
+  # members as JSON on stdin (`null` for no members), or with `--write` and the changes on stdin.
   litellm-keys:
     # realm-observer's python pin; tests/test_stack_litellm_admin.py holds the two equal.
     image: python:3.14.10-alpine@sha256:eb2c62658b8d51bff0acc408504b76521d02030de56a8a3c1e830083e89b89d2
@@ -438,7 +439,7 @@ services:
 
   # The one-route front of LiteLLM (agent-service/litellm/front/): the apps' only way to the
   # inference gateway, on each app's agent network. It reads no secret and reaches only `litellm`,
-  # at its fixed address, never by DNS. Not started by any unit yet.
+  # at its fixed address, never by DNS. The unit `litellm` of fleet.yaml starts it.
   litellm-front:
     <<: *traefik
     profiles: [litellm]
@@ -450,8 +451,8 @@ services:
       - ./agent-service/litellm/front/traefik.yml:/etc/traefik/traefik.yml:ro
       - ./agent-service/litellm/front/dynamic:/litellm-front/dynamic:ro
 
-  # LiteLLM's own database: its keys and spend counters, reachable from litellm alone. Not started
-  # by any unit yet.
+  # LiteLLM's own database: its keys and spend counters, reachable from litellm alone. The unit
+  # `litellm` of fleet.yaml starts it.
   litellm-db:
     <<: *postgres
     profiles: [litellm]
@@ -472,8 +473,8 @@ services:
   # LiteLLM, the apps' route to the paid API (agent-service/litellm/). Its own keys and budgets in
   # its database decide who may call; no hal code runs in it. It reads the provider key, the master
   # key and the database password as files and reaches only the front, its database and, through
-  # agent-egress, the provider. A change of its files reaches it only through a recreate. Not
-  # started by any unit yet.
+  # agent-egress, the provider. A change of its files reaches it only through a recreate. The
+  # unit `litellm` of fleet.yaml starts it.
   litellm:
     image: ghcr.io/berriai/litellm:v1.106.6@sha256:37e2dafb088a7723beb998590682957386dfc83ffea1848486f8e0e5cfac0b06
     profiles: [litellm]
@@ -597,27 +598,34 @@ services:
     volumes:
       - ./agent-service/smoke.py:/opt/smoke/smoke.py:ro
 
-  # The canary of the API route (agent-service/api_canary.py, run by live_canary.py; docs/
-  # agent-service.md, "Proofs"): one run of a person on the API route, only verdict lines out. Run
-  # as `compose run -T --rm agent-canary --marker TEXT` with the tokens on stdin, one per line.
-  # Declared like agent-smoke, whose smoke.py it imports; -B and not -I because it imports the
-  # script beside it.
+  # The canary of the direct route (agent-service/api_canary.py, run by live_canary.py; docs/
+  # agent-service.md, "Proofs"): one completion through the front, as an app posts it, with hopin's
+  # key, the second reader of that key file beside litellm-keys; only verdict lines out. Run as
+  # `compose run -T --rm agent-canary --marker TEXT`, nothing on stdin.
   agent-canary:
-    image: *agent-service-image
-    pull_policy: never
+    # realm-observer's python pin; tests/test_stack_litellm_admin_service.py holds the two equal.
+    image: python:3.14.10-alpine@sha256:eb2c62658b8d51bff0acc408504b76521d02030de56a8a3c1e830083e89b89d2
     profiles: [apply]
     logging: *one-off-logging
     user: "65534:65534"
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
-    networks: [agent-songmaker]
+    networks: [agent-hopin]
+    # -I ignores the PYTHON* environment, so -B is what keeps bytecode unwritten.
     entrypoint:
       - python
+      - -I
       - -B
       - /opt/canary/api_canary.py
+      - --key-file
+      - /run/secrets/litellm_key_hopin
+      - --model
+      - text/opus
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+    secrets: [litellm_key_hopin]
     volumes:
-      - ./agent-service/smoke.py:/opt/canary/smoke.py:ro
       - ./agent-service/api_canary.py:/opt/canary/api_canary.py:ro
 
   # The probe's stand-in for the agent service (probe/agent-service/egress.py): the same
@@ -673,8 +681,8 @@ secrets:
   # hal apply's key step litellm-keys and known to no app, so its admin routes stay closed to them.
   litellm_master_key:
     file: ${HOME}/.secrets/litellm/master-key
-  # Each app's own LiteLLM key (hal setup writes it); here read by litellm-keys alone, which makes
-  # its key row.
+  # Each app's own LiteLLM key (hal setup writes it); here read by litellm-keys, which makes its key
+  # row, and hopin's also by agent-canary, which posts with it.
   litellm_key_hopin:
     file: ${HOME}/.secrets/litellm/apps/hopin
   litellm_key_presentator:

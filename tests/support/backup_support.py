@@ -6,7 +6,7 @@ import json
 import re
 import stat
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -14,31 +14,30 @@ from pathlib import Path
 import pytest
 
 from hal.backup import host, sqlite_copy
-from hal.backup.apps import parse_apps
+from hal.backup.apps import PRE_APPLY_TAG, PostgresDatabase, parse_apps
 from hal.backup.cli import DEFAULT_APPS
 from hal.backup.docker import (
+    DATABASE_START_LABEL,
     FILE_COUNT_LABEL,
+    LIVE_LOAD_LABEL,
     RESTORE_OWNER_LABEL,
     RESTORE_OWNER_ROLE,
-    RESTORE_SERVER,
     SERVER_REMOVAL_LABEL,
     SERVER_START_LABEL,
+    SESSION_COUNT_LABEL,
     SQLITE_CHECK_LABEL,
     SQLITE_COPY_LABEL,
     SQLITE_OWNER_LABEL,
+    restore_server_name,
 )
 from hal.backup.settings import RESTIC_HOSTNAME
 
 CANARY_PASSWORD = "canary-7f3e-never-print-me"
+LIVE_ROW_VALUE_CANARY = "row-value-canary-2b9d-never-print-me"
 DUMP = b"PGDMP custom archive"
 AUDIO = {"u1/one.mp3": b"ID3 one", "u1/two.mp3": b"ID3 two", "u2/cover.png": b"PNG"}
 SONGMAKER_CONTAINER = "c0ffee"
 RESTORE_SERVER_ID = "deadbeef" * 8
-RADIO_CONTAINER = "beef01"
-KEYCLOAK_CONTAINER = "kc01"
-KEYCLOAK_PROJECT = next(
-    app.compose_project for app in parse_apps(DEFAULT_APPS.read_text()) if app.name == "keycloak"
-)
 STATUS_KEYS = {
     "schema",
     "state",
@@ -78,6 +77,18 @@ count_table = "songs"
 audio_reference_table = "generations"
 audio_reference_column = "mp3_path"
 """
+KEYCLOAK_TOML = """
+[app.keycloak]
+compose_project = "sso"
+db_service = "keycloak-db"
+dump = "pg_dump_custom"
+db_user = "keycloak"
+db_name = "keycloak"
+postgres_major = 17
+[app.keycloak.restore_test]
+count_table = "realm"
+require_rows = true
+"""
 SQLITE_TOML = """
 [app.presentator]
 compose_project = "presentator"
@@ -88,8 +99,17 @@ database_file = "presentator.sqlite3"
 count_table = "users"
 """
 SQLITE_COPY = b"SQLite rows=7"
+SHIPPED_APPS = parse_apps(DEFAULT_APPS.read_text())
+# Every Postgres record a test may declare: the shipped ones and the scenario ones.
+DECLARABLE_DATABASES = tuple(
+    app
+    for app in (*SHIPPED_APPS, *parse_apps(RADIO_TOML + KEYCLOAK_TOML))
+    if isinstance(app.database, PostgresDatabase)
+)
 # The real boundary, kept before the `machine` fixture swaps it: exits and files go through it.
 REAL_HOST_RUN = host.run
+# restic's full snapshot ID: what `forget` is named, never a prefix.
+FULL_SNAPSHOT_ID = re.compile(r"[0-9a-f]{64}")
 
 
 @dataclass
@@ -97,18 +117,23 @@ class Machine:
     """Answers each fixed argv the way docker, restic and the throwaway postgres would."""
 
     audio: dict[str, bytes] = field(default_factory=lambda: dict(AUDIO))
-    table_rows: dict[str, int] = field(default_factory=lambda: {"songs": 42, "realm": 2})
-    """The rows the restored database holds, by table."""
+    table_rows: dict[str, int] = field(
+        default_factory=lambda: {app.restore_test.count_table: 2 for app in DECLARABLE_DATABASES}
+    )
+    """The rows the restored database holds, by table: each declarable record's count has rows."""
     references: list[str] = field(default_factory=lambda: ["u1/one.mp3", "u1/two.mp3"])
     db_containers: list[str] = field(default_factory=lambda: [SONGMAKER_CONTAINER])
     volumes: list[str] = field(default_factory=lambda: ["songmaker_audiofiles"])
-    other_db_containers: dict[str, list[str]] = field(
+    other_db_containers: dict[tuple[str, str], list[str]] = field(
         default_factory=lambda: {
-            "radio": [RADIO_CONTAINER],
-            KEYCLOAK_PROJECT: [KEYCLOAK_CONTAINER],
+            (project, service): [f"{project}-{service}"]
+            for project, service in (
+                (app.compose_project, app.database.db_service) for app in DECLARABLE_DATABASES
+            )
+            if project != "songmaker"
         }
     )
-    """The database containers of every project but songmaker, by compose project."""
+    """The database containers of every project but songmaker, by compose project and service."""
     other_volumes: dict[str, list[str]] = field(
         default_factory=lambda: {"radio": ["radio_audiofiles"]}
     )
@@ -133,9 +158,14 @@ class Machine:
     hanging: set[str] = field(default_factory=set)
     """Labels of probes that never answer; only a timeout ends them."""
     leftover_servers: list[str] = field(default_factory=list)
-    """Throwaway servers a killed restore test left behind; they carry the owner label."""
-    created_servers: list[str] = field(default_factory=list)
-    """Throwaway servers `docker run` created; they carry the owner label too."""
+    """Throwaway servers a killed restore test of this home left behind, under this home's name;
+    they carry the owner label."""
+    created_servers: list[tuple[str, str]] = field(default_factory=list)
+    """Throwaway servers `docker run` created, with the name it gave; they carry the owner label
+    too."""
+    other_home_servers: dict[str, str] = field(default_factory=dict)
+    """Throwaway servers of another home's run by ID, each under that home's name; they carry the
+    owner label too."""
     foreign_server_name: bool = False
     """A container that is not edge-backup's already holds the throwaway server's name."""
     server_start_output: bytes = f"{RESTORE_SERVER_ID}\n".encode()
@@ -152,6 +182,10 @@ class Machine:
     restore_diagnostic: str = ""
     """What pg_restore would print to stderr when it fails, as postgres quotes row values."""
     snapshots: list[dict] = field(default_factory=list)
+    snapshot_listing: bytes | None = None
+    """What `restic snapshots --json` answers instead of the planted snapshots, when set."""
+    forgotten: list[str] = field(default_factory=list)
+    """The snapshot IDs `restic forget` was named, in order; restic lists them no more."""
     calls: list[tuple[str, list[str]]] = field(default_factory=list)
     status_seen_during_backup: dict | None = None
     status_file: Path | None = None
@@ -174,6 +208,22 @@ class Machine:
     """What the script's Python would print to stderr when it fails, as it quotes paths and rows."""
     private_modes: dict[str, int] = field(default_factory=dict)
     """Modes of the staging and restore directories and files, seen while restic used them."""
+    stopped_containers: set[str] = field(default_factory=set)
+    """Database containers that exist but are stopped; `docker start` runs them."""
+    started_containers: list[str] = field(default_factory=list)
+    """The containers `docker start` was named, in order."""
+    restore_sessions: int = 0
+    """The sessions of pg_restore the live database holds, as a killed run's load leaves one."""
+    live_code: int | None = 0
+    """What the shell around the live pg_restore prints as its code line; None: no line."""
+    live_client_exit: int = 0
+    """The exit of `docker exec` itself for the live load: non-zero is a failed client."""
+    live_loads: list[bytes] = field(default_factory=list)
+    """The dumps the live load was fed, each as its bytes."""
+    live_new_session: list[bool] = field(default_factory=list)
+    """Whether each live load's client ran in its own session."""
+    during_live_load: Callable[[], None] | None = None
+    """What happens while the live load runs, such as a signal to hal."""
 
     def run(
         self,
@@ -184,8 +234,11 @@ class Machine:
         stdout: Path | None = None,
         timeout: timedelta | None = None,
         discard_stderr: bool = False,
+        new_session: bool = False,
     ) -> bytes:
         argv = list(argv)
+        if label == LIVE_LOAD_LABEL:
+            self.live_new_session.append(new_session)
         self.calls.append((label, argv))
         assert len(self.calls) < 10_000, "the runner never gives up"
         if label in self.hanging:
@@ -198,7 +251,17 @@ class Machine:
             if isinstance(failure, int):
                 return exit_with(label, failure)
             raise failure()
-        answers = {
+        answers = self._answers()
+        if label not in answers:
+            pytest.fail(f"the scripted machine does not know {label!r}")
+        answer = answers[label](argv, stdin=stdin, discard_stderr=discard_stderr)
+        if stdout is None:
+            return answer
+        return REAL_HOST_RUN(["printf", "%s", answer.decode()], label=label, stdout=stdout)
+
+    def _answers(self) -> dict[str, Callable[..., bytes]]:
+        """The scripted answer to each host-run label."""
+        return {
             "docker info": self._daemon,
             "docker image inspect": self._image,
             "docker pull": self._pull,
@@ -220,16 +283,13 @@ class Machine:
             "psql": self._psql,
             SERVER_REMOVAL_LABEL: self._silent,
             "restic init": self._silent,
-            "restic forget": self._maintenance,
+            "restic forget": self._forget,
             "restic check": self._maintenance,
             "restic unlock": self._silent,
+            DATABASE_START_LABEL: self._start_container,
+            SESSION_COUNT_LABEL: self._session_count,
+            LIVE_LOAD_LABEL: self._live_load,
         }
-        if label not in answers:
-            pytest.fail(f"the scripted machine does not know {label!r}")
-        answer = answers[label](argv, stdin=stdin, discard_stderr=discard_stderr)
-        if stdout is None:
-            return answer
-        return REAL_HOST_RUN(["printf", "%s", answer.decode()], label=label, stdout=stdout)
 
     def labels(self) -> list[str]:
         return [label for label, _ in self.calls]
@@ -238,8 +298,38 @@ class Machine:
         return next(argv for called, argv in self.calls if called == label)
 
     def lose_keycloak_database(self) -> None:
-        """The shipped keycloak app's project has no database container."""
-        self.other_db_containers[KEYCLOAK_PROJECT] = []
+        """Each keycloak record's database service has no container; its neighbours keep theirs."""
+        for app in DECLARABLE_DATABASES:
+            if app.name == "keycloak":
+                self.other_db_containers[(app.compose_project, app.database.db_service)] = []
+
+    def plant(
+        self,
+        app: str,
+        taken: datetime,
+        *,
+        pre_apply: bool = True,
+        hostname: str = RESTIC_HOSTNAME,
+    ) -> str:
+        """A snapshot of the app that an earlier run took at `taken`; returns its full ID."""
+        snapshot_id = f"{len(self.snapshots) + 1:064x}"
+        self.snapshots.append(
+            {
+                "id": snapshot_id,
+                "app": app,
+                "host": hostname,
+                "pre_apply": pre_apply,
+                "time": restic_time(taken),
+                "db": {},
+                "audio": {},
+            }
+        )
+        return snapshot_id
+
+    def forget_scopes(self) -> list[str]:
+        """The tag scope of each policy forget, in order; a forget by ID has none."""
+        return [argv[argv.index("--tag") + 1] for label, argv in self.calls
+                if label == "restic forget" and "--tag" in argv]  # fmt: skip
 
     def _host_lock_is_free(self) -> bool:
         lock = self.status_file.with_name("backup.lock")
@@ -277,19 +367,51 @@ class Machine:
         return b"sha256:0\n"
 
     def _containers(self, argv, **_) -> bytes:
-        if any(RESTORE_SERVER in argument for argument in argv):
-            ours = f"label={RESTORE_OWNER_LABEL}={RESTORE_OWNER_ROLE}" in argv
-            foreign = [] if ours or not self.foreign_server_name else ["f0re1gn"]
-            return "\n".join([*self._owned_servers(), *foreign]).encode()
+        if names := [a.removeprefix("name=") for a in argv if a.startswith("name=")]:
+            owned_only = f"label={RESTORE_OWNER_LABEL}={RESTORE_OWNER_ROLE}" in argv
+            found = [
+                container_id
+                for container_id, name, owned in self._servers()
+                if re.search(names[0], name) and (owned or not owned_only)
+            ]
+            return "\n".join(found).encode()
         if self.absent_polls:
             self.absent_polls -= 1
             return b""
         project = label_value(argv, "com.docker.compose.project")
-        found = self.db_containers if project == "songmaker" else self.other_db_containers[project]
+        service = label_value(argv, "com.docker.compose.service")
+        found = (
+            self.db_containers
+            if project == "songmaker"
+            else self.other_db_containers[(project, service)]
+        )
         return "\n".join(found).encode()
 
     def _state(self, argv, **_) -> bytes:
-        return b"running healthy\n"
+        return b"exited \n" if argv[-1] in self.stopped_containers else b"running healthy\n"
+
+    def _start_container(self, argv, **_) -> bytes:
+        self.started_containers.append(argv[-1])
+        self.stopped_containers.discard(argv[-1])
+        return b""
+
+    def _session_count(self, argv, **_) -> bytes:
+        return f"{self.restore_sessions}\n".encode()
+
+    def _live_load(self, argv, *, stdin, discard_stderr, **_) -> bytes:
+        """The shell around pg_restore: it prints pg_restore's code as its last line, and its
+        diagnostics on stderr quote a row value unless the caller discards them."""
+        if not discard_stderr:
+            sys.stderr.write(f"{LIVE_ROW_VALUE_CANARY}\n")
+        assert argv[argv.index("sh") - 1] not in self.stopped_containers, (
+            "a load into a stopped database"
+        )
+        self.live_loads.append(stdin.read_bytes())
+        if self.during_live_load:
+            self.during_live_load()
+        if self.live_client_exit:
+            return exit_with(LIVE_LOAD_LABEL, self.live_client_exit)
+        return b"" if self.live_code is None else f"{self.live_code}\n".encode()
 
     def _volumes(self, argv, **_) -> bytes:
         if (
@@ -367,6 +489,8 @@ class Machine:
                 "id": snapshot_id,
                 "app": app,
                 "host": argv[argv.index("--hostname") + 1],
+                "pre_apply": PRE_APPLY_TAG in argv[argv.index("--tag") + 1].split(","),
+                "time": restic_time(self.clock.now()),
                 "db": {
                     path.name: path.read_bytes()
                     for path in staging.iterdir()
@@ -408,23 +532,36 @@ class Machine:
         return kept
 
     def _snapshots(self, argv, **_) -> bytes:
+        """As restic selects: the host, and every tag of the comma list; never a forgotten one."""
+        kept = [s for s in self.snapshots if s["id"] not in self.forgotten]
+        if "--json" in argv and self.snapshot_listing is not None:
+            return self.snapshot_listing
         if "--json" in argv:
-            tag = argv[argv.index("--tag") + 1]
+            wanted = set(argv[argv.index("--tag") + 1].split(","))
             host_name = argv[argv.index("--host") + 1]
             tagged = [
                 s
-                for s in self.snapshots
-                if s.get("app", "songmaker") == tag and s.get("host", RESTIC_HOSTNAME) == host_name
+                for s in kept
+                if wanted <= set(_tags(s)) and s.get("host", RESTIC_HOSTNAME) == host_name
             ]
             listed = tagged[-1:] if "--latest" in argv else tagged
-            return json.dumps([{"id": s["id"]} for s in listed]).encode()
+            return json.dumps([self._listed(s) for s in listed]).encode()
         shown = [
             s
-            for s in self.snapshots
+            for s in kept
             if "--host" not in argv
             or s.get("host", RESTIC_HOSTNAME) == argv[argv.index("--host") + 1]
         ]
         return "".join(f"{s['id']} {s.get('host', RESTIC_HOSTNAME)}\n" for s in shown).encode()
+
+    def _listed(self, snapshot: dict) -> dict:
+        """The fields of restic's `snapshots --json` that hal reads."""
+        return {
+            "id": snapshot["id"],
+            "time": snapshot.get("time", restic_time(self.clock.now())),
+            "tags": _tags(snapshot),
+            "hostname": snapshot.get("host", RESTIC_HOSTNAME),
+        }
 
     def _restore(self, argv, **_) -> bytes:
         snapshot_id = argv[argv.index("restore") + 1].split(":")[0]
@@ -447,16 +584,32 @@ class Machine:
         self.clock.sleep(self.maintenance_seconds)
         return b""
 
+    def _forget(self, argv, **_) -> bytes:
+        """A forget by ID names full IDs; a policy forget names none."""
+        named = argv[argv.index("forget") + 1 :]
+        self.forgotten += [argument for argument in named if FULL_SNAPSHOT_ID.fullmatch(argument)]
+        return self._maintenance(argv)
+
     def _start_server(self, argv, **_) -> bytes:
-        if self.foreign_server_name or self._owned_servers():
+        name = argv[argv.index("--name") + 1]
+        if any(standing == name for _, standing, _ in self._servers()):
             return exit_with(SERVER_START_LABEL, 125)
         self.server_accepting = False
-        self.created_servers.append(RESTORE_SERVER_ID)
+        self.created_servers.append((RESTORE_SERVER_ID, name))
         return self.server_start_output
 
-    def _owned_servers(self) -> list[str]:
+    def _servers(self) -> list[tuple[str, str, bool]]:
+        """Each throwaway server container standing: its ID, its name and whether it carries the
+        owner label. A foreign container holding this home's name never goes."""
+        own_name = restore_server_name(self.status_file.with_name("backup.lock"))
+        owned = [
+            *((container_id, own_name) for container_id in self.leftover_servers),
+            *self.created_servers,
+            *self.other_home_servers.items(),
+        ]
         removed = set(removed_servers(self))
-        return [s for s in [*self.leftover_servers, *self.created_servers] if s not in removed]
+        foreign = [("f0re1gn", own_name, False)] if self.foreign_server_name else []
+        return [(i, name, True) for i, name in owned if i not in removed] + foreign
 
     def _pg_isready(self, argv, **_) -> bytes:
         assert argv[argv.index("pg_isready") + 1 :] == ["--host", "127.0.0.1", "--quiet"]
@@ -493,6 +646,17 @@ class Machine:
         return answers[sql]
 
 
+def _tags(snapshot: dict) -> list[str]:
+    """The app's name, and the pre-apply tag on a snapshot taken before an apply."""
+    app = snapshot.get("app", "songmaker")
+    return [app, PRE_APPLY_TAG] if snapshot.get("pre_apply") else [app]
+
+
+def restic_time(moment: datetime) -> str:
+    """A snapshot's time as restic's JSON writes it: RFC 3339, `Z` for UTC."""
+    return moment.isoformat().replace("+00:00", "Z")
+
+
 def _skipped(name: str, glob: str | None) -> bool:
     """`find -name <glob> -prune` and restic's `**/<glob>` both drop an entry whose own name, or
     one of its parents' below the root, matches."""
@@ -514,6 +678,11 @@ def declare_shipped_apps() -> tuple[str, str]:
 def declare_two_apps(home: Path) -> tuple[str, str]:
     """The `--apps` arguments that declare songmaker and radio."""
     return declare_apps(home, SONGMAKER_TOML + RADIO_TOML)
+
+
+def declare_songmaker_and_keycloak(home: Path) -> tuple[str, str]:
+    """The `--apps` arguments that declare songmaker and a keycloak beside it."""
+    return declare_apps(home, SONGMAKER_TOML + KEYCLOAK_TOML)
 
 
 def schema_one_status(snapshot_id: str) -> dict:

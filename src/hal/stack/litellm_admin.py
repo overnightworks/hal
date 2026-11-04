@@ -1,10 +1,10 @@
-"""The key step's one-off: reads and writes each app's LiteLLM key and the person budget through
-LiteLLM's admin routes with the master key.
+"""The key step's one-off: reads and writes each app's LiteLLM key, the person budget and the
+admin budget with its customer rows through LiteLLM's admin routes with the master key.
 
 It runs inside the `litellm-keys` compose service (compose.yaml) on `litellm-backend`, standard
 library only, so it imports with `python -I` and nothing beside it:
 
-    docker compose run -T --rm --no-deps litellm-keys --read <budget id>
+    docker compose run -T --rm --no-deps litellm-keys --read <budget id> < members
     docker compose run -T --rm --no-deps litellm-keys --write < changes
 
 The service's entrypoint carries `--base-url http://litellm:4000`. The apps are the key files
@@ -16,12 +16,18 @@ this program prints.
 null, and `name_taken` when no live key has that hash while another holds the app's name; the
 person budget's row or null; and the names `/v1/models` lists. `/v2/key/info` reads only live
 keys, so a deleted key is absent, and it drops each row's `token`, so it is asked once per hash.
+Its stdin is JSON null, or the admin budget's id and its members' fingerprints; then `admin` holds
+that budget's row or null, each member's customer row in the order given (null when absent, else
+its budget link and spend), and each row on the admin budget that is no member's with its
+fingerprint and spend, all from one `/customer/list`; no other customer row leaves.
 
 `--write` reads the host's changes as JSON on stdin and makes them in their given order. A new
 key is generated with the file's key, an update names the key by its hash; only the given fields
-are sent. The first failed write stops the rest; it prints, per change, done, failed with its
-cause, or not made. A refusal with status 400 whose `error.param` is `key_alias` is the cause
-`name taken`; any other is its status or `timed out`, never a reply body.
+are sent. A customer change links a row to a budget, by `/customer/new` for a new row; one to a
+null budget unlinks it by the pair `unlink` describes. The first failed write stops the rest; it
+prints, per change, done, failed with its cause, or not made. A refusal with status 400 whose
+`error.param` is `key_alias` is the cause `name taken`; any other is its status or `timed out`,
+never a reply body.
 
 Output is printed only once the command ran to its end, with exit 0. A failure before that is one
 line on stderr, stdout stays empty, and the exit is 1; a stop by SIGINT or SIGTERM exits 130.
@@ -58,7 +64,16 @@ WRITES = {  # (target, new) -> the route that makes it
     ("budget", False): "/budget/update",
     ("key", True): "/key/generate",
     ("key", False): "/key/update",
+    ("customer", True): "/customer/new",
+    ("customer", False): "/customer/update",
 }
+UNKNOWN_CHANGE = "a change of an unknown kind"
+UNLINK = "unlink"  # a customer change to a null budget, which LiteLLM's update cannot make
+# The fields of a customer row that `/customer/new` takes back as they are: none of a budget's,
+# any of which makes it a budget of its own.
+CUSTOMER_FIELDS = (
+    "user_id", "spend", "blocked", "alias", "allowed_model_region", "default_model", "models",
+)  # fmt: skip
 
 
 class AdminError(Exception):
@@ -135,23 +150,62 @@ def parsed(body: bytes) -> Any:
 # --- --read -----------------------------------------------------------------------------------
 
 
-def read(admin: Admin, app_keys: dict[str, str], budget_id: str) -> dict[str, Any]:
+def read(
+    admin: Admin, app_keys: dict[str, str], budget_id: str, asked: dict[str, Any] | None
+) -> dict[str, Any]:
     found = {
         app: _only_row(admin.asked("/v2/key/info", {"keys": [hashed(key)]}), app)
         for app, key in sorted(app_keys.items())
     }
     named = admin.asked("/v2/key/info", {"key_aliases": sorted(app_keys)})
     holders = {row.get("key_alias") for row in _info(named)}
-    budgets = admin.asked("/budget/info", {"budgets": [budget_id]})
-    budget = next((row for row in _listed(budgets) if row.get("budget_id") == budget_id), None)
+    wanted = [budget_id] if asked is None else [budget_id, asked["budget"]]
+    budgets = _listed(admin.asked("/budget/info", {"budgets": wanted}))
     return {
         "apps": {
             app: {"key": _settings(row, KEY_FIELDS), "name_taken": row is None and app in holders}
             for app, row in found.items()
         },
-        "budget": _settings(budget, BUDGET_FIELDS),
+        "budget": _settings(_budget(budgets, budget_id), BUDGET_FIELDS),
         "models": listed_models(admin),
+        "admin": None if asked is None else read_customers(admin, asked, budgets),
     }
+
+
+def read_customers(
+    admin: Admin, asked: dict[str, Any], budgets: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """The admin budget's row, each member's customer row in the order asked and the rows on the
+    admin budget that are no member's."""
+    budget_id, members = asked["budget"], asked["members"]
+    rows = {row["user_id"]: row for row in customer_rows(admin)}
+    asked_for = set(members)
+    return {
+        "budget": _settings(_budget(budgets, budget_id), BUDGET_FIELDS),
+        "members": [_customer_state(rows.get(member)) for member in members],
+        "others": [
+            {"fingerprint": user_id, "spend": row.get("spend")}
+            for user_id, row in rows.items()
+            if row.get("budget_id") == budget_id and user_id not in asked_for
+        ],
+    }
+
+
+def customer_rows(admin: Admin) -> list[dict[str, Any]]:
+    answer = admin.asked("/customer/list")
+    if not isinstance(answer, list) or not all(
+        isinstance(row, dict) and isinstance(row.get("user_id"), str) for row in answer
+    ):
+        raise AdminError("no customer rows at /customer/list")
+    return answer
+
+
+def _customer_state(row: dict[str, Any] | None) -> dict[str, Any] | None:
+    return None if row is None else {"budget_id": row.get("budget_id"), "spend": row.get("spend")}
+
+
+def _budget(rows: list[dict[str, Any]], budget_id: str) -> dict[str, Any] | None:
+    return next((row for row in rows if row.get("budget_id") == budget_id), None)
 
 
 def _info(answer: Any) -> list[dict[str, Any]]:
@@ -201,7 +255,10 @@ def write(admin: Admin, app_keys: dict[str, str], changes: list[dict[str, Any]])
         if outcomes and outcomes[-1]["outcome"] != "done":
             outcomes.append(named | {"outcome": "not made"})
             continue
-        cause = _cause_of(admin, path, body)
+        if path == UNLINK:
+            cause = unlink(admin, body["user_id"], body["leaves"])
+        else:
+            cause = _cause_of(admin, path, body)
         outcomes.append(
             named
             | ({"outcome": "done"} if cause is None else {"outcome": "failed", "cause": cause})
@@ -217,15 +274,52 @@ def _request(change: Any, app_keys: dict[str, str]) -> tuple[str, dict[str, Any]
         )
         path = WRITES[(target, new)]
     except (KeyError, TypeError) as error:
-        raise AdminError("a change of an unknown kind") from error
+        raise AdminError(UNKNOWN_CHANGE) from error
     if not isinstance(fields, dict):
-        raise AdminError("a change of an unknown kind")
+        raise AdminError(UNKNOWN_CHANGE)
     if target == "budget":
         return path, {"budget_id": subject, **fields}
+    if target == "customer":
+        if not isinstance(subject, str) or fields.keys() != {"budget_id"}:
+            raise AdminError(UNKNOWN_CHANGE)
+        if new or fields["budget_id"] is not None:
+            return path, {"user_id": subject, **fields}
+        if not isinstance(leaves := change.get("leaves"), str):
+            raise AdminError(UNKNOWN_CHANGE)
+        return UNLINK, {"user_id": subject, "leaves": leaves}
     if subject not in app_keys:
         raise AdminError(f"no key file for {subject}")
     key = app_keys[subject]
     return path, {"key": key if new else hashed(key), **fields}
+
+
+def unlink(admin: Admin, user_id: str, leaves: str) -> str | None:
+    """Unlinks a customer row from the budget it leaves. LiteLLM's update drops a null budget, so
+    the row is deleted and made again from a read taken right before, with its own fields. A row
+    absent or off that budget by then is done untouched; a lost answer between the two calls loses
+    the row."""
+    try:
+        row = next((row for row in customer_rows(admin) if row["user_id"] == user_id), None)
+    except AdminError as error:
+        return str(error)
+    if row is None or row.get("budget_id") != leaves:
+        return None
+    if cause := _cause_of(admin, "/customer/delete", {"user_ids": [user_id]}):
+        return f"{cause} at /customer/delete"
+    if cause := _cause_of(admin, "/customer/new", remade(row)):
+        return f"{cause} at /customer/new after the delete"
+    return None
+
+
+def remade(row: dict[str, Any]) -> dict[str, Any]:
+    """The row's own fields as `/customer/new` takes them, its permission's contents without the
+    id LiteLLM gives anew."""
+    body = {name: row[name] for name in CUSTOMER_FIELDS if row.get(name) is not None}
+    if isinstance(permission := row.get("object_permission"), dict):
+        body["object_permission"] = {
+            name: value for name, value in permission.items() if name != "object_permission_id"
+        }
+    return body
 
 
 def _cause_of(admin: Admin, path: str, body: dict[str, Any]) -> str | None:
@@ -270,7 +364,7 @@ def main(
         if arguments.write:
             result: Any = write(admin, app_keys, read_changes(stdin or sys.stdin))
         else:
-            result = read(admin, app_keys, arguments.read)
+            result = read(admin, app_keys, arguments.read, read_members(stdin or sys.stdin))
     except AdminError as error:
         print(f"{PROGRAM}: {error}", file=sys.stderr, flush=True)  # noqa: T201 - this container program imports nothing of hal and prints itself
         return 1
@@ -305,13 +399,30 @@ def read_app_keys(directory: Path) -> dict[str, str]:
 
 
 def read_changes(stdin: TextIO) -> list[dict[str, Any]]:
-    try:
-        changes = json.loads(stdin.read())
-    except ValueError as error:
-        raise AdminError("no changes as JSON on stdin") from error
+    changes = _from_stdin(stdin, "changes")
     if not isinstance(changes, list):
         raise AdminError("no changes as JSON on stdin")
     return changes
+
+
+def read_members(stdin: TextIO) -> dict[str, Any] | None:
+    """The admin budget's id and its members' fingerprints the host asks about; None for none."""
+    asked = _from_stdin(stdin, "members")
+    if asked is None:
+        return None
+    members = asked.get("members") if isinstance(asked, dict) else None
+    if not isinstance(members, list) or not all(isinstance(member, str) for member in members):
+        raise AdminError("no members as JSON on stdin")
+    if not isinstance(asked.get("budget"), str):
+        raise AdminError("no members as JSON on stdin")
+    return asked
+
+
+def _from_stdin(stdin: TextIO, what: str) -> Any:
+    try:
+        return json.loads(stdin.read())
+    except ValueError as error:
+        raise AdminError(f"no {what} as JSON on stdin") from error
 
 
 if __name__ == "__main__":

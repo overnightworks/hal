@@ -1,262 +1,32 @@
 """The key step's one-off (#964): `src/hal/stack/litellm_admin.py` against a local fake LiteLLM
 admin API, as the realm observer's tests drive it."""
 
-import hashlib
 import importlib.util
-import io
-import json
 import re
-import secrets
-import signal
 import sys
-import threading
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
-from dataclasses import dataclass, field
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
 
 import pytest
+from support.litellm_fake import (
+    APPS,
+    MODELS,
+    NAME_TAKEN_BODY,
+    FakeLitellm,
+    Run,
+    Scene,
+    bystander_fixture,  # noqa: F401 the fixture, requested by name below
+    hashed,
+    scene_fixture,  # noqa: F401 the fixture, requested by name below
+    short_requests_fixture,  # noqa: F401 the fixture, requested by name below
+)
 
 from hal.stack import litellm_admin as admin
 from hal.stack import litellm_keys
 from hal.stack.api_limits import NONE_SET
 
-ROOT = Path(__file__).resolve().parents[1]
-APPS = ("hopin", "presentator", "songmaker")
-MODELS = ("text/haiku", "text/opus", "text/sonnet")
 BUDGET_ID = "scenario-budget"
-NAME_TAKEN_BODY = {
-    "error": {
-        "message": "Key with alias 'x' already exists.",
-        "type": "bad_request_error",
-        "param": "key_alias",
-        "code": "400",
-    }
-}
-
-
-def hashed(key: str) -> str:
-    return hashlib.sha256(key.encode()).hexdigest()
-
-
-@dataclass
-class FakeLitellm:
-    """The admin routes the one-off sends to, over rows of `LiteLLM_VerificationToken` and
-    `LiteLLM_BudgetTable`; `statuses` answer a path with a status and `body`, `slow` holds a path's
-    answer until `release` is set, `redirects` answer a path with a 302 to a location."""
-
-    master_key: str
-    keys: dict[str, dict] = field(default_factory=dict)  # token -> row
-    budgets: dict[str, dict] = field(default_factory=dict)
-    models: tuple[str, ...] = MODELS
-    statuses: dict[str, tuple[int, dict]] = field(default_factory=dict)
-    slow: set[str] = field(default_factory=set)
-    release: threading.Event = field(default_factory=threading.Event)
-    redirects: dict[str, str] = field(default_factory=dict)
-    garbage: set[str] = field(default_factory=set)  # paths answered with no HTTP at all
-    interrupt: set[str] = field(default_factory=set)  # paths whose request SIGTERMs the program
-    arrivals: list[tuple[str, str]] = field(default_factory=list)  # every request, answered or not
-    requests: list[tuple[str, str, dict | None]] = field(default_factory=list)
-
-    def answer(self, method: str, path: str, body: dict | None) -> tuple[int, object]:
-        self.requests.append((method, path, body))
-        if path in self.slow:
-            self.release.wait(timeout=30)
-        if path in self.interrupt:
-            signal.pthread_kill(threading.main_thread().ident, signal.SIGTERM)
-            self.release.wait(timeout=30)
-        if path in self.statuses:
-            return self.statuses[path]
-        if (method, path) == ("GET", "/v1/models"):
-            return 200, {
-                "object": "list",
-                "data": [{"id": name, "object": "model"} for name in self.models],
-            }
-        handler = {
-            "/v2/key/info": self.key_info,
-            "/budget/info": self.budget_info,
-            "/budget/new": self.budget_new,
-            "/budget/update": self.budget_update,
-            "/key/generate": self.generate,
-            "/key/update": self.update,
-        }[path]
-        return handler(body or {})
-
-    def key_info(self, body: dict) -> tuple[int, object]:
-        tokens = [token for token in body.get("keys") or [] if token in self.keys]
-        tokens += [
-            token
-            for token, row in self.keys.items()
-            if row.get("key_alias") in (body.get("key_aliases") or [])
-        ]
-        rows = [
-            {name: value for name, value in self.keys[token].items()} | {"key_name": "sk-...abcd"}
-            for token in tokens
-        ]
-        return 200, {"key": body.get("keys"), "info": rows}
-
-    def budget_info(self, body: dict) -> tuple[int, object]:
-        return 200, [row for budget_id, row in self.budgets.items() if budget_id in body["budgets"]]
-
-    def budget_new(self, body: dict) -> tuple[int, object]:
-        self.budgets[body["budget_id"]] = dict(body)
-        return 200, body
-
-    def budget_update(self, body: dict) -> tuple[int, object]:
-        self.budgets[body["budget_id"]] |= body
-        return 200, body
-
-    def generate(self, body: dict) -> tuple[int, object]:
-        if any(row.get("key_alias") == body.get("key_alias") for row in self.keys.values()):
-            return 400, NAME_TAKEN_BODY
-        row = {name: value for name, value in body.items() if name != "key"}
-        self.keys[hashed(body["key"])] = row
-        return 200, {"key": body["key"], "token": hashed(body["key"])}
-
-    def update(self, body: dict) -> tuple[int, object]:
-        token = body["key"]
-        if token not in self.keys:
-            return 404, {"error": {"message": "not found"}}
-        self.keys[token] |= {name: value for name, value in body.items() if name != "key"}
-        return 200, {"key": token}
-
-
-class Handler(BaseHTTPRequestHandler):
-    server: Server
-
-    def do_GET(self) -> None:
-        self.reply(None)
-
-    def do_POST(self) -> None:
-        self.reply(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
-
-    def reply(self, body: dict | None) -> None:
-        fake = self.server.fake
-        fake.arrivals.append((self.command, self.path))
-        if self.headers.get("Authorization") != f"Bearer {fake.master_key}":
-            status, document = 401, {"error": {"message": "no"}}
-        elif self.path in fake.garbage:
-            self.wfile.write(b"not http\r\n\r\n")
-            return
-        elif self.path in fake.redirects:
-            self.send_response(302)
-            self.send_header("Location", fake.redirects[self.path])
-            self.send_header("Content-Length", "0")
-            self.end_headers()
-            return
-        else:
-            status, document = fake.answer(self.command, self.path, body)
-        encoded = json.dumps(document).encode()
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(encoded)))
-        self.end_headers()
-        self.wfile.write(encoded)
-
-    def log_message(self, *_: object) -> None:
-        return None
-
-
-class Server(ThreadingHTTPServer):
-    fake: FakeLitellm
-    # server_close() then joins every handler, so a released one writes before the next test runs.
-    daemon_threads = False
-
-
-@dataclass(frozen=True)
-class Run:
-    exit_code: int
-    stdout: str
-    stderr: str
-
-    @property
-    def document(self) -> dict:
-        return json.loads(self.stdout)
-
-
-@dataclass
-class Scene:
-    fake: FakeLitellm
-    base_url: str
-    master_file: Path
-    apps_directory: Path
-    app_keys: dict[str, str]
-    run: Callable[..., Run]
-
-    @property
-    def everything_secret(self) -> list[str]:
-        return [
-            self.fake.master_key,
-            *self.app_keys.values(),
-            *(hashed(key) for key in self.app_keys.values()),
-        ]
-
-
-@contextmanager
-def serving(fake: FakeLitellm) -> Iterator[str]:
-    """The fake on a loopback port; a held answer is released before the server stops."""
-    server = Server(("127.0.0.1", 0), Handler)
-    server.fake = fake
-    threading.Thread(target=server.serve_forever, args=(0.05,), daemon=True).start()
-    try:
-        yield f"http://127.0.0.1:{server.server_address[1]}"
-    finally:
-        fake.release.set()
-        server.shutdown()
-        server.server_close()
-
-
-@pytest.fixture
-def bystander() -> Iterator[tuple[FakeLitellm, str]]:
-    """A second fake that stands in for a proxy Docker injects, or the other origin of a redirect:
-    whatever reaches it is logged."""
-    fake = FakeLitellm(master_key="sk-bystander")
-    with serving(fake) as url:
-        yield fake, url
-
-
-@pytest.fixture
-def short_requests(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(admin, "REQUEST_SECONDS", 0.2)
-
-
-@pytest.fixture
-def scene(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> Iterator[Scene]:
-    terminate = signal.getsignal(signal.SIGTERM)  # the program handles SIGTERM as PID 1 does
-    fake = FakeLitellm(master_key=f"sk-{secrets.token_hex(16)}")
-    with serving(fake) as base_url:
-        yield from scene_on(fake, base_url, tmp_path, capsys, terminate)
-
-
-def scene_on(
-    fake: FakeLitellm,
-    base_url: str,
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-    terminate: object,
-) -> Iterator[Scene]:
-    master_file = tmp_path / "litellm_master_key"
-    master_file.write_text(fake.master_key + "\n")
-    apps_directory = tmp_path / "apps"
-    apps_directory.mkdir()
-    app_keys = {app: f"sk-{secrets.token_urlsafe(24)}" for app in APPS}
-    for app, key in app_keys.items():
-        (apps_directory / app).write_text(key + "\n")
-
-    def run(
-        *flags: str, changes: object = None, at: str = base_url, program: ModuleType = admin
-    ) -> Run:
-        stdin = io.StringIO(
-            changes if isinstance(changes, str) else "" if changes is None else json.dumps(changes)
-        )
-        code = program.main(["--base-url", at, *flags], stdin, master_file, apps_directory)
-        captured = capsys.readouterr()
-        return Run(code, captured.out, captured.err)
-
-    yield Scene(fake, base_url, master_file, apps_directory, app_keys, run)
-    signal.signal(signal.SIGTERM, terminate)
 
 
 def desired_row(app: str) -> dict:
@@ -313,6 +83,7 @@ def test_the_read_reports_each_apps_live_key_by_its_hash_the_person_budget_and_t
         },
         "budget": {"max_budget": 1.5, "budget_duration": "1mo"},
         "models": list(MODELS),
+        "admin": None,
     }
 
 
