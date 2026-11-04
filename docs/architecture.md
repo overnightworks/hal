@@ -68,7 +68,7 @@ flowchart TB
         end
         subgraph l4["L4 Services: each repo owns its compose.yaml"]
             SONG["songmaker<br/>songmaker.hallucinai.de, own login until its cutover"]
-            PRES["presentator<br/>offline until its legal pages"]
+            PRES["presentator<br/>deployed from its tag"]
             HOP["hopin<br/>video calls"]
         end
         DATA[("L5 data<br/>volumes and ~/backups/restic")]
@@ -520,7 +520,7 @@ Every finding names the subject and a page to fix it, never a value.
 | Service | Today | Joins by |
 |---|---|---|
 | **songmaker** | system timer `songmaker-autodeploy.timer` (every 2 min) runs the 1,253-line `scripts/auto-deploy.sh` on `~/git/songmaker`, following `origin/main` once CI is green. The checkout is also the place `aco land` must not run (memory: land from `~/git/songmaker-land`) | the migration below |
-| **presentator** | manual. `~/presentator-live` is a separate checkout at `1f0422c` and runs a locally built image (`presentator-adoption-instance:ap112-e04e837a`) on 127.0.0.1:8100. Two host user units run from that checkout: `presentator-speech` and `presentator-copresenter`; speech is crash-looping (stale socket file, seen 16.10.2026). Offline publicly since 14.10.2026 | its go-public item agent-presentator#197 adds a catalog entry with `deploy: tags` and its first `hal release`. It joins under §10 rule 1: the two host units and their unix sockets (its `compose.yaml:52-53`) and the `docker.sock` mount (`:51`) leave its release, so the watcher deploys the compose release and nothing on the host |
+| **presentator** | `hal apply` deploys it from its newest `v*` tag, like hopin; its compose release carries no host unit and no `docker.sock` mount. The old `~/presentator-live` instance and its user units are retired by presentator's own `scripts/cutover.py` | its backup is the SQLite record in `backup/apps.toml` (`docs/backup.md`); it goes public after the first green `hal restore --test presentator` |
 | **hopin** | deployed from its tag `v2026.10.26.1` as `hopin-hopin-1` | section 3's example: a compose file, then its first tag |
 
 Every service that holds people's data also offers the export and erase routes of `docs/people.md`.
@@ -625,7 +625,7 @@ They survive a dead PC because they live at the provider.
 | 4 | App groups | `keycloak/realm.yaml` (`/apps/songmaker`, `presentator`, `hopin`) and the catalog's `login_group` | **new slice in E3**: the catalog's CI checks against `realm.yaml` and `apps.toml` (section 3) |
 | 5 | Org secret reach | home-tools#10 line 19 (repo-list drift) and E3 X5 (`fleet.yaml` org secrets) | home-tools#10 (drop its drift view) and E3 X5 (keep it) |
 | 6 | Alert channels: three today | songmaker's e-mail (`songmaker-alert@`), Alertmanager inside songmaker, `hal check`'s desktop notification | edge#4: **one e-mail channel** (ruled 24.10.2026: `msmtp`, run as the operator, over the SMTP account songmaker uses). `hal check` mails its news itself; Gatus ("is it OK now?") and Alertmanager ("why, since when?") both send into it; songmaker's own e-mail alert goes |
-| 7 | Deploy | songmaker's watcher only; presentator by hand, with locally tagged images; hopin none | **new item in edge**: "one deploy model: tag watcher and `hal release`". Its first slice is in songmaker (section 5) |
+| 7 | Deploy | songmaker's watcher only; presentator from its tag; hopin none | **new item in edge**: "one deploy model: tag watcher and `hal release`". Its first slice is in songmaker (section 5) |
 | 8 | Deploy checkout = work clone | `~/git/songmaker` is both; the workaround is the extra `~/git/songmaker-land` | the songmaker migration item (section 5, step 3) |
 | 9 | Monitoring stack | Prometheus, Grafana and Alertmanager live in songmaker's compose, though they serve the platform | edge#4: **ruled 16.10.2026:** they move into edge and serve every service. songmaker keeps only its metrics endpoint and its dashboards as files edge loads |
 | 10 | Two publishers | E3 X8 lets `keycloak/go-live` call `edge external apply`; section 6 publishes in `edge apply` | E3 X8, changed once (section 3): go-live never publishes |

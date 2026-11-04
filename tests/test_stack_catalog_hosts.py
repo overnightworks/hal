@@ -76,11 +76,17 @@ def test_a_host_carries_its_service_fqdn_and_all_five_fields():
     )
 
 
-def test_songmaker_and_hopin_refuse_the_back_channel_route_and_songmaker_alone_its_metrics():
+@pytest.mark.parametrize("name", ["songmaker", "hopin", "presentator", "presentator-talk"])
+def test_a_host_with_a_keycloak_login_refuses_the_back_channel_route_publicly(name):
     found = catalog.hosts(catalog.read(PROJECT_ROOT / catalog.FLEET_FILE))
-    assert {one.fqdn: one.deny_public for one in found if one.deny_public} == {
-        "songmaker.hallucinai.de": ("/auth/backchannel-logout", "/metrics"),
-        "hopin.hallucinai.de": ("/auth/backchannel-logout",),
+    [host] = [one for one in found if one.fqdn == f"{name}.hallucinai.de"]
+    assert "/auth/backchannel-logout" in host.deny_public
+
+
+def test_songmaker_alone_refuses_its_metrics_publicly():
+    found = catalog.hosts(catalog.read(PROJECT_ROOT / catalog.FLEET_FILE))
+    assert {one.fqdn for one in found if "/metrics" in one.deny_public} == {
+        "songmaker.hallucinai.de"
     }
 
 
