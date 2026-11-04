@@ -352,7 +352,7 @@ class KeysProbe(KeyFiles):
                 litellm_keys.BUDGET_DURATION,
                 litellm_keys.MAX_PARALLEL_REQUESTS,
                 models,
-                [litellm_keys.ROUTE],
+                list(litellm_keys.ROUTES),
                 None,
                 None,
             )

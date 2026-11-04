@@ -127,12 +127,11 @@ def test_the_canary_sends_the_key_files_key_as_bearer_and_no_litellm_or_anthropi
     assert not [name for name in headers if name.lower().startswith(("x-litellm-", "anthropic-"))]
 
 
-def test_the_canary_calls_the_fronts_service_at_its_entrypoint_port_and_its_one_path(
+def test_the_canary_calls_the_fronts_service_at_its_entrypoint_port_and_one_of_its_paths(
     canary, monkeypatch, tmp_path, compose
 ):
     static = load(LITELLM_DIRECTORY / "front" / "traefik.yml")
-    rule = load(LITELLM_DIRECTORY / "front" / "dynamic" / "route.yml")["http"]["routers"]
-    (router,) = rule.values()
+    routers = load(LITELLM_DIRECTORY / "front" / "dynamic" / "route.yml")["http"]["routers"]
     front_port = int(static["entryPoints"]["api"]["address"].rpartition(":")[2])
 
     _, _, connections = run_canary(canary, monkeypatch, tmp_path, Response(200, completion("x")))
@@ -142,7 +141,7 @@ def test_the_canary_calls_the_fronts_service_at_its_entrypoint_port_and_its_one_
     mounted = {volume.split(":")[0] for volume in compose["services"][host]["volumes"]}
     assert "./agent-service/litellm/front/traefik.yml" in mounted
     assert port == front_port
-    assert f"Path(`{sent(connections)[1]}`)" in router["rule"]
+    assert any(f"Path(`{sent(connections)[1]}`)" in router["rule"] for router in routers.values())
 
 
 # --- what the canary prints ---------------------------------------------------------------------

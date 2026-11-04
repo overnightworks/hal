@@ -1,10 +1,10 @@
 """Probe of the direct route's retention (#814 S1c cells B1-B7, B9-B11, D9 and P7; HAL-2.8 cells
-K0, T1-T4, STR-c and STR): the stack of litellm.py without the agent service and the issuer (the
-one-route front, LiteLLM, its database and the gateway's second entrypoint, against a fake
-Anthropic) and its caller with hopin's key, made by `hal apply`'s key step from a scratch key file,
-with a unique canary in each request and answer, searched afterwards in every writable mount and
-every log of the front, the gateway, LiteLLM and its database, and in a `pg_dump` of the database,
-by `agent-service/retention_census.py`.
+K0, T1-T4, STR-c and STR; HAL-2.11 B12): the stack of litellm.py without the agent service and the
+issuer (the front, LiteLLM, its database and the gateway's second entrypoint, against a fake
+Anthropic and a fake OpenAI) and its caller with hopin's key, made by `hal apply`'s key step from
+a scratch key file, with a unique canary in each request and answer, searched afterwards in every
+writable mount and every log of the front, the gateway, LiteLLM and its database, and in a
+`pg_dump` of the database, by `agent-service/retention_census.py`.
 Nothing live and nothing paid: the probe refuses to start unless `internet` is internal and holds
 only the fakes.
 
@@ -54,6 +54,7 @@ from litellm import (  # noqa: E402
     FRONT_STATIC,
     GATEWAY,
     LITELLM,
+    PICTURE_HOST,
     PROJECT,
     ROUTE,
     ProbeFailed,
@@ -67,6 +68,7 @@ from litellm import (  # noqa: E402
 from litellm_caller import CALL_PROGRAM, STREAM_PROGRAM, caller_input  # noqa: E402
 from litellm_failures import FailureProbe  # noqa: E402
 from litellm_key_files import APPS, KeyFiles  # noqa: E402
+from litellm_pictures import PictureCalls, picture_of  # noqa: E402
 from live_canary import LITELLM_LONGEST_WRITE_INTERVAL_SECONDS  # noqa: E402
 from retention_census import (  # noqa: E402
     DUMP,
@@ -181,7 +183,7 @@ def sinks_outside_the_database(
     ]  # fmt: skip
 
 
-class RetentionProbe(FailureProbe, KeyFiles):
+class RetentionProbe(FailureProbe, KeyFiles, PictureCalls):
     """litellm.py's stack with the census run over the route's containers, at the log level
     compose.yaml ships, and hopin's key made by the key step."""
 
@@ -313,8 +315,8 @@ class RetentionProbe(FailureProbe, KeyFiles):
         for step in (
             self.cell_b2, self.cells_b3, self.recreate_route, self.cell_b1, self.cell_t1,
             self.cell_b4, self.cell_b5, self.cell_b6, self.cell_b7, self.cell_b9, self.cell_d9,
-            self.cell_str_c, self.cell_str, self.cell_t4, self.cells_t3, self.cell_b10,
-            self.cell_b11,
+            self.cell_str_c, self.cell_str, self.cell_t4, self.cells_t3, self.cell_b12,
+            self.cell_b10, self.cell_b11,
         ):  # fmt: skip
             try:
                 step()
@@ -745,12 +747,25 @@ class RetentionProbe(FailureProbe, KeyFiles):
             expect(time.monotonic() < deadline, f"{value} is not in {table}")
             time.sleep(3)
 
+    def cell_b12(self) -> None:
+        """A picture turn with hopin's key: canaries in the prompt and in the picture."""
+        request, answer = canary("b12-request"), secrets.token_hex(16)  # hex is valid b64_json
+        self.steer_fake(PICTURE_HOST, marker=answer, request_canary=request)
+        before = len(self.picture_requests())
+        reply = self.picture(self.key, self.fingerprint(), prompt=request)
+        expect(picture_of(reply) == answer, f"B12: {reply['status']}, the answer canary missing")
+        hits = sum(record["request_canary_hits"] for record in self.picture_requests()[before:])
+        expect(hits == 1, f"B12: the request canary reached the fake OpenAI {hits} times")
+        self.expect_nothing_retained("B12", {"request": request, "answer": answer})
+        self.hold("B12", "a picture through the front: the prompt canary reached the fake OpenAI, "
+                  "the picture canary the client, both retained nowhere")  # fmt: skip
+
     def cell_b10(self) -> None:
-        """Every sink of the route over B4 to B9, D9 and STR."""
+        """Every sink of the route over B4 to B9, B12, D9 and STR."""
         found = self.sweep(self.clean).found
         expect(not found, f"B10: retained in {found}")
         self.hold("B10", f"the mounts, logs and dump of {', '.join(ROUTE_SERVICES)} hold none of "
-                  f"{len(self.clean)} canaries of B4 to B7, B9, D9 and STR")  # fmt: skip
+                  f"{len(self.clean)} canaries of B4 to B7, B9, B12, D9 and STR")  # fmt: skip
 
     def cell_b11(self) -> None:
         litellm, front = self.container_name(LITELLM), self.container_name(FRONT)

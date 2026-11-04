@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from litellm import (
     DATABASE,
+    FAKE_PICTURES,
     FAKE_PROVIDER,
     FRONT,
     GATEWAY,
@@ -62,7 +63,7 @@ class KeyFiles(LitellmProbe):
         self.budget_id = shipped_config()["litellm_settings"][litellm_keys.BUDGET_ID_SETTING]
 
     def services_to_start(self) -> tuple[str, ...]:
-        return (GATEWAY, FAKE_PROVIDER, FRONT, DATABASE, LITELLM)
+        return (GATEWAY, FAKE_PROVIDER, FAKE_PICTURES, FRONT, DATABASE, LITELLM)
 
     def write_app_key(self, app: str, replace: bool = False) -> str:
         key = f"sk-{secrets.token_urlsafe(32)}"

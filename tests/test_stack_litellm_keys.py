@@ -84,7 +84,7 @@ def test_a_new_key_carries_its_app_as_name_the_code_defaults_and_every_model_lit
         "max_budget": litellm_keys.APP_BUDGET_DOLLARS,
         "budget_duration": litellm_keys.BUDGET_DURATION,
         "models": MODELS,
-        "allowed_routes": (litellm_keys.ROUTE,),
+        "allowed_routes": litellm_keys.ROUTES,
         "max_parallel_requests": litellm_keys.MAX_PARALLEL_REQUESTS,
         "rpm_limit": None,
         "tpm_limit": None,
@@ -124,8 +124,8 @@ def test_the_person_budget_holds_the_person_default_for_the_period() -> None:
         ),
         pytest.param(
             {"allowed_routes": []},
-            {"allowed_routes": (litellm_keys.ROUTE,)},
-            id="a key without its route gets it",
+            {"allowed_routes": litellm_keys.ROUTES},
+            id="a key without its routes gets them",
         ),
     ],
 )
