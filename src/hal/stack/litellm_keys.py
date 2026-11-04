@@ -279,8 +279,8 @@ def plan_keys(
     engine: compose.Compose,
     states: Mapping[str, set[str]],
     repository: Path,
-    keycloak_gate: core.Gate | None = None,
-    keycloak_restart: Restart | None = None,
+    keycloak_gate: core.Gate | None,
+    keycloak_restart: Restart | None,
 ) -> KeysPlan:
     """Reads while the `litellm` container runs; a read that fails is a step not read. Keycloak's
     gate and restart are those `hal apply` hands the realm step; a gate of None, Keycloak outside
@@ -303,7 +303,7 @@ def admin_members(
 ) -> Fingerprints | AdminHeld | MembersNotRead:
     """The admin group's members as fingerprints: held while Keycloak's gate is not on, and not
     read while Keycloak does not run at plan time; a restart in this run changes no member."""
-    if gate is not None and gate is not core.Gate.ON:
+    if reconcile.keycloak_held(gate):
         return AdminHeld(gate)
     if not compose.has_running_container(states, (reconcile.KEYCLOAK_SERVICE,)):
         starts = restart is Restart.SERVICE

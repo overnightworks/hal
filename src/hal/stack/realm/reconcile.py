@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeGuard
 
 from hal.output import LOG_FORMAT_VARIABLE, LogFormat, printable
 from hal.output.command import PROGRAM, Verb, command
@@ -63,7 +63,7 @@ BACKUP_SECONDS = 1800
 STOP_GRACE_SECONDS = 120  # what hal backup gets to remove its staging and restore container
 COLLECT_SECONDS = 5  # what the output of a killed hal backup gets before its pipes are closed
 _ERROR_LINE = re.compile(r"^error: (.+)$", re.MULTILINE)
-_NO_MEMBERS = "the realm observer answered no members"
+NO_MEMBERS = "the realm observer answered no members"
 
 type Checksums = dict[str, dict[str, str]]  # realm -> import-checksum attribute -> value
 type Waiting = Callable[[float], None]  # told the seconds a stopped hal is given to clean up
@@ -193,10 +193,10 @@ class Observer:
             answer = json.loads(output)
             issuer, subjects = answer["issuer"], answer["members"]
         except ValueError, KeyError, TypeError:
-            return MembersNotRead(_NO_MEMBERS)
+            return MembersNotRead(NO_MEMBERS)
         texts = [issuer, *subjects] if isinstance(subjects, list) else None
         if texts is None or not all(isinstance(text, str) and text for text in texts):
-            return MembersNotRead(_NO_MEMBERS)
+            return MembersNotRead(NO_MEMBERS)
         return Members(issuer, tuple(subjects))
 
     def _read(self, arguments: list[str], stdin: str) -> dict:
@@ -206,6 +206,12 @@ class Observer:
             raise RealmError(f"the realm observer failed ({error})") from error
         except ValueError as error:
             raise RealmError("the realm observer answered no JSON") from error
+
+
+def keycloak_held(gate: core.Gate | None) -> TypeGuard[core.Gate]:
+    """Whether Keycloak's gate holds what reads it; a gate of None, Keycloak outside the
+    catalog, counts as on."""
+    return gate is not None and gate is not core.Gate.ON
 
 
 def plan_realm(
@@ -224,7 +230,7 @@ def plan_realm(
         return RealmPlan(RealmAction.NOT_CHECKED, restart=restart)
     inputs = read_inputs(config, checkout)
     reading = record.read()
-    if gate is not core.Gate.ON:
+    if keycloak_held(gate):
         if why := _why(reading, inputs, None):
             return RealmPlan(RealmAction.HELD, why=why, gate=gate)
         return RealmPlan()

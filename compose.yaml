@@ -265,7 +265,8 @@ services:
   # Reads both realms through the admin API, GET only, and prints one JSON inventory
   # (src/hal/stack/realm/observe.py). No depends_on: an observe never starts Keycloak. Run it as
   # `compose run -T --rm --no-deps realm-observer` with the per-run digest key on stdin, or with
-  # `--import-checksums` after it, which needs no key and prints config-cli's import checksums.
+  # `--import-checksums` after it, which needs no key and prints config-cli's import checksums, or
+  # with `--members PATH`, which prints the issuer and the subjects of the group at PATH.
   realm-observer:
     # The probe's python pin (probe/keycloak/compose.probe.yaml); ci.yml checks the two are equal.
     # agent-probe below carries the same pin; Dependabot moves all of them in one pull.
@@ -296,8 +297,8 @@ services:
   # hal apply's key step (src/hal/stack/litellm_admin.py): reads and makes each app's LiteLLM key
   # and the person budget through LiteLLM's admin routes with the master key. The apps are the key
   # files mounted below, one secret each. No depends_on: the step never starts LiteLLM. Run it as
-  # `compose run -T --rm --no-deps litellm-keys` with `--read <budget id>`, or with `--write` and
-  # the changes on stdin.
+  # `compose run -T --rm --no-deps litellm-keys` with `--read <budget id>` and the admin group's
+  # members as JSON on stdin (`null` for no members), or with `--write` and the changes on stdin.
   litellm-keys:
     # realm-observer's python pin; tests/test_stack_litellm_admin.py holds the two equal.
     image: python:3.14.10-alpine@sha256:eb2c62658b8d51bff0acc408504b76521d02030de56a8a3c1e830083e89b89d2

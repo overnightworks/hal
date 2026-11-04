@@ -26,7 +26,7 @@ from hal.stack.litellm_keys import (
 from hal.stack.realm import OBSERVER_SERVICE
 from hal.stack.realm import observe as observer
 from hal.stack.realm.declared import declared_realm
-from hal.stack.realm.reconcile import KEYCLOAK_SERVICE, MembersNotRead
+from hal.stack.realm.reconcile import KEYCLOAK_SERVICE, NO_MEMBERS, MembersNotRead
 from hal.stack.unit_plans import Restart
 
 APPS = ("hopin", "presentator", "songmaker")
@@ -314,7 +314,7 @@ def test_no_key_step_runs_while_litellm_does_not_run(repository: Path, state: st
 
     assert (
         litellm_keys.plan_keys(
-            compose.Compose(run=runner, repository=repository), states, repository
+            compose.Compose(run=runner, repository=repository), states, repository, None, None
         )
         == KeysPlan()
     )
@@ -327,7 +327,7 @@ def test_while_litellm_runs_the_step_reads_with_the_budget_id_config_yaml_names(
     runner = OneOff(read_answer(found(keys={}, budget={})))
     states = {litellm_keys.LITELLM_SERVICE: {"running"}}
     plan = litellm_keys.plan_keys(
-        compose.Compose(run=runner, repository=repository), states, repository
+        compose.Compose(run=runner, repository=repository), states, repository, None, None
     )
 
     assert [command[-3:] for command in runner.one_offs] == [
@@ -362,6 +362,8 @@ def test_a_read_that_fails_while_litellm_runs_plans_nothing_and_says_why(
         compose.Compose(run=runner, repository=repository),
         {litellm_keys.LITELLM_SERVICE: {"running"}},
         repository,
+        None,
+        None,
     )
 
     assert plan.changes == ()
@@ -378,7 +380,7 @@ def test_a_config_yaml_without_the_budget_id_is_a_step_not_read(
     runner = OneOff()
     states = {litellm_keys.LITELLM_SERVICE: {"running"}}
     plan = litellm_keys.plan_keys(
-        compose.Compose(run=runner, repository=repository), states, repository
+        compose.Compose(run=runner, repository=repository), states, repository, None, None
     )
 
     assert plan.not_read is not None
@@ -587,6 +589,10 @@ def test_with_keycloak_running_the_read_gets_the_fingerprints_of_the_groups_memb
     assert observer_call[-3:] == [OBSERVER_SERVICE, "--members", litellm_keys.ADMIN_GROUP]
     asked = json.loads(runner.stdin_of(litellm_keys.KEYS_SERVICE) or "")
     assert asked == {"budget": ADMIN, "members": sorted(map(fingerprint_of, ("p", "q")))}
+    words = [word for command, _ in runner.calls for word in command]
+    secrets = {*asked["members"], "p", "q"}
+    assert not secrets.intersection(words)
+    assert not any(fingerprint in word for fingerprint in asked["members"] for word in words)
     assert set(row_changes(plan)) == {
         (fingerprint_of("p"), True, ADMIN),
         (fingerprint_of("q"), True, ADMIN),
@@ -623,8 +629,50 @@ def test_with_keycloak_running_the_read_gets_the_fingerprints_of_the_groups_memb
             KEYCLOAK_RUNNING,
             None,
             Answer(0, json.dumps({"issuer": ISSUER, "members": "subject-p"})),
-            "the realm observer answered no members",
-            id="a malformed answer",
+            NO_MEMBERS,
+            id="a members value that is no list",
+        ),
+        pytest.param(
+            KEYCLOAK_RUNNING,
+            None,
+            Answer(0, "subject-p is not JSON"),
+            NO_MEMBERS,
+            id="an answer that is not JSON",
+        ),
+        pytest.param(
+            KEYCLOAK_RUNNING,
+            None,
+            Answer(0, json.dumps({"members": ["subject-p"]})),
+            NO_MEMBERS,
+            id="an answer without issuer",
+        ),
+        pytest.param(
+            KEYCLOAK_RUNNING,
+            None,
+            Answer(0, json.dumps({"issuer": ISSUER})),
+            NO_MEMBERS,
+            id="an answer without members",
+        ),
+        pytest.param(
+            KEYCLOAK_RUNNING,
+            None,
+            Answer(0, json.dumps({"issuer": ISSUER, "members": ["subject-p", 7]})),
+            NO_MEMBERS,
+            id="a member that is a number",
+        ),
+        pytest.param(
+            KEYCLOAK_RUNNING,
+            None,
+            Answer(0, json.dumps({"issuer": ISSUER, "members": ["subject-p", ""]})),
+            NO_MEMBERS,
+            id="an empty subject",
+        ),
+        pytest.param(
+            KEYCLOAK_RUNNING,
+            None,
+            Answer(0, json.dumps({"issuer": "", "members": ["subject-p"]})),
+            NO_MEMBERS,
+            id="an empty issuer",
         ),
     ],
 )
@@ -635,7 +683,7 @@ def test_members_not_read_leave_the_admin_rows_and_still_plan_the_keys_and_the_p
     plan = plan_with(runner, repository, states, restart=restart)
 
     assert plan.admin == MembersNotRead(cause)
-    assert "subject-p" not in cause
+    assert "subject-p" not in cause + repr(plan)
     assert json.loads(runner.stdin_of(litellm_keys.KEYS_SERVICE) or "") is None
     assert row_changes(plan) == []
     assert [change.subject for change in plan.changes] == list(APPS)

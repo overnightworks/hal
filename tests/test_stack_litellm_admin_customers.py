@@ -121,6 +121,12 @@ def test_an_admin_budget_litellm_does_not_hold_reads_as_absent(scene: Scene) -> 
             "no members as JSON on stdin",
             id="a member that is no string",
         ),
+        pytest.param(
+            lambda fake: None,
+            {"members": []},
+            "no members as JSON on stdin",
+            id="members without a budget",
+        ),
     ],
 )
 def test_a_failed_read_of_the_rows_prints_one_line_without_a_fingerprint_and_nothing_on_stdout(
@@ -136,6 +142,35 @@ def test_a_failed_read_of_the_rows_prints_one_line_without_a_fingerprint_and_not
 
 
 # --- the write ----------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        pytest.param({**link("o", True), "subject": 7}, id="a subject that is no string"),
+        pytest.param(
+            {**link("o", True), "fields": {"budget_id": ADMIN, "spend": 1.0}},
+            id="fields beyond the budget",
+        ),
+        pytest.param(
+            {"target": "customer", "subject": "o", "new": False, "fields": {"budget_id": None}},
+            id="an unlink without the budget it leaves",
+        ),
+    ],
+)
+def test_a_customer_change_of_no_known_shape_is_refused_before_any_write(
+    scene: Scene, change: dict
+) -> None:
+    admin_budget(scene)
+
+    run = scene.run("--write", changes=[link(fingerprint("p"), True), change])
+
+    assert (run.exit_code, run.stdout, run.stderr) == (
+        1,
+        "",
+        "litellm-keys: a change of an unknown kind\n",
+    )
+    assert sent(scene) == []
 
 
 def test_a_link_makes_a_members_row_on_the_admin_budget_or_moves_its_row_there(
