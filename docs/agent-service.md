@@ -353,7 +353,7 @@ and the admin budget with its customer rows (the key step below).
   rows linked and unlinked, never which. With Keycloak's unit off or switched off the rows are
   held, a row says so, and the run ends as it would. With the members not read (Keycloak not running
   at plan time, started by this run, the read failing, or the group absent) the rows stay and the run
-  ends `partial` naming Keycloak with `next: hal apply`, exit 1, also when nothing else changes; an
+  ends `partial` naming Keycloak with `next: hal apply`, exit 3, also when nothing else changes; an
   apply whose realm step makes the group, or which starts Keycloak, ends so. The members'
   fingerprints pass through hal's memory and the one-off's standard input and output; no printed
   line carries a fingerprint or a member, failures included.

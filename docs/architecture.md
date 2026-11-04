@@ -284,8 +284,8 @@ plan prints one row per kind, without a heading, above `core`: `+ legal  2 new p
 `yes`, before any unit switches, the core phase or an app, it writes each changed page (a temporary file, mode 0644, renamed over the page), so a new tag that then fails leaves the app's new text live while its old version runs,
 and prints `✓ legal  pages written` naming the pages whose bytes were written, `✓ legal  record written` for pages
 that gained only their record. Without an enabled `legal` unit there is no step and no line. A refusal comes before
-the question (exit 2, `CANNOT_PLAN`) and changes nothing; a failed write is `✗ legal  not written` with the path and the reason, then
-partial with no unit switched (exit 1, `REFUSED`). A page goes live only that way, and a
+the question (exit 3) and changes nothing; a failed write is `✗ legal  not written` with the path and the reason, then
+partial with no unit switched (exit 3). A page goes live only that way, and a
 wrong text is taken back by the next change of the text: there is no override.
 
 **Format.** German, UTF-8 without a byte order mark, at most 65,536 bytes, LF line ends, no control character

@@ -96,20 +96,32 @@ class ServiceRecreator:
         self, plan: Recreate | built_image.BuiltRecreate, snapshots: dict[str, str]
     ) -> str | None:
         """Recreate one, after its unit's proven snapshot when it is the unit's first; a snapshot
-        that fails leaves the unit as it runs, and a failure after it names the way back."""
+        that fails leaves the unit as it runs, and a failure after it names the snapshot, and the
+        way back once the unit's recreate has begun."""
         self.progress.unit = plan.service
         started = self.watch.clock()
         taken = None
+        recreating = False
+
+        def begin() -> None:
+            nonlocal recreating
+            recreating = True
+
         try:
             if isinstance(plan, Recreate) and plan.snapshot:
                 taken = snapshots[plan.unit] = self._proven_snapshot(plan.snapshot)
-            failure = self.alone(plan.unit, plan.service)
+            failure = self.alone(plan.unit, plan.service, begin)
         except PreApplyError as error:
             return f"{error}; {plan.unit} is not recreated"
         except (compose.ComposeError, switches.SwitchError) as error:
             failure = f"could not {self.progress.step}, {error}"
+        except KeyboardInterrupt as interruption:
+            if way_back := _way_back(plan.unit, snapshots.get(plan.unit), recreating):
+                interruption.add_note(way_back)
+            raise
         if failure:
-            return _with_way_back(failure, plan.unit, snapshots.get(plan.unit))
+            way_back = _way_back(plan.unit, snapshots.get(plan.unit), recreating)
+            return f"{failure}; {way_back}" if way_back else failure
         self.tell(Recreated(plan.service, self.watch.clock() - started, snapshot=taken))
         return None
 
@@ -130,6 +142,7 @@ class ServiceRecreator:
     ) -> str | None:
         """Recreate one service of `unit` under the switch lock and observe it running; the
         failure line of the first step that fails."""
+        self.progress.step = f"lock the {unit} switch"
         with self.marks.lock():
             if changed := self.marks.changed(unit, self.read[unit]):
                 since = switches.describe_since(since_of(changed))
@@ -145,10 +158,14 @@ class ServiceRecreator:
         return None
 
 
-def _with_way_back(failure: str, unit: str, snapshot: str | None) -> str:
-    """The failure, and once the unit's snapshot was proven, how its database goes back to it."""
+def _way_back(unit: str, snapshot: str | None, recreating: bool) -> str | None:
+    """Once the unit's snapshot was proven, it by name; once its recreate has begun, also how its
+    database goes back to it. Before that nothing was changed, and loading it would lose what the
+    database took since."""
     if snapshot is None:
-        return failure
+        return None
     short = printable(snapshot[:SNAPSHOT_SHORT_ID])
+    if not recreating:
+        return f"pre-apply snapshot {short} taken"
     restore = f"{command(Verb.RESTORE)} {unit} --live --snapshot {short}"
-    return f"{failure}; pre-apply snapshot {short}, `{restore}` loads it"
+    return f"pre-apply snapshot {short}, `{restore}` loads it"

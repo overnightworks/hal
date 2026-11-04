@@ -26,6 +26,8 @@ from support.stack_apply import (
 from support.stack_apply_fakes import RealmBackup
 from support.stack_plan_rows import find_row, plain
 
+from hal import cli
+from hal.grammar import ExitCode
 from hal.stack import api_limits, apply, compose, litellm_keys
 from hal.stack import cli as stack_cli
 from hal.stack.external import cli as external_cli
@@ -211,7 +213,7 @@ def plain_apply(
 
     def run() -> tuple[int, str, list[object]]:
         at_terminal("yes")
-        exit_code = stack_cli.apply_units(local=False, api=api_limits.NONE_SET)
+        exit_code = cli.main(["apply"])
         return exit_code, capsys.readouterr().err, published
 
     return run
@@ -222,13 +224,14 @@ def test_plain_hal_apply_publishes_nothing_after_a_failed_snapshot(
     scripted,  # noqa: F811
     realm_backup,
 ):
-    """C9: the local part is `hal apply --local`'s; its failure stops the publish."""
+    """C9: the local part is `hal apply --local`'s; its failure stops the publish. The exit is
+    the public one `hal` ends with, which C3 and the docs name."""
     scripted.change_image(KEYCLOAK.service, KEYCLOAK_BUMP)
     realm_backup.failing = "backup"
 
     exit_code, err, published = plain_apply()
 
-    assert exit_code == apply.ApplyExit.REFUSED
+    assert exit_code == ExitCode.FAILURE
     assert "nothing published" in err
     assert published == []
 
@@ -363,3 +366,49 @@ def test_a_recreated_app_that_does_not_run_names_its_snapshot_and_the_live_resto
     assert exit_code == apply.ApplyExit.REFUSED
     assert "keycloak is not running after the keycloak recreate" in err
     assert "hal restore keycloak --live --snapshot ab12cd34" in err
+
+
+@pytest.mark.usefixtures("database_units")
+def test_ctrl_c_in_the_recreate_after_the_snapshot_names_it_and_the_live_restore(
+    switch,  # noqa: F811
+    scripted,  # noqa: F811
+):
+    """B1: the recreate had begun, so the interrupt line carries the way back."""
+
+    def interrupted() -> None:
+        raise KeyboardInterrupt
+
+    scripted.change_image(KEYCLOAK.service, KEYCLOAK_BUMP)
+    scripted.after_up = interrupted
+
+    exit_code, _, err = switch()
+
+    assert exit_code == 1
+    assert "interrupted while changing keycloak" in err
+    assert "hal restore keycloak --live --snapshot ab12cd34" in err
+
+
+@pytest.mark.usefixtures("database_units")
+def test_a_unit_switched_off_after_its_snapshot_names_the_snapshot_and_no_restore(
+    switch,  # noqa: F811
+    scripted,  # noqa: F811
+    realm_backup,
+    state,  # noqa: F811
+    monkeypatch,
+):
+    """B3: nothing was recreated, so loading the snapshot would only lose what was written since."""
+    scripted.change_image(KEYCLOAK.service, KEYCLOAK_BUMP)
+    proven = realm_backup.restore_test
+
+    def proven_then_switched_off(unit, snapshot) -> None:
+        proven(unit, snapshot)
+        switch_off(state, unit=KEYCLOAK.key)
+
+    monkeypatch.setattr(realm_backup, "restore_test", proven_then_switched_off)
+
+    exit_code, _, err = switch()
+
+    assert exit_code == apply.ApplyExit.REFUSED
+    assert "keycloak was switched off meanwhile" in err
+    assert "pre-apply snapshot ab12cd34" in err
+    assert "hal restore" not in err

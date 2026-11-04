@@ -254,9 +254,12 @@ Reihenfolge, und wie der Eintrag in `applied.json` gefuehrt wird:
   Neuerstellen der Einheit `hal backup <einheit> --pre-apply` und beweist den Snapshot mit
   `hal restore --test`; erst dann erzeugt es die Datenbank und dann den Dienst neu, und die
   Ergebniszeile nennt den Snapshot. Scheitert Backup oder Test, laeuft der alte Container weiter, der
-  Lauf endet partial (Exit 1) und veroeffentlicht nichts. Laeuft ein neuer Container danach nicht,
-  nennt die Fehlerzeile den Snapshot und `hal restore <einheit> --live`. Eine ausgeschaltete Einheit
-  wird nicht angefasst, und `hal start` behaelt den alten Container.
+  Lauf endet partial (Exit 3) und veroeffentlicht nichts. Wird die Einheit vor dem Neuerstellen
+  ausgeschaltet, nennt die Fehlerzeile nur den Snapshot. Laeuft ein neuer Container danach nicht oder
+  bricht Ctrl-C das Neuerstellen ab, nennt die Zeile den Snapshot und `hal restore <einheit> --live`. Eine ausgeschaltete Einheit
+  wird nicht angefasst, und `hal start` behaelt den alten Container. Ein nicht angepinntes,
+  neu gebautes Tag von Keycloak oder LiteLLM wird nur genannt, nicht getauscht; heute ist jedes ihrer
+  Images per Digest angepinnt.
 
 **Setup.** Eine Einheit mit `setup` wird erst angeschaltet, wenn `<setup> --check` Exit 0 gibt. Der
 Vertrag von `<setup> --check`: fragt nichts, druckt kein Geheimnis, legt nichts an, braucht keinen
