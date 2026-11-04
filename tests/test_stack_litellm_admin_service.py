@@ -1,5 +1,5 @@
-"""The one-off's compose service: `compose.yaml` runs `src/hal/stack/litellm_admin.py` where
-the program looks for its files."""
+"""The one-offs on the Python pin: `compose.yaml` runs `src/hal/stack/litellm_admin.py` as the key
+one-off where the program looks for its files, and `agent-canary` beside it on the same pin."""
 
 import re
 from pathlib import Path, PurePosixPath
@@ -23,13 +23,19 @@ def secrets_declared() -> dict:
     return yaml.safe_load((ROOT / "compose.yaml").read_text())["secrets"]
 
 
+@pytest.mark.parametrize("name", [litellm_keys.KEYS_SERVICE, "agent-canary"])
 def test_the_one_off_shares_the_realm_observers_profile_image_logging_and_hardening(
-    services: dict,
+    services: dict, name: str
 ) -> None:
-    one_off, observer = services[litellm_keys.KEYS_SERVICE], services["realm-observer"]
+    one_off, observer = services[name], services["realm-observer"]
 
     for key in ("profiles", "image", "logging", "read_only", "cap_drop", "security_opt"):
         assert one_off[key] == observer[key]
+
+
+def test_the_key_one_off_runs_as_litellms_user(services: dict) -> None:
+    one_off = services[litellm_keys.KEYS_SERVICE]
+
     assert one_off["user"] == services[litellm_keys.LITELLM_SERVICE]["user"]
 
 

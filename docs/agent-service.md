@@ -191,12 +191,19 @@ person's fingerprint with its counters, but no spend-log or error-log row and no
 `store_prompts_in_spend_logs`). Only the per-request logs stop: the daily and the key, user and team
 spend aggregates are written whatever `disable_spend_logs` says, and they hold amounts, never content.
 What the database keeps per person or per tool goes after 90 days without use ([The API route](#the-api-route), What expires).
-The census also searches the database's volume and a `pg_dump` of it; the front logs at INFO without an access log.
+The front logs at INFO without an access log.
 The retention census (`agent-service/retention_census.py`, driven by
-`probe/agent-service/litellm_retention.py` on the fake-only stack) searches a request and an answer canary in every writable mount and every log of
-the front, the gateway, LiteLLM and the service. After a success, an upstream 500, an upstream error
-body that echoes the request, a refused model and a refusal of LiteLLM's guard it finds none, and each
-search is proven by a control that plants a canary where it must be found. LiteLLM runs at log level
+`probe/agent-service/litellm_retention.py` on the fake-only stack with hopin's key) searches its canaries in every writable mount and every log of
+the front, the gateway, LiteLLM and its database, the database's volume among them, and in a `pg_dump` of the database, naming the table a
+hit sits in. The canaries sit in the message, the tool description, the tool-call arguments, the tool result, the answer, a streamed
+answer, `User-Agent` and `x-litellm-tags`. After a success, an upstream 500, an upstream error body that echoes the request, a refused
+model, a refusal of LiteLLM's guard, a tool call and a streamed answer it finds none, and each search is proven by a control that plants
+a canary where it must be found. The front's constant user agent lands in the tool rows, beside each tool name. LiteLLM writes no request
+tag from the user agent (`disable_add_user_agent_to_request_tags`), so a conforming request writes no tag row. A key holder who does not
+conform can send a tag in the body: a root `tags` list, `metadata.tags` and `litellm_metadata.tags` each land in `LiteLLM_DailyTagSpend`
+with LiteLLM's own request id, and so in the database's volume, in no other table, log or mount, and `metadata` as a JSON string lands
+in no sink at all; none reaches the provider. Those rows are outside the
+four tables `hal expire` prunes, so the 90 days above do not cover them. LiteLLM runs at log level
 `CRITICAL`: its own logging sites and uvicorn's write no error line that could carry a provider's
 text, and a provider failure shows at the caller. One channel stays open: `logging.lastResort` and
 `warnings.warn` reach LiteLLM's standard error, and whether a real path sends a provider's text
@@ -243,7 +250,7 @@ host process can reach it, because the network has no host address and publishes
 An app that calls LiteLLM directly holds only its own key, the file `~/.secrets/litellm/apps/<app>` (`songmaker`,
 `hopin`, `presentator`). `hal setup` creates a missing one with the prefix `sk-` that LiteLLM requires of a custom
 key, mode 0644 in a 0700 folder so the app's container reads it as its own user. `hal apply`'s key step reads it to
-make the app's key in LiteLLM (see "The API route"). On the same agent network the app posts to
+make the app's key in LiteLLM (see "The API route"); hopin's file is also read by `agent-canary`, the live canary's one-off. On the same agent network the app posts to
 `http://litellm-front:4000/v1/chat/completions` with that key as bearer; nothing starts the front yet.
 
 ## The API route
@@ -370,8 +377,9 @@ step below).
   key; `litellm_apps.py` puts one fake app with a key of its own on each app network and proves
   that each reaches the front alone and that an app's alias `litellm` captures nothing.
   `litellm_admission.py` drives the key's models, the budgets, the person budget, the operator's
-  exception and the bound, `litellm_failures.py` the failure and key cases, and
-  `litellm_retention.py` the retention census of the route, and `litellm_keys.py` the key step through
+  exception and the bound, `litellm_failures.py` the failure and key cases,
+  `litellm_retention.py` the retention census of the route and `litellm_live_canary.py` the live canary, both with hopin's key made by
+  the key step, and `litellm_keys.py` the key step through
   `hal apply`'s own plan and run, on the same stack and with the same caller. Re-run them for every LiteLLM,
   Traefik or Docker bump. The CI job `front` runs the front's table of requests
   (`tests/test_litellm_front.py`) for every Traefik bump; a LiteLLM bump still needs the probes.
@@ -414,17 +422,14 @@ capability. It needs `[apps.songmaker] mcp_origin` in `service.toml`. It also re
 songmaker's own call is the proof.
 
 **The live canary** is `cd ~/srv/hal && python3 agent-service/live_canary.py`, for the operator at the go
-to let people in; it has not been run. It and its probe are frozen until HAL-2.8: LiteLLM no longer
-admits the service's call, which carries no app key and no `user`. It makes a paid call, so it runs only when the operator says so, as a
-person of the API group outside the subscription group: you sign in as for the live smoke, but the
-prompt is the only thing on standard error and no browser starts, you open its link yourself. It
-checks that the route's five containers run and that the running service's `[api]` names
-`litellm-front` as its gateway and that the service started after that file last changed (C0), runs `agent-canary` once with a random value as both the request
-and the answer it asks for (C1; any route but `api` fails), waits a few seconds, and runs the retention census
-over the five containers for that value (C2). Nothing is recreated; a failed canary ends the run, and a
-new run uses a new value. It prints only verdict lines of a closed grammar and a last line,
-`canary and census held` or `canary and census FAILED`, matching the exit code; no exception text, token or
-container output reaches the terminal. The probe `probe/agent-service/litellm_live_canary.py` runs it
+to let people in; it has not been run. It makes a paid call from hopin's app budget, so it runs only when the operator says so,
+after `hal apply` has made hopin's key. No one signs in: it checks that the front, the gateway, LiteLLM and its database each run once
+(C0), runs `agent-canary` once, which posts a random value to the front with hopin's key, the way an app does, and asks for it back (C1),
+waits 34 seconds, the longest interval of the writers a request feeds, and runs the retention census over those four containers for that value (C2), a `pg_dump` of the database among
+the sinks. The dump reads the whole store into the program's memory and never leaves it. Each run leaves one customer row for its throwaway
+fingerprint, which `hal expire` removes like any other. Nothing is recreated; a failed canary ends the run, and a new run uses a new value.
+It prints only verdict lines of a closed grammar and a last line, `canary and census held` or `canary and census FAILED`, matching the exit
+code; no exception text, key or container output reaches the terminal. The probe `probe/agent-service/litellm_live_canary.py` runs it
 against the fake-only stack.
 
 **The login command** is `python3 probe/agent-service/cells_12b.py --login-directory DIR`; its docstring gives the

@@ -1,12 +1,10 @@
 """The inference path as files, no containers (#768): the compose services of LiteLLM and its
-front, their configuration, `start.sh` against a stub `litellm`, and the canary's verdict lines.
+front, their configuration, `start.sh` against a stub `litellm`, and the fake provider's answers.
 
 The running path is proven by probe/agent-service/litellm.py and the CI job `front`; these tests
 hold the static facts those do not see.
 """
 
-import importlib
-import io
 import ipaddress
 import json
 import re
@@ -278,9 +276,11 @@ def test_litellm_retries_nothing_logs_no_messages_and_has_no_callback_cache_or_s
     assert config["litellm_settings"].keys() - {"max_end_user_budget_id"} == {
         "turn_off_message_logging",
         "redact_messages_in_exceptions",
+        "disable_add_user_agent_to_request_tags",
     }
     assert config["litellm_settings"]["turn_off_message_logging"] is True
     assert config["litellm_settings"]["redact_messages_in_exceptions"] is True
+    assert config["litellm_settings"]["disable_add_user_agent_to_request_tags"] is True
     assert set(config) == {"model_list", "router_settings", "litellm_settings", "general_settings"}
     assert config["general_settings"].keys() - {"enforce_user_param"} == {
         "disable_spend_logs",
@@ -297,17 +297,62 @@ def test_litellm_demands_a_user_and_loads_no_auth_hook(config):
     assert "custom_auth" not in config["general_settings"]
 
 
+def setting_keys(node: object) -> Iterator[str]:
+    """Every key of a YAML document, at any depth."""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            yield key
+            yield from setting_keys(value)
+    elif isinstance(node, list):
+        for item in node:
+            yield from setting_keys(item)
+
+
+def string_values(node: object) -> Iterator[str]:
+    """Every string a YAML document holds as a value, at any depth."""
+    if isinstance(node, dict):
+        for value in node.values():
+            yield from string_values(value)
+    elif isinstance(node, list):
+        for item in node:
+            yield from string_values(item)
+    elif isinstance(node, str):
+        yield node
+
+
+PREMIUM_SETTINGS = (
+    "LITELLM_LICENSE", "enforced_params", "allowed_ips", "allowed_routes", "tags",
+    "model_max_budget",
+)  # fmt: skip
+PREMIUM_ROUTE = "regenerate"
+
+
+def premium_names(document: object) -> set[str]:
+    """The premium settings a document sets as keys and the premium route it names in a value."""
+    named = set(PREMIUM_SETTINGS) & set(setting_keys(document))
+    return named | {PREMIUM_ROUTE for value in string_values(document) if PREMIUM_ROUTE in value}
+
+
+@pytest.mark.parametrize(
+    ("document", "named"),
+    [
+        ({"general_settings": {"allowed_routes": ["/chat"]}}, {"allowed_routes"}),
+        ({"litellm_settings": [{"model_max_budget": {}}]}, {"model_max_budget"}),
+        ({"LITELLM_LICENSE": "x"}, {"LITELLM_LICENSE"}),
+        ({"some_routes": ["/key/regenerate"]}, {PREMIUM_ROUTE}),
+        ({"general_settings": {"enforce_user_param": True}}, set()),
+    ],
+)
+def test_a_premium_setting_is_found_by_its_key_and_a_premium_route_by_its_value(document, named):
+    assert premium_names(document) == named
+
+
 def test_litellm_holds_no_license_and_none_of_the_settings_behind_the_premium_check(
     compose, config
 ):
-    premium_settings = (
-        "LITELLM_LICENSE", "enforced_params", "allowed_ips", "allowed_routes", "tags",
-        "model_max_budget", "regenerate",
-    )  # fmt: skip
     environment = compose["services"][LITELLM]["environment"]
-    configured = json.dumps(config) + json.dumps(environment)
 
-    assert not [name for name in premium_settings if name in configured]
+    assert premium_names(config) | premium_names(environment) == set()
     assert "LITELLM_LICENSE" not in START_SCRIPT
 
 
@@ -460,258 +505,25 @@ def test_the_fake_quotes_the_canary_a_request_holds_and_nothing_else_of_it(
     assert (status, json.loads(reply)["error"]["message"]) == (400, expected)
 
 
-@pytest.fixture(scope="module")
-def canary():
-    with pytest.MonkeyPatch.context() as patch:
-        patch.syspath_prepend(str(ROOT / "agent-service"))  # the canary imports smoke.py
-        yield from loaded_script("api_canary", ROOT / "agent-service" / "api_canary.py")
-
-
-class StreamedResponse:
-    def __init__(self, status: int, frames: list[tuple[str, dict]]) -> None:
-        self.status = status
-        body = "".join(
-            f"event: {event}\ndata: {json.dumps({'v': 4, **data})}\n\n" for event, data in frames
-        )
-        self.readline = io.BytesIO(body.encode()).readline
-
-
-class StreamedConnection:
-    def __init__(self, response: StreamedResponse) -> None:
-        self.response = response
-
-    def request(self, *_: object) -> None:
-        return None
-
-    def getresponse(self) -> StreamedResponse:
-        return self.response
-
-
-def run_canary(canary, monkeypatch, response, marker="m4rker"):
-    monkeypatch.setattr(
-        canary.http.client, "HTTPConnection", lambda *_, **__: StreamedConnection(response)
-    )
-    out = io.StringIO()
-    code = canary.main(["--marker", marker], stdin=io.StringIO("person\nworkload\n"), out=out)
-    return code, out.getvalue().splitlines()
-
-
-def test_the_canary_prints_only_verdict_lines_for_a_succeeded_run_that_holds_the_marker(
-    canary, monkeypatch
+def test_the_fakes_stream_answers_with_one_delta_per_steered_text_and_no_byte_of_the_request(
+    fake_provider,
 ):
-    response = StreamedResponse(
-        200,
-        [("run_started", {"route": "api"}), ("succeeded", {"text": "the m4rker", "files": []})],
+    steering = {"texts": ["first-7c1d", "second-2b9e"], "request_canary": "request-5a0f"}
+
+    frames = b"".join(fake_provider.stream_events(steering)).decode()
+
+    events = [block.splitlines() for block in frames.split("\n\n") if block]
+    names = [lines[0].removeprefix("event: ") for lines in events]
+    data = [json.loads(lines[1].removeprefix("data: ")) for lines in events]
+    assert names == [
+        "message_start", "content_block_start", "content_block_delta", "content_block_delta",
+        "content_block_stop", "message_delta", "message_stop",
+    ]  # fmt: skip
+    assert [item["type"] for item in data] == names
+    assert [item["delta"]["text"] for item in data if item["type"] == "content_block_delta"] == (
+        steering["texts"]
     )
-
-    code, lines = run_canary(canary, monkeypatch, response)
-
-    assert (code, lines) == (
-        0,
-        ["answer 200", "event run_started", "route api", "event succeeded", "marker yes"],
-    )
-
-
-class RequestRecordingConnection(StreamedConnection):
-    def __init__(self) -> None:
-        super().__init__(StreamedResponse(403, []))
-        self.bodies: list[bytes] = []
-
-    def request(self, _method: str, _path: str, body: bytes, _headers: dict) -> None:
-        self.bodies.append(body)
-
-
-def prompt_sent_by(canary, monkeypatch, options: list[str]) -> str:
-    connection = RequestRecordingConnection()
-    monkeypatch.setattr(canary.http.client, "HTTPConnection", lambda *_, **__: connection)
-    canary.main(
-        ["--marker", "m4rker", *options], stdin=io.StringIO("person\nworkload\n"), out=io.StringIO()
-    )
-    (body,) = connection.bodies
-    return json.loads(body)["turn"]["messages"][0]["text"]
-
-
-def test_the_canary_asks_for_the_request_marker_alone(canary, monkeypatch):
-    prompt = prompt_sent_by(canary, monkeypatch, ["--request-marker", "r3quest-9c1"])
-
-    assert prompt.endswith("r3quest-9c1")
-    assert canary.ANSWER_PROMPT not in prompt
-
-
-def test_an_exception_ends_the_canary_with_the_type_of_it_alone(canary, monkeypatch):
-    class Refusing:
-        def request(self, *_: object) -> None:
-            raise ConnectionRefusedError("secret-detail 10.0.0.7")
-
-    monkeypatch.setattr(canary.http.client, "HTTPConnection", lambda *_, **__: Refusing())
-    out = io.StringIO()
-
-    code = canary.main(["--marker", "m"], stdin=io.StringIO("person\nworkload\n"), out=out)
-
-    assert (code, out.getvalue()) == (1, "crashed ConnectionRefusedError\n")
-
-
-@pytest.mark.parametrize(
-    ("stdout", "expected"),
-    [
-        (
-            "answer 200\nroute api\nmarker yes\n",
-            {"answer": "200", "route": "api", "marker": "yes", "unknown": "0"},
-        ),
-        ("event a\nevent b\n", {"event": "b", "unknown": "0"}),
-        ("answer 4o3\nroute A route!\nmarker maybe\nhello\n", {"unknown": "4"}),
-        ("crashed Value_Error\ncrashed ValueError\n", {"crashed": "ValueError", "unknown": "1"}),
-        ("", {"unknown": "0"}),
-    ],
-)
-def test_a_line_outside_the_grammar_is_counted_and_never_kept(canary, stdout, expected):
-    assert canary.verdicts(stdout, 3) == {**expected, "exit": "3"}
-
-
-def test_the_canary_sends_the_plain_prompt_without_a_request_marker(canary, monkeypatch):
-    prompt = prompt_sent_by(canary, monkeypatch, [])
-
-    assert prompt == canary.ANSWER_PROMPT
-
-
-def test_the_canary_prints_the_route_as_other_when_run_started_names_none_in_a_closed_word(
-    canary, monkeypatch
-):
-    response = StreamedResponse(200, [("run_started", {"route": "A route!"})])
-
-    _, lines = run_canary(canary, monkeypatch, response)
-
-    assert "route other" in lines
-
-
-def test_the_canary_names_the_code_of_a_failed_run_and_exits_non_zero(canary, monkeypatch):
-    response = StreamedResponse(
-        200, [("failed", {"code": "provider_unavailable", "message": "free text"})]
-    )
-
-    code, lines = run_canary(canary, monkeypatch, response)
-
-    assert code != 0
-    assert lines == ["answer 200", "event failed", "code provider_unavailable", "marker no"]
-
-
-def test_the_canary_reports_a_refusal_by_its_status_alone(canary, monkeypatch):
-    code, lines = run_canary(canary, monkeypatch, StreamedResponse(403, []))
-
-    assert (code, lines) == (1, ["answer 403", "marker no"])
-
-
-class RecordConnection(StreamedConnection):
-    """The service for a cancelled run: the run's stream, then one record per status read."""
-
-    def __init__(self, response, records: list[tuple[int, dict]]) -> None:
-        super().__init__(response)
-        self.records = records
-        self.requests: list[tuple[str, str]] = []
-        self.current = response
-
-    def request(self, method, path, *_):
-        self.requests.append((method, path))
-        if method == "GET":
-            status, document = self.records.pop(0)
-            body = document if isinstance(document, bytes) else json.dumps(document).encode()
-            self.current = StreamedResponse(status, [])
-            self.current.read = lambda *_: body
-
-    def getresponse(self):
-        return self.current
-
-    def close(self):
-        return None
-
-
-def run_cancelled_canary(canary, monkeypatch, run_id, records):
-    started = StreamedResponse(200, [("run_started", {"route": "api", "run_id": run_id})])
-    connection = RecordConnection(started, records)
-    monkeypatch.setattr(canary.http.client, "HTTPConnection", lambda *_, **__: connection)
-    monkeypatch.setattr(canary.time, "sleep", lambda _: None)
-    out = io.StringIO()
-    code = canary.main(
-        ["--marker", "m", "--cancel"], stdin=io.StringIO("person\nworkload\n"), out=out
-    )
-    return code, out.getvalue().splitlines(), connection
-
-
-RUN = "0123abcd-0123-4abc-8def-0123456789ab"
-
-
-@pytest.mark.parametrize("polls_before_the_end", [0, 2], ids=["ended at once", "ended later"])
-def test_the_canary_with_cancel_reads_the_ended_record_and_prints_only_its_state(
-    canary, monkeypatch, polls_before_the_end
-):
-    records = [(200, {"state": "running", "ended_at": None})] * polls_before_the_end + [
-        (200, {"state": "cancelled", "ended_at": "t"})
-    ]
-
-    code, lines, connection = run_cancelled_canary(canary, monkeypatch, RUN, records)
-
-    assert (code, lines) == (
-        0,
-        ["answer 200", "event run_started", "route api", "status cancelled"],
-    )
-    assert {path for method, path in connection.requests if method == "GET"} == {f"/runs/{RUN}"}
-    assert RUN not in "".join(lines)
-
-
-def test_the_canary_with_cancel_exits_non_zero_when_the_run_did_not_end_cancelled(
-    canary, monkeypatch
-):
-    records = [(200, {"state": "succeeded", "ended_at": "t"})]
-
-    code, lines, _ = run_cancelled_canary(canary, monkeypatch, RUN, records)
-
-    assert (code, lines[-1]) == (1, "status succeeded")
-
-
-@pytest.mark.parametrize("state", ["running", "cancelled"])
-def test_the_canary_with_cancel_fails_when_no_record_ended_within_the_polls(
-    canary, monkeypatch, state
-):
-    records = [(200, {"state": state, "ended_at": None})] * canary.STATUS_POLLS
-
-    code, lines, _ = run_cancelled_canary(canary, monkeypatch, RUN, records)
-
-    assert (code, lines[-1]) == (1, f"status {canary.NOT_ENDED}")
-
-
-@pytest.fixture(scope="module")
-def smoke(canary):
-    return importlib.import_module("smoke")
-
-
-@pytest.mark.parametrize(
-    "record",
-    [
-        (404, {}),
-        (200, ["cancelled"]),
-        (200, b"{not json"),
-        (404, b"not json"),
-        "over the limit",
-    ],
-    ids=["refused", "no object", "no JSON", "refused without JSON", "over the limit"],
-)
-def test_the_canary_with_cancel_reports_a_refused_or_unusable_record_as_other(
-    canary, smoke, monkeypatch, record
-):
-    if record == "over the limit":
-        ended = json.dumps({"state": "cancelled", "ended_at": "t"})
-        record = (200, ended.ljust(smoke.MAX_RECORD_BYTES + 1).encode())
-
-    code, lines, _ = run_cancelled_canary(canary, monkeypatch, RUN, [record])
-
-    assert (code, lines[-1]) == (1, "status other")
-
-
-def test_the_canary_with_cancel_reads_no_record_for_a_run_id_it_cannot_trust(canary, monkeypatch):
-    code, lines, connection = run_cancelled_canary(canary, monkeypatch, "../x", [])
-
-    assert (code, lines[-1]) == (1, "status other")
-    assert [method for method, _ in connection.requests] == ["POST"]
+    assert steering["request_canary"] not in frames
 
 
 # --- the probe's reading of LiteLLM's processes and listeners, on synthetic scans ---------------
