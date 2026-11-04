@@ -15,11 +15,13 @@ x-mcp-origins: &mcp-origins [hello.mcp.internal, songmaker.mcp.internal]
 # The agent service's egress (agent-service/egress/): the gateway's one address on the egress
 # network, and what a member of the agent networks carries. The service finds the gateway through
 # extra_hosts, not through aliases on the gateway, which resolves its upstreams through the same
-# Docker DNS and would find itself. The names equal the HostSNI names of
-# agent-service/egress/dynamic/allowed.yml.
+# Docker DNS and would find itself. The names equal the HostSNI names of the routers on the
+# entrypoint `egress` of agent-service/egress/dynamic/allowed.yml.
 x-egress-address: &egress-address 172.31.252.10
 # The gateway's second address, on the network LiteLLM shares with it: the entrypoint `litellm`
-# of agent-service/egress/traefik.yml. LiteLLM finds the provider through extra_hosts too.
+# of agent-service/egress/traefik.yml. LiteLLM finds its providers through extra_hosts too, whose
+# names equal the HostSNI names of the routers on that entrypoint; api.openai.com is among them
+# and not in the agent attachments, so only LiteLLM reaches it.
 x-litellm-egress-address: &litellm-egress-address 172.31.239.10
 # LiteLLM's address on litellm-backend, where the front finds it through extra_hosts: the front
 # shares the app networks, where an app could claim the name `litellm` in Docker's DNS.
@@ -471,9 +473,9 @@ services:
       retries: 20
 
   # LiteLLM, the apps' route to the paid API (agent-service/litellm/). Its own keys and budgets in
-  # its database decide who may call; no hal code runs in it. It reads the provider key, the master
+  # its database decide who may call; no hal code runs in it. It reads the provider keys, the master
   # key and the database password as files and reaches only the front, its database and, through
-  # agent-egress, the provider. A change of its files reaches it only through a recreate. The
+  # agent-egress, the providers. A change of its files reaches it only through a recreate. The
   # unit `litellm` of fleet.yaml starts it.
   litellm:
     image: ghcr.io/berriai/litellm:v1.106.6@sha256:37e2dafb088a7723beb998590682957386dfc83ffea1848486f8e0e5cfac0b06
@@ -495,6 +497,7 @@ services:
       litellm-db: {}
     extra_hosts:
       api.anthropic.com: *litellm-egress-address
+      api.openai.com: *litellm-egress-address
     environment:
       HOME: /tmp
       LITELLM_LOCAL_MODEL_COST_MAP: "True"
@@ -506,12 +509,13 @@ services:
       LITELLM_LOG: CRITICAL
     tmpfs:
       - /tmp:uid=1000,gid=1000,mode=0700,size=64m,nosuid,nodev
-    secrets: [litellm_anthropic_key, litellm_master_key, litellm_db_password]
+    secrets: [litellm_anthropic_key, litellm_master_key, litellm_db_password, litellm_openai_key]
     entrypoint:
       - /etc/litellm/start.sh
       - /run/secrets/litellm_anthropic_key
       - /run/secrets/litellm_master_key
       - /run/secrets/litellm_db_password
+      - /run/secrets/litellm_openai_key
     volumes:
       - ./agent-service/litellm/config.yaml:/etc/litellm/config.yaml:ro
       - ./agent-service/litellm/start.sh:/etc/litellm/start.sh:ro
@@ -689,9 +693,11 @@ secrets:
     file: ${HOME}/.secrets/litellm/apps/presentator
   litellm_key_songmaker:
     file: ${HOME}/.secrets/litellm/apps/songmaker
-  # The provider key, read by litellm alone.
+  # The provider keys, read by litellm alone.
   litellm_anthropic_key:
     file: ${HOME}/.secrets/litellm/anthropic
+  litellm_openai_key:
+    file: ${HOME}/.secrets/litellm/openai
   # The password of LiteLLM's database user, read by litellm and litellm-db alone.
   litellm_db_password:
     file: ${HOME}/.secrets/litellm/db-password

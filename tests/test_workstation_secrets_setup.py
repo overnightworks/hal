@@ -733,7 +733,7 @@ def test_the_litellm_keys_without_a_prefix_keep_their_unprefixed_value_form(home
     assert not (home / ".secrets/litellm/db-password").read_text().startswith("sk-")
 
 
-@pytest.mark.parametrize("name", ["litellm/master-key", "litellm/db-password", *APP_KEYS])
+@pytest.mark.parametrize("name", ["litellm/master-key", "litellm/db-password", "litellm/anthropic", "litellm/openai", *APP_KEYS])
 def test_a_litellm_secret_is_read_by_exactly_the_services_of_compose_that_mount_it(name: str) -> None:
     entry = {entry.name: entry for entry in load_manifest(PACKAGED_MANIFEST)}[name]
     compose = yaml.safe_load((Path(__file__).resolve().parents[1] / "compose.yaml").read_text())

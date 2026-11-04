@@ -52,7 +52,8 @@ APP_BUDGET_DOLLARS = 10.0
 PERSON_BUDGET_DOLLARS = 2.0
 MAX_PARALLEL_REQUESTS = 5
 BUDGET_DURATION = "1mo"
-ROUTE = "/v1/chat/completions"  # the one path litellm-front serves
+# The paths litellm-front serves: the completion call and the picture call.
+ROUTES = ("/v1/chat/completions", "/v1/images/generations")
 ADMIN_GROUP = "/services/litellm/admin"
 ADMIN_BUDGET_ID = "litellm-admin"  # hal's own; LiteLLM never reads it by name
 FINGERPRINT = re.compile(r"fp-[0-9a-f]{64}")
@@ -225,7 +226,7 @@ def desired_key(app: str, models: tuple[str, ...]) -> Settings:
         "max_budget": APP_BUDGET_DOLLARS,
         "budget_duration": BUDGET_DURATION,
         "models": models,
-        "allowed_routes": (ROUTE,),
+        "allowed_routes": ROUTES,
         "max_parallel_requests": MAX_PARALLEL_REQUESTS,
         "rpm_limit": None,
         "tpm_limit": None,
