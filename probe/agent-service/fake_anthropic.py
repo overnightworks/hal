@@ -186,6 +186,18 @@ def message(expect: dict) -> bytes:
     }).encode()  # fmt: skip
 
 
+def picture_answer(connection: socket.socket, steering: dict) -> tuple[int, bytes]:
+    """`moderation` refuses as OpenAI's safety system does; `hold` holds as the provider's does,
+    then answers the picture."""
+    mode = steering.get("mode", "answer")
+    if mode == "moderation":
+        return 400, MODERATION
+    if mode == "hold":
+        seconds = steering.get("hold_seconds", HOLD_SECONDS)
+        print(f"held {wait_for_disconnect(connection, seconds)}", flush=True)  # noqa: T201 - this in-container program prints its own request log
+    return 200, picture(steering)
+
+
 def server_sent(kind: str, data: dict) -> bytes:
     return f"event: {kind}\ndata: {json.dumps({'type': kind, **data})}\n\n".encode()
 
@@ -246,7 +258,7 @@ def handler(role: str, expect: dict) -> type[http.server.BaseHTTPRequestHandler]
             if role == "pictures":
                 steering = {**expect, **control()}
                 print(json.dumps(picture_record(steering, self, body)), flush=True)  # noqa: T201 - this in-container program prints its own request log
-                status, reply = self.picture_answer(steering)
+                status, reply = picture_answer(self.connection, steering)
             if role == "provider":
                 steering = control()
                 record = provider_record({**expect, **steering}, self, body)
@@ -287,17 +299,6 @@ def handler(role: str, expect: dict) -> type[http.server.BaseHTTPRequestHandler]
                 seconds = steering.get("hold_seconds", HOLD_SECONDS)
                 print(f"held {wait_for_disconnect(self.connection, seconds)}", flush=True)  # noqa: T201 - this in-container program prints its own request log
             return 200, message({**expect, **steering})
-
-        def picture_answer(self, steering: dict) -> tuple[int, bytes]:
-            """`moderation` refuses as OpenAI's safety system does; `hold` holds as the provider's
-            does, then answers the picture."""
-            mode = steering.get("mode", "answer")
-            if mode == "moderation":
-                return 400, MODERATION
-            if mode == "hold":
-                seconds = steering.get("hold_seconds", HOLD_SECONDS)
-                print(f"held {wait_for_disconnect(self.connection, seconds)}", flush=True)  # noqa: T201 - this in-container program prints its own request log
-            return 200, picture(steering)
 
         do_GET = do_POST
 

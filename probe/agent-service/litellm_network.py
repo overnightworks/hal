@@ -347,7 +347,6 @@ class NetworkProbe(LitellmProbe):
         )
         first, second = self.address, self.second_entrypoint()
         provider = self.address_of(FAKE_PROVIDER, "internet")
-        pictures = self.address_of(FAKE_PICTURES, "internet")
         issuer = self.address_of(ISSUER_SERVICE, "agent-songmaker")
         caller = start_caller(
             self, PROJECT, LABEL, self.network_suffix("mcp"), f"{PROJECT}-caller-mcp"
@@ -384,16 +383,12 @@ class NetworkProbe(LitellmProbe):
             Reach("X7b", litellm, PROVIDER_ON_INTERNET, provider, GATEWAY_PORT, False),
             Reach("X7c", SERVICE, PROVIDER_ON_INTERNET, provider, GATEWAY_PORT, False),
             Reach("X7d", GATEWAY, PROVIDER_ON_INTERNET, provider, GATEWAY_PORT, True),
-            Reach("X7e", litellm, PICTURES_ON_INTERNET, pictures, GATEWAY_PORT, False),
-            Reach("X7f", SERVICE, PICTURES_ON_INTERNET, pictures, GATEWAY_PORT, False),
-            Reach("X7g", GATEWAY, PICTURES_ON_INTERNET, pictures, GATEWAY_PORT, True),
             Reach("X12a", litellm, "litellm-db", database, self.database_port, True),
             Reach("X12b", front, "litellm-db", database, self.database_port, False),
             Reach("X12c", SERVICE, "litellm-db", database, self.database_port, False),
         ):
             self.reach(step, intervals)
-        self.cells_x8_to_x11(second)
-        self.cell_x13()
+        self.cells_x8_to_x11(second, intervals)
         observed["cells_ended"] = {"at": time.time()}
         observed["x1d"] = {"started": intervals["X1d"][0], "ended": intervals["X1d"][1]}
 
@@ -403,13 +398,18 @@ class NetworkProbe(LitellmProbe):
         expect(name.startswith(prefix), f"{network} is named {name}, outside {prefix}*")
         return name.removeprefix(prefix)
 
-    def cells_x8_to_x11(self, entrypoint: str) -> None:
+    def sni_ended(self, source: str, address: str, where: str, name: str) -> str:
+        """An SNI of `name` from the namespace of `source` to the gateway at `address`, which must
+        end in an alert."""
+        result = self.client_in_namespace_of(
+            self.container(source), "tls", address, name, str(GATEWAY_PORT), "noverify"
+        )
+        alerted(result, name)
+        return f"SNI {name!r} on {where}: the handshake ended ({result['error']})"
+
+    def cells_x8_to_x11(self, entrypoint: str, intervals: dict[str, tuple[float, float]]) -> None:
         def ended(name: str) -> str:
-            result = self.client_in_namespace_of(
-                self.container(LITELLM), "tls", entrypoint, name, str(GATEWAY_PORT), "noverify"
-            )
-            alerted(result, name)
-            return f"SNI {name!r} on entrypoint 2: the handshake ended ({result['error']})"
+            return self.sni_ended(LITELLM, entrypoint, "entrypoint 2", name)
 
         def no_server_hello() -> str:
             record = self.first_record(ISSUER_HOST)
@@ -436,18 +436,24 @@ class NetworkProbe(LitellmProbe):
             expect(found == [entrypoint], f"X11: {host} resolves to {found}")
         self.hold("X11", f"LiteLLM resolves {PROVIDER_HOST} and {PICTURE_HOST} to {entrypoint}, "
                   "entrypoint 2")  # fmt: skip
+        self.cells_picture_host(intervals)
 
-    def cell_x13(self) -> None:
-        """The agent service cannot reach the picture host: no name, and the gateway's entrypoint
-        1 ends its SNI without a dial."""
+    def cells_picture_host(self, intervals: dict[str, tuple[float, float]]) -> None:
+        """X7e-g: only the gateway reaches the fake OpenAI. X13: the agent service cannot reach the
+        picture host: no name, and the gateway's entrypoint 1 ends its SNI without a dial."""
+        pictures = self.address_of(FAKE_PICTURES, "internet")
+        for step in (
+            Reach("X7e", LITELLM, PICTURES_ON_INTERNET, pictures, GATEWAY_PORT, False),
+            Reach("X7f", SERVICE, PICTURES_ON_INTERNET, pictures, GATEWAY_PORT, False),
+            Reach("X7g", GATEWAY, PICTURES_ON_INTERNET, pictures, GATEWAY_PORT, True),
+        ):
+            self.reach(step, intervals)
         found = self.client("resolve", PICTURE_HOST)["addresses"]
         expect(found == [], f"X13: the service resolves {PICTURE_HOST} to {found}")
 
         def ended() -> str:
-            result = self.client("tls", self.address, PICTURE_HOST, str(GATEWAY_PORT), "noverify")
-            alerted(result, PICTURE_HOST)
-            return (f"the service resolves {PICTURE_HOST} to nothing; its SNI on entrypoint 1 "
-                    f"ended ({result['error']})")  # fmt: skip
+            refused = self.sni_ended(SERVICE, self.address, "entrypoint 1", PICTURE_HOST)
+            return f"the service resolves {PICTURE_HOST} to nothing; its {refused}"
 
         self.refused_without_a_dial("X13", ended)
 
