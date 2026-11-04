@@ -581,25 +581,25 @@ def test_the_admin_budget_follows_the_person_budget_and_the_keys_then_unlinks_th
 def test_with_keycloak_running_the_read_gets_the_fingerprints_of_the_groups_members(
     repository: Path,
 ) -> None:
+    subjects = ("subject-p", "subject-q")
     admin = {
         "budget": None,
         "members": [{"budget_id": "elsewhere"}, None],
         "others": [{"fingerprint": FORMER, "spend": 1.0}],
     }
-    runner = OneOff(read_answer(found(), admin), observer=members_answer("p", "q"))
+    runner = OneOff(read_answer(found(), admin), observer=members_answer(*subjects))
     plan = plan_with(runner, repository)
 
     observer_call = next(command for command, _ in runner.calls if OBSERVER_SERVICE in command)
     assert observer_call[-3:] == [OBSERVER_SERVICE, "--members", litellm_keys.ADMIN_GROUP]
     asked = json.loads(runner.stdin_of(litellm_keys.KEYS_SERVICE) or "")
-    assert asked == {"budget": ADMIN, "members": sorted(map(fingerprint_of, ("p", "q")))}
+    assert asked == {"budget": ADMIN, "members": sorted(map(fingerprint_of, subjects))}
     words = [word for command, _ in runner.calls for word in command]
-    secrets = {*asked["members"], "p", "q"}
-    assert not secrets.intersection(words)
-    assert not any(fingerprint in word for fingerprint in asked["members"] for word in words)
+    secrets = (*asked["members"], *subjects)
+    assert not any(secret in word for secret in secrets for word in words)
     assert set(row_changes(plan)) == {
-        (fingerprint_of("p"), True, ADMIN),
-        (fingerprint_of("q"), False, ADMIN),
+        (fingerprint_of(subjects[0]), False, ADMIN),
+        (fingerprint_of(subjects[1]), True, ADMIN),
         (FORMER, False, None),
     }
 
