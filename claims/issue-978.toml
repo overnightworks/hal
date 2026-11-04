@@ -1,8 +1,0 @@
-claim_id = "b5fa6d5659a64c1a8573c22bedbe4c06"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "1da7a79ae93e4098eafd51244fd018fe487d9201"
-branch = "claude/issue-978-restart-owner"
-scope = ["src/hal/stack/apply.py", "src/hal/stack/plan_rows.py", "src/hal/stack/realm/reconcile.py", "src/hal/stack/unit_plans.py", "tests/test_stack_plan_rows.py", "tests/test_stack_realm_reconcile.py", "tests/test_stack_unit_restart.py"]
-opened_commit = "0b085690f7ffdde3fd1aa34e9cf6101c3d08cfd3"
-whole_reason = "One owner moved with its callers: the realm's restart_of and RealmRestart leave reconcile.py only together with their one caller in apply.py, their one reader in plan_rows.py and the tests that name the type, since a half-moved type does not import."
