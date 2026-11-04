@@ -1,9 +1,10 @@
-"""Cells D1-D3, B1-B3, A1-A10, C1-C4 and E1 of probe.py: the public client `agents` signs a
-person's own AI agent in with the authorization code and PKCE at one loopback address, and a
-token carries an app's `/mcp` audience only for the optional scope `mcp-<app>`. The cell first
-proves the realm's transition (sessions of the app clients live through the apply that adds the
-client, the scopes and the groups), then the client on the shipped configuration. Expected values
-are read from `keycloak/realm.yaml`; the held lines print decoded claims and never a token."""
+"""Cells D1-D3, B1-B3, A1-A10, C1-C4 and E1 of probe.py, and N1 that their refreshed ID tokens
+carry no nonce: the public client `agents` signs a person's own AI agent in with the
+authorization code and PKCE at one loopback address, and a token carries an app's `/mcp`
+audience only for the optional scope `mcp-<app>`. The cell first proves the realm's transition
+(sessions of the app clients live through the apply that adds the client, the scopes and the
+groups), then the client on the shipped configuration. Expected values are read from
+`keycloak/realm.yaml`; the held lines print decoded claims and never a token."""
 
 from __future__ import annotations
 
