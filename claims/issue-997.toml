@@ -1,0 +1,8 @@
+claim_id = "6015ce5b08cf41d7a8fc6d3a3fc63dc7"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "0f4bd72caa85c9d20e673c0d587e57b7d74d60dc"
+branch = "claude/issue-997-b2-apps-legal-from-release"
+scope = ["docs/architecture.md", "docs/design/hal-output.html", "docs/stack.md", "src/hal/stack/apply.py", "src/hal/stack/apps.py", "src/hal/stack/deploy_checkout.py", "src/hal/stack/legal_step.py", "src/hal/stack/plan_rows.py", "src/hal/stack/result_rows.py", "tests/support/stack_apps.py", "tests/test_stack_apply_legal.py", "tests/test_stack_deploy_checkout.py", "tests/test_stack_legal_apps.py", "tests/test_stack_legal_unit.py"]
+opened_commit = "578cefee6910d1259599cd1e17c5260e31a8cafd"
+whole_reason = "The reader, the per-app sha and the plan line land together: L3 lets a text go live only at an apply whose plan names its block, so a reader without its plan line, or a sha without its reader, would publish unnamed text or nothing."
