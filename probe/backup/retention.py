@@ -1,6 +1,7 @@
-"""Probe of the backup's retention bound and its per-home restore server (#969 cells P1-P8): the
-checkout's `hal backup`, `hal backup <app> --pre-apply` and `hal restore --test` under two scratch
-HOMEs, each with its own restic repository, against two Postgres apps the probe starts itself.
+"""Probe of the backup's retention bound and its per-home restore server (#969 cells P1-P8), and of
+the prune that leaves no unused data (#988 cell P9): the checkout's `hal backup`,
+`hal backup <app> --pre-apply` and `hal restore --test` under two scratch HOMEs, each with its own
+restic repository, against two Postgres apps the probe starts itself.
 
     flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \\
         python3 probe/backup/retention.py --scratch DIR
@@ -9,8 +10,9 @@ The apps `alpha` and `bravo` (bravo with an audio volume) run in `docker run` co
 network that carry the compose labels hal finds them by and the probe's own label, by which the
 teardown removes them. The probe plants back-dated snapshots with `restic backup --time` in the
 pinned restic image and reads what is left with `restic snapshots --json`; it never forgets one
-itself. Every age derives from `PRE_APPLY_MAX_AGE`. The restic password is a scratch value it
-generates and never prints. No live container, volume, network, repository or HOME is named. It
+itself, and P9 reads the packs from `restic cat index` and asks `restic prune --dry-run` what is
+left to repack. Every age derives from `PRE_APPLY_MAX_AGE`. The restic password is a scratch value
+it generates and never prints. No live container, volume, network, repository or HOME is named. It
 leaves --scratch empty, passed or failed (`edge_copy`). Exit 0: every cell held.
 """
 
@@ -71,6 +73,9 @@ DAY, HOUR, MINUTE = timedelta(days=1), timedelta(hours=1), timedelta(minutes=1)
 # `--keep-tag` keeps them all.
 P1_RECENT = KEEP_PRE_APPLY + 2
 LOCKED_FILE = "locked.mp3"
+# P9's kept file is larger than restic's default pack size of 16 MiB: a prune within its default
+# tolerance of unused data keeps such a full pack, and the forgotten blob in it, unrepacked.
+P9_KEPT_BYTES = 20 * 1024 * 1024
 
 
 def now() -> datetime:
@@ -132,6 +137,7 @@ class RetentionProbe:
     def __init__(self, scratch: Path) -> None:
         self.prefix = f"retention-probe-{secrets.token_hex(4)}"
         self.label = f"hal-retention-probe={self.prefix}"
+        self.scratch = scratch
         self.apps_file = scratch / "apps.toml"
         self.apps_file.write_text(self.apps_toml())
         self.source = scratch / "planted"
@@ -217,6 +223,7 @@ class RetentionProbe:
         *,
         pre_apply: bool = True,
         host: str = RESTIC_HOSTNAME,
+        source: Path | None = None,
     ) -> str:
         """A snapshot of the app as a run at `taken` would have left it; returns its full ID."""
         tags = f"{app},{PRE_APPLY_TAG}" if pre_apply else app
@@ -224,7 +231,7 @@ class RetentionProbe:
             home,
             ["backup", "--json", "--time", f"{taken.astimezone(UTC):%Y-%m-%d %H:%M:%S}",
              "--host", host, "--tag", tags, app_source(app)],
-            Mount(MountKind.BIND, str(self.source), app_source(app)),
+            Mount(MountKind.BIND, str(source or self.source), app_source(app)),
         )  # fmt: skip
         messages = [json.loads(line) for line in output.splitlines() if line.strip()]
         [summary] = [m for m in messages if m.get("message_type") == "summary"]
@@ -253,8 +260,8 @@ class RetentionProbe:
         lost = [name for name, snapshot_id in self.controls.items() if snapshot_id not in listed]
         expect(not lost, f"{cell}: controls forgotten: {lost}")
 
-    def held(self, cell: str, what: str) -> None:
-        write_line(f"#969 {cell} held: {what}")
+    def held(self, cell: str, what: str, *, item: str = "#969") -> None:
+        write_line(f"{item} {cell} held: {what}")
 
     # --- the stand ----------------------------------------------------------------------------
 
@@ -495,6 +502,59 @@ class RetentionProbe:
             "owner label stood through H2's `hal restore --test alpha`, and H1's next one swept it",
         )
 
+    def cell_p9(self) -> None:
+        """A forgotten snapshot's file that shares a pack with a kept file leaves the repository."""
+        home = self.first
+        both, kept_only = self.scratch / "p9-both", self.scratch / "p9-kept"
+        both.mkdir()
+        kept_only.mkdir()
+        # Named to come first, so its blob opens the pack the kept file's first chunks fill.
+        (both / "1-forgotten").write_text(secrets.token_hex(32))
+        large = secrets.token_bytes(P9_KEPT_BYTES)
+        (both / "2-kept").write_bytes(large)
+        (kept_only / "2-kept").write_bytes(large)
+        forgotten = self.plant(home, ALPHA, past_the_bound(), source=both)
+        kept = self.plant(home, ALPHA, now() - HOUR, source=kept_only)
+        contents = self.file_blobs(home, forgotten)
+        [forgotten_blob], kept_blobs = contents["1-forgotten"], set(contents["2-kept"])
+        before = self.pack_of_blobs(home)
+        shared = {b for b in kept_blobs if before[b] == before[forgotten_blob]}
+        expect(shared, "P9: the forgotten file shares no pack with the kept file")
+        self.hal_ran(home, "P9", "backup", ALPHA)
+        listed = {s.snapshot_id for s in self.snapshots(home)}
+        expect(forgotten not in listed and kept in listed, "P9: the wrong snapshot was forgotten")
+        after = self.pack_of_blobs(home)
+        expect(forgotten_blob not in after, "P9: the forgotten file's blob is still in a pack")
+        expect(kept_blobs <= after.keys(), "P9: a blob of the kept file is gone")
+        dry_run = self.restic(home, ["prune", "--dry-run", "--max-unused", "0"])
+        clean = [
+            line
+            for line in dry_run.splitlines()
+            if re.fullmatch(r"(to repack|this removes):\s+0 blobs / 0 B", line)
+        ]
+        expect(len(clean) == 2, f"P9: `restic prune --dry-run` finds work: {dry_run.strip()}")
+        self.held(
+            "P9",
+            f"the forgotten file's blob shared a pack with {len(shared)} of the kept file's; "
+            "after the weekly `hal backup alpha` forgot its snapshot it is in no pack, every kept "
+            f"blob stays, and `restic prune --dry-run --max-unused 0` says {' | '.join(clean)}",
+            item="#988",
+        )
+
+    def file_blobs(self, home: Home, snapshot_id: str) -> dict[str, list[str]]:
+        """The data blobs of each file in the snapshot's app folder, by file name."""
+        tree = json.loads(self.restic(home, ["cat", "tree", f"{snapshot_id}:{app_source(ALPHA)}"]))
+        return {node["name"]: node["content"] for node in tree["nodes"]}
+
+    def pack_of_blobs(self, home: Home) -> dict[str, str]:
+        """Every blob the repository's index holds, mapped to the pack that holds it."""
+        return {
+            blob["id"]: pack["id"]
+            for index_id in self.restic(home, ["list", "index"]).split()
+            for pack in json.loads(self.restic(home, ["cat", "index", index_id]))["packs"]
+            for blob in pack["blobs"]
+        }
+
     def containers(self, container_id: str) -> list[str]:
         return self.docker(
             "ps", "--all", "--quiet", "--no-trunc", "--filter", f"id={container_id}"
@@ -541,6 +601,7 @@ def prove(probe: RetentionProbe) -> int:
         probe.cell_p6,
         probe.cell_p7,
         probe.cell_p8,
+        probe.cell_p9,
     )
     try:
         for step in steps:
@@ -555,7 +616,7 @@ def prove(probe: RetentionProbe) -> int:
 
 
 def verdict(_probe: RetentionProbe) -> int:
-    return edge_copy.passed_line("PROBE PASSED: #969 P1-P8 (P4b)")
+    return edge_copy.passed_line("PROBE PASSED: #969 P1-P8 (P4b), #988 P9")
 
 
 def main(argv: list[str] | None = None) -> int:

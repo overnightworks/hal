@@ -61,10 +61,10 @@ def test_backup_forgets_by_host_and_app_tag_then_checks(edge_backup, machine):
 
     assert machine.labels()[-3:] == ["restic forget", "restic snapshots", "restic check"]
     forget = machine.argv_of("restic forget")
-    expected_scope = ["--host", "hal", "--tag", "songmaker", "--group-by", "host,tags"]
     assert forget[forget.index("forget") + 1 :] == [
-        *expected_scope,
-        *["--keep-weekly", "4", "--keep-monthly", "3", "--keep-tag", "pre-apply", "--prune"],
+        *["--host", "hal", "--tag", "songmaker", "--group-by", "host,tags"],
+        *["--keep-weekly", "4", "--keep-monthly", "3", "--keep-tag", "pre-apply"],
+        *["--prune", "--max-unused", "0"],
     ]
     assert "--retry-lock" in forget
     assert "--no-lock" not in forget
@@ -132,7 +132,7 @@ def test_pre_apply_backup_tags_the_snapshot_prints_its_id_and_thins_only_pre_app
     forget = machine.argv_of("restic forget")
     assert forget[forget.index("forget") + 1 :] == [
         *["--host", "hal", "--tag", "radio,pre-apply", "--group-by", "host,tags"],
-        *["--keep-last", "10", "--prune"],
+        *["--keep-last", "10", "--prune", "--max-unused", "0"],
     ]
 
 
