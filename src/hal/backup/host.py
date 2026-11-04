@@ -38,11 +38,13 @@ def run(
     stdout: Path | None = None,
     timeout: timedelta | None = None,
     discard_stderr: bool = False,
+    new_session: bool = False,
 ) -> bytes:
     """Run argv without a shell; stdout goes to a new 0600 file when given, else is returned.
 
     A timeout bounds a probe: past it the command is killed and counts as failed.
     A probe whose failure the caller words itself discards the command's own diagnostic.
+    A command in a new session is out of reach of the terminal's Ctrl-C.
     """
     seconds = None if timeout is None else timeout.total_seconds()
     with ExitStack() as files:
@@ -56,6 +58,7 @@ def run(
                 stderr=subprocess.DEVNULL if discard_stderr else None,
                 check=False,
                 timeout=seconds,
+                start_new_session=new_session,
             )
         except FileNotFoundError as error:
             raise HostCommandError(label, "is not installed") from error

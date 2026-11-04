@@ -157,13 +157,14 @@ class KeysProbe(KeyFiles):
         ]
         return self.run(command, stdin=statement).stdout.splitlines()
 
-    def digest(self) -> list[str]:
+    def digest(self, tables: tuple[str, ...] = TABLES) -> list[str]:
+        """Each table's complete rows as one md5; only the digests leave the database."""
         return [
             self.query(
                 f"SELECT coalesce(md5(string_agg(r::text, E'\\n' ORDER BY r::text)), '-')"  # noqa: S608 - the table names are this probe's literals
                 f' FROM "{table}" AS r;'
             )[0]
-            for table in TABLES
+            for table in tables
         ]
 
     def set_key(self, app: str, assignments: str) -> None:

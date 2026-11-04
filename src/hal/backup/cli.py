@@ -1,10 +1,11 @@
-"""The steps behind `hal backup` and `hal restore`: each returns when it succeeded and raises
-`StepFailed` when it did not. `hal.backup_commands` owns the lock, the
-signal and the exit."""
+"""The steps behind `hal backup` and `hal restore`: each returns its `StepExit`, and raises
+`StepFailed` when it could not do its job. `hal.backup_commands` owns the lock, the signal and
+the exit code each `StepExit` maps to."""
 
 import argparse
 import json
 from collections.abc import Callable
+from enum import Enum
 from pathlib import Path
 
 from hal.backup import host, restic, runner
@@ -29,14 +30,24 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_APPS = _PROJECT_ROOT / "backup" / "apps.toml"
 
 
-def init(settings: Settings, _: argparse.Namespace) -> None:
+class StepExit(Enum):
+    """How a step ended, one member per exit it can return."""
+
+    OK = "ok"
+    DECLINED = "declined"  # the person answered anything but yes
+    REFUSED = "refused"  # a guard of the step said no; nothing changed
+    FAILED = "failed"  # the step ran and could not do its job
+
+
+def init(settings: Settings, _: argparse.Namespace) -> StepExit:
     runner.require_password_file(settings)
     settings.repository.mkdir(mode=0o700, parents=True, exist_ok=True)
-    _command(restic.init, settings)
+    checked(restic.init, settings)
     write_line(f"{command(Verb.BACKUP)}: repository created")
+    return StepExit.OK
 
 
-def backup(settings: Settings, arguments: argparse.Namespace) -> None:
+def backup(settings: Settings, arguments: argparse.Namespace) -> StepExit:
     """With `--json` only the snapshot is printed; otherwise a row per app, one for the
     repository and the verdict."""
     _require_declared(arguments)
@@ -73,6 +84,7 @@ def backup(settings: Settings, arguments: argparse.Namespace) -> None:
             )
 
     _recorded(settings, arguments, step, announce)
+    return StepExit.OK
 
 
 class AppCount(Noun):
@@ -116,7 +128,7 @@ def _name_failed_apps(failure: StepFailed, run: Run, *, rows: bool) -> None:
     failure.next_step = command(Verb.BACKUP, failed[0])
 
 
-def restore_test(settings: Settings, arguments: argparse.Namespace) -> None:
+def restore_test(settings: Settings, arguments: argparse.Namespace) -> StepExit:
     """A row per app, one for the repository and the verdict. With `--snapshot` (one app) the
     error line carries the reason, which the realm step reads."""
     _require_declared(arguments)
@@ -155,29 +167,31 @@ def restore_test(settings: Settings, arguments: argparse.Namespace) -> None:
         )
 
     _recorded(settings, arguments, step, announce)
+    return StepExit.OK
 
 
-def snapshots(settings: Settings, _: argparse.Namespace) -> None:
+def snapshots(settings: Settings, _: argparse.Namespace) -> StepExit:
     runner.require_secret_and_repository(settings)
-    listing = _command(restic.snapshots, settings)
+    listing = checked(restic.snapshots, settings)
     write_line(listing, end="")
+    return StepExit.OK
 
 
-def unlock(settings: Settings, _: argparse.Namespace) -> None:
+def unlock(settings: Settings, _: argparse.Namespace) -> StepExit:
     runner.require_secret_and_repository(settings)
-    _command(restic.unlock, settings)
+    checked(restic.unlock, settings)
+    return StepExit.OK
 
 
-def restore(settings: Settings, arguments: argparse.Namespace) -> None:
-    apps = _apps(arguments.apps)
+def restore(settings: Settings, arguments: argparse.Namespace) -> StepExit:
+    apps = apps_of(arguments.apps)
     app = runner.declared_app(apps, arguments.app)
-    snapshot_id = _command(
-        runner.restore, settings, apps, app, arguments.target, arguments.snapshot
-    )
+    snapshot_id = checked(runner.restore, settings, apps, app, arguments.target, arguments.snapshot)
+    short = snapshot_id[: runner.MIN_SNAPSHOT_PREFIX]
     write_line(
-        f"{command(Verb.RESTORE)}: snapshot {snapshot_id[:8]} of {app.name} "
-        f"restored into {arguments.target}"
+        f"{command(Verb.RESTORE)}: snapshot {short} of {app.name} restored into {arguments.target}"
     )
+    return StepExit.OK
 
 
 def _recorded(
@@ -200,7 +214,7 @@ def _recorded(
     try:
         # Even a run that fails at once sweeps first, so a killed run's plaintext never waits.
         runner.sweep_leftover_staging(settings.work_dir)
-        step(settings, _apps(arguments.apps), run)
+        step(settings, apps_of(arguments.apps), run)
     except StepFailed as failure:
         run.failed(failure.category, failure.app, failure.phase)
         raise
@@ -217,10 +231,10 @@ def _recorded(
 def _require_declared(arguments: argparse.Namespace) -> None:
     """A mistyped app is refused before any status is written: nothing ran."""
     if arguments.app is not None:
-        runner.declared_app(_apps(arguments.apps), arguments.app)
+        runner.declared_app(apps_of(arguments.apps), arguments.app)
 
 
-def _apps(path: Path) -> tuple[App, ...]:
+def apps_of(path: Path) -> tuple[App, ...]:
     try:
         return parse_apps(path.read_text(encoding="utf-8"))
     except OSError as error:
@@ -231,7 +245,8 @@ def _apps(path: Path) -> tuple[App, ...]:
         raise StepFailed(ExitCategory.CONFIGURATION, str(error)) from error
 
 
-def _command[**P, T](operation: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
+def checked[**P, T](operation: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
+    """The operation, a host failure turned into a failed step."""
     try:
         return operation(*args, **kwargs)
     except host.HostError as error:

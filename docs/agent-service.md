@@ -348,8 +348,9 @@ and the admin budget with its customer rows (the key step below).
 - **The database.** `litellm-db` is Postgres 17 at the image and hardening of `keycloak-db` (one
   `x-postgres` anchor in `compose.yaml`), with its own volume and the file secret `litellm/db-password`,
   which `start.sh` turns into `DATABASE_URL`. It holds the keys (their hashes only), the budgets, and
-  each person's fingerprint with its counters; the weekly backup copies it whole
-  ([backup.md](backup.md)). LiteLLM stays the official image by its digest: BerriAI ships one
+  each person's fingerprint with its counters; the weekly backup copies it whole, and
+  `hal restore litellm --live` loads a snapshot back while LiteLLM is switched off, so a lost
+  volume gets its month's spend back ([backup.md](backup.md), „Restore LiteLLM“). LiteLLM stays the official image by its digest: BerriAI ships one
   image whose enterprise part a licence key switches on, and hal sets no key and uses no enterprise
   function, so it builds no image of its own. It runs with no `LITELLM_LICENSE` and none of the settings behind its premium check (`enforced_params`,
   `allowed_ips`, global `allowed_routes`, key `tags`, `model_max_budget`, `/key/regenerate`). It
@@ -431,6 +432,10 @@ in hal's environment, which holds the agent-runtime client. Cell LM1 of the Keyc
 members mode against a real Keycloak. `litellm_backup.py` proves `hal backup litellm`,
 its pre-apply snapshot and `hal restore --test litellm` under a scratch HOME, that the dump holds every
 table and no key in clear, and that a lost volume rebuilds through the key step with budgets at zero.
+Its load cells prove `hal restore litellm --live`: only while LiteLLM is switched off, a key and a
+person past their budgets still refused after a load into the rebuilt volume, a failed load that
+changes nothing, the question's no and the missing terminal, a killed run's load that runs to its
+own end, and an interrupt that waits for the load.
 
 **The live smoke** is one command, run in the live checkout after `hal apply` and with the image
 built: `cd ~/srv/hal && python3 agent-service/live_smoke.py`. It signs you in as yourself (the

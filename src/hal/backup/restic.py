@@ -226,6 +226,15 @@ def snapshot_ids(settings: Settings, app: str, *options: str) -> list[str]:
         raise host.UnreadableOutputError("restic snapshots output is unreadable") from error
 
 
+def snapshot_time(settings: Settings, app: str, snapshot_id: str) -> datetime:
+    """The instant the app's snapshot with this full ID was taken."""
+    listing = _restic(settings, _SNAPSHOTS_LABEL, ["snapshots", "--json", *_scope(app)])
+    taken = dict(_taken(listing))
+    if snapshot_id not in taken:
+        raise host.UnreadableOutputError(f"restic does not list the snapshot {snapshot_id[:8]}")
+    return taken[snapshot_id]
+
+
 def restore(settings: Settings, app: str, snapshot_id: str, target: Path) -> None:
     """The app's source path lands directly in target: DB_FOLDER and the kept folder below it."""
     _restic(
