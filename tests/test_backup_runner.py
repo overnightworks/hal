@@ -1013,16 +1013,11 @@ def test_a_backup_run_saves_the_keycloak_dump_without_any_audio_volume(edge_back
     assert outcome.exit_code == 0, outcome.err
     keycloak = next(s for s in machine.snapshots if s["app"] == "keycloak")
     assert keycloak["db"].keys() == {"db.dump", "manifest.json"}
-    assert json.loads(keycloak["db"]["manifest.json"]) == {
-        "schema": 1,
-        "app": "keycloak",
-        "audio_files": None,
-    }
+    manifest = json.loads(keycloak["db"]["manifest.json"])
+    assert manifest == {"schema": 1, "app": "keycloak", "audio_files": None}
     assert keycloak["audio"] == {}
-    assert not any(
-        label == "docker volume ls" and "label=com.docker.compose.project=keycloak" in argv
-        for label, argv in machine.calls
-    )
+    lookups = [argv for label, argv in machine.calls if label == "docker volume ls"]
+    assert all("label=com.docker.compose.project=keycloak" not in argv for argv in lookups)
     assert app_history(outcome.status, "keycloak")["last_snapshot_id"] == keycloak["id"]
     keycloak_backup = next(
         argv for label, argv in machine.calls if label == "restic backup" and "keycloak" in argv
