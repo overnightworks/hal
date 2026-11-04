@@ -17,7 +17,7 @@
 "tests/test_stack_cloudflare_read.py" = 906
 "tests/test_stack_external.py" = 2242
 "tests/test_stack_host_check.py" = 817
-"tests/test_stack_realm_reconcile.py" = 974
+"tests/test_stack_realm_reconcile.py" = 929
 "tests/test_workstation_secrets_view.py" = 919
 
 [function_lines."probe/keycloak/probe.py"]
@@ -38,6 +38,3 @@
 
 [clones."probe/apps/probe.py"]
 "Probe.wait_until" = [["probe/switches/probe.py", "Probe.wait_until"]]
-
-[clones."tests/test_stack_app_compose.py"]
-"Docker.run" = [["tests/test_stack_realm_reconcile.py", "Commands.__call__"]]
