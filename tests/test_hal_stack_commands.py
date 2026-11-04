@@ -373,16 +373,21 @@ def test_apply_from_a_checkout_that_is_not_a_clean_main_is_refused(hal, applying
 
 
 @pytest.mark.parametrize(
-    ("text", "key"),
-    [("[api]\nbudget_dollars = -1\n", "budget_dollars"), ("[alarm]\ninterval = 0\n", "interval")],
-    ids=["api", "alarm"],
+    ("text", "refusal"),
+    [
+        ("[api]\nbudget_dollars = -1\n", "budget_dollars must be "),
+        ("[alarm]\ninterval = 0\n", "interval must be "),
+        (f"[api]\nbudget_dollars = {'9' * 5000}\n", "an integer of more than "),
+        (f"[api]\nmax_parallel_requests = 0x{'f' * 5000}\n", "max_parallel_requests must be "),
+    ],
+    ids=["api", "alarm", "decimal past the digit limit", "hex past the digit limit"],
 )
 def test_apply_with_a_malformed_settings_file_ends_2_before_any_guard(
     hal,
     applying,
     home,  # noqa: F811
     text,
-    key,
+    refusal,
 ):
     """#889: any malformed table stops `hal apply` at its door, with the path and the reason."""
     config_file = write_hal_config(home, text)
@@ -390,7 +395,7 @@ def test_apply_with_a_malformed_settings_file_ends_2_before_any_guard(
     result = hal("apply", answers=("yes",))
 
     assert result.exit_code == ExitCode.USAGE
-    assert f"{config_file}: {key} must be " in result.err
+    assert f"{config_file}: {refusal}" in result.err
     assert applying.scripted.calls == []
     assert applying.scripted_git.calls == []
     assert applying.publish_never_began()

@@ -70,8 +70,23 @@ def _read(path: Path) -> dict[str, object]:
         raise ConfigInvalid(path, str(error)) from error
     except UnicodeDecodeError as error:
         raise ConfigInvalid(path, "not UTF-8") from error
+    except ValueError as error:  # tomllib converts a decimal integer past the digit limit
+        raise ConfigInvalid(path, _past_digit_limit()) from error
     except OSError as error:
         raise ConfigInvalid(path, error.strerror or type(error).__name__) from error
+
+
+def _past_digit_limit() -> str:
+    return f"an integer of more than {sys.get_int_max_str_digits()} digits"
+
+
+def _shown(value: object) -> str | None:
+    """The value as a refusal names it; None when it holds an integer past the digit limit, which
+    has no digits to show (a hex integer parses at any length)."""
+    try:
+        return repr(value)
+    except ValueError:
+        return None
 
 
 def _refuse_unknown(path: Path, names: set[str], known: frozenset[str]) -> None:
@@ -81,6 +96,8 @@ def _refuse_unknown(path: Path, names: set[str], known: frozenset[str]) -> None:
 
 
 def _admits(kind: Kind, value: object) -> bool:
+    if type(value) is int and _shown(value) is None:
+        return False
     if kind is Kind.SWITCH:
         return isinstance(value, bool)
     if kind is Kind.AT_LEAST_ONE:
@@ -101,7 +118,8 @@ def _table_values(
     _refuse_unknown(path, set(table), frozenset(key_kinds))
     for key, value in table.items():
         if not _admits(key_kinds[key], value):
-            raise ConfigInvalid(path, f"{key} must be {key_kinds[key].value}, got {value!r}")
+            shown = _shown(value) or _past_digit_limit()
+            raise ConfigInvalid(path, f"{key} must be {key_kinds[key].value}, got {shown}")
     return {
         key: float(value) if key_kinds[key] is Kind.DOLLARS else value
         for key, value in table.items()

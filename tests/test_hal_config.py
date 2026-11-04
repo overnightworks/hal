@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import sys
 from pathlib import Path
 
 import pytest
@@ -110,6 +111,9 @@ def test_every_number_of_the_api_records_is_a_known_key(
 DOLLARS = "a finite number of at least 0"
 COUNT = "a whole number of at least 0"
 HUGE_WHOLE_NUMBER = 10**400
+DIGIT_LIMIT = sys.get_int_max_str_digits()
+PAST_THE_DIGIT_LIMIT = DIGIT_LIMIT + 1
+TOO_LONG = f"an integer of more than {DIGIT_LIMIT} digits"
 
 
 @pytest.mark.parametrize(
@@ -130,6 +134,26 @@ HUGE_WHOLE_NUMBER = 10**400
             f"[api]\nbudget_dollars = {HUGE_WHOLE_NUMBER}\n",
             f"budget_dollars must be {DOLLARS}, got {HUGE_WHOLE_NUMBER}",
             id="a whole number beyond float range",
+        ),
+        pytest.param(
+            f"[api]\nbudget_dollars = {'9' * PAST_THE_DIGIT_LIMIT}\n",
+            TOO_LONG,
+            id="a decimal integer past the digit limit",
+        ),
+        pytest.param(
+            f"[api]\nbudget_dollars = 0x{'f' * PAST_THE_DIGIT_LIMIT}\n",
+            f"budget_dollars must be {DOLLARS}, got {TOO_LONG}",
+            id="a hex integer past the digit limit as dollars",
+        ),
+        pytest.param(
+            f"[api.hopin]\nmax_parallel_requests = 0x{'f' * PAST_THE_DIGIT_LIMIT}\n",
+            f"max_parallel_requests must be {COUNT}, got {TOO_LONG}",
+            id="a hex integer past the digit limit as a count",
+        ),
+        pytest.param(
+            f"[api.budget_dollars]\nhopin = 0x{'f' * PAST_THE_DIGIT_LIMIT}\n",
+            f"budget_dollars must be {DOLLARS}, got {TOO_LONG}",
+            id="a hex integer past the digit limit inside a table",
         ),
         ("[api]\nmax_parallel_requests = 2.5\n", f"max_parallel_requests must be {COUNT}, got 2.5"),
         (

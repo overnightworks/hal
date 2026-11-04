@@ -775,7 +775,8 @@ ungültiger Konfiguration mit `2`.
 Timer-Job mit Einstellungen und `[api]` für die Zahlen, die LiteLLM den Apps setzt; `hal`
 schreibt, verschiebt und löscht die Datei nie.
 Ohne die Datei gelten die Defaults. Eine unbekannte Tabelle, ein unbekannter
-Schlüssel, ein falscher Werttyp, Inhalt, der kein TOML ist, oder eine nicht
+Schlüssel, ein falscher Werttyp, eine ganze Zahl mit mehr Stellen, als Python ausgibt,
+Inhalt, der kein TOML ist, oder eine nicht
 lesbare Datei ist ein Konfigurationsfehler, in jeder Tabelle: `hal check`, `hal alarm`,
 `hal setup` und `hal apply` melden ihn auf stderr mit Pfad und Grund und beenden sich mit
 Exit-Code 2, statt mit falschen Einstellungen weiterzulaufen; `hal apply` liest die Datei vor
