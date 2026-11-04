@@ -54,7 +54,7 @@ from hal.stack.unit_plans import DatabaseUnit, Restart
 
 REALM_UNIT = "keycloak"
 KEYCLOAK_SERVICE = "keycloak"
-REALM = DatabaseUnit(REALM_UNIT, KEYCLOAK_SERVICE, "keycloak-db", "Keycloak")
+KEYCLOAK = DatabaseUnit(REALM_UNIT, KEYCLOAK_SERVICE, "keycloak-db", "Keycloak")
 CONFIG_CLI = "keycloak-config-cli"
 # config-cli imports these from its directory bind of keycloak/, which `core.file_binds` skips.
 REALM_FILES = ("keycloak/master.yaml", "keycloak/realm.yaml")

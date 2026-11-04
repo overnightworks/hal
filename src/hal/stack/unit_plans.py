@@ -206,7 +206,7 @@ class Recreate:
 class DatabaseUnit:
     """A unit whose service reads its own database; `name` is the service as a line says it."""
 
-    unit: str
+    key: str
     service: str
     database: str
     name: str
@@ -223,9 +223,9 @@ def restart_of(
     """What this run starts of `unit`, None when nothing: its service when the unit is switched
     on or the service recreated, else its database when only that is recreated. Any other service
     of the unit counts as neither."""
-    if any(plan.unit.key == unit.unit and plan.action is Action.ON for plan in plans):
+    if any(plan.unit.key == unit.key and plan.action is Action.ON for plan in plans):
         return Restart.SERVICE
-    services = {recreate.service for recreate in recreates if recreate.unit == unit.unit}
+    services = {recreate.service for recreate in recreates if recreate.unit == unit.key}
     if unit.service in services:
         return Restart.SERVICE
     if unit.database in services:

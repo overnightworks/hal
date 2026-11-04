@@ -211,7 +211,7 @@ def _plan(
         fleet.config,
         tracked,
         gates.get(reconcile.REALM_UNIT),
-        restart_of(plans, unit_services.recreates, reconcile.REALM),
+        restart_of(plans, unit_services.recreates, reconcile.KEYCLOAK),
     )
     keys = litellm_keys.plan_keys(engine, states, repository)
     app_plans = plan_apps(repository, fleet, app_runtime, marks)
