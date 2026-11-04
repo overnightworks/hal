@@ -12,6 +12,7 @@ import secrets
 import stat
 import subprocess
 from collections.abc import Iterator
+from fnmatch import fnmatchcase
 from pathlib import Path
 from types import ModuleType
 
@@ -155,6 +156,22 @@ def test_litellm_is_pinned_by_digest_hardened_and_reaches_the_provider_through_t
     assert not {"ports", "expose", "network_mode", "cap_add"} & service.keys()
     assert service["extra_hosts"] == {"api.anthropic.com": compose["x-litellm-egress-address"]}
     assert service["profiles"] == ["litellm"]
+
+
+def test_dependabot_proposes_no_litellm_image_with_or_without_its_registry_host(compose):
+    """LiteLLM migrates its database at start and hal apply takes no backup before an image move,
+    so no bump arrives unasked."""
+    updates = load(ROOT / ".github" / "dependabot.yml")["updates"]
+    (images,) = [update for update in updates if update["package-ecosystem"] == "docker-compose"]
+    ignored = [
+        entry["dependency-name"] for entry in images["ignore"] if "update-types" not in entry
+    ]
+    name = compose["services"][LITELLM]["image"].partition(":")[0]
+    without_host = name.partition("/")[2]
+
+    assert any(
+        fnmatchcase(name, pattern) and fnmatchcase(without_host, pattern) for pattern in ignored
+    )
 
 
 def test_litellm_keeps_telemetry_off_and_uses_the_local_cost_map(compose):

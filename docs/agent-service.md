@@ -251,16 +251,16 @@ An app that calls LiteLLM directly holds only its own key, the file `~/.secrets/
 `hopin`, `presentator`). `hal setup` creates a missing one with the prefix `sk-` that LiteLLM requires of a custom
 key, mode 0644 in a 0700 folder so the app's container reads it as its own user. `hal apply`'s key step reads it to
 make the app's key in LiteLLM (see "The API route"); hopin's file is also read by `agent-canary`, the live canary's one-off. On the same agent network the app posts to
-`http://litellm-front:4000/v1/chat/completions` with that key as bearer; nothing starts the front yet.
+`http://litellm-front:4000/v1/chat/completions` with that key as bearer; the unit `litellm` starts the front.
 
 ## The API route
 
 An app reaches the provider through LiteLLM with its own key. The path starts on the app's own
 agent network, `hal_agent_<app>`, and is `litellm-front`, `litellm`, `agent-egress`, the provider,
 over the internal, isolated networks `litellm-backend` and `litellm-egress`; `litellm` also reaches its own Postgres, `litellm-db`, over
-`litellm-db`, a network with those two members. Nothing runs it yet: the profile `litellm` is in no
-unit. While its container runs, `hal apply` makes each app's key, the person budget and the admin
-budget with its customer rows (the key step below).
+`litellm-db`, a network with those two members. The unit `litellm` of `fleet.yaml` runs the front,
+LiteLLM and its database. While the unit is on, `hal apply` makes each app's key, the person budget
+and the admin budget with its customer rows (the key step below).
 
 - **The boundary.** `litellm-front` is the same pinned Traefik as the gateway with one router,
   `POST /v1/chat/completions` (`agent-service/litellm/front/`); every other method and path ends in
@@ -312,9 +312,16 @@ budget with its customer rows (the key step below).
   old key is the operator's call). Keys that cannot be read while LiteLLM runs end as an unread
   realm does: alone, `error:` and `next: hal apply` without a question; beside other changes,
   skipped and `partial`. Output names apps, budget ids and models, never a key or its hash. The
-  step reads only while the `litellm` container runs; nothing in `hal apply` starts it yet. After
-  LiteLLM's first start it migrates its database and answers 502 meanwhile, so a second `hal
-  apply` makes the keys.
+  step reads while the unit is on and the run neither starts LiteLLM nor recreates it or its
+  database. Such a run's plan says `keys later` and the next apply checks them, so a first start
+  takes two applies. While the unit is off or switched off the step does nothing. A file of the
+  one-off that is missing refuses the run before the yes, with `next: hal setup`. After `hal setup`
+  writes a new master key, the running LiteLLM still holds the old one and the step's read ends
+  `keys not read`: `hal stop litellm`, then `hal start litellm`, and the next apply reads.
+- **A start of LiteLLM.** It migrates its database before it listens; meanwhile the front answers
+  502 and the key step reads nothing. A changed LiteLLM image is named `!` and not swapped, as
+  `docs/stack.md` "Images" says; Dependabot proposes no LiteLLM image, so a bump is a pull request
+  opened by hand. A change of `config.yaml` or `start.sh` alone does not recreate it.
 - **The admin group's rows.** After the apps the step makes `litellm-admin` and links to it exactly
   the customer rows of the direct members of `/services/litellm/admin`, read at each plan through
   the realm observer's members mode; each fingerprint is `person_fingerprint` of agent-runtime's
@@ -400,8 +407,12 @@ budget with its customer rows (the key step below).
   exception and the bound, `litellm_failures.py` the failure and key cases,
   `litellm_retention.py` the retention census of the route and `litellm_live_canary.py` the live canary, both with hopin's key made by
   the key step, `litellm_keys.py` the key step through
-  `hal apply`'s own plan and run, and `litellm_backup.py` the backup, its restore test and a lost
-  volume, on the same stack and with the same caller. Re-run them for every LiteLLM,
+  `hal apply`'s own plan and run, and that LiteLLM calls no provider from its start to the first app
+  call (S0), and `litellm_backup.py` the backup, its restore test and a lost volume, on the same
+  stack and with the same caller. `litellm_unit.py` drives the copy's real `hal apply` with the
+  shipped unit `litellm`: its first start and the second apply, the refusals of a missing file, the
+  switch-off and the stop that hold the key step, the recreates that make it wait, a start after a
+  failed one and the way on after a new master key. Re-run them for every LiteLLM,
   Traefik or Docker bump. The CI job `front` runs the front's table of requests
   (`tests/test_litellm_front.py`) for every Traefik bump; a LiteLLM bump still needs the probes.
 

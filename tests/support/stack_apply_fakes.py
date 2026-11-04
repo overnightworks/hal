@@ -309,6 +309,8 @@ class ScriptedCompose:
         one_shots = compose.one_shot_services(self.config)
         flags = {argument for argument in arguments if argument.startswith("-")}
         for service in (argument for argument in arguments if argument not in flags):
+            if self.containers.get(service) == "restarting" and "--no-recreate" in flags:
+                continue  # Docker leaves a container that restarts in a loop as it is
             if self.needs_a_new_container(service, flags):
                 self.create_container(service)
             if service in self.unstartable:

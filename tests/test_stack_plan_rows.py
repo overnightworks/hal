@@ -37,7 +37,7 @@ from hal.stack.core import (
     FollowerPlan,
     Gate,
 )
-from hal.stack.litellm_keys import Change, FieldChange, KeysPlan, Target
+from hal.stack.litellm_keys import Change, FieldChange, KeysPlan, KeysStep, NotRead, Target
 from hal.stack.plan_rows import (
     CHECKOUT,
     CheckoutEvent,
@@ -613,7 +613,32 @@ def key_change(new: bool, *fields: FieldChange, subject: str = "hopin") -> Chang
 @pytest.mark.parametrize(
     ("keys", "expected"),
     [
-        pytest.param(KeysPlan(), (), id="no row when the step plans nothing"),
+        pytest.param(None, (), id="no row when the step does not act"),
+        pytest.param(KeysPlan(), (), id="no row when the read finds nothing to do"),
+        pytest.param(
+            Restart.SERVICE,
+            (
+                Row(
+                    Glyph.UNCHANGED,
+                    "litellm",
+                    KeysEvent.LATER,
+                    "LiteLLM starts now · next apply checks them",
+                ),
+            ),
+            id="later, LiteLLM starts",
+        ),
+        pytest.param(
+            Restart.DATABASE,
+            (
+                Row(
+                    Glyph.UNCHANGED,
+                    "litellm",
+                    KeysEvent.LATER,
+                    "its database restarts now · next apply checks them",
+                ),
+            ),
+            id="later, its database restarts",
+        ),
         pytest.param(
             KeysPlan(
                 (
@@ -704,14 +729,14 @@ def key_change(new: bool, *fields: FieldChange, subject: str = "hopin") -> Chang
             id="a taken name",
         ),
         pytest.param(
-            KeysPlan(not_read="status 502\x1b"),
+            NotRead("status 502\x1b"),
             (Row(Glyph.NEEDS_YOU, "litellm", KeysEvent.NOT_READ, "status 502\\x1b"),),
             id="not read, its reason escaped",
         ),
     ],
 )
 def test_the_key_step_is_one_row_per_change_conflict_or_unread_step_under_litellm(
-    keys: KeysPlan, expected: tuple[Row, ...]
+    keys: KeysStep, expected: tuple[Row, ...]
 ) -> None:
     group = groups_of(keys=keys)[3]
 

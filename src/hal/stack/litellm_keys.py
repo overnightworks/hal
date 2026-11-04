@@ -20,13 +20,15 @@ row is made or linked, and a row on the admin budget that is no member's is unli
 are never touched. With Keycloak held the admin rows are held; with its members not read they
 stay as they are, and the run ends partial.
 
-The step reads while the `litellm` container runs and is absent otherwise; nothing in `hal apply`
-starts or stops LiteLLM yet.
+The step reads only while the unit `litellm` is on and this run neither starts LiteLLM nor
+recreates it or its database; while the unit is off or switched off it does nothing, and a run that
+starts LiteLLM or its database leaves the read to the next apply, since LiteLLM migrates before it
+listens.
 """
 
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
@@ -37,10 +39,12 @@ import yaml
 from hal.stack import compose, core
 from hal.stack.realm import reconcile
 from hal.stack.realm.reconcile import MembersNotRead
-from hal.stack.unit_plans import Restart
+from hal.stack.unit_plans import DatabaseUnit, Recreate, Restart, UnitPlan, restart_of
 
 KEYS_SERVICE = "litellm-keys"
+UNIT = "litellm"
 LITELLM_SERVICE = "litellm"
+LITELLM = DatabaseUnit(UNIT, LITELLM_SERVICE, "litellm-db", "LiteLLM")
 CONFIG_FILE = Path("agent-service") / "litellm" / "config.yaml"
 BUDGET_ID_SETTING = "max_end_user_budget_id"
 # The code defaults until `config.toml` carries the operator's numbers.
@@ -163,12 +167,29 @@ class Found:
 
 @dataclass(frozen=True)
 class KeysPlan:
-    """The step as planned; the empty plan is a step that does not act."""
+    """What the read found to do; the empty plan is a read that found everything as desired."""
 
     changes: tuple[StepChange, ...] = ()
     name_taken: tuple[str, ...] = ()
-    not_read: str | None = None  # why the keys could not be read while LiteLLM runs
     admin: AdminState = None
+
+
+@dataclass(frozen=True)
+class NotRead:
+    """The read ran and failed; `cause` is one line."""
+
+    cause: str
+
+
+# The step as planned, one state: what the read found, a read that failed, a start of LiteLLM or
+# its database in this run that leaves the read to the next apply, or None, a step that does not
+# act (no unit `litellm`, or its gate is not on).
+type KeysStep = KeysPlan | NotRead | Restart | None
+
+
+def reads(step: KeysStep) -> bool:
+    """Whether the step ran its one-off at plan time."""
+    return isinstance(step, KeysPlan | NotRead)
 
 
 @dataclass(frozen=True)
@@ -279,20 +300,26 @@ def plan_keys(
     engine: compose.Compose,
     states: Mapping[str, set[str]],
     repository: Path,
-    keycloak_gate: core.Gate | None,
-    keycloak_restart: Restart | None,
-) -> KeysPlan:
-    """Reads while the `litellm` container runs; a read that fails is a step not read. Keycloak's
-    gate and restart are those `hal apply` hands the realm step; a gate of None, Keycloak outside
-    the catalog, counts as on, as the realm step reads it."""
-    if not compose.has_running_container(states, (LITELLM_SERVICE,)):
-        return KeysPlan()
+    gates: Mapping[str, core.Gate],
+    plans: Sequence[UnitPlan],
+    recreates: Sequence[Recreate],
+) -> KeysStep:
+    """None unless the unit `litellm` is on; its restart when this run starts LiteLLM or
+    recreates it or its database; otherwise the read, and a read that fails is a step not read.
+    An on gate with no switch-on planned means every service of the unit runs. Keycloak's gate
+    and restart are read as the realm step reads them; a gate of None, Keycloak outside the
+    catalog, counts as on."""
+    if gates.get(UNIT) is not core.Gate.ON:
+        return None
+    if restart := restart_of(plans, recreates, LITELLM):
+        return restart
+    keycloak_restart = restart_of(plans, recreates, reconcile.KEYCLOAK)
     try:
         budget_id = read_budget_id(repository)
-        members = admin_members(engine, states, keycloak_gate, keycloak_restart)
+        members = admin_members(engine, states, gates.get(reconcile.REALM_UNIT), keycloak_restart)
         return planned(read(engine, budget_id, members), budget_id)
     except KeysError as error:
-        return KeysPlan(not_read=str(error))
+        return NotRead(str(error))
 
 
 def admin_members(
@@ -408,11 +435,13 @@ def _one_off(engine: compose.Compose, arguments: list[str], stdin: str) -> Any:
         raise KeysError("the key step answered no JSON") from error
 
 
-def run_keys(plan: KeysPlan, engine: compose.Compose) -> KeysResult:
-    """Alone decides whether the step acts: a step not read is skipped, and an empty plan has no
-    effect."""
-    if plan.not_read is not None:
-        return KeysSkipped(plan.not_read)
+def run_keys(plan: KeysStep, engine: compose.Compose) -> KeysResult:
+    """Alone decides whether the step acts: a step not read is skipped, and only a read's changes
+    are written."""
+    if isinstance(plan, NotRead):
+        return KeysSkipped(plan.cause)
+    if not isinstance(plan, KeysPlan):
+        return None
     if not plan.changes:
         unsettled = bool(plan.name_taken) or plan.admin is not None
         return KeysDone((), plan.name_taken, plan.admin) if unsettled else None
