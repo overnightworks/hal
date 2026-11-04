@@ -1,0 +1,7 @@
+claim_id = "96fc93d001464d2084d88cb1e71ed094"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "74f1774e163e69eec180ce942cd0e947a2f49524"
+branch = "claude/issue-981-hal-2-9a-privacy-agent-dienst"
+scope = ["docs/agent-service.md", "legal/sections/agent-service/datenschutz.html"]
+opened_commit = "4c04710d0d887ad0d20f0249f78fccdfe9d3374d"
