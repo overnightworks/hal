@@ -1,25 +1,29 @@
-"""`hal apply`'s key step (#964, #965): its rows in the one question, its run
-before the apps, every ending of the item's table "How the run ends", and the admin group's rows."""
+"""`hal apply`'s key step (#964, #965, #889): its rows in the one question, its run before the
+apps, every ending of the item's table "How the run ends", the admin group's rows, and the
+operator's numbers handed to it."""
 
 import json
 import re
 import subprocess
-from pathlib import Path
 
 import pytest
-import yaml
 from agent_runtime_client.turn import Principal, person_fingerprint
 from support.stack_apply import (
+    APP_KEYS,
     DISABLED,
     ENABLED,
+    LITELLM_ON,
+    MASTER_KEY,
     at_terminal,  # noqa: F401 the fixture, requested by name below
     home,  # noqa: F401 the fixture, requested by name below
     ingress,  # noqa: F401 the fixture, requested by name below
+    litellm_running,
     realm_backup,  # noqa: F401 the fixture, requested by name below
     realm_unit,  # noqa: F401 the fixture, requested by name below
     repository,  # noqa: F401 the fixture, requested by name below
     scripted,  # noqa: F401 the fixture, requested by name below
     scripted_git,  # noqa: F401 the fixture, requested by name below
+    secret_files,  # noqa: F401 the fixture, requested by name below
     setup_check,  # noqa: F401 the fixture, requested by name below
     setup_run,  # noqa: F401 the fixture, requested by name below
     state,  # noqa: F401 the fixture, requested by name below
@@ -27,93 +31,36 @@ from support.stack_apply import (
     switch_off,
     write_fleet,
 )
+from support.stack_apply import (
+    LITELLM_UNIT_SERVICES as UNIT_SERVICES,
+)
 from support.stack_apply_apps import (
     RELEASE,
     app_world,  # noqa: F401 the fixture, requested by name below
 )
 from support.stack_apply_fakes import ScriptedCompose
 from support.stack_core import bind, sha256
+from support.stack_litellm_found import APPS, BUDGET_ID
 from support.stack_plan_rows import find_row, plain
 
-from hal.stack import core, litellm_keys
+from hal.stack import api_limits, core, litellm_keys
+from hal.stack.api_limits import ApiSettings, AppNumbers
 from hal.stack.apply import ApplyExit
 from hal.stack.litellm_keys import ADMIN_BUDGET_ID, LITELLM
 from hal.stack.plan_rows import KeysEvent, PlanEvent, PlanGroup
 from hal.stack.realm.reconcile import KEYCLOAK_SERVICE
 from hal.stack.result_rows import ResultEvent
 
-APPS = ("hopin", "presentator", "songmaker")
-BUDGET_ID = "scenario-budget"
-
 
 def lines_of(text: str) -> list[str]:
     return plain(text).splitlines()
 
 
-def desired_row(app: str, models: tuple[str, ...]) -> dict:
-    desired = litellm_keys.desired_key(app, models)
-    return {
-        name: list(value) if isinstance(value, tuple) else value for name, value in desired.items()
-    }
-
-
-LITELLM_ON = "  litellm:\n    run: {enabled: true}\n"
-UNIT_SERVICES = (LITELLM.service, LITELLM.database, "litellm-front")
-MASTER_KEY, DB_PASSWORD, PROVIDER_KEY = "master_key", "db_password", "anthropic_key"
-APP_KEYS = tuple(f"app_{app}" for app in APPS)
-
-
-def secrets_of(*names: str) -> list[dict]:
-    return [{"source": name} for name in names]
-
-
-@pytest.fixture
-def secret_files(tmp_path, scripted: ScriptedCompose) -> dict[str, Path]:  # noqa: F811
-    """Each secret file the unit's services and the one-off name, present."""
-    files = {
-        name: tmp_path / "secrets" / name
-        for name in (MASTER_KEY, DB_PASSWORD, PROVIDER_KEY, *APP_KEYS)
-    }
-    for file in files.values():
-        file.parent.mkdir(exist_ok=True)
-        file.write_text("scenario-value\n")
-    scripted.config["secrets"] = {name: {"file": str(file)} for name, file in files.items()}
-    return files
-
-
 @pytest.fixture
 def keys(repository, scripted: ScriptedCompose, secret_files):  # noqa: F811
-    """The unit `litellm` on and its three services running beside a disabled step-ca, Keycloak
-    running with no unit of its own, LiteLLM's config naming the budget id; every key, the person
-    budget and the admin budget as desired, and the admin group empty, so the step alone has
-    nothing to change."""
+    """The unit `litellm` on beside a disabled step-ca; see `litellm_running`."""
     write_fleet(repository, DISABLED + LITELLM_ON)
-    config = repository / litellm_keys.CONFIG_FILE
-    config.parent.mkdir(parents=True, exist_ok=True)
-    config.write_text(
-        yaml.safe_dump({"litellm_settings": {litellm_keys.BUDGET_ID_SETTING: BUDGET_ID}})
-    )
-    services = scripted.config["services"]
-    litellm_db_volume = [{"type": "volume", "source": "litellm-db", "target": "/data"}]
-    services[LITELLM.service] = {
-        "profiles": ["litellm"],
-        "secrets": secrets_of(PROVIDER_KEY, MASTER_KEY, DB_PASSWORD),
-    }
-    services[LITELLM.database] = {
-        "profiles": ["litellm"],
-        "secrets": secrets_of(DB_PASSWORD),
-        "volumes": litellm_db_volume,
-    }
-    services["litellm-front"] = {"profiles": ["litellm"]}
-    services[litellm_keys.KEYS_SERVICE] = {
-        "profiles": ["apply"],
-        "secrets": secrets_of(MASTER_KEY, *APP_KEYS),
-    }
-    scripted.put_containers(dict.fromkeys((*UNIT_SERVICES, KEYCLOAK_SERVICE), "running"))
-    scripted.keys.rows = {app: desired_row(app, scripted.keys.models) for app in APPS}
-    scripted.keys.budget = dict(litellm_keys.desired_budget())
-    scripted.keys.admin_budget = dict(litellm_keys.desired_admin_budget())
-    return scripted.keys
+    return litellm_running(repository, scripted, secret_files)
 
 
 def with_other_change(repository) -> None:  # noqa: F811
@@ -170,7 +117,7 @@ def test_a_changed_number_shows_its_old_and_new_value(switch, keys):  # noqa: F8
     assert exit_code == 0
     row = find_row(plain(out).partition("Type yes")[0], "songmaker", KeysEvent.KEY_CHANGED)
     assert row
-    assert f"7 → {litellm_keys.APP_BUDGET_DOLLARS:g}" in row.group(0)
+    assert f"7 → {api_limits.APP_BUDGET_DOLLARS:g}" in row.group(0)
     assert "60 → none" in row.group(0)
     assert keys.writes == [
         [
@@ -178,10 +125,31 @@ def test_a_changed_number_shows_its_old_and_new_value(switch, keys):  # noqa: F8
                 "target": "key",
                 "subject": "songmaker",
                 "new": False,
-                "fields": {"max_budget": litellm_keys.APP_BUDGET_DOLLARS, "rpm_limit": None},
+                "fields": {"max_budget": api_limits.APP_BUDGET_DOLLARS, "rpm_limit": None},
             }
         ]
     ]
+
+
+def test_an_app_table_of_the_record_shows_its_change_and_writes_that_number_alone(switch, keys):  # noqa: F811
+    exit_code, out, _ = switch(api=ApiSettings(apps={"hopin": AppNumbers(budget_dollars=6.0)}))
+
+    assert exit_code == 0
+    row = find_row(plain(out).partition("Type yes")[0], "hopin", KeysEvent.KEY_CHANGED)
+    assert row
+    assert f"{api_limits.APP_BUDGET_DOLLARS:g} → 6" in row.group(0)
+    assert keys.writes == [
+        [{"target": "key", "subject": "hopin", "new": False, "fields": {"max_budget": 6.0}}]
+    ]
+
+
+def test_an_app_table_naming_no_app_read_cannot_plan_and_asks_nothing(switch, keys):  # noqa: F811
+    exit_code, out, err = switch(api=ApiSettings(apps={"hopn": AppNumbers(budget_dollars=1.0)}))
+
+    assert exit_code == ApplyExit.CANNOT_PLAN
+    assert "Type yes" not in plain(out)
+    assert "cannot plan, [api.hopn] names no app" in plain(err)
+    assert keys.writes == []
 
 
 def test_keys_not_read_with_nothing_else_to_change_ask_nothing_and_refuse(switch, keys):  # noqa: F811
@@ -534,7 +502,7 @@ def test_a_first_start_with_an_app_key_file_absent_is_not_refused(
     switch,  # noqa: F811
     keys,
     scripted,  # noqa: F811
-    secret_files,
+    secret_files,  # noqa: F811
 ):
     switched_on(scripted)
     secret_files[APP_KEYS[0]].unlink()
@@ -604,7 +572,7 @@ def test_a_missing_file_of_the_one_off_refuses_the_run_before_the_question(
     switch,  # noqa: F811
     keys,
     scripted,  # noqa: F811
-    secret_files,
+    secret_files,  # noqa: F811
     missing: str,
 ):
     """B2, decision 11: the read ran, so its files join the refusal before the yes."""

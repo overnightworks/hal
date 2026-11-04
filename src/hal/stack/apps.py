@@ -152,6 +152,17 @@ class StaysStoppedNote:
 
 
 @dataclass(frozen=True)
+class ShownRelease:
+    """The release whose own legal text the pages show for an app: the planned one, the one that
+    runs settled, or the one a stopped or disabled app last deployed."""
+
+    key: str
+    tag: str
+    sha: str
+    checkout: deploy_checkout.AppCheckout
+
+
+@dataclass(frozen=True)
 class SkippedNote:
     key: str
     skipped: releases.SkippedTag
@@ -197,6 +208,7 @@ class AppsPlan:
     offs: tuple[OffPlan, ...] = ()
     catalogued: tuple[catalog.App, ...] = ()  # every app of the catalog, for its barriers
     switched_off_still_running: tuple[str, ...] = ()  # the keys apply refuses to go on with
+    shown: tuple[ShownRelease, ...] = ()  # a stopped or disabled app never deployed has none
 
     @property
     def changes_nothing(self) -> bool:
@@ -220,27 +232,29 @@ def plan_apps(
     app that is on as it should be is left out; one that cannot be planned raises AppError. A
     disabled app is asked file-free for its containers and fetches nothing, and so is an app its
     marker or its barrier keeps off: it is named and left alone, unless its containers still run,
-    which apply refuses."""
+    which apply refuses. A disabled or stopped app shows the release it last deployed."""
     document = catalog.read(repository / catalog.FLEET_FILE)
     every = catalog.apps(document, fleet.profile_services, fleet.config["name"])
     offs = [off for app in every if not app.enabled if (off := _plan_off(app, runtime))]
-    enabled = [app for app in every if app.enabled]
-    if not enabled:
-        return AppsPlan(runtime, offs=tuple(offs), catalogued=every)
-    organisation = catalog.github_org(document)
+    shown = [one for app in every if not app.enabled if (one := _recorded(app, document, runtime))]
     plans, notes, still_running = [], [], []
-    for app in enabled:
+    for app in (app for app in every if app.enabled):
         ingress = _ingress_of(app, fleet, repository)
         if stopped := _stays_stopped_note(app.key, marks, ingress):
             notes.append(stopped)
+            if recorded := _recorded(app, document, runtime):
+                shown.append(recorded)
             if _runs(app, runtime):
                 still_running.append(app.key)
             continue
-        planned, skipped = _plan_one(app, organisation, runtime, ingress)
+        planned, settled, skipped = _plan_one(app, catalog.github_org(document), runtime, ingress)
         notes += [SkippedNote(app.key, one) for one in skipped]
+        shown.append(settled)
         if planned:
             plans.append(planned)
-    return AppsPlan(runtime, tuple(plans), tuple(notes), tuple(offs), every, tuple(still_running))
+    return AppsPlan(
+        runtime, tuple(plans), tuple(notes), tuple(offs), every, tuple(still_running), tuple(shown)
+    )
 
 
 def _ingress_of(app: catalog.App, fleet: Fleet, repository: Path) -> barrier.Barrier:
@@ -266,6 +280,22 @@ def _runs(app: catalog.App, runtime: AppRuntime) -> bool:
     return any(compose.is_live(container.state) for container in engine.containers())
 
 
+def _recorded(app: catalog.App, document: object, runtime: AppRuntime) -> ShownRelease | None:
+    """The release the app last deployed; None when it never was."""
+    if (recorded := runtime.record.read(app.key)) is None:
+        return None
+    app_checkout = _checkout_of(app, catalog.github_org(document), runtime)
+    return ShownRelease(app.key, recorded.tag, recorded.sha, app_checkout)
+
+
+def _checkout_of(
+    app: catalog.App, organisation: str, runtime: AppRuntime
+) -> deploy_checkout.AppCheckout:
+    url = f"https://github.com/{organisation}/{app.key}.git"
+    git = checkout.Git(runtime.srv / app.key, runtime.git)
+    return deploy_checkout.AppCheckout(git, url, app.default_branch)
+
+
 def _plan_off(app: catalog.App, runtime: AppRuntime) -> OffPlan | None:
     """None when no container of the project exists."""
     engine = app_compose.AppCompose(app.key, runtime.srv / app.key, runtime.docker)
@@ -276,11 +306,10 @@ def _plan_off(app: catalog.App, runtime: AppRuntime) -> OffPlan | None:
 
 def _plan_one(
     app: catalog.App, organisation: str, runtime: AppRuntime, ingress: barrier.Barrier
-) -> tuple[AppPlan | None, tuple[releases.SkippedTag, ...]]:
-    url = f"https://github.com/{organisation}/{app.key}.git"
-    app_checkout = deploy_checkout.AppCheckout(
-        checkout.Git(runtime.srv / app.key, runtime.git), url, app.default_branch
-    )
+) -> tuple[AppPlan | None, ShownRelease, tuple[releases.SkippedTag, ...]]:
+    """The plan of an enabled app, None when it is on as it should be, and the release its legal
+    text is read from."""
+    app_checkout = _checkout_of(app, organisation, runtime)
     try:
         app_checkout.prepare()
     except deploy_checkout.CheckoutRefused as error:
@@ -300,26 +329,27 @@ def _plan_one(
         sha = app_checkout.commit_of(release.tag)
         recorded = runtime.record.read(app.key)
         _refuse_moved_tag(app_checkout, tags.mirrored, app.key, recorded)
-        services = _contract_services(app, release.tag, app_checkout.compose_file(sha))
+        services = _contract_services(app, release.tag, _compose_text(app_checkout, sha))
         engine = app_compose.AppCompose(app.key, runtime.srv / app.key, runtime.docker)
         containers = engine.containers()
         head = app_checkout.head()
     except (checkout.GitError, deploy_checkout.CheckoutRefused) as error:
         raise AppError(f"services.{app.key}: {error}") from error
+    shown = ShownRelease(app.key, release.tag, sha, app_checkout)
     if recorded and recorded.sha == sha and head == sha and _settled(containers, services):
-        return None, choice.skipped
+        return None, shown, choice.skipped
     plan = AppPlan(
         app=app,
         release=release,
         sha=sha,
         services=services,
-        url=url,
+        url=app_checkout.url,
         ingress=ingress,
         kind=_kind_of(recorded, sha),
         recorded_tag=recorded.tag if recorded else None,
         unfinished=_unfinished_update(recorded, sha, release.tag, head),
     )
-    return plan, choice.skipped
+    return plan, shown, choice.skipped
 
 
 def _refuse_moved_tag(
@@ -362,6 +392,17 @@ def _settled(containers: Sequence[app_compose.AppContainer], services: Sequence[
 
 def _is_sha(text: str) -> bool:
     return len(text) == _SHA and all(digit in "0123456789abcdef" for digit in text)
+
+
+def _compose_text(app_checkout: deploy_checkout.AppCheckout, sha: str) -> str | None:
+    """`compose.yaml` at the root of the commit; None when it has none."""
+    content = app_checkout.file_at(sha, deploy_checkout.COMPOSE_FILE)
+    try:
+        return None if content is None else content.decode()
+    except UnicodeDecodeError:
+        raise deploy_checkout.CheckoutRefused(
+            f"{deploy_checkout.COMPOSE_FILE} is not UTF-8"
+        ) from None
 
 
 def _contract_services(app: catalog.App, tag: str, text: str | None) -> tuple[str, ...]:
@@ -443,7 +484,7 @@ def _build(
     engine.pull(tag)
     progress.step = f"check the volumes of the images at {tag}"
     app_contract.check_image_volumes(
-        app_checkout.compose_file(plan.sha) or "", key, tag,
+        _compose_text(app_checkout, plan.sha) or "", key, tag,
         engine.image_volumes(plan.services, tag),
     )  # fmt: skip
 

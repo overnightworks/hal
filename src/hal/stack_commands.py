@@ -1,10 +1,15 @@
 """`hal apply`, `hal update`, `hal stop`, `hal start`, `hal offline` and `hal online`: the stack's
 switches behind hal's door. Each calls a typed function of `hal.stack.cli`, so the guards, the
-prompts, the state files and the lines are the stack's own; only the exit number is hal's."""
+prompts, the state files and the lines are the stack's own; only the exit number is hal's.
+`hal apply` alone reads `~/.config/hal/config.toml` first and hands its `[api]` numbers down; a
+malformed file ends it with exit 2 before any guard. The other verbs never read the file."""
 
 import argparse
+from pathlib import Path
 
+from hal import config as hal_config
 from hal.grammar import Asks, Command, ExitCode
+from hal.output import write_error
 from hal.output.command import Verb, command
 from hal.stack import apply
 from hal.stack import cli as stack
@@ -68,7 +73,12 @@ def _configure_nothing(_parser: argparse.ArgumentParser) -> None:
 
 
 def _apply(arguments: argparse.Namespace) -> ExitCode:
-    return _exit_of(stack.apply_units(arguments.local))
+    try:
+        settings = hal_config.load(Path.home())
+    except hal_config.ConfigInvalid as error:
+        write_error(f"{error.path}: {error.reason}")
+        return ExitCode.USAGE
+    return _exit_of(stack.apply_units(arguments.local, settings.api))
 
 
 def _update(_arguments: argparse.Namespace) -> ExitCode:

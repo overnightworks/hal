@@ -131,7 +131,7 @@ Each layer has **one** owner. The order is the order of a setup: a layer needs o
 | **L5 data** | Docker volumes (songmaker DB and audio, Keycloak DB, LiteLLM DB; `step-ca` ([internal-ca.md](internal-ca.md) names its backup) and `traefik-mcp-acme`, which is not: its certificates are issued again), the restic repository and its off-disk copy (D3), the encrypted OpenTofu state | edge `backup/apps.toml` | `hal restore …` (section 6) | the restore test (monthly), the clean-machine drill (section 6), and the backup's freshness on the LOOK page | the restic password, the OpenTofu passphrase and the disk's recovery key live in the password manager: without them no backup, no state and no disk can be read |
 | **People** | users, passkeys, group memberships (`/apps/<name>`, `/services/agent-service/subscription`, `/services/agent-service/api`, `/services/speech-service`, `/services/litellm/admin`, which `hal apply`'s key step reads) | the Keycloak database (managed only in the admin console); the groups themselves are code in `keycloak/realm.yaml` | first-ever: create people in the admin console; re-setup: restore the Keycloak DB | Keycloak events (login anomalies) on the LOOK page | everything: people are never code (ruled) |
 
-**Tunable values live in configuration** (ruled 27.10.2026). A value the operator tunes, such as an interval or a threshold, belongs in configuration he edits, so a change needs no build: `~/.config/hal/config.toml`, one table per timer job, read by `src/hal/config.py`. A value that a privacy page states, for example a retention, is app-owned (ruled 27.10.2026): each app defines its own values and its own privacy section, hal only assembles them, and the values live in a versioned configuration file in the app's repository, so CI sees them, not in the operator's local configuration. An app-owned consistency check of those values against the text is planned and not built.
+**Tunable values live in configuration** (ruled 27.10.2026). A value the operator tunes, such as an interval or a threshold, belongs in configuration he edits, so a change needs no build: `~/.config/hal/config.toml`, one table per timer job and `[api]` for the numbers LiteLLM enforces on the apps, read by `src/hal/config.py`. A value that a privacy page states, for example a retention, is app-owned (ruled 27.10.2026): each app defines its own values and its own privacy section, hal only assembles them, and the values live in a versioned configuration file in the app's repository, so CI sees them, not in the operator's local configuration. An app-owned consistency check of those values against the text is planned and not built.
 
 **Who calls whom (no step twice):**
 - `hal setup` installs the tools and clones edge. It creates the agent user only after D14 is ordered; until then the user is D14's step, not setup's. It installs cloudflared disabled and never starts a service.
@@ -270,15 +270,22 @@ with no sections. A page's blocks stand as the general part (`allgemein`, edge's
 (`agent-service` under `#agent-dienst`, `keycloak` under `#anmeldung`), then the apps (their catalog key
 is the anchor), each group sorted by anchor. A section directory with no catalog entry builds no block. Edge's
 services and songmaker's text, which edge holds until songmaker ships its own, are built while their entry is in
-the catalog, enabled or not. Apps' own texts are not read yet (edge#110).
+the catalog, enabled or not. An app (an entry with `repo`) brings its own text: `legal/datenschutz.html` and,
+optionally, `legal/nutzungsbedingungen.html` of a release, read from `~/srv/<key>/.git` at the release's commit, never
+from the working tree. That release is the planned one of an enabled app, the one a settled app runs, or the one a
+stopped (`hal stop`) or disabled app last deployed, from its record; a stopped or disabled app never deployed has none (an enabled one gets its block at its planned tag), and a
+release without the privacy file has no block at all, its terms file included, yet; a terms file that is present is
+still validated. A symlink at either path refuses the run. An app's key that also has
+`legal/sections/<key>/` refuses the run, naming both, since one block has one owner; so does a stopped or disabled app
+whose checkout or recorded commit is gone, or whose `.git` is a symlink or no repository, naming the path.
 
 What `hal apply` does: it validates every section, builds the pages and compares them with `legal/built/`. The
-plan prints one row per kind, without a heading, above `core`: `+ legal  2 new pages`, `~ legal  1 edited page` and `~ legal  3 new records` (a page that matches while its record is missing, unreadable or stale), each with the page names. Under an edited page, from a record of what the last write was made of, each block stands as a dim line, new, changed or left (`legal/sections/songmaker/datenschutz.html#songmaker changed`), and a changed page frame (its skeleton or a table-of-contents template) as its own line; a missing or stale record makes every block new. It prints no legal row when nothing changes. The record is `legal-built.json` in the apply state beside `applied.json` (not beside `legal/built/`, which nginx serves), written after the pages; a page whose bytes already match is still planned (and the record written) while its entry is missing, unreadable or stale. After
-`yes`, before any unit switches, it writes each changed page (a temporary file, mode 0644, renamed over the page)
+plan prints one row per kind, without a heading, above `core`: `+ legal  2 new pages`, `~ legal  1 edited page` and `~ legal  3 new records` (a page that matches while its record is missing, unreadable or stale), each with the page names. Under an edited page, from a record of what the last write was made of, each block stands as a dim line, new, changed or left (`legal/sections/songmaker/datenschutz.html#songmaker changed`; an app's block with the tag it is read at, `~/srv/hopin/legal/datenschutz.html#hopin changed at v2026.11.04.1`, and a new tag with the same bytes changes no block; a new page lists the app blocks it first publishes, each with its tag), and a changed page frame (its skeleton or a table-of-contents template) as its own line; a missing or stale record makes every block new. It prints no legal row when nothing changes. The record is `legal-built.json` in the apply state beside `applied.json` (not beside `legal/built/`, which nginx serves), written after the pages; a page whose bytes already match is still planned (and the record written) while its entry is missing, unreadable or stale. After
+`yes`, before any unit switches, the core phase or an app, it writes each changed page (a temporary file, mode 0644, renamed over the page), so a new tag that then fails leaves the app's new text live while its old version runs,
 and prints `✓ legal  pages written` naming the pages whose bytes were written, `✓ legal  record written` for pages
 that gained only their record. Without an enabled `legal` unit there is no step and no line. A refusal comes before
-the question (exit 3) and changes nothing; a failed write is `✗ legal  not written` with the path and the reason, then
-partial with no unit switched (exit 3). A page goes live only that way, and a
+the question (exit 2, `CANNOT_PLAN`) and changes nothing; a failed write is `✗ legal  not written` with the path and the reason, then
+partial with no unit switched (exit 1, `REFUSED`). A page goes live only that way, and a
 wrong text is taken back by the next change of the text: there is no override.
 
 **Format.** German, UTF-8 without a byte order mark, at most 65,536 bytes, LF line ends, no control character
@@ -329,7 +336,7 @@ edge never rewrites a text to drop the link.
 | /nutzungsbedingungen | `recht` |
 | /impressum | `verantwortlich`, `kontakt` |
 
-**Stand** is the newest commit date of the page's section files (`git log -1 --format=%cs`); a commit that
+**Stand** is the newest commit date of the page's section files (`git log -1 --format=%cs`), an app's file dated at the release it is read at; a commit that
 changes only the frame does not move it. The imprint has none.
 
 **Refusal line**, never quoting the text: `error: cannot plan, legal: legal/sections/songmaker/datenschutz.html: line 14: <img> is not allowed (allowed: h2 h3 section p ul ol li strong em code br a)`.
@@ -341,7 +348,8 @@ accepts more is announced.
 as this checkout (or `TREE`) builds them and with its own held block for `KEY` left out. It prints the same refusal as above
 as `error: legal: <path relative to DIR>: line N: <rule>` and exits 1, prints the row `✓ KEY  legal valid  <pages>` and
 exits 0, and exits 3 when `DIR` does not exist; it writes nothing. A path under `legal/sections/` or `legal/frame/`
-in the line is edge's, not the app's. Apps' own texts are not read from their releases yet.
+in the line is edge's, not the app's. `hal apply` refuses what this refuses in an app's release, but a release without
+the privacy file is no refusal there yet.
 
 ### Hopin as the worked example: what it needs before its entry works
 
@@ -921,7 +929,7 @@ Health: `run.health` (section 3).
 - Moving a GPU service to another card or machine follows §10 rule 4.
 
 **§10 rule 9: a shared service admits a bounded number of jobs** (ruled 30.10.2026, [speech-runtime#69](https://github.com/overnightworks/speech-runtime/issues/69)). It binds every service edge runs for several apps (today agent-runtime and speech-runtime; songmaker once it is a GPU service, [songmaker#2084](https://github.com/overnightworks/songmaker/issues/2084)). Apps only handle 429, inside each service's client package.
-- Per resource, a service accepts at most as many concurrent jobs as its configuration says (speech: 1 synthesis and 1 transcription per instance; agent: N, whose subscription route is `[runs] max_parallel_cli_runs` and whose API route is each app key's `max_parallel_requests` in LiteLLM). Each resource has its own count, waiters and wait; resources run side by side (ruled 31.10.2026, [speech-runtime#83](https://github.com/overnightworks/speech-runtime/issues/83)).
+- Per resource, a service accepts at most as many concurrent jobs as its configuration says (speech: 1 synthesis and 1 transcription per instance; agent: N, whose subscription route is `[runs] max_parallel_cli_runs` and whose API route is each app key's `max_parallel_requests` in LiteLLM, which `hal apply` sets from `[api]` and `[api.<app>]` of `~/.config/hal/config.toml`). Each resource has its own count, waiters and wait; resources run side by side (ruled 31.10.2026, [speech-runtime#83](https://github.com/overnightworks/speech-runtime/issues/83)).
 - Per resource, a few jobs may wait briefly; their number and the wait are configured.
 - Anyone beyond that gets 429 at once, with `Retry-After`, before any work starts. A request that is too large gets 413.
 - The numbers come from configuration the platform sets. A service knows nothing about the PC's GPU or the operator's subscription. More instances add capacity (§10 rule 4, [hal#755](https://github.com/overnightworks/hal/issues/755)).

@@ -44,7 +44,7 @@ import edge_copy  # noqa: E402
 from edge_copy import HAL_DECLINED, HAL_FAILURE, HAL_OK, HAL_REFUSED, expect, publish  # noqa: E402
 
 from hal.output import write_line  # noqa: E402
-from hal.stack import catalog, core, litellm_keys  # noqa: E402
+from hal.stack import api_limits, catalog, core, litellm_keys  # noqa: E402
 from hal.stack.litellm_admin import hashed  # noqa: E402
 
 PROJECT = "edge-litellm-unit-probe"
@@ -416,9 +416,9 @@ class Probe:
             statement = f"SELECT {columns} FROM {table} WHERE token = '{token}';"  # noqa: S608 - a hash of the probe's own key
             row = self.sql(statement)
             defaults = (
-                litellm_keys.APP_BUDGET_DOLLARS,
+                api_limits.APP_BUDGET_DOLLARS,
                 litellm_keys.BUDGET_DURATION,
-                litellm_keys.MAX_PARALLEL_REQUESTS,
+                api_limits.MAX_PARALLEL_REQUESTS,
             )
             wanted = "|".join(
                 (
@@ -546,7 +546,7 @@ class Probe:
         self.wait_until_listening("U8")
         output, _ = self.apply("U8", HAL_OK)
         expect("budget 7 → 10" in output.partition(PLAN_END)[0], f"U8: {output[-300:]}")
-        expect(float(self.budget("hopin")) == litellm_keys.APP_BUDGET_DOLLARS, "U8: hopin's budget")
+        expect(float(self.budget("hopin")) == api_limits.APP_BUDGET_DOLLARS, "U8: hopin's budget")
         self.hold("U8", "the kept volume's row planned `budget 7 → 10` and made; D shows 10")
 
     def cell_u9(self) -> None:

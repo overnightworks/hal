@@ -1,6 +1,7 @@
 """The key step of `hal apply`: each app's LiteLLM key, the person budget and the admin budget
-with its customer rows, from the code defaults below, through the one-off `litellm-keys`
-(`hal.stack.litellm_admin`).
+with its customer rows, from the numbers of `[api]` and `[api.<app>]` in
+`~/.config/hal/config.toml` (the door reads the file, `api_limits` decides which number holds and
+keeps the code defaults), through the one-off `litellm-keys` (`hal.stack.litellm_admin`).
 
 At plan time the one-off reads what LiteLLM holds; the diff of desired and found is the step's
 plan rows, part of the one question. After the yes, past the realm step and before the apps, the
@@ -8,9 +9,10 @@ one-off makes the changes: the person budget first, then the apps in name order,
 budget and its rows, and the first failed write stops the rest. A key is found by the SHA-256 of
 its file, so a retry after a lost answer makes no second key, and an unchanged row changes
 nothing. Only changed fields are sent: a pure limit change sends no period, so LiteLLM keeps its
-reset. The apps are the key files compose mounts into the one-off. hal's own process never opens
-a key file or the master key; the step's stdin and stdout carry names, numbers, model names and
-the admin group's fingerprints, and no printed line carries a fingerprint or a member.
+reset. The apps are the key files compose mounts into the one-off, so an `[api.<app>]` naming none
+of them cannot be planned. hal's own process never opens a key file or the master key; the step's
+stdin and stdout carry names, numbers, model names and the admin group's fingerprints, and no
+printed line carries a fingerprint or a member.
 
 The admin budget has no limit and the person budget's period, so LiteLLM resets its rows' spend
 each month and no person budget binds them. Its rows are exactly those of the members of the
@@ -36,7 +38,7 @@ from typing import Any, cast
 
 import yaml
 
-from hal.stack import compose, core
+from hal.stack import api_limits, compose, core
 from hal.stack.realm import reconcile
 from hal.stack.realm.reconcile import MembersNotRead
 from hal.stack.unit_plans import DatabaseUnit, Recreate, Restart, UnitPlan, restart_of
@@ -47,10 +49,6 @@ LITELLM_SERVICE = "litellm"
 LITELLM = DatabaseUnit(UNIT, LITELLM_SERVICE, "litellm-db", "LiteLLM")
 CONFIG_FILE = Path("agent-service") / "litellm" / "config.yaml"
 BUDGET_ID_SETTING = "max_end_user_budget_id"
-# The code defaults until `config.toml` carries the operator's numbers.
-APP_BUDGET_DOLLARS = 10.0
-PERSON_BUDGET_DOLLARS = 2.0
-MAX_PARALLEL_REQUESTS = 5
 BUDGET_DURATION = "1mo"
 # The paths litellm-front serves: the completion call and the picture call.
 ROUTES = ("/v1/chat/completions", "/v1/images/generations")
@@ -64,6 +62,11 @@ type Settings = Mapping[str, Value]
 
 class KeysError(Exception):
     """The key step's one-off failed or answered nonsense; the message is one line."""
+
+
+class UnknownApps(Exception):
+    """An `[api.<app>]` names no app with a key; outside `KeysError`, since a typo in the
+    operator's file is no step that could not be read."""
 
 
 class Target(StrEnum):
@@ -220,21 +223,21 @@ class KeysSkipped:
 type KeysResult = KeysDone | KeysFailed | KeysSkipped | None  # None: nothing to do
 
 
-def desired_key(app: str, models: tuple[str, ...]) -> Settings:
+def desired_key(app: str, models: tuple[str, ...], limits: api_limits.AppLimits) -> Settings:
     return {
         "key_alias": app,
-        "max_budget": APP_BUDGET_DOLLARS,
+        "max_budget": limits.budget_dollars,
         "budget_duration": BUDGET_DURATION,
         "models": models,
         "allowed_routes": ROUTES,
-        "max_parallel_requests": MAX_PARALLEL_REQUESTS,
+        "max_parallel_requests": limits.max_parallel_requests,
         "rpm_limit": None,
         "tpm_limit": None,
     }
 
 
-def desired_budget() -> Settings:
-    return {"max_budget": PERSON_BUDGET_DOLLARS, "budget_duration": BUDGET_DURATION}
+def desired_budget(dollars: float) -> Settings:
+    return {"max_budget": dollars, "budget_duration": BUDGET_DURATION}
 
 
 def desired_admin_budget() -> Settings:
@@ -268,12 +271,18 @@ def diff(
     return Change(target, subject, False, fields) if fields else None
 
 
-def planned(found: Found, budget_id: str) -> KeysPlan:
+def planned(found: Found, budget_id: str, api: api_limits.ApiSettings) -> KeysPlan:
     """The person budget first, then each app in name order, then the admin budget and its rows;
-    an app whose name another key holds gets no change."""
-    budget = diff(Target.BUDGET, budget_id, desired_budget(), found.budget)
+    an app whose name another key holds gets no change. Raises `UnknownApps` when an app table
+    names no app the one-off read."""
+    if unknown := sorted(set(api.apps) - set(found.keys)):
+        tables = ", ".join(f"[api.{app}]" for app in unknown)
+        verb = "names" if len(unknown) == 1 else "name"
+        read_apps = ", ".join(sorted(found.keys))
+        raise UnknownApps(f"{tables} {verb} no app with a LiteLLM key ({read_apps})")
+    budget = diff(Target.BUDGET, budget_id, desired_budget(api.person_budget()), found.budget)
     keys = (
-        diff(Target.KEY, app, desired_key(app, found.models), found.keys[app])
+        diff(Target.KEY, app, desired_key(app, found.models, api.limits_of(app)), found.keys[app])
         for app in sorted(found.keys)
         if app not in found.name_taken
     )
@@ -301,6 +310,7 @@ def plan_keys(
     engine: compose.Compose,
     states: Mapping[str, set[str]],
     repository: Path,
+    api: api_limits.ApiSettings,
     gates: Mapping[str, core.Gate],
     plans: Sequence[UnitPlan],
     recreates: Sequence[Recreate],
@@ -318,7 +328,7 @@ def plan_keys(
     try:
         budget_id = read_budget_id(repository)
         members = admin_members(engine, states, gates.get(reconcile.REALM_UNIT), keycloak_restart)
-        return planned(read(engine, budget_id, members), budget_id)
+        return planned(read(engine, budget_id, members), budget_id, api)
     except KeysError as error:
         return NotRead(str(error))
 

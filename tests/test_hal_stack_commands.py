@@ -8,6 +8,8 @@ stand-ins is first on PATH for every test, and every test ends by asserting that
 The exits are hal's: 0, or 3 for every outcome of the stack that is not "applied or nothing to do"
 (exception E in docs/stack.md)."""
 
+import re
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -46,6 +48,7 @@ from support.stack_external import (
     live_checkout,  # noqa: F401 the fixture, requested by name below
 )
 from support.stack_global_stop import hosts_asked  # noqa: F401 the fixture, used by `fakes`
+from support.workstation_support import write_hal_config
 
 from hal import cli, stack_commands
 from hal.grammar import ExitCode
@@ -180,11 +183,36 @@ def test_the_emergency_verbs_end_every_outcome_with_the_exit_they_always_had(
     ],
     ids=lambda value: value.name,
 )
-def test_every_outcome_of_apply_has_one_exit_of_hal(monkeypatch, stack_exit, hal_exit):
+def test_every_outcome_of_apply_has_one_exit_of_hal(monkeypatch, home, stack_exit, hal_exit):  # noqa: F811
     """#784 D1, D2: declined 1, a guard 4, cannot plan, failed and partial 3."""
-    monkeypatch.setattr(stack, "apply_units", lambda _local: stack_exit)
+    monkeypatch.setattr(stack, "apply_units", lambda _local, _api: stack_exit)
 
     assert cli.main(["apply"]) == hal_exit
+
+
+@pytest.mark.parametrize(
+    ("arguments", "stack_function", "stack_end"),
+    [
+        (["stop", UNIT], "stop_unit", apply.ApplyExit.APPLIED_OR_NOTHING),
+        (["start", UNIT], "start_unit", apply.ApplyExit.APPLIED_OR_NOTHING),
+        (["offline"], "stop_all", apply.ApplyExit.APPLIED_OR_NOTHING),
+        (["online"], "start_all", apply.ApplyExit.APPLIED_OR_NOTHING),
+        (["update"], "update_checkout", UpdateEnd.DONE),
+    ],
+    ids=lambda value: " ".join(value) if isinstance(value, list) else None,
+)
+def test_the_verbs_beside_apply_never_read_the_settings_file(
+    monkeypatch,
+    home,  # noqa: F811
+    arguments,
+    stack_function,
+    stack_end,
+):
+    """#889: a malformed `config.toml` stops `hal apply` alone; the switches still act."""
+    write_hal_config(home, "[api]\nbudget_dollars = -1\n")
+    monkeypatch.setattr(stack, stack_function, lambda *_arguments: stack_end)
+
+    assert cli.main(arguments) == ExitCode.OK
 
 
 @pytest.mark.parametrize(
@@ -343,6 +371,42 @@ def test_apply_from_a_checkout_that_is_not_a_clean_main_is_refused(hal, applying
     assert "runs only on main" in result.err
     assert "nothing published" in result.err
     assert applying.scripted.changing_verbs() == []
+    assert applying.publish_never_began()
+
+
+PAST_THE_DIGIT_LIMIT = sys.get_int_max_str_digits() + 1
+
+
+@pytest.mark.parametrize(
+    ("text", "refusal"),
+    [
+        ("[api]\nbudget_dollars = -1\n", "budget_dollars must be "),
+        ("[alarm]\ninterval = 0\n", "interval must be "),
+        (f"[api]\nbudget_dollars = {'9' * PAST_THE_DIGIT_LIMIT}\n", "an integer of more than "),
+        (
+            f"[api]\nmax_parallel_requests = 0x{'f' * PAST_THE_DIGIT_LIMIT}\n",
+            "max_parallel_requests must be ",
+        ),
+    ],
+    ids=["api", "alarm", "decimal past the digit limit", "hex past the digit limit"],
+)
+def test_apply_with_a_malformed_settings_file_ends_2_before_any_guard(
+    hal,
+    applying,
+    home,  # noqa: F811
+    text,
+    refusal,
+):
+    """#889: any malformed table stops `hal apply` at its door, with the path and the reason."""
+    config_file = write_hal_config(home, text)
+
+    result = hal("apply", answers=("yes",))
+
+    assert result.exit_code == ExitCode.USAGE
+    assert f"{config_file}: {refusal}" in result.err
+    assert not any(run in result.err for run in re.findall(r"[0-9a-f]{50,}", text))
+    assert applying.scripted.calls == []
+    assert applying.scripted_git.calls == []
     assert applying.publish_never_began()
 
 

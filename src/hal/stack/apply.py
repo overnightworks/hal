@@ -31,15 +31,18 @@ shown, a service this run creates, or the key step's one-off when the step reads
 secret file which does not exist refuses the run with that path and `next: hal setup`, where
 Compose would refuse it at `up`.
 While the unit `litellm` is on, the key step (`litellm_keys.py`) plans each app's LiteLLM key
-and the person budget in the same plan and makes them after the realm step and before the apps;
+and the person budget, with the numbers of `[api]` in `~/.config/hal/config.toml` that `hal`'s door
+read, in the same plan and makes them after the realm step and before the apps;
 a run that starts LiteLLM or recreates it or its database leaves the read to the next apply.
 An app (an entry with `repo`) is planned last, in the same plan and under the same `yes`: its
 newest release tag is checked out, built, started and recorded once its containers are settled
 (`apps.py`).
-While `services.legal` is enabled the three legal pages are built from `legal/frame` and
-`legal/sections` through the validator (`legal_step.py`); a refused section is exit 2, and the
-plan names each page that is new or changes. After `yes` the pages are written to `legal/built/`
-before any unit switches, which the legal unit serves. The appkit step (`appkit_step.py`) comes
+While `services.legal` is enabled the three legal pages are built from `legal/frame`,
+`legal/sections` and each app's own `legal/` files at its release through the validator
+(`legal_step.py`); a refused section is exit 2, and the plan names each page that is new or
+changes. After `yes` the pages are written to `legal/built/`, which the legal unit serves, before
+any unit switches and before the core phase and the apps: a new app release that fails leaves its
+new text live while the old version runs. The appkit step (`appkit_step.py`) comes
 first and runs with or without the legal unit: it writes the installed appkit's tokens and fonts
 to `appkit-<version>/` in `legal/assets/` and in both Keycloak themes; a missing appkit is exit 2.
 
@@ -80,6 +83,7 @@ from hal.output import (
 )
 from hal.output.command import Verb, command
 from hal.stack import (
+    api_limits,
     barrier,
     catalog,
     checkout,
@@ -167,6 +171,7 @@ CANNOT_PLAN_ERRORS = (
     checkout.GitError,
     LegalError,
     AppkitError,
+    litellm_keys.UnknownApps,
 )
 
 
@@ -183,6 +188,7 @@ def _plan(
     record: core.Record,
     live: checkout.Git,
     app_runtime: AppRuntime,
+    api: api_limits.ApiSettings,
     rename: Rename = os.rename,
 ) -> Plan:
     repository = live.tree
@@ -212,10 +218,12 @@ def _plan(
     realm = reconcile.plan_realm(
         reconcile.Observer(engine), record, fleet.config, tracked, keycloak_gate, keycloak_restart
     )
-    keys = litellm_keys.plan_keys(engine, states, repository, gates, plans, unit_services.recreates)
+    keys = litellm_keys.plan_keys(
+        engine, states, repository, api, gates, plans, unit_services.recreates
+    )
     app_plans = plan_apps(repository, fleet, app_runtime, marks)
     appkit = plan_appkit(repository, rename=rename)
-    legal = plan_legal(repository, record.directory / RECORD_FILE, fleet)
+    legal = plan_legal(repository, record.directory / RECORD_FILE, fleet, app_plans)
     return Plan(
         fleet,
         tracked,
@@ -260,6 +268,7 @@ def apply_local(
     repository: Path = compose.REPOSITORY,
     home: Path | None = None,
     collaborators: Collaborators = PRODUCTION,
+    api: api_limits.ApiSettings = api_limits.NONE_SET,
 ) -> int:
     started = collaborators.verifier.clock()
     if not at_terminal():
@@ -290,6 +299,7 @@ def apply_local(
             live,
             home or Path.home(),
             collaborators,
+            api,
             lambda: collaborators.verifier.clock() - started,
         )
     finally:
@@ -370,6 +380,7 @@ def _plan_and_apply(
     live: checkout.Git,
     home: Path,
     collaborators: Collaborators,
+    api: api_limits.ApiSettings,
     elapsed: Callable[[], float],
 ) -> int:
     repository = live.tree
@@ -383,7 +394,7 @@ def _plan_and_apply(
     try:
         completed: list[str] = []
         while True:  # the plan made after the setups ran is held to the same refusals
-            planned = _plan(engine, marks, record, live, app_runtime, collaborators.rename)
+            planned = _plan(engine, marks, record, live, app_runtime, api, collaborators.rename)
             missing = _missing_setups(planned, repository, collaborators.check)
             exit_code = _refusal(missing, planned, bool(completed))
             if exit_code is None:

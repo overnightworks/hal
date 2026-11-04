@@ -99,6 +99,11 @@ rule = "test-layout"
 reason = "it tests agent-service/api_canary.py and its compose one-off agent-canary, outside src/hal, which no module of src/hal mirrors"
 
 [[layout.allow]]
+path = "tests/test_agent_service_limits_probe.py"
+rule = "test-layout"
+reason = "it tests the person-budget deadline of agent-service/litellm_limits.py, outside src/hal, which no module of src/hal mirrors"
+
+[[layout.allow]]
 path = "tests/test_agent_service_live_canary.py"
 rule = "test-layout"
 reason = "it tests agent-service/live_canary.py, outside src/hal, which no module of src/hal mirrors"

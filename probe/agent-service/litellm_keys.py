@@ -56,7 +56,7 @@ from scratch_secrets import write_new
 
 from hal.output import Row, write_line, write_row
 from hal.output.command import Verb, command
-from hal.stack import core, litellm_keys
+from hal.stack import api_limits, core, litellm_keys
 from hal.stack.litellm_keys import (
     ADMIN_BUDGET_ID,
     ADMIN_GROUP,
@@ -107,6 +107,11 @@ class KeysProbe(KeyFiles):
     # S0 starts LiteLLM on the shipped config.yaml; S5's recreate brings the short budget period
     # that A7 waits on.
     rescheduled = False
+
+    # The cells' methods in the order they run, each on what the ones before left.
+    CELLS = ("cell_s1", "cell_s2", "cell_s3", "cell_s4", "cell_s5", "cell_s6", "cell_s7", "cell_s9",
+             "cell_a2", "cell_a5", "cell_a3", "cell_a7", "cell_a4", "cell_a8", "cell_a6",
+             "cell_s8")  # fmt: skip
 
     def __init__(self, scratch: Path) -> None:
         super().__init__(scratch)
@@ -187,6 +192,7 @@ class KeysProbe(KeyFiles):
             return super().step_runner(command, timeout, stdin)
         answer = self.observer_answer(command)
         self.seen.argv.append(command)
+        self.seen.stdin.append("")  # one input per one-off, so a call's argv and input pair up
         self.seen.output += [answer.stdout, answer.stderr]
         return answer
 
@@ -208,7 +214,7 @@ class KeysProbe(KeyFiles):
         if self.keycloak_running:
             states[KEYCLOAK_SERVICE] = {"running"}
         gates = {litellm_keys.UNIT: core.Gate.ON, REALM_UNIT: core.Gate.ON}
-        plan = litellm_keys.plan_keys(self.engine, states, REPO, gates, (), ())
+        plan = litellm_keys.plan_keys(self.engine, states, REPO, self.api_settings(), gates, (), ())
         self.print_rows(keys_plan_rows(plan))
         return plan
 
@@ -263,22 +269,8 @@ class KeysProbe(KeyFiles):
     def drive(self) -> None:
         self.steer_fake()
         self.wait_until_listening()
-        self.cell_s1()
-        self.cell_s2()
-        self.cell_s3()
-        self.cell_s4()
-        self.cell_s5()
-        self.cell_s6()
-        self.cell_s7()
-        self.cell_s9()
-        self.cell_a2()
-        self.cell_a5()
-        self.cell_a3()
-        self.cell_a7()
-        self.cell_a4()
-        self.cell_a8()
-        self.cell_a6()
-        self.cell_s8()
+        for cell in self.CELLS:
+            getattr(self, cell)()
 
     def cell_s1(self) -> None:
         plan = self.read_plan("S1")
@@ -297,7 +289,7 @@ class KeysProbe(KeyFiles):
         budget = self.budget()
         expect(
             (budget["max_budget"], budget["budget_duration"])
-            == (litellm_keys.PERSON_BUDGET_DOLLARS, litellm_keys.BUDGET_DURATION),
+            == (api_limits.PERSON_BUDGET_DOLLARS, litellm_keys.BUDGET_DURATION),
             "S1: budget",
         )
         models, reset = sorted(self.models()), first_of_next_month()
@@ -348,9 +340,9 @@ class KeysProbe(KeyFiles):
             )
             wanted = (
                 app,
-                litellm_keys.APP_BUDGET_DOLLARS,
+                api_limits.APP_BUDGET_DOLLARS,
                 litellm_keys.BUDGET_DURATION,
-                litellm_keys.MAX_PARALLEL_REQUESTS,
+                api_limits.MAX_PARALLEL_REQUESTS,
                 models,
                 list(litellm_keys.ROUTES),
                 None,
@@ -384,7 +376,9 @@ class KeysProbe(KeyFiles):
 
     def cell_s3(self) -> None:
         self.query("DELETE FROM \"LiteLLM_VerificationToken\" WHERE key_alias = 'hopin';")
-        desired = litellm_keys.desired_key("hopin", tuple(self.models()))
+        desired = litellm_keys.desired_key(
+            "hopin", tuple(self.models()), api_limits.NONE_SET.limits_of("hopin")
+        )
         made = {
             name: list(value) if isinstance(value, tuple) else value
             for name, value in desired.items()
@@ -432,11 +426,11 @@ class KeysProbe(KeyFiles):
             budget["max_budget"],
         )
         wanted = (
-            litellm_keys.APP_BUDGET_DOLLARS,
-            litellm_keys.MAX_PARALLEL_REQUESTS,
+            api_limits.APP_BUDGET_DOLLARS,
+            api_limits.MAX_PARALLEL_REQUESTS,
             None,
             None,
-            litellm_keys.PERSON_BUDGET_DOLLARS,
+            api_limits.PERSON_BUDGET_DOLLARS,
         )
         expect(held == wanted, f"S4: {held}")
         expect(
@@ -543,7 +537,7 @@ class KeysProbe(KeyFiles):
         by_alias = self.key_rows(key_aliases=["hopin"])
         row = self.key_of("hopin")
         expect(
-            len(by_alias) == 1 and row["max_budget"] == litellm_keys.APP_BUDGET_DOLLARS,
+            len(by_alias) == 1 and row["max_budget"] == api_limits.APP_BUDGET_DOLLARS,
             "S9: hopin's key",
         )
         self.hold(

@@ -301,11 +301,24 @@ and the admin budget with its customer rows (the key step below).
   of the month at 00:00 UTC, through LiteLLM's own reset job. A recreate keeps the refusals: spend
   lives in the database. Without its database a running proxy keeps admitting a cached key until
   its cache expires (about a minute, measured), then refuses every request before the provider
-  with 503.
-- **The key step.** `hal apply` makes each app's key and the person budget from code defaults in
-  `src/hal/stack/litellm_keys.py`: per app 10 dollars, `1mo`, 5 parallel, the two routes, `models`
-  as LiteLLM's `/v1/models` lists them and no rpm or tpm, and the app's name as `key_alias`; the
-  person budget 2 dollars and `1mo` under the id `max_end_user_budget_id` names. The apps are the
+  with 503. The operator sets both amounts in `~/.config/hal/config.toml` and `hal apply` writes
+  them (the key step, below): a changed app budget binds the key at its next request, a changed
+  person budget once LiteLLM's cache lets it in (up to 60 s per cache layer, two layers read; 44 s
+  in one measured run). A budget below the spend refuses from then on, until the reset, and the
+  plan does not warn.
+- **The key step.** `hal apply` makes each app's key and the person budget from the numbers of
+  `[api]` and `[api.<app>]` in `~/.config/hal/config.toml` (`docs/home.md`, „Konfiguration“): per
+  number an app's own table, else `[api]`, else the code default in `src/hal/stack/api_limits.py`.
+  The defaults are per app 10 dollars and 5 parallel, and 2 dollars per person; every key carries
+  `1mo`, the two routes, `models` as LiteLLM's `/v1/models` lists them and no rpm or tpm, and the
+  app's name as `key_alias`; the person budget carries `1mo` under the id `max_end_user_budget_id`
+  names. `hal apply`'s door reads the file before any guard and ends 2 on a malformed one; the
+  step plans only what the file and LiteLLM's rows disagree on, so a changed number is a change
+  row with old and new, and the next apply sets it without a recreate. An `[api.<name>]` naming no
+  app the one-off read ends `hal apply` with `cannot plan` before the question while LiteLLM runs:
+  a table for an app compose does not mount yet stops the setups that run would offer, and a
+  retired app's leftover table stops every `hal apply` until the operator removes it. While the
+  step does not read (below) the name is not checked and nothing is set. The apps are the
   key files compose mounts into the one-off `litellm-keys` (profile `apply`, on `litellm-backend`
   alone), which holds them and the master key; hal's own process opens neither. At plan time the
   one-off reads each app's live key by the SHA-256 of its file, in a request body, so a deleted key
@@ -388,10 +401,12 @@ and the admin budget with its customer rows (the key step below).
   names; `api.openai.com` is open to that entrypoint alone, so the agent service cannot reach it.
 - **The bound.** Each app key's `max_parallel_requests` bounds its requests in flight; LiteLLM
   refuses the next one at once with 429 and `Retry-After`, before the provider, and another key's
-  requests are not counted against it. It counts HTTP requests, not runs, per LiteLLM process in
-  memory (a second worker or replica would multiply it). A request whose client left keeps its
-  slot until the provider call ends or 3600 s pass (`cancel_on_disconnect` is off and `config.yaml`
-  sets no `request_timeout`), so stalled calls can refuse a key for up to an hour.
+  requests are not counted against it. The operator sets it per app through `config.toml` (the key
+  step); a changed bound binds at the key's next request, and 0 refuses every request. It counts
+  HTTP requests, not runs, per LiteLLM process in memory (a second worker or replica would multiply
+  it). A request whose client left keeps its slot until the provider call ends or 3600 s pass
+  (`cancel_on_disconnect` is off and `config.yaml` sets no `request_timeout`), so stalled calls can
+  refuse a key for up to an hour.
 - **A change reaches LiteLLM only through a recreate** of its container: `config.yaml` (model
   remapping included) and `start.sh` are read once at start, and the four secrets (the two provider
   keys, master key, database password) are files mounted at create time. Keys and budgets live in the
@@ -420,7 +435,8 @@ and the admin budget with its customer rows (the key step below).
   `litellm_retention.py` the retention census of the route and `litellm_live_canary.py` the live canary, both with hopin's key made by
   the key step, `litellm_keys.py` the key step through
   `hal apply`'s own plan and run, and that LiteLLM calls no provider from its start to the first app
-  call (S0), and `litellm_backup.py` the backup, its restore test and a lost volume, on the same
+  call (S0), `litellm_limits.py` the operator's numbers from `config.toml` through that step, and
+  `litellm_backup.py` the backup, its restore test and a lost volume, on the same
   stack and with the same caller. `litellm_unit.py` drives the copy's real `hal apply` with the
   shipped unit `litellm`: its first start and the second apply, the refusals of a missing file, the
   switch-off and the stop that hold the key step, the recreates that make it wait, a start after a
@@ -437,7 +453,11 @@ argument, the step's input or output, or LiteLLM's log; and the admin group's ro
 scenario data: the links and the unlink, the refusal of a former admin past the person budget, the
 monthly reset, the members not read, and that no printed line carries a fingerprint or a member. It runs
 in hal's environment, which holds the agent-runtime client. Cell LM1 of the Keycloak probe proves the
-members mode against a real Keycloak. `litellm_backup.py` proves `hal backup litellm`,
+members mode against a real Keycloak. `litellm_limits.py` proves the numbers of
+`[api]` and `[api.<app>]` through that step: their precedence, their return to the defaults, no
+recreate and no moved reset, an app budget below spend, a bound and a budget of 0, a person budget
+below spend binding within LiteLLM's cache lifetime, and an app table naming no app.
+`litellm_backup.py` proves `hal backup litellm`,
 its pre-apply snapshot and `hal restore --test litellm` under a scratch HOME, that the dump holds every
 table and no key in clear, and that a lost volume rebuilds through the key step with budgets at zero.
 Its load cells prove `hal restore litellm --live`: only while LiteLLM is switched off, a key and a
