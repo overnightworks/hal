@@ -12,7 +12,7 @@ It writes three app key files beside litellm.py's scratch secrets and drives the
 `hal.stack.litellm_keys` with a Compose runner on the probe's project, which records every argv,
 standard input, standard output and standard error the step's one-off sees. The step plans as
 `hal apply` with Keycloak on and running; the runner answers its `realm-observer` call with the
-scenario's members of the admin group (cell A1 of probe/keycloak proves the real answer), an empty
+scenario's members of the admin group (cell LM1 of probe/keycloak proves the real answer), an empty
 group in the S cells. LiteLLM runs at log level INFO, as litellm.py sets it for LA. F is the fake
 provider's request log, LA LiteLLM's log, D a digest of `LiteLLM_VerificationToken`,
 `LiteLLM_BudgetTable` and `LiteLLM_EndUserTable` read by SQL, P the rows and partials the step's
@@ -74,7 +74,7 @@ FOURTH_MODEL = "text/fourth"
 TABLES = ("LiteLLM_VerificationToken", "LiteLLM_BudgetTable", "LiteLLM_EndUserTable")
 CUSTOMERS = TABLES.index("LiteLLM_EndUserTable")
 CUSTOMER_TABLE = TABLES[CUSTOMERS]
-ISSUER = "https://auth.probe.invalid/realms/hallucinai"  # the scenario's; A1 proves Keycloak's
+ISSUER = "https://auth.probe.invalid/realms/hallucinai"  # the scenario's; LM1 proves Keycloak's
 PEOPLE = ("O", "O2", "O3", "X", "Y")
 OTHER_BUDGET = "probe-by-hand"
 OBSERVER_STOPPED = "realm-observer: stopped"
@@ -348,10 +348,13 @@ class KeysProbe(KeyFiles):
         plan = self.read_plan("S2")
         expect(plan == KeysPlan(), f"S2: planned {plan}")
         expect(self.run_step(plan) is None, "S2: the step acted")
-        ran = self.seen.argv[calls:]
-        expect(len(ran) == 1 and "--read" in ran[0], f"S2: {len(ran)} one-offs ran")
+        ran = [argv for argv in self.seen.argv[calls:] if litellm_keys.KEYS_SERVICE in argv]
+        expect(len(ran) == 1 and "--read" in ran[0], f"S2: {len(ran)} key one-offs ran")
         expect(self.digest() == before, "S2: D changed")
-        self.hold("S2", "nothing to change; one --read and no --write ran; D unchanged")
+        self.hold(
+            "S2",
+            "nothing to change; one --read and no --write ran beside the members read; D unchanged",
+        )
 
     def cell_s3(self) -> None:
         self.query("DELETE FROM \"LiteLLM_VerificationToken\" WHERE key_alias = 'hopin';")

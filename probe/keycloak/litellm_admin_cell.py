@@ -1,7 +1,8 @@
-"""Cell A1 of probe.py (#965): the realm observer's members mode against the probe's Keycloak, as
-`hal apply` runs it. Person P, proof 10's member of hopin, joins the LiteLLM admin group and Q its
-parent group: the mode lists P's id and not Q's, its issuer is the `iss` of P's access token and
-P's id that token's `sub`. The held line prints counts and the issuer, never an id."""
+"""Cell LM1 of probe.py, #965's A1: the realm observer's members mode against the probe's
+Keycloak, as `hal apply` runs it. Person P, proof 10's member of hopin, joins the LiteLLM admin
+group and Q its parent group: the mode lists P's id and not Q's, its issuer is the `iss` of P's
+access token and P's id that token's `sub`. The held line prints counts and the issuer, never an
+id."""
 
 from __future__ import annotations
 
@@ -41,15 +42,14 @@ class Probe(Protocol):
     def keep_secret(self, name: str, value: str) -> str: ...
 
 
-def members_mode(stack: Stack) -> dict:
+def members_mode(stack: Stack, expect: Callable[[bool, str], None]) -> dict:
     """The observer's members mode as the key step runs it; a failure is its exit and last
     standard error line, never its standard output."""
     read = stack.compose(
         "run", "-T", "--rm", "--no-deps", OBSERVER_SERVICE, "--members", ADMIN_GROUP, stdin=""
     )
-    if read.returncode != 0:
-        last = (read.stderr.strip().splitlines() or [""])[-1]
-        raise AssertionError(f"A1: the members mode exited {read.returncode}: {last}")
+    last = (read.stderr.strip().splitlines() or [""])[-1]
+    expect(read.returncode == 0, f"LM1: the members mode exited {read.returncode}: {last}")
     return json.loads(read.stdout)
 
 
@@ -66,16 +66,16 @@ def prove(
     outsider = probe.admin.create_user(REALM, OUTSIDER, password)
     probe.admin.join_group(outsider, PARENT_GROUP)
     probe.admin.join_group(member_id, ADMIN_GROUP)
-    answer, access = members_mode(probe.stack), token_claims(access_token)
+    answer, access = members_mode(probe.stack, expect), token_claims(access_token)
     members = answer["members"]
     expect(
         member_id in members and outsider not in members,
-        f"A1: P listed {member_id in members}, Q listed {outsider in members}",
+        f"LM1: P listed {member_id in members}, Q listed {outsider in members}",
     )
-    expect(answer["issuer"] == access["iss"], "A1: the issuer is not the iss of P's access token")
-    expect(access["sub"] == member_id, "A1: P's id is not the sub of P's access token")
+    expect(answer["issuer"] == access["iss"], "LM1: the issuer is not the iss of P's access token")
+    expect(access["sub"] == member_id, "LM1: P's id is not the sub of P's access token")
     probe.held(
-        "A1",
+        "LM1",
         f"the members mode of {ADMIN_GROUP} lists P and not Q of {PARENT_GROUP} "
         f"({len(members)} member); its issuer {answer['issuer']} is the iss of P's access token "
         f"from {client_id}, and P's id its sub",

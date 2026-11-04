@@ -411,7 +411,7 @@ a pure limit change, a taken name, a failed write and a deleted key, and that no
 argument, the step's input or output, or LiteLLM's log; and the admin group's rows with the members as
 scenario data: the links and the unlink, the refusal of a former admin past the person budget, the
 monthly reset, the members not read, and that no printed line carries a fingerprint or a member. It runs
-in hal's environment, which holds the agent-runtime client. Cell A1 of the Keycloak probe proves the
+in hal's environment, which holds the agent-runtime client. Cell LM1 of the Keycloak probe proves the
 members mode against a real Keycloak.
 
 **The live smoke** is one command, run in the live checkout after `hal apply` and with the image
