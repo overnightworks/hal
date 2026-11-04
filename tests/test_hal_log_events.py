@@ -19,6 +19,7 @@ from support.backup_support import (
     SQLITE_TOML,
     declare_apps,
     declare_shipped_apps,
+    declare_songmaker_and_keycloak,
     declare_two_apps,
 )
 
@@ -300,10 +301,12 @@ def test_a_good_run_under_the_environment_a_backup_unit_declares_is_json_events(
 
 
 @pytest.mark.usefixtures("json_log")
-def test_a_failed_app_is_an_error_row_beside_an_info_row_and_the_error_event(edge_backup, machine):
+def test_a_failed_app_is_an_error_row_beside_an_info_row_and_the_error_event(
+    edge_backup, machine, home
+):
     machine.lose_keycloak_database()
 
-    outcome = edge_backup(*declare_shipped_apps(), "backup")
+    outcome = edge_backup(*declare_songmaker_and_keycloak(home), "backup")
 
     assert outcome.exit_code == ExitCode.FAILURE
     assert [(priority, event["subject"]) for priority, event in events(outcome.out)] == [
