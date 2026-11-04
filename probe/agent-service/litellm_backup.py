@@ -285,16 +285,8 @@ class BackupProbe(KeysProbe, AdmissionProbe):
         return self.count("LiteLLM_DailyEndUserSpend", f"end_user_id = '{self.person}'")
 
     def database_digest(self) -> str:
-        """D: each of hal's six tables as `KeysProbe.digest` reads one, its complete rows, and
-        only the digest of those leaves the database."""
-        tables = [
-            self.query(
-                f"SELECT coalesce(md5(string_agg(r::text, E'\\n' ORDER BY r::text)), '-')"  # noqa: S608 - the table names are this probe's literals
-                f' FROM "{table}" AS r;'
-            )[0]
-            for table in DIGEST_TABLES
-        ]
-        return hashlib.sha256("\n".join(tables).encode()).hexdigest()[:12]
+        """D: the digest of hal's six tables."""
+        return hashlib.sha256("\n".join(self.digest(DIGEST_TABLES)).encode()).hexdigest()[:12]
 
     def database_argv(self, *psql: str) -> list[str]:
         return ["docker", "exec", "-i", self.container(DATABASE), "psql",
