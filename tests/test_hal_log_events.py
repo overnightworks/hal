@@ -309,6 +309,7 @@ def test_a_failed_app_is_an_error_row_beside_an_info_row_and_the_error_event(edg
     assert [(priority, event["subject"]) for priority, event in events(outcome.out)] == [
         (6, "songmaker"),
         (3, "keycloak"),
+        (6, "keycloak"),
         (6, "repository"),
     ]
     [(priority, event)] = events(outcome.err)
@@ -537,7 +538,7 @@ def text_reason_of(output: str, event: str) -> str:
     return line.split(f"{event} ", 1)[1].strip()
 
 
-def test_a_failed_app_carries_its_reason_and_the_skipped_prune_carries_its_own(
+def test_a_failed_app_carries_its_reason_and_its_skipped_prune_carries_its_own(
     edge_backup, machine, monkeypatch
 ):
     machine.lose_keycloak_database()
@@ -552,7 +553,7 @@ def test_a_failed_app_carries_its_reason_and_the_skipped_prune_carries_its_own(
     assert failed["reason"] == text_reason_of(in_text.out, "not backed up")
     assert "fact" not in failed
     priority, skipped = the_event(in_json.out, "not pruned")
-    assert (priority, skipped["reason"]) == (6, "a backup failed")
+    assert (priority, skipped["subject"], skipped["reason"]) == (6, "keycloak", "its backup failed")
     assert "fact" not in skipped
 
 

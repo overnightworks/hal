@@ -30,7 +30,8 @@ def _configure_backup(parser: argparse.ArgumentParser) -> None:
         "--pre-apply",
         action="store_true",
         help=f"tag the snapshot {PRE_APPLY_TAG} and keep the last {restic.KEEP_PRE_APPLY} "
-        "such snapshots of the app (needs the app's name)",
+        f"such snapshots of the app within {restic.PRE_APPLY_MAX_AGE.days} days (needs the "
+        "app's name)",
     )
     parser.add_argument("--init", action="store_true", help="create the restic repository once")
     parser.add_argument("--unlock", action="store_true", help="remove stale restic locks")

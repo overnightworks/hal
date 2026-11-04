@@ -59,7 +59,7 @@ def test_backup_puts_dump_manifest_and_audio_into_one_snapshot(edge_backup, mach
 def test_backup_forgets_by_host_and_app_tag_then_checks(edge_backup, machine):
     edge_backup("backup")
 
-    assert machine.labels()[-2:] == ["restic forget", "restic check"]
+    assert machine.labels()[-3:] == ["restic forget", "restic snapshots", "restic check"]
     forget = machine.argv_of("restic forget")
     expected_scope = ["--host", "hal", "--tag", "songmaker", "--group-by", "host,tags"]
     assert forget[forget.index("forget") + 1 :] == [
@@ -422,7 +422,7 @@ def test_an_app_that_fails_to_back_up_keeps_the_others_and_every_earlier_success
     songmaker = app_history(outcome.status)
     assert songmaker["last_snapshot_id"] == machine.snapshots[-1]["id"]
     assert songmaker["last_successful_backup"] > app_history(first.status)["last_successful_backup"]
-    assert "restic forget" not in machine.labels()
+    assert machine.forget_scopes() == ["songmaker"]
 
 
 def test_backup_continues_with_the_next_app_after_one_failed(edge_backup, machine, home):

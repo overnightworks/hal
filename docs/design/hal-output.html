@@ -1517,10 +1517,11 @@ Type <span class="w">yes</span> to reopen the tunnel: yes
 <pre class="term"><span class="p">$</span> <span class="u">hal backup</span>
 <span class="r">  ✗</span> songmaker       not backed up  <span class="d">database not ready after 10 min</span>
 <span class="g">  ✓</span> keycloak        backed up      <span class="d">9b07e1d2 · 4.2 MiB · 21s</span>
-<span class="d">  · repository      not pruned     a backup failed</span>
+<span class="d">  · songmaker       not pruned     its backup failed</span>
+<span class="g">  ✓</span> repository      pruned         <span class="d">checked · 6s</span>
 <span class="rw">error:</span> 1 of 2 apps not backed up · songmaker's last good backup 25.10. 03:04
 <span class="c">next:</span> hal backup songmaker</pre>
-      <p class="was">Angepasst an den Lauf: die Fehlerzeile nennt die letzte gute Sicherung der ersten gescheiterten App aus der Statusdatei, in Ortszeit, mit Jahr ab einem anderen Jahr; ohne Eintrag <code>songmaker has no good backup recorded</code>, bei einer App ohne den Namen noch einmal</p>
+      <p class="was">Angepasst an den Lauf: die Fehlerzeile nennt die letzte gute Sicherung der ersten gescheiterten App aus der Statusdatei, in Ortszeit, mit Jahr ab einem anderen Jahr; ohne Eintrag <code>songmaker has no good backup recorded</code>, bei einer App ohne den Namen noch einmal. Die gescheiterte App wird in diesem Lauf nicht vergessen (<code>· songmaker  not pruned</code>), die anderen schon, und das Repository wird geprüft</p>
     </figure>
     <figure id="f-expire">
       <figcaption><span class="tag new">neu #945</span> <code>hal expire</code>, der tägliche Timer: gelöscht, LiteLLM aus, psql scheitert (Zahlen erfunden)</figcaption>
@@ -1628,10 +1629,11 @@ Type <span class="w">yes</span> to apply 7 changes: yes
 <span class="d">Nov 01 03:00:01 pc systemd[2087]:</span> Starting hal-backup.service - hal backup: encrypted restic backup of the declared apps...
 <span class="d">Nov 01 03:10:04 pc hal[4711]:</span> <span class="r">{"timestamp":"2026-11-01T02:10:04.000Z","level":"error","logger":"hal.backup","service":"hal","event":"not backed up","subject":"songmaker","reason":"database not ready after 10 min"}</span>
 <span class="d">Nov 01 03:10:26 pc hal[4711]:</span> {"timestamp":"2026-11-01T02:10:26.000Z","level":"info","logger":"hal.backup","service":"hal","event":"backed up","subject":"keycloak","snapshot":"9b07e1d2","bytes":4404019,"seconds":21.3}
-<span class="d">Nov 01 03:10:26 pc hal[4711]:</span> {"timestamp":"2026-11-01T02:10:26.000Z","level":"info","logger":"hal.backup","service":"hal","event":"not pruned","subject":"repository","reason":"a backup failed"}
-<span class="d">Nov 01 03:10:26 pc hal[4711]:</span> <span class="r">{"timestamp":"2026-11-01T02:10:26.000Z","level":"error","logger":"hal.backup","service":"hal","event":"error","message":"1 of 2 apps not backed up · songmaker has no good backup recorded","next":"hal backup songmaker"}</span>
-<span class="d">Nov 01 03:10:26 pc systemd[2087]:</span> hal-backup.service: Main process exited, code=exited, status=3/NOTIMPLEMENTED
-<span class="d">Nov 01 03:10:26 pc systemd[2087]:</span> hal-backup.service: Failed with result 'exit-code'.</pre>
+<span class="d">Nov 01 03:10:26 pc hal[4711]:</span> {"timestamp":"2026-11-01T02:10:26.000Z","level":"info","logger":"hal.backup","service":"hal","event":"not pruned","subject":"songmaker","reason":"its backup failed"}
+<span class="d">Nov 01 03:10:32 pc hal[4711]:</span> {"timestamp":"2026-11-01T02:10:32.000Z","level":"info","logger":"hal.backup","service":"hal","event":"pruned","subject":"repository","fact":"checked","seconds":6.1}
+<span class="d">Nov 01 03:10:32 pc hal[4711]:</span> <span class="r">{"timestamp":"2026-11-01T02:10:32.000Z","level":"error","logger":"hal.backup","service":"hal","event":"error","message":"1 of 2 apps not backed up · songmaker has no good backup recorded","next":"hal backup songmaker"}</span>
+<span class="d">Nov 01 03:10:32 pc systemd[2087]:</span> hal-backup.service: Main process exited, code=exited, status=3/NOTIMPLEMENTED
+<span class="d">Nov 01 03:10:32 pc systemd[2087]:</span> hal-backup.service: Failed with result 'exit-code'.</pre>
     </figure>
     <div class="stack">
       <figure>
@@ -1639,7 +1641,8 @@ Type <span class="w">yes</span> to apply 7 changes: yes
 <pre class="term"><span class="p">$</span> <span class="u">hal logs hal-backup --since today</span>
 <span class="d">01.11. 03:10</span>  <span class="r">✗</span> songmaker     not backed up  <span class="d">database not ready after 10 min</span>
 <span class="d">01.11. 03:10</span>  <span class="g">✓</span> keycloak      backed up      <span class="d">9b07e1d2 · 4.2 MiB · 21s</span>
-<span class="d">01.11. 03:10</span>  <span class="d">· repository    not pruned     a backup failed</span>
+<span class="d">01.11. 03:10</span>  <span class="d">· songmaker     not pruned     its backup failed</span>
+<span class="d">01.11. 03:10</span>  <span class="g">✓</span> repository    pruned         <span class="d">checked · 6s</span>
 <span class="d">01.11. 03:10</span>  <span class="rw">error:</span> 1 of 2 apps not backed up <span class="d">· next: hal backup songmaker</span></pre>
       </figure>
       <figure>

@@ -233,7 +233,7 @@ def test_an_unreadable_backup_summary_fails_the_app_as_not_backed_up(
     )
 
 
-def test_a_failed_app_has_its_row_while_the_others_are_backed_up_and_the_repository_is_not_pruned(
+def test_a_failed_app_has_its_rows_while_the_others_are_backed_up_and_the_repository_pruned(
     edge_backup, machine
 ):
     machine.lose_keycloak_database()
@@ -245,13 +245,13 @@ def test_a_failed_app_has_its_row_while_the_others_are_backed_up_and_the_reposit
     assert rows == [
         f"  ✓ songmaker       backed up      {machine.snapshots[-1]['id'][:8]} · 4.2 MiB · <1s",
         "  ✗ keycloak        not backed up  no database container after 10 min",
-        "  · repository      not pruned     a backup failed",
+        "  · keycloak        not pruned     its backup failed",
+        "  ✓ repository      pruned         checked · <1s",
     ]
     assert outcome.err.splitlines() == [
         "error: 1 of 2 apps not backed up · keycloak has no good backup recorded",
         "next: hal backup keycloak",
     ]
-    assert "restic forget" not in machine.labels()
 
 
 def test_a_single_failed_app_is_named_on_the_error_line(edge_backup, machine):
