@@ -1,6 +1,6 @@
-"""The key step's host side (#964, #965): the desired key, person budget and admin budget from the
-code defaults, the diff against what the one-off read, and the admin group's members and their
-rows."""
+"""The key step's host side (#964, #965, #889): the desired key, person budget and admin budget
+from the numbers of the operator's record, the diff against what the one-off read, and the admin
+group's members and their rows."""
 
 import json
 import subprocess
@@ -11,8 +11,19 @@ import pytest
 import yaml
 from agent_runtime_client import turn as client_turn
 from agent_runtime_client.turn import Principal, person_fingerprint
+from support.stack_litellm_found import (
+    APPS,
+    BUDGET_ID,
+    HELD,
+    MODELS,
+    changed_fields,
+    found,
+    found_budget,
+    found_key,
+)
 
-from hal.stack import compose, core, litellm_keys
+from hal.stack import api_limits, compose, core, litellm_keys
+from hal.stack.api_limits import NONE_SET, ApiSettings, AppLimits, AppNumbers
 from hal.stack.litellm_keys import (
     AdminFound,
     AdminHeld,
@@ -31,69 +42,27 @@ from hal.stack.realm.declared import declared_realm
 from hal.stack.realm.reconcile import KEYCLOAK_SERVICE, NO_MEMBERS, REALM_UNIT, MembersNotRead
 from hal.stack.unit_plans import Recreate
 
-APPS = ("hopin", "presentator", "songmaker")
-MODELS = ("text/haiku", "text/opus", "text/sonnet")
-BUDGET_ID = "scenario-budget"
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def found_key(app: str, **overrides: object) -> dict:
-    """The live row of `app` as the one-off reports it: the desired settings, overridden."""
-    desired = litellm_keys.desired_key(app, MODELS)
-    return {
-        name: list(value) if isinstance(value, tuple) else value for name, value in desired.items()
-    } | overrides
-
-
-def found_budget(**overrides: object) -> dict:
-    return dict(litellm_keys.desired_budget()) | overrides
-
-
-HELD = AdminHeld(core.Gate.OFF)
-
-
-def found(
-    keys: dict | None = None,
-    taken: tuple[str, ...] = (),
-    budget: dict | None = None,
-    models: tuple[str, ...] = MODELS,
-    admin: AdminFound | AdminHeld | MembersNotRead = HELD,
-) -> Found:
-    keys = {app: found_key(app) for app in APPS} if keys is None else keys
-    return Found(
-        keys={app: keys.get(app) for app in APPS},
-        name_taken=frozenset(taken),
-        budget=found_budget() if budget is None else budget,
-        models=models,
-        admin=admin,
-    )
-
-
-def changed_fields(change: Change | None) -> dict[str, object]:
-    assert change is not None
-    return {field_change.name: field_change.new for field_change in change.fields}
-
-
-def test_a_new_key_carries_its_app_as_name_the_code_defaults_and_every_model_litellm_lists() -> (
-    None
-):
-    desired = litellm_keys.desired_key("hopin", MODELS)
+def test_a_new_key_carries_its_app_as_name_its_numbers_and_every_model_litellm_lists() -> None:
+    desired = litellm_keys.desired_key("hopin", MODELS, AppLimits(6.0, 3))
 
     assert desired == {
         "key_alias": "hopin",
-        "max_budget": litellm_keys.APP_BUDGET_DOLLARS,
+        "max_budget": 6.0,
         "budget_duration": litellm_keys.BUDGET_DURATION,
         "models": MODELS,
         "allowed_routes": (litellm_keys.ROUTE,),
-        "max_parallel_requests": litellm_keys.MAX_PARALLEL_REQUESTS,
+        "max_parallel_requests": 3,
         "rpm_limit": None,
         "tpm_limit": None,
     }
 
 
-def test_the_person_budget_holds_the_person_default_for_the_period() -> None:
-    assert litellm_keys.desired_budget() == {
-        "max_budget": litellm_keys.PERSON_BUDGET_DOLLARS,
+def test_the_person_budget_holds_its_dollars_for_the_period() -> None:
+    assert litellm_keys.desired_budget(1.5) == {
+        "max_budget": 1.5,
         "budget_duration": litellm_keys.BUDGET_DURATION,
     }
 
@@ -137,6 +106,7 @@ def test_a_found_key_is_changed_in_exactly_the_fields_that_differ(
             keys={app: found_key(app, **row) if app == "hopin" else found_key(app) for app in APPS}
         ),
         BUDGET_ID,
+        NONE_SET,
     )
 
     hopin = [change for change in plan.changes if change.subject == "hopin"]
@@ -156,6 +126,7 @@ def test_a_pure_limit_change_sends_no_period_so_the_reset_stays() -> None:
             budget=found_budget(max_budget=1.5),
         ),
         BUDGET_ID,
+        NONE_SET,
     )
 
     assert plan.changes
@@ -164,7 +135,7 @@ def test_a_pure_limit_change_sends_no_period_so_the_reset_stays() -> None:
 
 def test_a_cleared_rpm_travels_as_null() -> None:
     plan = litellm_keys.planned(
-        found(keys={app: found_key(app, rpm_limit=60) for app in APPS}), BUDGET_ID
+        found(keys={app: found_key(app, rpm_limit=60) for app in APPS}), BUDGET_ID, NONE_SET
     )
 
     assert {json.dumps(change.wire()["fields"]) for change in plan.changes} == {
@@ -189,7 +160,7 @@ def test_a_cleared_rpm_travels_as_null() -> None:
 def test_the_plan_makes_absent_keys_and_names_taken_names(
     keys: dict | None, taken: tuple[str, ...], new_keys: tuple[str, ...], conflicts: tuple[str, ...]
 ) -> None:
-    plan = litellm_keys.planned(found(keys=keys, taken=taken), BUDGET_ID)
+    plan = litellm_keys.planned(found(keys=keys, taken=taken), BUDGET_ID, NONE_SET)
 
     assert tuple(change.subject for change in plan.changes if change.new) == new_keys
     assert plan.name_taken == conflicts
@@ -198,7 +169,9 @@ def test_the_plan_makes_absent_keys_and_names_taken_names(
         changed_fields(change)
         == {
             name: value
-            for name, value in litellm_keys.desired_key(change.subject, MODELS).items()
+            for name, value in litellm_keys.desired_key(
+                change.subject, MODELS, NONE_SET.limits_of(change.subject)
+            ).items()
             if value is not None
         }
         for change in new
@@ -215,6 +188,7 @@ def test_the_person_budget_comes_first_then_the_apps_in_name_order() -> None:
             admin=HELD,
         ),
         BUDGET_ID,
+        NONE_SET,
     )
 
     assert [(change.target, change.subject) for change in plan.changes] == [
@@ -226,20 +200,21 @@ def test_the_person_budget_comes_first_then_the_apps_in_name_order() -> None:
         BUDGET_ID,
         True,
         tuple(
-            FieldChange(name, None, value) for name, value in litellm_keys.desired_budget().items()
+            FieldChange(name, None, value)
+            for name, value in litellm_keys.desired_budget(NONE_SET.person_budget()).items()
         ),
     )
 
 
 def test_a_changed_person_budget_is_changed_in_its_amount_alone() -> None:
-    plan = litellm_keys.planned(found(budget=found_budget(max_budget=1.5)), BUDGET_ID)
+    plan = litellm_keys.planned(found(budget=found_budget(max_budget=1.5)), BUDGET_ID, NONE_SET)
 
     assert plan.changes == (
         Change(
             Target.BUDGET,
             BUDGET_ID,
             False,
-            (FieldChange("max_budget", 1.5, litellm_keys.PERSON_BUDGET_DOLLARS),),
+            (FieldChange("max_budget", 1.5, api_limits.PERSON_BUDGET_DOLLARS),),
         ),
     )
 
@@ -362,6 +337,14 @@ def test_a_config_yaml_without_the_budget_id_is_a_step_not_read(
     assert runner.one_offs == []
 
 
+def test_an_app_table_naming_no_app_read_is_no_step_not_read(repository: Path) -> None:
+    runner = OneOff(read_answer(found()))
+    api = ApiSettings(apps={"hopn": AppNumbers(budget_dollars=1.0)})
+
+    with pytest.raises(litellm_keys.UnknownApps):
+        plan_with(runner, repository, LITELLM_RUNNING, None, api=api)
+
+
 def test_the_shipped_config_yaml_names_the_person_budget_id() -> None:
     assert litellm_keys.read_budget_id(ROOT)
 
@@ -461,20 +444,24 @@ def plan_with(
     states: dict[str, set[str]] = KEYCLOAK_RUNNING,
     gate: core.Gate | None = core.Gate.ON,
     recreates: tuple[Recreate, ...] = (),
+    api: ApiSettings = NONE_SET,
 ) -> KeysStep:
     """The step with the unit `litellm` on and running; `gate` is Keycloak's, None outside the
     catalog."""
     engine = compose.Compose(run=runner, repository=repository)
     keycloak = {} if gate is None else {REALM_UNIT: gate}
     gates = {litellm_keys.UNIT: core.Gate.ON} | keycloak
-    return litellm_keys.plan_keys(engine, states, repository, gates, (), recreates)
+    return litellm_keys.plan_keys(engine, states, repository, api, gates, (), recreates)
 
 
 def test_the_admin_budget_has_no_limit_and_the_person_budgets_period() -> None:
     admin = litellm_keys.desired_admin_budget()
 
     assert admin["max_budget"] is None
-    assert admin["budget_duration"] == litellm_keys.desired_budget()["budget_duration"]
+    assert (
+        admin["budget_duration"]
+        == litellm_keys.desired_budget(NONE_SET.person_budget())["budget_duration"]
+    )
 
 
 @pytest.mark.parametrize(
@@ -493,7 +480,7 @@ def test_the_admin_budget_is_made_or_changed_to_have_no_limit(
     budget: dict | None, new: bool, fields: dict
 ) -> None:
     admin = AdminFound(budget, {}, ())
-    plan = litellm_keys.planned(found(admin=admin), BUDGET_ID)
+    plan = litellm_keys.planned(found(admin=admin), BUDGET_ID, NONE_SET)
 
     assert [change.wire() for change in plan.changes] == [
         {"target": "budget", "subject": ADMIN, "new": new, "fields": fields}
@@ -534,7 +521,7 @@ def test_the_admin_budget_is_made_or_changed_to_have_no_limit(
 def test_the_members_rows_are_linked_and_every_other_row_on_the_admin_budget_unlinked(
     members: dict, others: tuple[str, ...], expected: set
 ) -> None:
-    plan = litellm_keys.planned(found(admin=admin_found(members, others)), BUDGET_ID)
+    plan = litellm_keys.planned(found(admin=admin_found(members, others)), BUDGET_ID, NONE_SET)
 
     assert set(row_changes(plan)) == expected
     assert plan.admin is None
@@ -543,7 +530,7 @@ def test_the_members_rows_are_linked_and_every_other_row_on_the_admin_budget_unl
 def test_the_admin_budget_follows_the_person_budget_and_the_keys_then_unlinks_then_links() -> None:
     admin = admin_found({ELSEWHERE: CustomerRow("by-hand"), NO_ROW: None}, (FORMER,), budget={})
     plan = litellm_keys.planned(
-        found(keys={}, budget=found_budget(max_budget=1.5), admin=admin), BUDGET_ID
+        found(keys={}, budget=found_budget(max_budget=1.5), admin=admin), BUDGET_ID, NONE_SET
     )
 
     assert [(change.wire()["target"], change.wire()["subject"]) for change in plan.changes] == [
@@ -745,7 +732,7 @@ def test_a_read_whose_admin_rows_do_not_fit_is_an_unexpected_shape(
 def test_a_failed_write_names_its_exit_and_last_error_line_never_the_fingerprints_on_stdout() -> (
     None
 ):
-    plan = litellm_keys.planned(found(admin=admin_found({}, (FORMER,))), BUDGET_ID)
+    plan = litellm_keys.planned(found(admin=admin_found({}, (FORMER,))), BUDGET_ID, NONE_SET)
     done = [{"target": "customer", "subject": FORMER, "outcome": "done"}]
     runner = OneOff(json.dumps(done), 130, stderr="litellm-keys: stopped\n")
     result = litellm_keys.run_keys(plan, compose.Compose(run=runner))

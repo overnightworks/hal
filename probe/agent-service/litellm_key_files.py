@@ -28,7 +28,7 @@ from litellm import (
 )
 from scratch_secrets import write_new
 
-from hal.stack import compose, core, litellm_keys
+from hal.stack import api_limits, compose, core, litellm_keys
 from hal.stack.litellm_keys import KeysPlan, KeysStep, NotRead
 
 APPS = ("hopin", "presentator", "songmaker")
@@ -99,10 +99,16 @@ class KeyFiles(LitellmProbe):
             self.seen.output += [result.stdout, result.stderr]
         return result
 
+    def api_settings(self) -> api_limits.ApiSettings:
+        """The numbers the step plans with: the code defaults here."""
+        return api_limits.NONE_SET
+
     def plan(self) -> KeysStep:
         """The step with its gate passed: the unit on and nothing of it starting in this run."""
         gates = {litellm_keys.UNIT: core.Gate.ON}
-        return litellm_keys.plan_keys(self.engine, self.engine.states(), REPO, gates, (), ())
+        return litellm_keys.plan_keys(
+            self.engine, self.engine.states(), REPO, self.api_settings(), gates, (), ()
+        )
 
     def read_plan(self, cell: str) -> KeysPlan:
         """The plan once the keys can be read: LiteLLM answers 502 while it migrates."""

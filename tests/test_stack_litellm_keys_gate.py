@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from support.stack_plan_rows import unit_plan
 
-from hal.stack import compose, core, litellm_keys
+from hal.stack import api_limits, compose, core, litellm_keys
 from hal.stack.catalog import Unit
 from hal.stack.litellm_keys import LITELLM, KeysPlan, KeysStep
 from hal.stack.realm.reconcile import REALM_UNIT
@@ -75,6 +75,7 @@ def test_the_step_reads_only_while_the_unit_is_on_and_this_run_starts_neither_se
         compose.Compose(run=runner, repository=REPOSITORY),
         RUNNING,
         REPOSITORY,
+        api_limits.NONE_SET,
         gates,
         plans,
         recreates,
