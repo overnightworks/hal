@@ -765,7 +765,8 @@ def test_each_secret_file_the_litellm_unit_or_its_key_step_mounts_is_one_hal_set
     """S4b1's `next: hal setup` has a file to write for each such secret: a live entry, not optional, that setup writes."""
     file = SHIPPED_COMPOSE["secrets"][secret]["file"].removeprefix("${HOME}/")
     (entry,) = [entry for entry in load_manifest(PACKAGED_MANIFEST) if file in map(str, entry.paths)]
-    assert entry.expected_present and entry.written_by_setup
+    assert entry.expected_present
+    assert entry.written_by_setup
 
 
 def test_each_apps_litellm_key_is_listed_with_its_readers_and_mode_0644_is_no_finding(tmp_path: Path, probe: FakeProbe, capsys) -> None:

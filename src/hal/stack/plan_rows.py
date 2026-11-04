@@ -244,7 +244,7 @@ def plan_groups(plan: Plan) -> tuple[Group, ...]:
         Group(None, (*_appkit_rows(plan.appkit), *_legal_rows(plan.legal))),
         Group(PlanGroup.CORE, _core_rows(plan)),
         Group(PlanGroup.UNITS, _unit_rows(plan)),
-        Group(PlanGroup.LITELLM, keys_plan_rows(plan.keys)),
+        Group(PlanGroup.LITELLM, tuple(keys_plan_rows(plan.keys))),
         Group(PlanGroup.APPS, _app_rows(plan.app_plans)),
     )
 
@@ -442,30 +442,25 @@ def _realm_row(realm: RealmPlan) -> Row | None:
             return None
 
 
-def keys_plan_rows(keys: KeysStep) -> tuple[Row, ...]:
+def keys_plan_rows(keys: KeysStep) -> Iterator[Row]:
     match keys:
         case NotRead(cause):
-            return (Row(Glyph.NEEDS_YOU, LITELLM_SERVICE, KeysEvent.NOT_READ, printable(cause)),)
+            yield Row(Glyph.NEEDS_YOU, LITELLM_SERVICE, KeysEvent.NOT_READ, printable(cause))
         case Restart():
             fact = f"{restart_text(keys, LITELLM)}{_SEPARATOR}next apply checks them"
-            return (Row(Glyph.UNCHANGED, LITELLM.key, KeysEvent.LATER, fact),)
+            yield Row(Glyph.UNCHANGED, LITELLM.key, KeysEvent.LATER, fact)
         case KeysPlan():
-            return _read_rows(keys)
-        case _:
-            return ()
+            yield from _read_rows(keys)
 
 
-def _read_rows(keys: KeysPlan) -> tuple[Row, ...]:
-    return (
-        *(
-            key_change_row(change, Glyph.ADD if change.new else Glyph.CHANGE)
-            for change in keys.changes
-            if isinstance(change, Change)
-        ),
-        *customer_rows(keys.changes, Glyph.CHANGE),
-        *(name_taken_row(app) for app in keys.name_taken),
-        *admin_rows(keys.admin),
-    )
+def _read_rows(keys: KeysPlan) -> Iterator[Row]:
+    for change in keys.changes:
+        if isinstance(change, Change):
+            yield key_change_row(change, Glyph.ADD if change.new else Glyph.CHANGE)
+    yield from customer_rows(keys.changes, Glyph.CHANGE)
+    for app in keys.name_taken:
+        yield name_taken_row(app)
+    yield from admin_rows(keys.admin)
 
 
 def customer_rows(changes: Sequence[StepChange], glyph: Glyph) -> tuple[Row, ...]:

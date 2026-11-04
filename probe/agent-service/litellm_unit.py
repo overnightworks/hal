@@ -56,8 +56,14 @@ SECRETS = Path(".secrets/litellm")
 PROVIDER, MASTER, PASSWORD = (SECRETS / name for name in ("anthropic", "master-key", "db-password"))
 LISTEN_SECONDS = 240
 LABEL = f"{PROJECT}.throwaway=1"
+KEY_TABLE = '"LiteLLM_VerificationToken"'
+COMPOSE_FILE = "compose.yaml"
+YES_PROMPT = "Type yes"
+PLAN_END = "to apply"
+LITELLM_ON = "litellm is on"
+CELL_U14C = "U14 (c)"
 SUBNET_CANDIDATES = [f"172.31.{third}.0/24" for third in range(230, 210, -1)]
-ENTRY = re.compile(r"^  litellm:\n(?: {4}.*\n)+", re.MULTILINE)
+ENTRY = re.compile(r"^ {2}litellm:\n(?: {4}.*\n)+", re.MULTILINE)
 KEYCLOAK_OFF = "  keycloak:\n    run:\n      enabled: false\n"
 DOCKER_STAND_IN = """\
 #!/bin/sh
@@ -187,7 +193,7 @@ class Probe:
         ordered by its key; neither a token nor a row is printed."""
         parts = []
         for table, key in (
-            ('"LiteLLM_VerificationToken"', "token"),
+            (KEY_TABLE, "token"),
             ('"LiteLLM_BudgetTable"', "budget_id"),
         ):
             statement = (
@@ -199,7 +205,7 @@ class Probe:
 
     def budget(self, app: str, set_to: int | None = None) -> str:
         """The app key's max_budget, after setting it to `set_to` by SQL when given."""
-        table, where = '"LiteLLM_VerificationToken"', f"WHERE key_alias = '{app}'"
+        table, where = KEY_TABLE, f"WHERE key_alias = '{app}'"
         if set_to is not None:
             self.sql(f"UPDATE {table} SET max_budget = {set_to} {where};")  # noqa: S608 - the probe's own app name and number
         return self.sql(f"SELECT max_budget FROM {table} {where};")[0]  # noqa: S608 - the probe's own app name
@@ -243,7 +249,7 @@ class Probe:
     ) -> None:
         """`key` of `service` in the copy's compose.yaml, published as the first of `candidates`
         that differs from the value it holds."""
-        file = self.copy / "compose.yaml"
+        file = self.copy / COMPOSE_FILE
         text = file.read_text()
         block = re.search(rf"^  {re.escape(service)}:\n(?: {{4}}.*\n|\n)+", text, re.MULTILINE)
         expect(block is not None, f"the copy's compose.yaml has no service {service}")
@@ -257,7 +263,7 @@ class Probe:
     def set_enabled(self, enabled: bool) -> None:
         fleet = self.copy / catalog.FLEET_FILE
         text, count = re.subn(
-            r"(  litellm:\n    run:\n      enabled: )\w+",
+            r"( {2}litellm:\n {4}run:\n {6}enabled: )\w+",
             rf"\g<1>{str(enabled).lower()}",
             fleet.read_text(),
         )
@@ -275,7 +281,7 @@ class Probe:
         """The copy with its pinned networks moved and the scratch secrets; the catalog texts
         without and with the shipped entry."""
         self.copy = edge_copy.repository_copy(REPO, self.home, self.scratch, PROJECT)
-        compose_file = self.copy / "compose.yaml"
+        compose_file = self.copy / COMPOSE_FILE
         live = edge_copy.live_pinned_prefixes(compose_file.read_text())
         moved = edge_copy.free_probe_prefixes(live, SUBNET_CANDIDATES, edge_copy.daemon_subnets())
         compose_file.write_text(edge_copy.moved_to_probe_subnets(compose_file.read_text(), moved))
@@ -315,7 +321,7 @@ class Probe:
         ).stdout.split()
         if stray:
             self.run(["docker", "rm", "-f", *stray], check=False)
-        if (self.copy / "compose.yaml").is_file():
+        if (self.copy / COMPOSE_FILE).is_file():
             self.compose("down", "--volumes", "--remove-orphans", "--timeout", "10", check=False)
         filters = [f"label=com.docker.compose.project={PROJECT}"]
         left = self.run(["docker", "ps", "-aq", "--filter", filters[0]]).stdout.split()
@@ -365,7 +371,7 @@ class Probe:
             path.unlink()
             output, ran = self.apply("U1", HAL_REFUSED)
             wanted = f"error: litellm needs {path}; nothing switched next: hal setup"
-            expect(wanted in output and "Type yes" not in output, f"U1 {relative}: {output[-300:]}")
+            expect(wanted in output and YES_PROMPT not in output, f"U1 {relative}: {output[-300:]}")
             expect((self.running(), ran.created) == (set(), 0), f"U1 {relative}: something started")
             self.write_secret(relative, value)
         self.hold(
@@ -380,13 +386,13 @@ class Probe:
         expect(all(row in output for row in rows), f"U2: {output[-400:]}")
         expect((self.running(), ran.created) == (set(), 0), "U2: something started")
         first = min(output.index(SWITCH_ON), output.index(f"~ {FRONT}"))
-        plan = output[first : output.index("Type yes")]
+        plan = output[first : output.index(YES_PROMPT)]
         self.hold("U2", f"{plan}; aborted, exit 1, nothing runs")
 
     def cell_u3(self) -> None:
         output, ran = self.apply("U3", HAL_OK)
-        after = output.partition("to apply")[2]
-        expect("litellm is on" in after and "next:" not in after, f"U3: {after[-300:]}")
+        after = output.partition(PLAN_END)[2]
+        expect(LITELLM_ON in after and "next:" not in after, f"U3: {after[-300:]}")
         expect("litellm keys" not in after, f"U3: the key step printed after the yes: {after}")
         expect(self.running() == set(SERVICES), f"U3: running {self.running()}")
         record = json.loads((self.home / ".local/state/edge" / core.APPLIED_FILE).read_text())
@@ -399,12 +405,12 @@ class Probe:
     def cell_u5(self) -> None:
         self.wait_until_listening("U5")
         output, ran = self.apply("U5", HAL_OK)
-        plan = output.partition("to apply")[0]
+        plan = output.partition(PLAN_END)[0]
         expect("new budget" in plan and plan.count("new key") == len(APPS), f"U5: {plan[-400:]}")
         for app in APPS:
             token = hashed(self.files[SECRETS / "apps" / app])
             columns = "key_alias, max_budget, budget_duration, max_parallel_requests"
-            table = '"LiteLLM_VerificationToken"'
+            table = KEY_TABLE
             statement = f"SELECT {columns} FROM {table} WHERE token = '{token}';"  # noqa: S608 - a hash of the probe's own key
             row = self.sql(statement)
             defaults = (
@@ -436,7 +442,7 @@ class Probe:
         before = self.digest()
         output, _ = self.apply("U6", HAL_OK)
         expect(
-            edge_copy.NOTHING_TO_CHANGE in output and "Type yes" not in output,
+            edge_copy.NOTHING_TO_CHANGE in output and YES_PROMPT not in output,
             f"U6: {output[-300:]}",
         )
         self.expect_digest("U6", before)
@@ -447,7 +453,7 @@ class Probe:
         master.unlink()
         output, _ = self.apply("U14 (a)", HAL_REFUSED)
         wanted = f"error: litellm-keys needs {master}; nothing switched next: hal setup"
-        expect(wanted in output and "Type yes" not in output, f"U14 (a): {output[-300:]}")
+        expect(wanted in output and YES_PROMPT not in output, f"U14 (a): {output[-300:]}")
         self.expect_digest("U14 (a)", before)
         self.write_secret(MASTER, f"sk-{secrets.token_hex(32)}")
         output, _ = self.apply("U14 (b)", HAL_FAILURE)
@@ -457,21 +463,21 @@ class Probe:
         self.expect_digest("U14 (b)", before)
         for verb in ("stop", "start"):
             code, said, _ = self.hal(verb, UNIT)
-            expect(code == HAL_OK, f"U14 (c): hal {verb} exited {code}: {said[-200:]}")
-        self.wait_until_listening("U14 (c)")
-        output, ran = self.apply("U14 (c)", HAL_OK)
+            expect(code == HAL_OK, f"{CELL_U14C}: hal {verb} exited {code}: {said[-200:]}")
+        self.wait_until_listening(CELL_U14C)
+        output, ran = self.apply(CELL_U14C, HAL_OK)
         expect(
             edge_copy.NOTHING_TO_CHANGE in output and (ran.created, ran.modes) == (1, ["read"]),
-            f"U14 (c): E {ran}: {output[-300:]}",
+            f"{CELL_U14C}: E {ran}: {output[-300:]}",
         )
-        self.expect_digest("U14 (c)", before)
+        self.expect_digest(CELL_U14C, before)
         app_key = self.home / SECRETS / "apps" / "hopin"
         aside = app_key.with_name("hopin.aside")
         app_key.rename(aside)
         output, _ = self.apply("U14 (d)", HAL_REFUSED)
         aside.rename(app_key)
         wanted = f"error: litellm-keys needs {app_key}; nothing switched next: hal setup"
-        expect(wanted in output and "Type yes" not in output, f"U14 (d): {output[-300:]}")
+        expect(wanted in output and YES_PROMPT not in output, f"U14 (d): {output[-300:]}")
         self.expect_digest("U14 (d)", before)
         self.hold(
             "U14",
@@ -487,7 +493,7 @@ class Probe:
         self.budget("hopin", set_to=7)
         self.set_enabled(False)
         output, ran = self.apply("U7", HAL_OK)
-        plan, _, after = output.partition("to apply")
+        plan, _, after = output.partition(PLAN_END)
         expect(
             "- litellm switch off litellm, litellm-db, litellm-front · volumes litellm-db kept"
             in plan,
@@ -512,8 +518,7 @@ class Probe:
         self.set_enabled(True)
         output, ran = self.apply("U12", HAL_FAILURE)
         expect(
-            "partial, litellm is not on after the change" in output
-            and "litellm is on" not in output,
+            "partial, litellm is not on after the change" in output and LITELLM_ON not in output,
             f"U12: {output[-300:]}",
         )
         expect({"litellm-db", FRONT} <= self.running(), f"U12: running {self.running()}")
@@ -529,7 +534,7 @@ class Probe:
         for _ in range(2):
             code, output, _ = self.hal("apply", "--local")
             said.append(f"exit {code}: {output.partition('to apply')[2][-160:] or output[-160:]}")
-            if "litellm is on" in output:
+            if LITELLM_ON in output:
                 break
         else:
             raise edge_copy.ProbeFailed(f"R1: no `litellm is on` within two applies: {said}")
@@ -538,7 +543,7 @@ class Probe:
     def cell_u8(self) -> None:
         self.wait_until_listening("U8")
         output, _ = self.apply("U8", HAL_OK)
-        expect("budget 7 → 10" in output.partition("to apply")[0], f"U8: {output[-300:]}")
+        expect("budget 7 → 10" in output.partition(PLAN_END)[0], f"U8: {output[-300:]}")
         expect(float(self.budget("hopin")) == litellm_keys.APP_BUDGET_DOLLARS, "U8: hopin's budget")
         self.hold("U8", "the kept volume's row planned `budget 7 → 10` and made; D shows 10")
 
@@ -559,7 +564,7 @@ class Probe:
         self.wait_until_listening("U9")
         output, _ = self.apply("U9", HAL_OK)
         expect(
-            "budget 8 → 10" in output.partition("to apply")[0],
+            "budget 8 → 10" in output.partition(PLAN_END)[0],
             f"U9: after the start {output[-300:]}",
         )
         self.hold(
