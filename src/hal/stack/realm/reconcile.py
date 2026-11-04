@@ -50,10 +50,11 @@ from hal.stack.realm.observe import (
     Inventory,
     keys,
 )
-from hal.stack.unit_plans import Action, Recreate, UnitPlan
+from hal.stack.unit_plans import DatabaseUnit, Restart
 
 REALM_UNIT = "keycloak"
 KEYCLOAK_SERVICE = "keycloak"
+KEYCLOAK = DatabaseUnit(REALM_UNIT, KEYCLOAK_SERVICE, "keycloak-db", "Keycloak")
 CONFIG_CLI = "keycloak-config-cli"
 # config-cli imports these from its directory bind of keycloak/, which `core.file_binds` skips.
 REALM_FILES = ("keycloak/master.yaml", "keycloak/realm.yaml")
@@ -138,17 +139,12 @@ class RealmAction(StrEnum):
     UNREADABLE = "unreadable"  # Keycloak should run and cannot be read
 
 
-class RealmRestart(StrEnum):
-    KEYCLOAK = "Keycloak starts now"
-    DATABASE = "its database restarts now"
-
-
 @dataclass(frozen=True)
 class RealmPlan:
     action: RealmAction = RealmAction.NOTHING
     why: str = ""  # why the realm is applied or held, for RUN and HELD
     error: str = ""  # why Keycloak could not be read, for UNREADABLE
-    restart: RealmRestart | None = None  # the Keycloak unit start of this run, for NOT_CHECKED
+    restart: Restart | None = None  # the Keycloak unit start of this run, for NOT_CHECKED
     gate: core.Gate | None = None  # the Keycloak unit's gate, for HELD
     entry: dict[str, str] = field(default_factory=dict)  # the inputs as planned, for the record
 
@@ -180,25 +176,13 @@ class Observer:
             raise RealmError("the realm observer answered no JSON") from error
 
 
-def restart_of(plans: Iterable[UnitPlan], recreates: Iterable[Recreate]) -> RealmRestart | None:
-    """What this run starts of the Keycloak unit, None when nothing: Keycloak itself when its
-    unit is switched on or its service recreated, else only another service of the unit."""
-    realm_recreates = [recreate for recreate in recreates if recreate.unit == REALM_UNIT]
-    switched_on = any(plan.unit.key == REALM_UNIT and plan.action is Action.ON for plan in plans)
-    if switched_on or any(recreate.service == KEYCLOAK_SERVICE for recreate in realm_recreates):
-        return RealmRestart.KEYCLOAK
-    if realm_recreates:
-        return RealmRestart.DATABASE
-    return None
-
-
 def plan_realm(
     observer: Observer,
     record: core.Record,
     config: Mapping[str, Any],
     checkout: core.Checkout,
     gate: core.Gate | None,
-    restart: RealmRestart | None,
+    restart: Restart | None,
 ) -> RealmPlan:
     """What the step does: `gate` is the Keycloak unit's, None when the catalog has none, and
     `restart` says what this run starts of its unit, None when nothing."""
