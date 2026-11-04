@@ -1,10 +1,11 @@
 """Probe of LiteLLM's backup (#970 cells B1-B7): `hal backup litellm`, its pre-apply snapshot,
 `hal restore --test litellm` and a lost volume rebuilt through `hal apply`'s key step, on the stack
 of litellm.py in its throwaway project. Nothing live and nothing paid: the probe refuses to start
-unless `internet` is internal and holds only the fakes.
+unless `internet` is internal and holds only the fakes. It runs in hal's environment, which
+holds the agent-runtime client:
 
     flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 50 1780 \\
-        python3 probe/agent-service/litellm_backup.py --scratch DIR
+        uv run --frozen python3 probe/agent-service/litellm_backup.py --scratch DIR
 
 Measured: a run takes about two minutes and its teardown a few seconds (K 50 s, CAP 1780 s).
 
@@ -31,8 +32,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from litellm import DATABASE, PROJECT, expect, hashed, run_scratch_probe
-from litellm_admission import APP_PUSH, PERSON_PUSH, AdmissionProbe
+from litellm import DATABASE, PERSON_PUSH, PROJECT, expect, hashed, run_scratch_probe
+from litellm_admission import APP_PUSH, AdmissionProbe
 from litellm_expiry import HAL, HAL_SECONDS
 from litellm_keys import APPS, KeysProbe, first_of_next_month, parsed_time
 from scratch_secrets import write_new
