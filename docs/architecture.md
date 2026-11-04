@@ -246,7 +246,7 @@ The apex and `www` are hosts only as the catalog's `cloudflare.redirect` (the ap
 
 What the file declares belongs to the file: a console change to a declared object is reset by the next apply that runs the realm step, together with what hangs off it (a step or subflow in a declared flow, a mapper on a declared scope or client, a default or optional scope on a declared client that lists its scopes, a client role on a listed service account, a console-enabled service account on a declared client, a flow binding override on a declared client). What the console creates on its own stays: people, their memberships, and the groups, clients, roles and top-level flows the file does not declare. No person is ever deleted (a service-account user that a console-enabled service account on a declared client created goes with that reset). A change to a declared object goes into the file; the blockquote in docs/keycloak.md after „Theme and language“ lists the measured examples, and the Keycloak probe's proofs 3c and 3d pin them.
 
-**Today's switch** is different: "off" means removing a tunnel line by hand. Planned with X6a (#168): the ingress comes from the catalog, so a line is no longer removed by hand. Both presentator hosts are `exposure: public`, target Traefik on 8081 and sit behind presentator's own Keycloak login; no Access app stands in front of them. The wildcard `*` protection is X8b.
+**Today's switch** is different: "off" means removing a tunnel line by hand, and only a Cloudflare-managed tunnel reads the lines (`docs/external.md`). Planned with X6a (#168): the ingress comes from the catalog, so a line is no longer removed by hand. Both presentator hosts are `exposure: public`, target Traefik on 8081 and sit behind presentator's own Keycloak login; no Access app stands in front of them. The wildcard `*` protection is X8b.
 
 **Emergency switches are separate:** `hal stop hopin` takes it offline at once without a code change. Guards: section 8 state table.
 
@@ -386,7 +386,7 @@ the privacy file is no refusal there yet.
 |---|---|---|
 | `purpose` | one sentence: what breaks without it | "SonarCloud analysis in CI" |
 | `scope` | the permissions it was created with, as declared | `["sonarcloud:analyze"]`; `["org:secrets:read", "repo:metadata:read"]` |
-| `bound_as` | exactly where each app receives it: a compose secret file, or a named environment variable | `{app = "edge", file = "keycloak/db-password"}`; `{app = "presentator", env = "PRESENTATOR_SECRET_KEY_FILE"}` |
+| `bound_as` | exactly where each app receives it: a compose secret file, or a named environment variable | `{app = "edge", file = "keycloak/db-password"}`; `{app = "presentator", file = "presentator/secret-key"}` |
 | `placed_at` | where a copy lives at a provider, by name | `github-org-secret:SONAR_TOKEN` |
 | `max_age_days` | rotation rule (home-tools#10 line 15: a date only with provenance) | `365` |
 
