@@ -151,16 +151,12 @@ class Probe:
         )
         return hashlib.sha256("\n".join(rows).encode()).hexdigest()[:12]
 
-    def set_budget(self, app: str, dollars: int) -> None:
-        self.sql(
-            f'UPDATE "LiteLLM_VerificationToken" SET max_budget = {dollars} '
-            f"WHERE key_alias = '{app}';"
-        )  # noqa: S608 - the probe's own app name and number
-
-    def budget_of(self, app: str) -> str:
-        return self.sql(
-            f"SELECT max_budget FROM \"LiteLLM_VerificationToken\" WHERE key_alias = '{app}';"
-        )[0]  # noqa: S608 - the probe's own app name
+    def budget(self, app: str, set_to: int | None = None) -> str:
+        """The app key's max_budget, after setting it to `set_to` by SQL when given."""
+        table, where = '"LiteLLM_VerificationToken"', f"WHERE key_alias = '{app}'"
+        if set_to is not None:
+            self.sql(f"UPDATE {table} SET max_budget = {set_to} {where};")  # noqa: S608 - the probe's own app name and number
+        return self.sql(f"SELECT max_budget FROM {table} {where};")[0]  # noqa: S608 - the probe's own app name
 
     def wait_until_listening(self, cell: str) -> None:
         """Until LiteLLM answers on litellm-backend, from a throwaway beside the key step."""
@@ -354,10 +350,10 @@ class Probe:
         expect("new budget" in plan and plan.count("new key") == len(APPS), f"U5: {plan[-400:]}")
         for app in APPS:
             token = hashed(self.files[SECRETS / "apps" / app])
-            row = self.sql(
-                "SELECT key_alias, max_budget, budget_duration, max_parallel_requests FROM "
-                f"\"LiteLLM_VerificationToken\" WHERE token = '{token}';"  # noqa: S608 - a hash of the probe's own key
-            )
+            columns = "key_alias, max_budget, budget_duration, max_parallel_requests"
+            table = '"LiteLLM_VerificationToken"'
+            statement = f"SELECT {columns} FROM {table} WHERE token = '{token}';"  # noqa: S608 - a hash of the probe's own key
+            row = self.sql(statement)
             defaults = (
                 litellm_keys.APP_BUDGET_DOLLARS,
                 litellm_keys.BUDGET_DURATION,
@@ -426,7 +422,7 @@ class Probe:
         )
 
     def cell_u7(self) -> None:
-        self.set_budget("hopin", 7)
+        self.budget("hopin", set_to=7)
         self.set_enabled(False)
         output, created = self.apply("U7", HAL_OK)
         plan, _, after = output.partition("to apply")
@@ -481,9 +477,7 @@ class Probe:
         self.wait_until_listening("U8")
         output, _ = self.apply("U8", HAL_OK)
         expect("budget 7 → 10" in output.partition("to apply")[0], f"U8: {output[-300:]}")
-        expect(
-            float(self.budget_of("hopin")) == litellm_keys.APP_BUDGET_DOLLARS, "U8: hopin's budget"
-        )
+        expect(float(self.budget("hopin")) == litellm_keys.APP_BUDGET_DOLLARS, "U8: hopin's budget")
         self.hold("U8", "the kept volume's row planned `budget 7 → 10` and made; D shows 10")
 
     def cell_u9(self) -> None:
@@ -491,7 +485,7 @@ class Probe:
         expect(code == HAL_OK, f"U9: hal stop exited {code}: {said[-200:]}")
         self.compose("start", "litellm-db", "litellm")
         self.wait_until_listening("U9")
-        self.set_budget("hopin", 8)
+        self.budget("hopin", set_to=8)
         output, created = self.apply("U9", HAL_OK)
         expect(
             "· litellm stays stopped" in output and edge_copy.NOTHING_TO_CHANGE in output,
