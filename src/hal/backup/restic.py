@@ -28,6 +28,9 @@ PRE_APPLY_MAX_AGE = timedelta(days=90)
 # A snapshot's full ID, the only form a forget is ever named: never a prefix or an option.
 _FULL_ID = re.compile(r"[0-9a-f]{64}")
 CHECK_READ_DATA_SUBSET = "10%"
+# Every prune repacks each pack that holds an unused blob, so a forgotten snapshot's bytes leave
+# the repository at that prune: the privacy text's bound on backups depends on it.
+PRUNE = ("--prune", "--max-unused", "0")
 _SNAPSHOTS_LABEL = "restic snapshots"
 # The snapshot layout under an app's source path: the dump and manifest (DB_FOLDER), the audio,
 # and a SQLite app's files volume under its compose volume name.
@@ -157,11 +160,11 @@ def forget(settings: Settings, app: str, *, pre_apply: bool = False) -> None:
         [
             "forget", *_scope(app, pre_apply=pre_apply), "--group-by", "host,tags",
             *(_pre_apply_policy() if pre_apply else _weekly_policy()),
-            "--prune",
+            *PRUNE,
         ],
     )  # fmt: skip
     if expired := _pre_apply_older_than(settings, app, host.now() - PRE_APPLY_MAX_AGE):
-        _restic(settings, "restic forget", ["forget", *expired, "--prune"])
+        _restic(settings, "restic forget", ["forget", *expired, *PRUNE])
 
 
 def _pre_apply_older_than(settings: Settings, app: str, bound: datetime) -> list[str]:
