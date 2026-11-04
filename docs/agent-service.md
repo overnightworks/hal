@@ -221,7 +221,7 @@ privacy section, which owns it.
 **Whose account.** Only the operator and his own test accounts are members of `/services/agent-service/subscription`, so his
 Claude subscription serves only his own use. Every other person reaches the provider only through the
 API route, under Anthropic's commercial API terms: an app's own key at LiteLLM, not the service
-(see „The API route“). Nothing runs that route yet. The privacy section `agent-dienst` in
+(see „The API route“). No app takes that route yet. The privacy section `agent-dienst` in
 `legal/sections/agent-service/datenschutz.html` describes only that route as an app takes it, through the
 front, LiteLLM with its database and the gateway to Anthropic: what a request carries, what LiteLLM keeps
 per app and per person, when that is deleted, how long the backup keeps it and the legal basis of the budget per person (Art. 6 Abs. 1 lit. f DSGVO, with the right to object in the general part). The Keycloak section states the same backup bound for a snapshot before an update. hal writes it itself
