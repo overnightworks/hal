@@ -51,7 +51,7 @@ Allow by `owner` alone only when the service opens random ports.
 
 ## hal backup and hal restore
 
-A weekly encrypted backup of the declared apps (Songmaker, Keycloak and LiteLLM) into a local restic repository,
+A weekly encrypted backup of the declared apps (Songmaker, Keycloak, LiteLLM and presentator) into a local restic repository,
 and a monthly test that restores the last successful backup's snapshot and proves it is good.
 
 **What it protects against:** accidental deletion and corruption. The repository `~/backups/restic` sits
@@ -239,6 +239,19 @@ spend per key and per fingerprint, the daily rows and the tool names, and `key_n
 LiteLLM shows of each key; never a key in clear. In plain text it exists in the same three 0700
 places as Keycloak's. LiteLLM writes spend to its database in batches every 10 seconds
 (`PROXY_BATCH_WRITE_AT`), so a dump lacks at most that last batch.
+
+presentator's copy is its SQLite database and its built decks (`builds`, without the half-built
+`staged-*` directories). The database holds the people's sessions, their Keycloak `sub`s and the
+source secrets, which are encrypted with presentator's master key (the file
+`~/.secrets/presentator/secret-key`). The master key is not in the data backup, so a restored copy
+cannot read those secrets without it. Until the separate backups of secrets and data of #291 exist,
+the master key and the data backups sit on the same disk. The session ids (the signed session
+cookies carry them) and the Keycloak refresh and ID tokens are stored as plain text in the copy. The
+copy alone exposes the claims of the ID tokens and whatever an ID token allows as a logout hint at
+Keycloak. A takeover of a live session needs the master key as well, because presentator signs the
+cookies with it (`~/.secrets/presentator/secret-key`); renewing a token needs Keycloak's client secret
+(`~/.secrets/keycloak/clients/presentator`), which is not in the database either. In plain text the
+copy exists in the same three 0700 places as Keycloak's.
 
 A row that `hal expire` deletes ([agent-service.md](agent-service.md), „What expires“) stays in
 every snapshot taken before the delete, until retention forgets that snapshot:

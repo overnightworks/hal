@@ -1,6 +1,5 @@
 """The catalog's host shape (#131): one reader, one decision about `run.enabled`."""
 
-import copy
 import json
 import re
 from pathlib import Path
@@ -76,11 +75,17 @@ def test_a_host_carries_its_service_fqdn_and_all_five_fields():
     )
 
 
-def test_songmaker_and_hopin_refuse_the_back_channel_route_and_songmaker_alone_its_metrics():
+@pytest.mark.parametrize("name", ["songmaker", "hopin", "presentator", "presentator-talk"])
+def test_a_host_with_a_keycloak_login_refuses_the_back_channel_route_publicly(name):
     found = catalog.hosts(catalog.read(PROJECT_ROOT / catalog.FLEET_FILE))
-    assert {one.fqdn: one.deny_public for one in found if one.deny_public} == {
-        "songmaker.hallucinai.de": ("/auth/backchannel-logout", "/metrics"),
-        "hopin.hallucinai.de": ("/auth/backchannel-logout",),
+    [host] = [one for one in found if one.fqdn == f"{name}.hallucinai.de"]
+    assert "/auth/backchannel-logout" in host.deny_public
+
+
+def test_songmaker_alone_refuses_its_metrics_publicly():
+    found = catalog.hosts(catalog.read(PROJECT_ROOT / catalog.FLEET_FILE))
+    assert {one.fqdn for one in found if "/metrics" in one.deny_public} == {
+        "songmaker.hallucinai.de"
     }
 
 
@@ -548,14 +553,3 @@ def test_an_app_host_without_ready_is_refused_when_the_apps_are_read():
 
     with pytest.raises(catalog.CatalogError, match=r"services\.app\.hosts\[0\]\.ready"):
         catalog.apps(entry, {}, "edge")
-
-
-def test_enabling_presentator_publishes_hosts_with_the_back_channel_denied():
-    """#449 A1 (M3): enabled, every presentator host denies the back-channel route."""
-    fleet = copy.deepcopy(catalog.read(PROJECT_ROOT / catalog.FLEET_FILE))
-    fleet["services"]["presentator"]["run"]["enabled"] = True
-
-    hosts = [one for one in catalog.hosts(fleet) if one.service == "presentator"]
-
-    assert hosts
-    assert all(one.deny_public == ("/auth/backchannel-logout",) for one in hosts)
