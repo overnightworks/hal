@@ -83,10 +83,10 @@ class World:
 @pytest.fixture
 def world(repository: Path, scripted: ScriptedCompose, switch, state: Path) -> World:  # noqa: F811
     """The repository's own frame, general part and agent service block (a catalog entry,
-    disabled) and its Songmaker text (no catalog entry), committed, with an empty `legal/built`."""
+    disabled) committed, with an empty `legal/built`."""
     legal = repository / "legal"
     shutil.copytree(REPOSITORY / "legal/frame", legal / "frame")
-    for unit in ("allgemein", "agent-service", "songmaker"):
+    for unit in ("allgemein", "agent-service"):
         shutil.copytree(REPOSITORY / "legal/sections" / unit, legal / "sections" / unit)
     (legal / "built").mkdir()
     (legal / "built/.gitkeep").touch()

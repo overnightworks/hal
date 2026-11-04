@@ -152,6 +152,16 @@ def is_app(entry: object) -> bool:
     return isinstance(entry, dict) and "run" in entry and "repo" in entry
 
 
+def host_only_keys(document: Any) -> tuple[str, ...]:
+    """The entries with neither `repo` nor `run`: apps edge only fronts, whose checkout
+    `~/srv/<key>` is somebody else's to deploy."""
+    return tuple(
+        key
+        for key, entry in _entries(document).items()
+        if isinstance(entry, dict) and "run" not in entry and "repo" not in entry
+    )
+
+
 def apps(
     document: Any, profile_services: Mapping[str, tuple[str, ...]], edge_project: str
 ) -> tuple[App, ...]:

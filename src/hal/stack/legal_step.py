@@ -1,6 +1,6 @@
 """The legal step of `hal apply --local`: the three pages built from `legal/frame`, the
 sections of `legal/sections` and each app's own `legal/` files at the release it shows
-(`apps.ShownRelease`), compared with `legal/built`, and written there after the operator's `yes`.
+(`apps.ShownRelease`; a host-only app's is HEAD of its checkout), compared with `legal/built`, and written there after the operator's `yes`.
 
 The step runs only while `services.legal` is in the catalog and enabled. Every refusal comes at
 plan time, before the question, and nothing is written on one.
@@ -109,14 +109,17 @@ def plan_legal(
     """What the step would write; a plan without pages while the legal unit does not run."""
     if not any(unit.key == LEGAL_UNIT and unit.enabled for unit in fleet.units):
         return LegalPlan(repository, record, {}, {})
-    _refuse_two_owners(repository, {app.key for app in released.catalogued})
+    document = catalog.read(repository / catalog.FLEET_FILE)
+    host_only = catalog.host_only_keys(document)
+    _refuse_two_owners(repository, {app.key for app in released.catalogued} | set(host_only))
     git = checkout.Git(repository, run_git)
     all_blocks = read_blocks(
         repository, _catalog_keys(repository), lambda path: _commit_date(git, path)
     )
-    zone = catalog.zone(catalog.read(repository / catalog.FLEET_FILE))
+    zone = catalog.zone(document)
     tags: dict[str, str] = {}
-    for shown in released.shown:
+    shown_releases = [*released.shown, *(_head_of(key, released.runtime) for key in host_only)]
+    for shown in shown_releases:
         app = _release_blocks(shown, zone)
         all_blocks += app
         tags |= {block.path: shown.tag for block in app}
@@ -250,6 +253,21 @@ def _release_blocks(shown: apps.ShownRelease, zone: str) -> list[Block]:
         raise LegalError(f"{where}: cannot read {shown.tag} ({shown.sha}): {error}") from error
     # Without the privacy file the release has no block at all, its terms included.
     return blocks if any(block.page == PRIVACY_PAGE for block in blocks) else []
+
+
+def _head_of(key: str, runtime: apps.AppRuntime) -> apps.ShownRelease:
+    """The release of an app without origin: HEAD of its checkout `~/srv/<key>`, named by its
+    short sha."""
+    where = f"~/srv/{key}"
+    tree = deploy_checkout.AppCheckout(checkout.Git(runtime.srv / key, runtime.git), "", "")
+    try:
+        tree.require_repository()
+        sha = tree.head()
+        if sha is None:
+            raise LegalError(f"{where}: has no commit")
+        return apps.ShownRelease(key, tree.git.short(sha), sha, tree)
+    except (checkout.GitError, deploy_checkout.CheckoutRefused) as error:
+        raise LegalError(f"{where}: cannot read its HEAD: {error}") from error
 
 
 def _refuse_two_owners(repository: Path, app_keys: Collection[str]) -> None:
