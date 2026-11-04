@@ -285,9 +285,10 @@ def test_a_compose_file_that_is_no_utf8_refuses_the_plan_of_its_app(origin, home
     repository.mkdir()
     (repository / "fleet.yaml").write_text(FLEET)
     runtime = runtime_of(home, state, ScriptedDocker(state, home / "srv" / KEY))
+    marks = switches.Switches(state)
 
     with pytest.raises(apps.AppError, match=r"compose\.yaml is not UTF-8"):
-        apps.plan_apps(repository, EDGE_FLEET, runtime, switches.Switches(state))
+        apps.plan_apps(repository, EDGE_FLEET, runtime, marks)
 
 
 def test_a_tag_listing_that_git_does_not_give_in_three_fields_is_an_error(app):
