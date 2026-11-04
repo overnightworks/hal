@@ -63,7 +63,7 @@ off-site copy is a later slice (architecture.md, gap 19).
 - *Data classes.* An app's record in `backup/apps.toml` names its persistent data: the database and the audio or files volume. That is backed up and restore-tested. What the record does not name, such as caches and model weights, is rebuildable and is not backed up; no key marks it.
 - *Online.* No service is stopped: a PostgreSQL app is dumped transactionally, a SQLite app is copied through SQLite's online backup, and volumes are read live. The app keeps running.
 - *One app fails alone.* An app whose volume or database container is missing fails only itself; the others still back up and are forgotten, and the repository is checked. The failed app is not forgotten in that run, so a partial snapshot of it never displaces its last good one.
-- *Restore goes to a new folder.* `hal restore --target` refuses a directory that exists; loading it into the live app is a separate step.
+- *Restore goes to a new folder.* `hal restore --target` refuses a directory that exists. The only form that changes a live database is `hal restore <app> --live`: it loads a DB-only app's snapshot into its live database while the app is switched off (below).
 - *0 rows is valid.* The restore test requires rows only where the record says `require_rows = true`.
 - *One retention.* Every app's snapshots follow the same policy, 4 weekly and 3 monthly, and pre-apply snapshots keep their own last 10, and each forget of an app drops those older than 90 days (below). There is no per-app retention of backup snapshots; privacy values are app-owned (architecture.md, section 2).
 - *Separate backups.* All secrets are backed up once as their own encrypted off-disk backup with its own password; the data backup has its own. Of the backup credentials only these two passwords sit in the password manager, and a restore after a disk loss brings the secrets back first, then the data. The secrets backup does not exist yet: `~/.secrets` is in no backup today (architecture.md, section 6).
@@ -111,7 +111,9 @@ read by anyone, ever:** losing the key loses every backup, and restic has no rec
 A missed run (PC off) runs at the next boot. If Docker or the app's database is not up yet, the backup
 waits up to 10 minutes, then fails. One host lock (`~/.local/state/edge/backup.lock`) serialises every
 `hal backup` or `hal restore` run: run by hand during a backup or restore test, `hal restore --list`,
-`hal restore` or any other verb waits silently until that run ends.
+`hal restore` or any other verb waits silently until that run ends. `hal restore <app> --live` holds
+the lock from before its question to its end, so a Sunday backup or restore test that starts
+meanwhile waits for the answer and the load.
 
 To run now, start the same units the timers take (`systemctl --user start hal-backup.service` and
 `hal-backup-restore-test.service`); the last `hal` event of the unit is the verdict.
@@ -333,10 +335,29 @@ Exit 0: every phase succeeded. Exit 3: a run failed; `error: <app> not backed up
 (`hal restore --list`, the real `hal restore`, `hal backup --init` and `--unlock` still print `error: hal <verb>: failed: …`). Exit 2: the flags do not fit together (`--pre-apply` without an app, for
 example); nothing ran. Exit 130: Ctrl-C or SIGTERM; `backup` and the restore test record it in the status file as interrupted.
 
+`hal restore <app> --live` ends with `✓ <app>  loaded  <snapshot> · <time>` and `next: hal start <app>`, exit 0.
+Exit 4: the app is on (`stop it first: hal stop <app>`), disabled or no unit, there is no terminal,
+a `pg_restore` session still runs in its database, or its switch changed after the check. Exit 1: the
+question was answered with anything but `yes`. Exit 3: the record keeps audio or files, or a step before
+the load failed (`error: <app>: <reason>`), or the load failed. A failed load ends in one line,
+`error: <app> load failed · <cause> · a rerun loads the snapshot whole`, and
+`next: hal restore <app> --live --snapshot <id>` naming the snapshot it tried. What the cause means for
+the data:
+
+- `pg_restore ended with exit N`, or `the shell could not start pg_restore`: `pg_restore`'s
+  transaction rolled back, so the old data stays, unless the server crashed at the commit;
+- `no exit code of pg_restore`, or the client's own exit: the load may be in, since `pg_restore`
+  commits whenever the whole dump reached it.
+
+In every case the rerun the line names, of the same snapshot, is the way back. `hal start <app>` on
+the old data is your own choice, and only after a printed code other than 0. Ctrl-C or SIGTERM before
+the load ends with `interrupted · nothing loaded`, exit 130; during the load hal waits for the load's
+end and prints its real outcome.
+
 ### Restore one app
 
-The two blocks below stay until `restore <app> --live` exists (`docs/architecture.md` gap 18;
-follow-up on overnightworks/edge#222).
+Songmaker's block below stays until its live restore exists (`docs/architecture.md` gap 18;
+follow-up on overnightworks/edge#222): it copies audio, which `hal restore <app> --live` does not.
 
 ```sh
 hal restore songmaker --target ~/restore-songmaker   # a new directory, not under ~/.cache/edge-backup
@@ -405,59 +426,43 @@ volume. The copied files keep the owner restic restored them with (your user).
 
 ### Restore Keycloak
 
-Only you restore Keycloak, and the block below overwrites only Keycloak's
-database. It stops `keycloak` only (Traefik and every other service keep
-running), loads the dump into `keycloak-db`, and starts `keycloak` again. First
-restore the snapshot as above, `hal restore keycloak --target
-~/restore-keycloak`; the dump holds keys, so the block deletes that directory
-after a successful `docker start`. Paste the block as a whole: it stops at the
-first failing command and never starts Keycloak after a failed load. If the
-load fails, `pg_restore`'s messages can quote rows of the dump, so they are
-discarded and the session runs with server error logging off (`keycloak` is the
-image's superuser, which may set that); only the exit code is printed. Delete
-`~/restore-keycloak` once you are done. The block acts on the compose project `hal`;
-`HAL_COMPOSE_PROJECT` names another, which is how it was driven against a throwaway stack.
-A failed realm step of `hal apply` names its pre-apply snapshot; restore that one with
-`hal restore keycloak --snapshot <ID> --target ~/restore-keycloak`.
+Only you restore Keycloak. `hal restore keycloak --live` loads the last good snapshot into
+Keycloak's live database in one transaction, after you type `yes` at a terminal, and only while
+Keycloak is switched off. It starts `keycloak-db` alone if it is stopped, leaves `keycloak` stopped,
+holds the backup lock and removes the restored dump when it ends:
 
-```sh
-(
-set -euo pipefail
-umask 077
-restored=~/restore-keycloak
-container() {
-  docker ps --quiet --filter label=com.docker.compose.project="${HAL_COMPOSE_PROJECT:-hal}" \
-    --filter label=com.docker.compose.service="$1" \
-    --filter label=com.docker.compose.oneoff=False
-}
-db=$(container keycloak-db)
-kc=$(container keycloak)
-[ "$(wc -w <<<"$db")" -eq 1 ] \
-  || { echo "need exactly one running keycloak-db, found: ${db:-none}" >&2; exit 1; }
-[ "$(wc -w <<<"$kc")" -eq 1 ] \
-  || { echo "need exactly one running keycloak, found: ${kc:-none}" >&2; exit 1; }
-docker stop "$kc"
-docker exec -i -e PGOPTIONS='-c log_min_messages=panic -c log_min_error_statement=panic' \
-  "$db" pg_restore --username keycloak --dbname keycloak \
-  --clean --if-exists --single-transaction --exit-on-error \
-  < "$restored/db/db.dump" 2>/dev/null \
-  || { code=$?; echo "pg_restore failed with exit $code; keycloak stays stopped, start it with: docker start $kc" >&2; exit 1; }
-docker start "$kc"
-rm -rf "$restored"
-)
-```
+1. `hal stop keycloak`
+2. `hal restore keycloak --live`, and check that its loaded row names the snapshot you meant
+3. `hal start keycloak`
 
-A failed load changed nothing (`--single-transaction`); `docker start` with the
-printed ID brings the old Keycloak back.
+A failed realm step of `hal apply` names its pre-apply snapshot; load that one with
+`hal restore keycloak --live --snapshot <ID>`. A failed load's line names its own rerun (above).
+
+A run killed outright (SIGKILL, the terminal closed) reports nothing: its load ends whole or not
+at all, nobody reports which, and Keycloak stays stopped. Run
+`hal restore keycloak --live --snapshot <id>` with the ID the killed run's question named (or
+`hal restore --list`'s): it refuses while that load still runs, then loads.
+
+### Restore LiteLLM
+
+The same three commands load LiteLLM's database:
+
+1. `hal stop litellm`
+2. `hal restore litellm --live`
+3. `hal start litellm`
+
+Every key and person then counts from the snapshot's spend: one past its budget stays refused, and
+spend since the snapshot is lost. A snapshot from an earlier month is reset by LiteLLM's own budget
+job, as its `budget_reset_at` has passed. No app reaches LiteLLM while it is switched off.
 
 ### A lost LiteLLM volume
 
 At its next start `litellm-db` is empty and LiteLLM migrates it. The key step of `hal apply` then
 makes the person budget and each app's key anew from the key files (when it runs:
 [agent-service.md](agent-service.md), „The API route“). Every budget restarts at zero, and the
-daily rows are gone. `~/.secrets` is in no backup. `hal restore litellm --target <dir>` restores
-the last backup's dump into a folder; loading it into the live database is not scripted yet
-([architecture.md](architecture.md), gap 18). The key files must be the ones that made the hashes.
+daily rows are gone. `~/.secrets` is in no backup. `hal restore litellm --live` loads the last
+backup into the live database and gives the month's spend back („Restore LiteLLM“ above). The key
+files must be the ones that made the hashes.
 
 ### Stale locks
 

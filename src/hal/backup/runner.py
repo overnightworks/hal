@@ -206,7 +206,7 @@ def require_password_file(settings: Settings) -> None:
 
 
 @dataclass(frozen=True)
-class _Deadline:
+class Deadline:
     """One waiting budget that several consecutive waits draw from."""
 
     timeout: timedelta
@@ -231,7 +231,7 @@ def backup(
     targets = _targets(apps, only)
     with run.phase(Phase.PREPARE, failing=ExitCategory.CONFIGURATION):
         require_secret_and_repository(settings)
-    first_readiness = _Deadline.start(READINESS_TIMEOUT)
+    first_readiness = Deadline.start(READINESS_TIMEOUT)
     _require_docker_with_pinned_images(run, targets, first_readiness)
     with run.phase(Phase.PREPARE):
         run.attribute_legacy_evidence(settings, apps)
@@ -242,7 +242,7 @@ def backup(
                 settings,
                 app,
                 run,
-                first_readiness if index == 0 else _Deadline.start(),
+                first_readiness if index == 0 else Deadline.start(),
                 pre_apply=pre_apply,
             )
             report(_backed_up_row(app, summary, started))
@@ -348,7 +348,7 @@ def restore_test(
     targets = _targets(apps, only)
     with run.phase(Phase.PREPARE, failing=ExitCategory.CONFIGURATION):
         require_secret_and_repository(settings)
-    _require_docker_with_pinned_images(run, targets, _Deadline.start())
+    _require_docker_with_pinned_images(run, targets, Deadline.start())
     with run.phase(Phase.PREPARE):
         run.attribute_legacy_evidence(settings, apps)
     verified = []
@@ -394,11 +394,11 @@ def _targets(apps: tuple[App, ...], only: str | None) -> tuple[App, ...]:
 
 
 def _require_docker_with_pinned_images(
-    run: Run, apps: tuple[App, ...], readiness: _Deadline
+    run: Run, apps: tuple[App, ...], readiness: Deadline
 ) -> None:
     """A daemon that is still starting is waited for; only then are missing images pulled."""
     with run.phase(Phase.READINESS):
-        _wait_until_ready(docker.require_daemon, readiness, READINESS_POLL_SECONDS)
+        wait_until_ready(docker.require_daemon, readiness, READINESS_POLL_SECONDS)
     with run.phase(Phase.PREPARE, failing=ExitCategory.CONFIGURATION):
         _resolved(lambda: docker.ensure_pinned_images(apps))
 
@@ -446,14 +446,19 @@ def restore(
     if target.exists():
         raise StepFailed(ExitCategory.CONFIGURATION, "the target already exists")
     require_secret_and_repository(settings)
-    snapshot_id = (
-        _last_successful_snapshot(settings, app, _recorded_snapshot(settings, apps, app))
-        if snapshot_prefix is None
-        else _chosen_snapshot(settings, app, snapshot_prefix)
-    )
+    snapshot_id = snapshot_to_restore(settings, apps, app, snapshot_prefix)
     target.mkdir(mode=0o700, parents=True)
     restic.restore(settings, app.name, snapshot_id, target)
     return snapshot_id
+
+
+def snapshot_to_restore(
+    settings: Settings, apps: tuple[App, ...], app: App, snapshot_prefix: str | None
+) -> str:
+    """The last successful backup's snapshot of the app, or the one of it the operator names."""
+    if snapshot_prefix is None:
+        return _last_successful_snapshot(settings, app, _recorded_snapshot(settings, apps, app))
+    return _chosen_snapshot(settings, app, snapshot_prefix)
 
 
 @dataclass(frozen=True)
@@ -470,12 +475,12 @@ class _SqliteTarget:
     kept: KeptVolume | None
 
 
-def _ready_target(app: App, readiness: _Deadline) -> _PostgresTarget | _SqliteTarget:
+def _ready_target(app: App, readiness: Deadline) -> _PostgresTarget | _SqliteTarget:
     match app.database:
         case PostgresDatabase(audio=audio) as database:
             return _PostgresTarget(
                 database,
-                _wait_until_ready(
+                wait_until_ready(
                     lambda: docker.database_container(app, database),
                     readiness,
                     READINESS_POLL_SECONDS,
@@ -495,11 +500,11 @@ def _kept_volume(app: App, folder: str, volume: str, skip: str | None) -> KeptVo
 
 
 def _back_up(
-    settings: Settings, app: App, run: Run, readiness: _Deadline, *, pre_apply: bool
+    settings: Settings, app: App, run: Run, readiness: Deadline, *, pre_apply: bool
 ) -> restic.BackupSummary:
     with run.phase(Phase.READINESS):
         target = _ready_target(app, readiness)
-    with _private_directory(settings.work_dir) as staging:
+    with private_directory(settings.work_dir) as staging:
         with run.phase(Phase.DUMP):
             _dump(settings, target, staging)
         with run.phase(Phase.MANIFEST):
@@ -547,7 +552,7 @@ def _restore_test(settings: Settings, app: App, run: Run, snapshot_prefix: str |
             if snapshot_prefix is None
             else _chosen_snapshot(settings, app, snapshot_prefix)
         )
-    with _private_directory(settings.work_dir) as restored:
+    with private_directory(settings.work_dir) as restored:
         with run.phase(Phase.RESTORE):
             restic.restore(settings, app.name, snapshot_id, restored)
         with run.phase(Phase.VERIFY):
@@ -605,9 +610,9 @@ def _verify_postgres(
     with docker.restore_server(
         RESTORE_IMAGES[database.postgres_major], settings.lock_file
     ) as server:
-        _wait_until_ready(
+        wait_until_ready(
             lambda: _ready_or_raise(server),
-            _Deadline.start(RESTORE_SERVER_TIMEOUT),
+            Deadline.start(RESTORE_SERVER_TIMEOUT),
             RESTORE_SERVER_POLL_SECONDS,
         )
         with run.phase(Phase.VERIFY, failing=ExitCategory.VERIFICATION_FAILED):
@@ -677,7 +682,7 @@ def _chosen_snapshot(settings: Settings, app: App, prefix: str) -> str:
     return matches[0]
 
 
-def _wait_until_ready[T](probe: Callable[[], T], deadline: _Deadline, poll_seconds: float) -> T:
+def wait_until_ready[T](probe: Callable[[], T], deadline: Deadline, poll_seconds: float) -> T:
     while True:
         try:
             return _resolved(probe)
@@ -729,7 +734,7 @@ def sweep_leftover_staging(parent: Path) -> None:
 
 
 @contextmanager
-def _private_directory(parent: Path) -> Iterator[Path]:
+def private_directory(parent: Path) -> Iterator[Path]:
     """A 0700 directory for dumps and restored copies, removed on success and on failure.
 
     The directory is reserved under a fresh name before it is marked, so the mark never

@@ -1524,6 +1524,21 @@ Type <span class="w">yes</span> to reopen the tunnel: yes
 <span class="w">✓ restore test done</span> <span class="d">· 2 apps · 9m13s</span></pre>
       <p class="was">Angepasst an den Lauf: die Zeile des Repositorys zeigt die Zeit von forget bis check (<code>checked · 1m05s</code>); die behaltenen Snapshots folgen mit S7d-3</p>
     </figure>
+    <figure id="f-restore-live">
+      <figcaption><span class="tag new">neu</span> <code>hal restore &lt;app&gt; --live</code>: die Frage, die geladene Zeile und ein fehlgeschlagener Lauf</figcaption>
+<pre class="term"><span class="p">$</span> <span class="u">hal stop keycloak</span>
+<span class="d">  … die Zeilen von hal stop</span>
+<span class="p">$</span> <span class="u">hal restore keycloak --live</span>
+Type <span class="w">yes</span> to load snapshot 9b07e1d2 of 02.11. 03:04 into keycloak's live database: yes
+<span class="g">  ✓</span> keycloak        loaded         <span class="d">9b07e1d2 · 02.11. 03:04</span>
+<span class="c">next:</span> hal start keycloak
+
+<span class="p">$</span> <span class="u">hal restore keycloak --live</span>
+Type <span class="w">yes</span> to load snapshot 9b07e1d2 of 02.11. 03:04 into keycloak's live database: yes
+<span class="rw">error:</span> keycloak load failed · pg_restore ended with exit 1 · a rerun loads the snapshot whole
+<span class="c">next:</span> hal restore keycloak --live --snapshot 9b07e1d2</pre>
+      <p class="was">Exit 0, dann Exit 3. Nur während die App abgeschaltet ist; sonst <code>error: stop it first: hal stop keycloak</code>, Exit 4. Startet nur die Datenbank; Keycloak bleibt aus bis <code>hal start keycloak</code>. Ctrl-C während des Ladens wartet auf dessen Ende.</p>
+    </figure>
     <figure>
       <figcaption><span class="tag fail">neu, kaputt</span> eine App fällt aus, die andere läuft weiter</figcaption>
 <pre class="term"><span class="p">$</span> <span class="u">hal backup</span>
