@@ -755,6 +755,11 @@ UNIT_AND_KEY_STEP_SECRETS = sorted(
 )
 
 
+def test_the_litellm_unit_and_its_key_step_mount_secrets() -> None:
+    """An empty list would let the parametrized test below skip without a failure."""
+    assert UNIT_AND_KEY_STEP_SECRETS
+
+
 @pytest.mark.parametrize("secret", UNIT_AND_KEY_STEP_SECRETS)
 def test_each_secret_file_the_litellm_unit_or_its_key_step_mounts_is_one_hal_setup_writes(secret: str) -> None:
     """S4b1's `next: hal setup` has a file to write for each such secret: a live entry, not optional, that setup writes."""

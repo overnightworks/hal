@@ -15,8 +15,10 @@ name moved into the probe's project, and every network of edge_copy.PINNED_NETWO
 rows. Secrets are random scratch values under the scratch HOME's `~/.secrets/litellm/`, never a real
 key; every network a service of profile `litellm` joins must be internal, and `agent-egress` is in
 no unit, or the probe refuses to start. E counts the key step's one-off containers in `docker
-events` of the project during a run (U5 is its control), D digests the key rows and the budgets
-read by SQL in `litellm-db`. Exit 0: every cell held.
+events` of the project during a run and names each one's mode, `--read` or `--write`, from a
+`docker` stand-in in front of the real one (U5 is its control); D digests the complete rows of the
+key table and the budget table, read by SQL in `litellm-db`, and prints the digest alone. Exit 0:
+every cell held.
 """
 
 from __future__ import annotations
@@ -26,10 +28,14 @@ import json
 import os
 import re
 import secrets
+import shlex
+import shutil
+import stat
 import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import NamedTuple
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path[:0] = [str(Path(__file__).resolve().parent), str(REPO / "probe"), str(REPO / "src")]
@@ -53,20 +59,48 @@ LABEL = f"{PROJECT}.throwaway=1"
 SUBNET_CANDIDATES = [f"172.31.{third}.0/24" for third in range(230, 210, -1)]
 ENTRY = re.compile(r"^  litellm:\n(?: {4}.*\n)+", re.MULTILINE)
 KEYCLOAK_OFF = "  keycloak:\n    run:\n      enabled: false\n"
-DB_HEALTH = '"--username=litellm", "--dbname=litellm"]\n      interval: 5s\n'
-LITELLM_TELEMETRY = '      LITELLM_TELEMETRY: "False"\n'
+DOCKER_STAND_IN = """\
+#!/bin/sh
+# The mode of each litellm-keys one-off, after the service name; nothing else is written.
+named=
+for argument in "$@"; do
+  if [ -n "$named" ]; then
+    case "$argument" in --read|--write) echo "${argument#--}" >> "$KEY_STEP_MODES" ;; esac
+  fi
+  [ "$argument" = "litellm-keys" ] && named=1
+done
+exec "$REAL_DOCKER" "$@"
+"""
 SWITCH_ON = "+ litellm switch on litellm, litellm-db, litellm-front"
 STARTS_NOW = "· litellm keys later LiteLLM starts now · next apply checks them"
 DB_RESTARTS = "· litellm keys later its database restarts now · next apply checks them"
+
+
+class OneOffs(NamedTuple):
+    """E: how many key step one-off containers a run created, and the mode (`read` or `write`) of
+    each attempt to start one; Compose refuses an attempt whose secret file is missing, which
+    names a mode and creates nothing."""
+
+    created: int
+    modes: list[str]
 
 
 class Probe:
     def __init__(self, scratch: Path) -> None:
         self.scratch, self.home = scratch, scratch / "home"
         self.home.mkdir()
+        self.modes_file = scratch / "key-step-modes"
+        self.modes_file.touch()
+        stand_in = scratch / "bin" / "docker"
+        stand_in.parent.mkdir()
+        stand_in.write_text(DOCKER_STAND_IN)
+        stand_in.chmod(stat.S_IRWXU)
         self.environment = {
             **os.environ, "HOME": str(self.home), "COMPOSE_PROJECT_NAME": PROJECT,
             "EDGE_DOMAIN": "probe.invalid", "DOCKER_GID": "0",
+            "PATH": f"{stand_in.parent}{os.pathsep}{os.environ['PATH']}",
+            "REAL_DOCKER": shutil.which("docker") or "docker",
+            "KEY_STEP_MODES": str(self.modes_file),
         }  # fmt: skip
         self.guard = edge_copy.NetworkGuard(PROJECT, lambda command: self.run(command).stdout)
         self.live_before = edge_copy.live_project(REPO)
@@ -90,14 +124,19 @@ class Probe:
         self.guard.expect_call(command)
         return self.run(command, check=check).stdout
 
-    def hal(self, *arguments: str, typed: bytes = b"yes\n") -> tuple[int, str, int]:
-        """`hal <arguments>` in the copy at a pty: its exit, its normalised output and E, the
-        key step's one-off containers created meanwhile."""
+    def hal(self, *arguments: str, typed: bytes = b"yes\n") -> tuple[int, str, OneOffs]:
+        """`hal <arguments>` in the copy at a pty: its exit, its normalised output and E, the key
+        step's one-offs meanwhile."""
         if arguments[0] in ("apply", "start"):
             self.guard.expect(edge_copy.copy_compose_command(self.copy), once=False)
-        since = time.time()
+        since, modes_before = time.time(), len(self.modes_file.read_text().split())
         program = self.copy / ".venv" / "bin" / "hal"
-        command = ["script", "-qec", " ".join([str(program), *arguments]), edge_copy.DISCARD_OUTPUT]
+        command = [
+            "script",
+            "-qec",
+            shlex.join([str(program), *arguments]),
+            edge_copy.DISCARD_OUTPUT,
+        ]
         result = edge_copy.run_command(
             command,
             input=typed,
@@ -107,18 +146,18 @@ class Probe:
         )
         text = (result.stdout + result.stderr).decode(errors="replace")
         output = " ".join(edge_copy.ANSI_ESCAPE.sub("", text).split())
-        return result.returncode, output, self.one_offs(since)
+        return result.returncode, output, self.one_offs(since, modes_before)
 
-    def apply(self, cell: str, exit_code: int, typed: bytes = b"yes\n") -> tuple[str, int]:
-        code, output, created = self.hal("apply", "--local", typed=typed)
+    def apply(self, cell: str, exit_code: int, typed: bytes = b"yes\n") -> tuple[str, OneOffs]:
+        code, output, ran = self.hal("apply", "--local", typed=typed)
         expect(
             code == exit_code,
             f"{cell}: hal apply exited {code}, wanted {exit_code}: {output[-300:]}",
         )
         expect(not self.leaked(output), f"{cell}: a scratch secret is in hal's output")
-        return output, created
+        return output, ran
 
-    def one_offs(self, since: float) -> int:
+    def one_offs(self, since: float, modes_before: int) -> OneOffs:
         events = self.run([
             "docker", "events", "--since", f"{since:.3f}", "--until", f"{time.time() + 1:.3f}",
             "--filter", "type=container", "--filter", "event=create",
@@ -126,7 +165,11 @@ class Probe:
             "--filter", f"label=com.docker.compose.service={litellm_keys.KEYS_SERVICE}",
             "--format", "{{.Actor.ID}}",
         ]).stdout  # fmt: skip
-        return len(events.split())
+        modes = self.modes_file.read_text().split()[modes_before:]
+        expect(
+            len(events.split()) <= len(modes), f"E: {len(events.split())} created, modes {modes}"
+        )
+        return OneOffs(len(events.split()), modes)
 
     def leaked(self, output: str) -> bool:
         return any(value in output or hashed(value) in output for value in self.files.values())
@@ -140,16 +183,19 @@ class Probe:
         return out.splitlines()
 
     def digest(self) -> str:
-        """D: the key rows by alias and the budgets, never a hash."""
-        rows = self.sql(
-            "SELECT key_alias, max_budget, budget_duration, models, allowed_routes, "
-            'max_parallel_requests, rpm_limit, tpm_limit FROM "LiteLLM_VerificationToken" '
-            "ORDER BY key_alias;"
-        ) + self.sql(
-            'SELECT budget_id, max_budget, budget_duration FROM "LiteLLM_BudgetTable" '
-            "ORDER BY budget_id;"
-        )
-        return hashlib.sha256("\n".join(rows).encode()).hexdigest()[:12]
+        """D: one digest over the complete rows of the key table and the budget table, each
+        ordered by its key; neither a token nor a row is printed."""
+        parts = []
+        for table, key in (
+            ('"LiteLLM_VerificationToken"', "token"),
+            ('"LiteLLM_BudgetTable"', "budget_id"),
+        ):
+            statement = (
+                "SELECT encode(sha256(convert_to(coalesce(string_agg(t::text, E'\\n' "  # noqa: S608 - the probe's own table names
+                f"ORDER BY t.{key}), ''), 'UTF8')), 'hex') FROM {table} AS t;"
+            )
+            parts += self.sql(statement)
+        return hashlib.sha256("".join(parts).encode()).hexdigest()[:12]
 
     def budget(self, app: str, set_to: int | None = None) -> str:
         """The app key's max_budget, after setting it to `set_to` by SQL when given."""
@@ -192,13 +238,20 @@ class Probe:
             file.write(value + "\n")
         self.files[relative] = value
 
-    def edit_compose(self, old: str, new: str, message: str) -> None:
+    def change_setting(
+        self, service: str, key: str, candidates: tuple[str, str], message: str
+    ) -> None:
+        """`key` of `service` in the copy's compose.yaml, published as the first of `candidates`
+        that differs from the value it holds."""
         file = self.copy / "compose.yaml"
         text = file.read_text()
-        expect(
-            text.count(old) == 1, f"the copy's compose.yaml holds {old!r} {text.count(old)} times"
-        )
-        file.write_text(text.replace(old, new))
+        block = re.search(rf"^  {re.escape(service)}:\n(?: {{4}}.*\n|\n)+", text, re.MULTILINE)
+        expect(block is not None, f"the copy's compose.yaml has no service {service}")
+        line = re.search(rf"^ +{re.escape(key)}: (\S+)$", block[0], re.MULTILINE)
+        expect(line is not None, f"{service} sets no {key} in the copy's compose.yaml")
+        new = next(value for value in candidates if value != line[1])
+        value_start = block.start() + line.start(1)
+        file.write_text(text[:value_start] + new + text[block.start() + line.end(1) :])
         publish(self.copy, message)
 
     def set_enabled(self, enabled: bool) -> None:
@@ -310,10 +363,10 @@ class Probe:
         for relative in (PROVIDER, MASTER, PASSWORD):
             path, value = self.home / relative, self.files[relative]
             path.unlink()
-            output, created = self.apply("U1", HAL_REFUSED)
+            output, ran = self.apply("U1", HAL_REFUSED)
             wanted = f"error: litellm needs {path}; nothing switched next: hal setup"
             expect(wanted in output and "Type yes" not in output, f"U1 {relative}: {output[-300:]}")
-            expect((self.running(), created) == (set(), 0), f"U1 {relative}: something started")
+            expect((self.running(), ran.created) == (set(), 0), f"U1 {relative}: something started")
             self.write_secret(relative, value)
         self.hold(
             "U1",
@@ -322,30 +375,30 @@ class Probe:
         )
 
     def cell_u2(self) -> None:
-        output, created = self.apply("U2", HAL_DECLINED, typed=b"no\n")
+        output, ran = self.apply("U2", HAL_DECLINED, typed=b"no\n")
         rows = (SWITCH_ON, f"~ {FRONT} starts later", STARTS_NOW, "aborted, nothing changed")
         expect(all(row in output for row in rows), f"U2: {output[-400:]}")
-        expect((self.running(), created) == (set(), 0), "U2: something started")
+        expect((self.running(), ran.created) == (set(), 0), "U2: something started")
         first = min(output.index(SWITCH_ON), output.index(f"~ {FRONT}"))
         plan = output[first : output.index("Type yes")]
         self.hold("U2", f"{plan}; aborted, exit 1, nothing runs")
 
     def cell_u3(self) -> None:
-        output, created = self.apply("U3", HAL_OK)
+        output, ran = self.apply("U3", HAL_OK)
         after = output.partition("to apply")[2]
         expect("litellm is on" in after and "next:" not in after, f"U3: {after[-300:]}")
         expect("litellm keys" not in after, f"U3: the key step printed after the yes: {after}")
         expect(self.running() == set(SERVICES), f"U3: running {self.running()}")
         record = json.loads((self.home / ".local/state/edge" / core.APPLIED_FILE).read_text())
         expect(FRONT in record, f"U3: {FRONT} is not recorded")
-        expect(created == 0, f"U3: E saw {created} one-offs")
+        expect(ran.created == 0, f"U3: E saw {ran}")
         self.hold(
             "U3", f"litellm is on, exit 0, the three containers run, {FRONT} recorded, E empty"
         )
 
     def cell_u5(self) -> None:
         self.wait_until_listening("U5")
-        output, created = self.apply("U5", HAL_OK)
+        output, ran = self.apply("U5", HAL_OK)
         plan = output.partition("to apply")[0]
         expect("new budget" in plan and plan.count("new key") == len(APPS), f"U5: {plan[-400:]}")
         for app in APPS:
@@ -369,11 +422,14 @@ class Probe:
                 )
             )
             expect(row == [wanted], f"U5: {app}'s key holds {row}")
-        expect(created == 2, f"U5: E saw {created} one-offs, not the read and the write")
+        expect(
+            ran.created == 2 and sorted(ran.modes) == ["read", "write"],
+            f"U5: E saw {ran}, not one read and one write",
+        )
         self.hold(
             "U5",
             "the person budget and three keys planned new and made, each found by its hash with "
-            "the defaults; E saw 2 one-offs (the control)",
+            "the defaults; E saw one --read and one --write (the control)",
         )
 
     def cell_u6(self) -> None:
@@ -383,7 +439,7 @@ class Probe:
             edge_copy.NOTHING_TO_CHANGE in output and "Type yes" not in output,
             f"U6: {output[-300:]}",
         )
-        expect(self.digest() == before, "U6: D changed")
+        self.expect_digest("U6", before)
         self.hold("U6", f"nothing to change, exit 0, no question; D {before} unchanged")
 
     def cell_u14(self) -> None:
@@ -392,20 +448,23 @@ class Probe:
         output, _ = self.apply("U14 (a)", HAL_REFUSED)
         wanted = f"error: litellm-keys needs {master}; nothing switched next: hal setup"
         expect(wanted in output and "Type yes" not in output, f"U14 (a): {output[-300:]}")
+        self.expect_digest("U14 (a)", before)
         self.write_secret(MASTER, f"sk-{secrets.token_hex(32)}")
         output, _ = self.apply("U14 (b)", HAL_FAILURE)
         expect(
             "keys not read" in output and "next: hal apply" in output, f"U14 (b): {output[-300:]}"
         )
+        self.expect_digest("U14 (b)", before)
         for verb in ("stop", "start"):
             code, said, _ = self.hal(verb, UNIT)
             expect(code == HAL_OK, f"U14 (c): hal {verb} exited {code}: {said[-200:]}")
         self.wait_until_listening("U14 (c)")
-        output, created = self.apply("U14 (c)", HAL_OK)
+        output, ran = self.apply("U14 (c)", HAL_OK)
         expect(
-            edge_copy.NOTHING_TO_CHANGE in output and created == 1,
-            f"U14 (c): E {created}: {output[-300:]}",
+            edge_copy.NOTHING_TO_CHANGE in output and (ran.created, ran.modes) == (1, ["read"]),
+            f"U14 (c): E {ran}: {output[-300:]}",
         )
+        self.expect_digest("U14 (c)", before)
         app_key = self.home / SECRETS / "apps" / "hopin"
         aside = app_key.with_name("hopin.aside")
         app_key.rename(aside)
@@ -413,18 +472,21 @@ class Probe:
         aside.rename(app_key)
         wanted = f"error: litellm-keys needs {app_key}; nothing switched next: hal setup"
         expect(wanted in output and "Type yes" not in output, f"U14 (d): {output[-300:]}")
-        expect(self.digest() == before, "U14: D changed")
+        self.expect_digest("U14 (d)", before)
         self.hold(
             "U14",
             "(a) litellm-keys needs the master key, exit 4; (b) a new master key: keys not read, "
-            "exit 3; (c) stop and start: nothing to change, one read; (d) as (a) for hopin's key; "
-            "D unchanged",
+            "exit 3; (c) stop and start: nothing to change, one --read; (d) as (a) for hopin's "
+            f"key; D {before} unchanged after each",
         )
+
+    def expect_digest(self, cell: str, before: str) -> None:
+        expect(self.digest() == before, f"{cell}: D changed")
 
     def cell_u7(self) -> None:
         self.budget("hopin", set_to=7)
         self.set_enabled(False)
-        output, created = self.apply("U7", HAL_OK)
+        output, ran = self.apply("U7", HAL_OK)
         plan, _, after = output.partition("to apply")
         expect(
             "- litellm switch off litellm, litellm-db, litellm-front · volumes litellm-db kept"
@@ -435,7 +497,7 @@ class Probe:
             "litellm keys" not in output and "key changed" not in output,
             f"U7: the key step planned: {plan}",
         )
-        expect("litellm is off" in after and created == 0, f"U7: E {created}: {after[-200:]}")
+        expect("litellm is off" in after and ran.created == 0, f"U7: E {ran}: {after[-200:]}")
         self.run(
             ["docker", "volume", "inspect", f"{PROJECT}_litellm-db"]
         )  # a missing volume exits 1
@@ -448,14 +510,14 @@ class Probe:
     def cell_u12(self) -> None:
         (self.home / PROVIDER).write_text("")
         self.set_enabled(True)
-        output, created = self.apply("U12", HAL_FAILURE)
+        output, ran = self.apply("U12", HAL_FAILURE)
         expect(
             "partial, litellm is not on after the change" in output
             and "litellm is on" not in output,
             f"U12: {output[-300:]}",
         )
         expect({"litellm-db", FRONT} <= self.running(), f"U12: running {self.running()}")
-        expect(created == 0, f"U12: E saw {created}")
+        expect(ran.created == 0, f"U12: E saw {ran}")
         self.hold(
             "U12",
             "partial, litellm is not on after the change, exit 3; litellm-db and the front run",
@@ -486,12 +548,12 @@ class Probe:
         self.compose("start", "litellm-db", "litellm")
         self.wait_until_listening("U9")
         self.budget("hopin", set_to=8)
-        output, created = self.apply("U9", HAL_OK)
+        output, ran = self.apply("U9", HAL_OK)
         expect(
             "· litellm stays stopped" in output and edge_copy.NOTHING_TO_CHANGE in output,
             f"U9: {output[-300:]}",
         )
-        expect("key changed" not in output and created == 0, f"U9: E {created}: {output[-300:]}")
+        expect("key changed" not in output and ran.created == 0, f"U9: E {ran}: {output[-300:]}")
         code, said, _ = self.hal("start", UNIT)
         expect(code == HAL_OK, f"U9: hal start exited {code}: {said[-200:]}")
         self.wait_until_listening("U9")
@@ -507,29 +569,27 @@ class Probe:
         )
 
     def cell_u10(self) -> None:
-        self.edit_compose(DB_HEALTH, DB_HEALTH.replace("5s", "6s"), "probe: litellm-db's interval")
-        output, created = self.apply("U10", HAL_OK)
+        self.change_setting("litellm-db", "interval", ("7s", "8s"), "probe: litellm-db's interval")
+        output, ran = self.apply("U10", HAL_OK)
         expect(
             "~ litellm-db recreate definition changed" in output and DB_RESTARTS in output,
             f"U10: {output[-300:]}",
         )
-        expect(created == 0, f"U10: E saw {created}")
+        expect(ran.created == 0, f"U10: E saw {ran}")
         self.hold(
             "U10", "litellm-db recreated, `keys later its database restarts now`, exit 0, E empty"
         )
 
     def cell_u11(self) -> None:
-        self.edit_compose(
-            LITELLM_TELEMETRY,
-            LITELLM_TELEMETRY + '      PROBE_MARK: "u11"\n',
-            "probe: litellm's environment",
+        self.change_setting(
+            "litellm", "LITELLM_LOG", ("ERROR", "WARNING"), "probe: litellm's log level"
         )
-        output, created = self.apply("U11", HAL_OK)
+        output, ran = self.apply("U11", HAL_OK)
         expect(
             "~ litellm recreate definition changed" in output and STARTS_NOW in output,
             f"U11: {output[-300:]}",
         )
-        expect(created == 0, f"U11: E saw {created}")
+        expect(ran.created == 0, f"U11: E saw {ran}")
         self.hold("U11", "litellm recreated, `keys later LiteLLM starts now`, exit 0, E empty")
 
 

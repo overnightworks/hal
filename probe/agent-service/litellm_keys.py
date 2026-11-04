@@ -18,7 +18,8 @@ group in the S cells. LiteLLM runs at log level INFO, as litellm.py sets it for 
 provider's request log, LA LiteLLM's log, D a digest of `LiteLLM_VerificationToken`,
 `LiteLLM_BudgetTable` and `LiteLLM_EndUserTable` read by SQL, P the rows and partials the step's
 plans and runs print. Keys, subjects and fingerprints are scratch values the probe generates and
-never prints; the probe's own SQL names keys by alias, never by hash. Exit 0: every cell held.
+never prints; the probe's own SQL names keys by alias, never by hash. LiteLLM starts on the
+shipped config.yaml (S0) and gets the short budget period only at S5. Exit 0: every cell held.
 """
 
 from __future__ import annotations
@@ -37,6 +38,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import yaml
 from agent_runtime_client.turn import Principal, person_fingerprint
 from litellm import (
     DATABASE,
@@ -102,6 +104,10 @@ class Person:
 class KeysProbe(KeyFiles):
     """litellm.py's stack without the service, and the key step against it."""
 
+    # S0 starts LiteLLM on the shipped config.yaml; S5's recreate brings the short budget period
+    # that A7 waits on.
+    rescheduled = False
+
     def __init__(self, scratch: Path) -> None:
         super().__init__(scratch)
         self.earlier_logs: list[str] = []
@@ -112,6 +118,13 @@ class KeysProbe(KeyFiles):
         self.printed: list[str] = []  # P
 
     # --- plumbing -----------------------------------------------------------------------------
+
+    def write_litellm_config(self, config: dict) -> None:
+        if self.rescheduled:
+            super().write_litellm_config(config)
+            return
+        self.litellm_config.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+        self.litellm_config.chmod(0o644)
 
     def key_rows(self, **asked: object) -> list[dict]:
         return self.admin("POST", "/v2/key/info", asked)["info"]
@@ -296,8 +309,9 @@ class KeysProbe(KeyFiles):
             self.served("S1", answer, self.provider_requests()[before:])
         self.hold(
             "S0",
-            "F held no request from the stack's start through LiteLLM's migration and S1's read "
-            "and write; each of S1's calls then added its one line (the control)",
+            "on the shipped config.yaml, F held no request from the stack's start through "
+            "LiteLLM's migration and S1's read and write; each of S1's calls then added its one "
+            "line (the control)",
         )
         self.wait_for(
             "S1", "the person's row", lambda: self.end_user_budget(fingerprint) is not None
@@ -436,6 +450,7 @@ class KeysProbe(KeyFiles):
 
     def cell_s5(self) -> None:
         config = shipped_config()
+        self.rescheduled = True
         fourth = {**config["model_list"][0], "model_name": FOURTH_MODEL}
         self.write_litellm_config({**config, "model_list": [*config["model_list"], fourth]})
         self.earlier_logs.append(self.log_of(LITELLM))  # LA of the container the recreate ends
