@@ -475,7 +475,8 @@ def test_a_section_edge_still_holds_for_a_host_only_app_refuses_naming_both(lega
     (edge / held).parent.mkdir(parents=True)
     (edge / held).write_text(HOST_ONLY_PRIVACY)
     plain_git(edge, "add", held)
-    plain_git(edge, "commit", "--quiet", "--message", "held section", "--", held)
+    plain_git(edge, "-c", "core.hooksPath=/dev/null", "commit", "--quiet",
+              "--message", "held section", "--", held)  # fmt: skip
     legal_apps.host_only_app().commit({PRIVACY_FILE: HOST_ONLY_PRIVACY})
 
     exit_code, out, err = legal_apps.world.apply()
