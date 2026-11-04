@@ -1,6 +1,6 @@
 """The key step's host side (#964, #965): the desired key, person budget and admin budget from the
-code defaults, the diff against what the one-off read, the admin group's members and their rows,
-and whether the step reads at all (decision 14)."""
+code defaults, the diff against what the one-off read, and the admin group's members and their
+rows."""
 
 import json
 import subprocess
@@ -21,13 +21,15 @@ from hal.stack.litellm_keys import (
     FieldChange,
     Found,
     KeysPlan,
+    KeysStep,
+    NotRead,
     Target,
 )
 from hal.stack.realm import OBSERVER_SERVICE
 from hal.stack.realm import observe as observer
 from hal.stack.realm.declared import declared_realm
-from hal.stack.realm.reconcile import KEYCLOAK_SERVICE, NO_MEMBERS, MembersNotRead
-from hal.stack.unit_plans import Restart
+from hal.stack.realm.reconcile import KEYCLOAK_SERVICE, NO_MEMBERS, REALM_UNIT, MembersNotRead
+from hal.stack.unit_plans import Recreate
 
 APPS = ("hopin", "presentator", "songmaker")
 MODELS = ("text/haiku", "text/opus", "text/sonnet")
@@ -307,28 +309,11 @@ def repository(tmp_path: Path) -> Path:
     return tmp_path
 
 
-@pytest.mark.parametrize("state", ["exited", "created", None])
-def test_no_key_step_runs_while_litellm_does_not_run(repository: Path, state: str | None) -> None:
-    runner = OneOff()
-    states = {} if state is None else {litellm_keys.LITELLM_SERVICE: {state}}
-
-    assert (
-        litellm_keys.plan_keys(
-            compose.Compose(run=runner, repository=repository), states, repository, None, None
-        )
-        == KeysPlan()
-    )
-    assert runner.one_offs == []
-
-
 def test_while_litellm_runs_the_step_reads_with_the_budget_id_config_yaml_names(
     repository: Path,
 ) -> None:
     runner = OneOff(read_answer(found(keys={}, budget={})))
-    states = {litellm_keys.LITELLM_SERVICE: {"running"}}
-    plan = litellm_keys.plan_keys(
-        compose.Compose(run=runner, repository=repository), states, repository, None, None
-    )
+    plan = plan_with(runner, repository, LITELLM_RUNNING, None)
 
     assert [command[-3:] for command in runner.one_offs] == [
         [litellm_keys.KEYS_SERVICE, "--read", BUDGET_ID]
@@ -357,18 +342,10 @@ def test_while_litellm_runs_the_step_reads_with_the_budget_id_config_yaml_names(
 def test_a_read_that_fails_while_litellm_runs_plans_nothing_and_says_why(
     repository: Path, answer: str, exit_code: int, reason: str
 ) -> None:
-    runner = OneOff(answer, exit_code)
-    plan = litellm_keys.plan_keys(
-        compose.Compose(run=runner, repository=repository),
-        {litellm_keys.LITELLM_SERVICE: {"running"}},
-        repository,
-        None,
-        None,
-    )
+    plan = plan_with(OneOff(answer, exit_code), repository, LITELLM_RUNNING, None)
 
-    assert plan.changes == ()
-    assert plan.not_read is not None
-    assert reason in plan.not_read
+    assert isinstance(plan, NotRead)
+    assert reason in plan.cause
 
 
 @pytest.mark.parametrize("settings", [{}, {litellm_keys.BUDGET_ID_SETTING: ""}])
@@ -378,13 +355,10 @@ def test_a_config_yaml_without_the_budget_id_is_a_step_not_read(
     config = repository / litellm_keys.CONFIG_FILE
     config.write_text(yaml.safe_dump({"litellm_settings": settings}))
     runner = OneOff()
-    states = {litellm_keys.LITELLM_SERVICE: {"running"}}
-    plan = litellm_keys.plan_keys(
-        compose.Compose(run=runner, repository=repository), states, repository, None, None
-    )
+    plan = plan_with(runner, repository, LITELLM_RUNNING, None)
 
-    assert plan.not_read is not None
-    assert litellm_keys.BUDGET_ID_SETTING in plan.not_read
+    assert isinstance(plan, NotRead)
+    assert litellm_keys.BUDGET_ID_SETTING in plan.cause
     assert runner.one_offs == []
 
 
@@ -486,10 +460,14 @@ def plan_with(
     repository: Path,
     states: dict[str, set[str]] = KEYCLOAK_RUNNING,
     gate: core.Gate | None = core.Gate.ON,
-    restart: Restart | None = None,
-) -> KeysPlan:
+    recreates: tuple[Recreate, ...] = (),
+) -> KeysStep:
+    """The step with the unit `litellm` on and running; `gate` is Keycloak's, None outside the
+    catalog."""
     engine = compose.Compose(run=runner, repository=repository)
-    return litellm_keys.plan_keys(engine, states, repository, gate, restart)
+    keycloak = {} if gate is None else {REALM_UNIT: gate}
+    gates = {litellm_keys.UNIT: core.Gate.ON} | keycloak
+    return litellm_keys.plan_keys(engine, states, repository, gates, (), recreates)
 
 
 def test_the_admin_budget_has_no_limit_and_the_person_budgets_period() -> None:
@@ -605,16 +583,16 @@ def test_with_keycloak_running_the_read_gets_the_fingerprints_of_the_groups_memb
 
 
 def keycloak_running(observed: Answer, cause: str, id: str) -> object:
-    return pytest.param(KEYCLOAK_RUNNING, None, observed, cause, id=id)
+    return pytest.param(KEYCLOAK_RUNNING, (), observed, cause, id=id)
 
 
 @pytest.mark.parametrize(
-    ("states", "restart", "observed", "cause"),
+    ("states", "recreates", "observed", "cause"),
     [
-        pytest.param(LITELLM_RUNNING, None, Answer(), "Keycloak is not running", id="not running"),
+        pytest.param(LITELLM_RUNNING, (), Answer(), "Keycloak is not running", id="not running"),
         pytest.param(
             LITELLM_RUNNING,
-            Restart.SERVICE,
+            (Recreate(REALM_UNIT, KEYCLOAK_SERVICE),),
             Answer(),
             "Keycloak starts in this run",
             id="started by this run",
@@ -664,10 +642,10 @@ def keycloak_running(observed: Answer, cause: str, id: str) -> object:
     ],
 )
 def test_members_not_read_leave_the_admin_rows_and_still_plan_the_keys_and_the_person_budget(
-    repository: Path, states: dict, restart: Restart | None, observed: Answer, cause: str
+    repository: Path, states: dict, recreates: tuple[Recreate, ...], observed: Answer, cause: str
 ) -> None:
     runner = OneOff(read_answer(found(keys={})), observer=observed)
-    plan = plan_with(runner, repository, states, restart=restart)
+    plan = plan_with(runner, repository, states, recreates=recreates)
 
     assert plan.admin == MembersNotRead(cause)
     assert "subject-p" not in cause + repr(plan)
@@ -732,7 +710,7 @@ def test_a_value_that_fails_its_form_check_fails_the_read_naming_the_check_alone
     runner = OneOff(read_answer(found()), observer=observed)
     plan = plan_with(runner, repository)
 
-    assert plan.not_read == reason
+    assert plan == NotRead(reason)
     assert runner.one_offs == []
 
 
@@ -743,7 +721,7 @@ def test_a_failed_read_names_its_exit_and_last_error_line_never_the_fingerprints
     runner = OneOff(on_stdout, 1, members_answer("p"), "litellm-keys: status 502 at /customer/list")
     plan = plan_with(runner, repository)
 
-    assert plan.not_read == "litellm-keys exited 1: litellm-keys: status 502 at /customer/list"
+    assert plan == NotRead("litellm-keys exited 1: litellm-keys: status 502 at /customer/list")
 
 
 @pytest.mark.parametrize(
@@ -761,7 +739,7 @@ def test_a_read_whose_admin_rows_do_not_fit_is_an_unexpected_shape(
     runner = OneOff(read_answer(found(), admin), observer=members_answer("p"))
     plan = plan_with(runner, repository)
 
-    assert plan.not_read == "the key step answered an unexpected shape"
+    assert plan == NotRead("the key step answered an unexpected shape")
 
 
 def test_a_failed_write_names_its_exit_and_last_error_line_never_the_fingerprints_on_stdout() -> (

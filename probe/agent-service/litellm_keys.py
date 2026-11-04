@@ -1,5 +1,6 @@
-"""Probe of `hal apply`'s key step (#964 cells S1-S9, #965 cells A2-A8): the step's plan and run,
-through the one-off `litellm-keys`, against the LiteLLM of litellm.py in its throwaway project.
+"""Probe of `hal apply`'s key step (#964 cells S1-S9, #965 cells A2-A8, #894 cell S0): the step's
+plan and run, through the one-off `litellm-keys`, against the LiteLLM of litellm.py in its
+throwaway project.
 Nothing live and nothing paid: the probe refuses to start unless `internet` is internal and holds
 only the fakes. It runs in hal's environment, which holds the agent-runtime client:
 
@@ -17,7 +18,8 @@ group in the S cells. LiteLLM runs at log level INFO, as litellm.py sets it for 
 provider's request log, LA LiteLLM's log, D a digest of `LiteLLM_VerificationToken`,
 `LiteLLM_BudgetTable` and `LiteLLM_EndUserTable` read by SQL, P the rows and partials the step's
 plans and runs print. Keys, subjects and fingerprints are scratch values the probe generates and
-never prints; the probe's own SQL names keys by alias, never by hash. Exit 0: every cell held.
+never prints; the probe's own SQL names keys by alias, never by hash. LiteLLM starts on the
+shipped config.yaml (S0) and gets the short budget period only at S5. Exit 0: every cell held.
 """
 
 from __future__ import annotations
@@ -36,6 +38,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import yaml
 from agent_runtime_client.turn import Principal, person_fingerprint
 from litellm import (
     DATABASE,
@@ -62,12 +65,14 @@ from hal.stack.litellm_keys import (
     KeysFailed,
     KeysPlan,
     KeysResult,
+    KeysStep,
+    NotRead,
     RowChange,
     Target,
 )
 from hal.stack.plan_rows import keys_plan_rows
 from hal.stack.realm import OBSERVER_SERVICE
-from hal.stack.realm.reconcile import KEYCLOAK_SERVICE, MembersNotRead
+from hal.stack.realm.reconcile import KEYCLOAK_SERVICE, REALM_UNIT, MembersNotRead
 from hal.stack.result_rows import keys_partial, keys_rows
 
 FOURTH_MODEL = "text/fourth"
@@ -99,6 +104,10 @@ class Person:
 class KeysProbe(KeyFiles):
     """litellm.py's stack without the service, and the key step against it."""
 
+    # S0 starts LiteLLM on the shipped config.yaml; S5's recreate brings the short budget period
+    # that A7 waits on.
+    rescheduled = False
+
     def __init__(self, scratch: Path) -> None:
         super().__init__(scratch)
         self.earlier_logs: list[str] = []
@@ -109,6 +118,13 @@ class KeysProbe(KeyFiles):
         self.printed: list[str] = []  # P
 
     # --- plumbing -----------------------------------------------------------------------------
+
+    def write_litellm_config(self, config: dict) -> None:
+        if self.rescheduled:
+            super().write_litellm_config(config)
+            return
+        self.litellm_config.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+        self.litellm_config.chmod(0o644)
 
     def key_rows(self, **asked: object) -> list[dict]:
         return self.admin("POST", "/v2/key/info", asked)["info"]
@@ -184,16 +200,18 @@ class KeysProbe(KeyFiles):
             return subprocess.CompletedProcess(command, 1, document, f"{OBSERVER_STOPPED}\n")
         return subprocess.CompletedProcess(command, 0, document, "")
 
-    def plan(self) -> KeysPlan:
-        """The step as `hal apply` plans it with Keycloak's gate on; its rows go to P."""
+    def plan(self) -> KeysStep:
+        """The step as `hal apply` plans it with the gates of LiteLLM and Keycloak on and nothing
+        starting in this run; its rows go to P."""
         states = self.engine.states()
         if self.keycloak_running:
             states[KEYCLOAK_SERVICE] = {"running"}
-        plan = litellm_keys.plan_keys(self.engine, states, REPO, core.Gate.ON, None)
+        gates = {litellm_keys.UNIT: core.Gate.ON, REALM_UNIT: core.Gate.ON}
+        plan = litellm_keys.plan_keys(self.engine, states, REPO, gates, (), ())
         self.print_rows(keys_plan_rows(plan))
         return plan
 
-    def run_step(self, plan: KeysPlan) -> KeysResult | None:
+    def run_step(self, plan: KeysStep) -> KeysResult | None:
         result = super().run_step(plan)
         if result is not None:
             self.print_rows(keys_rows(result))
@@ -284,10 +302,17 @@ class KeysProbe(KeyFiles):
         models, reset = sorted(self.models()), first_of_next_month()
         self.expect_default_keys(models, reset)
         fingerprint = self.fingerprint()
+        expect(not self.provider_requests(), "S0: F holds a request before S1's first call")
         for app in APPS:
             before = len(self.provider_requests())
             answer = self.complete(self.file_keys[app], user=fingerprint)
             self.served("S1", answer, self.provider_requests()[before:])
+        self.hold(
+            "S0",
+            "on the shipped config.yaml, F held no request from the stack's start through "
+            "LiteLLM's migration and S1's read and write; each of S1's calls then added its one "
+            "line (the control)",
+        )
         self.wait_for(
             "S1", "the person's row", lambda: self.end_user_budget(fingerprint) is not None
         )
@@ -425,6 +450,7 @@ class KeysProbe(KeyFiles):
 
     def cell_s5(self) -> None:
         config = shipped_config()
+        self.rescheduled = True
         fourth = {**config["model_list"][0], "model_name": FOURTH_MODEL}
         self.write_litellm_config({**config, "model_list": [*config["model_list"], fourth]})
         self.earlier_logs.append(self.log_of(LITELLM))  # LA of the container the recreate ends
@@ -705,7 +731,7 @@ class KeysProbe(KeyFiles):
         finally:
             self.compose("start", DATABASE, timeout=120)
         expect(isinstance(failed, KeysFailed) and failed.failed == plan.changes[0], f"A6: {failed}")
-        expect(unread.not_read is not None, f"A6: read with the database stopped: {unread}")
+        expect(isinstance(unread, NotRead), f"A6: read with the database stopped: {unread}")
         expect(isinstance(self.run_step(self.read_plan("A6")), KeysDone), "A6: the retry failed")
         people = self.people.values()
         secret_values = [self.master_key, *self.written]
@@ -722,7 +748,7 @@ class KeysProbe(KeyFiles):
         self.hold(
             "A6",
             f"{len(self.printed)} lines of P, among them a failing members read ({stopped}), a "
-            f"failing unlink ({failed.cause}) and a failing --read ({unread.not_read}): no "
+            f"failing unlink ({failed.cause}) and a failing --read ({unread.cause}): no "
             "subject, fingerprint, key or hash; the control finds O, O2, O3 and X in "
             "litellm-keys' standard input, Y nowhere",
         )

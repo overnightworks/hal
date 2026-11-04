@@ -1,8 +1,10 @@
 """`hal apply`'s key step (#964, #965): its rows in the one question, its run
 before the apps, every ending of the item's table "How the run ends", and the admin group's rows."""
 
+import json
 import re
 import subprocess
+from pathlib import Path
 
 import pytest
 import yaml
@@ -22,6 +24,7 @@ from support.stack_apply import (
     setup_run,  # noqa: F401 the fixture, requested by name below
     state,  # noqa: F401 the fixture, requested by name below
     switch,  # noqa: F401 the fixture, requested by name below
+    switch_off,
     write_fleet,
 )
 from support.stack_apply_apps import (
@@ -29,11 +32,13 @@ from support.stack_apply_apps import (
     app_world,  # noqa: F401 the fixture, requested by name below
 )
 from support.stack_apply_fakes import ScriptedCompose
+from support.stack_core import bind, sha256
 from support.stack_plan_rows import find_row, plain
 
-from hal.stack import litellm_keys
-from hal.stack.litellm_keys import ADMIN_BUDGET_ID
-from hal.stack.plan_rows import KeysEvent, PlanGroup
+from hal.stack import core, litellm_keys
+from hal.stack.apply import ApplyExit
+from hal.stack.litellm_keys import ADMIN_BUDGET_ID, LITELLM
+from hal.stack.plan_rows import KeysEvent, PlanEvent, PlanGroup
 from hal.stack.realm.reconcile import KEYCLOAK_SERVICE
 from hal.stack.result_rows import ResultEvent
 
@@ -52,19 +57,59 @@ def desired_row(app: str, models: tuple[str, ...]) -> dict:
     }
 
 
+LITELLM_ON = "  litellm:\n    run: {enabled: true}\n"
+UNIT_SERVICES = (LITELLM.service, LITELLM.database, "litellm-front")
+MASTER_KEY, DB_PASSWORD, PROVIDER_KEY = "master_key", "db_password", "anthropic_key"
+APP_KEYS = tuple(f"app_{app}" for app in APPS)
+
+
+def secrets_of(*names: str) -> list[dict]:
+    return [{"source": name} for name in names]
+
+
 @pytest.fixture
-def keys(repository, scripted: ScriptedCompose):  # noqa: F811
-    """LiteLLM and Keycloak running beside a disabled fleet that has no Keycloak unit, its config
-    naming the budget id; every key, the person budget and the admin budget as desired, and the
-    admin group empty, so the step alone has nothing to change."""
-    write_fleet(repository, DISABLED)
+def secret_files(tmp_path, scripted: ScriptedCompose) -> dict[str, Path]:  # noqa: F811
+    """Each secret file the unit's services and the one-off name, present."""
+    files = {
+        name: tmp_path / "secrets" / name
+        for name in (MASTER_KEY, DB_PASSWORD, PROVIDER_KEY, *APP_KEYS)
+    }
+    for file in files.values():
+        file.parent.mkdir(exist_ok=True)
+        file.write_text("scenario-value\n")
+    scripted.config["secrets"] = {name: {"file": str(file)} for name, file in files.items()}
+    return files
+
+
+@pytest.fixture
+def keys(repository, scripted: ScriptedCompose, secret_files):  # noqa: F811
+    """The unit `litellm` on and its three services running beside a disabled step-ca, Keycloak
+    running with no unit of its own, LiteLLM's config naming the budget id; every key, the person
+    budget and the admin budget as desired, and the admin group empty, so the step alone has
+    nothing to change."""
+    write_fleet(repository, DISABLED + LITELLM_ON)
     config = repository / litellm_keys.CONFIG_FILE
     config.parent.mkdir(parents=True, exist_ok=True)
     config.write_text(
         yaml.safe_dump({"litellm_settings": {litellm_keys.BUDGET_ID_SETTING: BUDGET_ID}})
     )
-    scripted.config["services"][litellm_keys.LITELLM_SERVICE] = {"profiles": ["litellm"]}
-    scripted.put_containers({litellm_keys.LITELLM_SERVICE: "running", KEYCLOAK_SERVICE: "running"})
+    services = scripted.config["services"]
+    litellm_db_volume = [{"type": "volume", "source": "litellm-db", "target": "/data"}]
+    services[LITELLM.service] = {
+        "profiles": ["litellm"],
+        "secrets": secrets_of(PROVIDER_KEY, MASTER_KEY, DB_PASSWORD),
+    }
+    services[LITELLM.database] = {
+        "profiles": ["litellm"],
+        "secrets": secrets_of(DB_PASSWORD),
+        "volumes": litellm_db_volume,
+    }
+    services["litellm-front"] = {"profiles": ["litellm"]}
+    services[litellm_keys.KEYS_SERVICE] = {
+        "profiles": ["apply"],
+        "secrets": secrets_of(MASTER_KEY, *APP_KEYS),
+    }
+    scripted.put_containers(dict.fromkeys((*UNIT_SERVICES, KEYCLOAK_SERVICE), "running"))
     scripted.keys.rows = {app: desired_row(app, scripted.keys.models) for app in APPS}
     scripted.keys.budget = dict(litellm_keys.desired_budget())
     scripted.keys.admin_budget = dict(litellm_keys.desired_admin_budget())
@@ -72,7 +117,7 @@ def keys(repository, scripted: ScriptedCompose):  # noqa: F811
 
 
 def with_other_change(repository) -> None:  # noqa: F811
-    write_fleet(repository, ENABLED)
+    write_fleet(repository, ENABLED + LITELLM_ON)
 
 
 def test_no_row_and_no_one_off_while_litellm_neither_runs_nor_starts(switch, scripted, repository):  # noqa: F811
@@ -215,6 +260,8 @@ def test_the_key_step_writes_before_the_apps_are_started(
     keys,
     app_world,  # noqa: F811
 ):
+    with (app_world.repository / "fleet.yaml").open("a") as fleet:
+        fleet.write(LITELLM_ON)
     app_world.origin.release(RELEASE)
     keys.rows["hopin"] = None
     started_before_the_write = []
@@ -415,7 +462,7 @@ def test_keycloak_held_holds_the_admin_rows_with_a_row_and_leaves_the_ending_as_
     realm_changed: bool,
 ):
     """Decision 13: no members read, no customer change, a held row and exit 0."""
-    write_fleet(repository, KEYCLOAK_OFF)
+    write_fleet(repository, KEYCLOAK_OFF + LITELLM_ON)
     if not running:
         scripted.containers.pop(KEYCLOAK_SERVICE)
     if realm_changed:
@@ -428,3 +475,178 @@ def test_keycloak_held_holds_the_admin_rows_with_a_row_and_leaves_the_ending_as_
     assert find_row(plain(out), ADMIN_BUDGET_ID, KeysEvent.ROWS_HELD, "Keycloak is off")
     assert not [call for call in scripted.calls if "--members" in call]
     assert (keys.writes, keys.customers) == ([], {})
+
+
+# --- the gate: the unit off, stopped, starting or recreated ------------------------------------
+
+
+def one_offs(scripted: ScriptedCompose) -> list[list[str]]:  # noqa: F811
+    return [call for call in scripted.calls if litellm_keys.KEYS_SERVICE in call]
+
+
+def key_step_rows(text: str) -> list[str]:
+    """The rows the key step prints under `litellm`, none of a unit or a service."""
+    return re.findall(r"^  \S litellm +keys .*$", plain(text), re.M)
+
+
+def switched_on(scripted: ScriptedCompose) -> None:  # noqa: F811
+    for service in UNIT_SERVICES:
+        scripted.containers.pop(service)
+
+
+@pytest.mark.parametrize(
+    ("arrange", "reason"),
+    [
+        pytest.param(switched_on, "LiteLLM starts now", id="switched on"),
+        pytest.param(
+            lambda compose: compose.change_definition(LITELLM.service),
+            "LiteLLM starts now",
+            id="litellm recreated",
+        ),
+        pytest.param(
+            lambda compose: compose.change_definition(LITELLM.database),
+            "its database restarts now",
+            id="litellm-db recreated",
+        ),
+    ],
+)
+def test_a_run_that_starts_litellm_or_its_database_plans_the_keys_for_the_next_apply(
+    switch,  # noqa: F811
+    keys,
+    scripted,  # noqa: F811
+    arrange,
+    reason: str,
+):
+    keys.rows["hopin"] = None
+    arrange(scripted)
+
+    exit_code, out, err = switch()
+
+    assert (exit_code, err) == (0, "")
+    plan, _, result = plain(out).partition("Type yes")
+    assert find_row(plan, LITELLM.key, KeysEvent.LATER, f"{reason} · next apply checks them")
+    assert not find_row(plan, "hopin", KeysEvent.NEW_KEY)
+    assert (one_offs(scripted), keys.writes) == ([], [])
+    assert key_step_rows(result) == []
+
+
+def test_a_first_start_with_an_app_key_file_absent_is_not_refused(
+    switch,  # noqa: F811
+    keys,
+    scripted,  # noqa: F811
+    secret_files,
+):
+    switched_on(scripted)
+    secret_files[APP_KEYS[0]].unlink()
+
+    exit_code, out, err = switch()
+
+    assert (exit_code, err) == (0, "")
+    assert find_row(plain(out), LITELLM.key, KeysEvent.LATER)
+
+
+def test_a_switch_off_reads_no_keys_and_removes_the_containers_keeping_the_volume(
+    switch,  # noqa: F811
+    keys,
+    scripted,  # noqa: F811
+    repository,  # noqa: F811
+):
+    keys.rows["hopin"] = None
+    write_fleet(repository, DISABLED + "  litellm:\n    run: {enabled: false}\n")
+
+    exit_code, out, err = switch()
+
+    assert (exit_code, err) == (0, "")
+    plan, _, result = plain(out).partition("Type yes")
+    assert find_row(plan, LITELLM.key, PlanEvent.SWITCH_OFF, "volumes litellm-db kept")
+    assert key_step_rows(plan) == []
+    assert (one_offs(scripted), keys.writes) == ([], [])
+    assert "litellm is off" in result
+
+
+def test_a_stop_that_keeps_litellm_off_reads_no_keys_and_changes_nothing(
+    switch,  # noqa: F811
+    keys,
+    scripted,  # noqa: F811
+    state,  # noqa: F811
+):
+    keys.rows["hopin"] = None
+    switch_off(state, unit=LITELLM.key)
+
+    exit_code, out, err = switch()
+
+    assert (exit_code, err) == (0, "")
+    assert find_row(plain(out), LITELLM.key, PlanEvent.STAYS_STOPPED)
+    assert "nothing to change" in out
+    assert one_offs(scripted) == []
+
+
+def test_a_litellm_that_restarts_in_a_loop_after_it_was_on_ends_partial_without_a_read(
+    switch,  # noqa: F811
+    keys,
+    scripted,  # noqa: F811
+):
+    """B3: `up --no-recreate` leaves the looping container as it is."""
+    scripted.containers[LITELLM.service] = "restarting"
+
+    exit_code, out, err = switch()
+
+    assert exit_code == ApplyExit.REFUSED
+    plan = plain(out).partition("Type yes")[0]
+    assert find_row(plan, LITELLM.key, PlanEvent.SWITCH_ON)
+    assert find_row(plan, LITELLM.key, KeysEvent.LATER, "LiteLLM starts now")
+    assert one_offs(scripted) == []
+    assert lines_of(err) == ["error: partial, litellm is not on after the change"]
+
+
+@pytest.mark.parametrize("missing", [MASTER_KEY, APP_KEYS[0]], ids=["master key", "app key"])
+def test_a_missing_file_of_the_one_off_refuses_the_run_before_the_question(
+    switch,  # noqa: F811
+    keys,
+    scripted,  # noqa: F811
+    secret_files,
+    missing: str,
+):
+    """B2, decision 11: the read ran, so its files join the refusal before the yes."""
+    keys.rows["hopin"] = None
+    secret_files[missing].unlink()
+
+    exit_code, out, err = switch()
+
+    assert exit_code == ApplyExit.GUARD_REFUSED
+    assert "Type yes" not in plain(out)
+    assert lines_of(err) == [
+        f"error: {litellm_keys.KEYS_SERVICE} needs {secret_files[missing]}; nothing switched",
+        "next: hal setup",
+    ]
+    assert keys.writes == []
+
+
+def test_a_recreate_of_the_front_alone_leaves_the_key_step_as_without_it(
+    switch,  # noqa: F811
+    keys,
+    scripted,  # noqa: F811
+    repository,  # noqa: F811
+    state,  # noqa: F811
+):
+    """The front is a follower: its recreate never reaches the step's restart."""
+    (repository / "front.yml").write_text("entryPoints: {}\n")
+    scripted.config["services"]["litellm-front"]["volumes"] = [
+        bind(repository / "front.yml", core.TRAEFIK_STATIC_CONFIG)
+    ]
+    state.mkdir(parents=True, exist_ok=True)
+    (state / "applied.json").write_text(
+        json.dumps({"litellm-front": {"front.yml": sha256(repository / "front.yml")}})
+    )
+    scripted.change_definition("litellm-front")
+    keys.rows["hopin"] = None
+
+    exit_code, out, err = switch()
+
+    assert (exit_code, err) == (0, "")
+    plan, _, result = plain(out).partition("Type yes")
+    assert find_row(plan, "litellm-front", PlanEvent.RECREATE)
+    assert not find_row(plan, LITELLM.key, KeysEvent.LATER)
+    assert find_row(plan, "hopin", KeysEvent.NEW_KEY)
+    assert [change["subject"] for change in keys.writes[0]] == ["hopin"]
+    assert find_row(result, "hopin", KeysEvent.NEW_KEY)
