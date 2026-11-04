@@ -108,7 +108,9 @@ RENEWAL_POLL_SECONDS = 12 * 60
 RENEWAL_POLL_INTERVAL = 15
 FOREIGN_UID = 12345
 STEP_CA_SWITCH = re.compile(r"( {2}step-ca:\n {4}run:\n {6}enabled: )(?:true|false)")
-ASKING_SWITCHES = re.compile(r"( {2}(?:keycloak|agent-service):\n {4}run:\n {6}enabled: )\w+")
+ASKING_SWITCHES = re.compile(
+    r"( {2}(?:keycloak|agent-service|litellm):\n {4}run:\n {6}enabled: )\w+"
+)
 STAND_IN_OVERLAY = REPO / "probe" / "step-ca" / "compose.probe.yaml"
 SHORT_LIVED_OVERLAY = REPO / "probe" / "step-ca" / "compose.short-lived.probe.yaml"
 
@@ -606,16 +608,13 @@ class Probe(McpNetworks, TraefikMcpFollows):
         return copy_repository(REPO, self.home, self.scratch, PROJECT)
 
     def set_enabled(self, copy: Path, enabled: bool) -> None:
-        """Set step-ca's switch; keycloak and agent-service go off: their setups ask."""
+        """Set step-ca's switch, the others off: setups ask, litellm's secret files are absent."""
         fleet = copy / "fleet.yaml"
         text, step_ca_matches = STEP_CA_SWITCH.subn(
             rf"\g<1>{str(enabled).lower()}", fleet.read_text()
         )
         text, asking_matches = ASKING_SWITCHES.subn(r"\g<1>false", text)
-        expect(
-            (step_ca_matches, asking_matches) == (1, 2),
-            "fleet.yaml lacks exactly one step-ca, keycloak and agent-service switch",
-        )
+        expect((step_ca_matches, asking_matches) == (1, 3), "fleet.yaml's switches are unknown")
         fleet.write_text(text)
         publish(copy, f"probe: step-ca enabled {enabled}")
 

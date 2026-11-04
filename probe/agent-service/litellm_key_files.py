@@ -28,8 +28,8 @@ from litellm import (
 )
 from scratch_secrets import write_new
 
-from hal.stack import compose, litellm_keys
-from hal.stack.litellm_keys import KeysPlan
+from hal.stack import compose, core, litellm_keys
+from hal.stack.litellm_keys import KeysPlan, KeysStep, NotRead
 
 APPS = ("hopin", "presentator", "songmaker")
 APP_KEYS_FOLDER = Path(".secrets/litellm/apps")
@@ -99,16 +99,19 @@ class KeyFiles(LitellmProbe):
             self.seen.output += [result.stdout, result.stderr]
         return result
 
-    def plan(self) -> KeysPlan:
-        return litellm_keys.plan_keys(self.engine, self.engine.states(), REPO, None, None)
+    def plan(self) -> KeysStep:
+        """The step with its gate passed: the unit on and nothing of it starting in this run."""
+        gates = {litellm_keys.UNIT: core.Gate.ON}
+        return litellm_keys.plan_keys(self.engine, self.engine.states(), REPO, gates, (), ())
 
     def read_plan(self, cell: str) -> KeysPlan:
         """The plan once the keys can be read: LiteLLM answers 502 while it migrates."""
         deadline = time.monotonic() + READ_SECONDS
-        while (plan := self.plan()).not_read is not None:
-            expect(time.monotonic() < deadline, f"{cell}: keys not read ({plan.not_read})")
+        while isinstance(plan := self.plan(), NotRead):
+            expect(time.monotonic() < deadline, f"{cell}: keys not read ({plan.cause})")
             time.sleep(3)
+        expect(isinstance(plan, KeysPlan), f"{cell}: the gate held the read ({plan})")
         return plan
 
-    def run_step(self, plan: KeysPlan):
+    def run_step(self, plan: KeysStep):
         return litellm_keys.run_keys(plan, self.engine)

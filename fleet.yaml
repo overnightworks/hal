@@ -40,6 +40,9 @@ services:
       enabled: true
       setup: agent-service/setup
       build: agent-service/image
+  litellm:
+    run:
+      enabled: true
   keycloak:
     run:
       enabled: true

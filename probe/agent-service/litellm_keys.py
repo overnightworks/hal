@@ -1,5 +1,6 @@
-"""Probe of `hal apply`'s key step (#964 cells S1-S9, #965 cells A2-A8): the step's plan and run,
-through the one-off `litellm-keys`, against the LiteLLM of litellm.py in its throwaway project.
+"""Probe of `hal apply`'s key step (#964 cells S1-S9, #965 cells A2-A8, #894 cell S0): the step's
+plan and run, through the one-off `litellm-keys`, against the LiteLLM of litellm.py in its
+throwaway project.
 Nothing live and nothing paid: the probe refuses to start unless `internet` is internal and holds
 only the fakes. It runs in hal's environment, which holds the agent-runtime client:
 
@@ -62,12 +63,14 @@ from hal.stack.litellm_keys import (
     KeysFailed,
     KeysPlan,
     KeysResult,
+    KeysStep,
+    NotRead,
     RowChange,
     Target,
 )
 from hal.stack.plan_rows import keys_plan_rows
 from hal.stack.realm import OBSERVER_SERVICE
-from hal.stack.realm.reconcile import KEYCLOAK_SERVICE, MembersNotRead
+from hal.stack.realm.reconcile import KEYCLOAK_SERVICE, REALM_UNIT, MembersNotRead
 from hal.stack.result_rows import keys_partial, keys_rows
 
 FOURTH_MODEL = "text/fourth"
@@ -184,16 +187,18 @@ class KeysProbe(KeyFiles):
             return subprocess.CompletedProcess(command, 1, document, f"{OBSERVER_STOPPED}\n")
         return subprocess.CompletedProcess(command, 0, document, "")
 
-    def plan(self) -> KeysPlan:
-        """The step as `hal apply` plans it with Keycloak's gate on; its rows go to P."""
+    def plan(self) -> KeysStep:
+        """The step as `hal apply` plans it with the gates of LiteLLM and Keycloak on and nothing
+        starting in this run; its rows go to P."""
         states = self.engine.states()
         if self.keycloak_running:
             states[KEYCLOAK_SERVICE] = {"running"}
-        plan = litellm_keys.plan_keys(self.engine, states, REPO, core.Gate.ON, None)
+        gates = {litellm_keys.UNIT: core.Gate.ON, REALM_UNIT: core.Gate.ON}
+        plan = litellm_keys.plan_keys(self.engine, states, REPO, gates, (), ())
         self.print_rows(keys_plan_rows(plan))
         return plan
 
-    def run_step(self, plan: KeysPlan) -> KeysResult | None:
+    def run_step(self, plan: KeysStep) -> KeysResult | None:
         result = super().run_step(plan)
         if result is not None:
             self.print_rows(keys_rows(result))
@@ -284,10 +289,16 @@ class KeysProbe(KeyFiles):
         models, reset = sorted(self.models()), first_of_next_month()
         self.expect_default_keys(models, reset)
         fingerprint = self.fingerprint()
+        expect(not self.provider_requests(), "S0: F holds a request before S1's first call")
         for app in APPS:
             before = len(self.provider_requests())
             answer = self.complete(self.file_keys[app], user=fingerprint)
             self.served("S1", answer, self.provider_requests()[before:])
+        self.hold(
+            "S0",
+            "F held no request from the stack's start through LiteLLM's migration and S1's read "
+            "and write; each of S1's calls then added its one line (the control)",
+        )
         self.wait_for(
             "S1", "the person's row", lambda: self.end_user_budget(fingerprint) is not None
         )
@@ -705,7 +716,7 @@ class KeysProbe(KeyFiles):
         finally:
             self.compose("start", DATABASE, timeout=120)
         expect(isinstance(failed, KeysFailed) and failed.failed == plan.changes[0], f"A6: {failed}")
-        expect(unread.not_read is not None, f"A6: read with the database stopped: {unread}")
+        expect(isinstance(unread, NotRead), f"A6: read with the database stopped: {unread}")
         expect(isinstance(self.run_step(self.read_plan("A6")), KeysDone), "A6: the retry failed")
         people = self.people.values()
         secret_values = [self.master_key, *self.written]
@@ -722,7 +733,7 @@ class KeysProbe(KeyFiles):
         self.hold(
             "A6",
             f"{len(self.printed)} lines of P, among them a failing members read ({stopped}), a "
-            f"failing unlink ({failed.cause}) and a failing --read ({unread.not_read}): no "
+            f"failing unlink ({failed.cause}) and a failing --read ({unread.cause}): no "
             "subject, fingerprint, key or hash; the control finds O, O2, O3 and X in "
             "litellm-keys' standard input, Y nowhere",
         )

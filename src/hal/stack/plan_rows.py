@@ -14,12 +14,15 @@ from hal.stack.built_image import ENDS_RUNS, BuiltRecreate
 from hal.stack.legal_step import LEGAL_UNIT, BlockChange, LegalPlan, PageChange
 from hal.stack.litellm_keys import (
     ADMIN_BUDGET_ID,
+    LITELLM,
     LITELLM_SERVICE,
     AdminHeld,
     AdminState,
     Change,
     FieldChange,
     KeysPlan,
+    KeysStep,
+    NotRead,
     RowChange,
     StepChange,
     Target,
@@ -69,6 +72,7 @@ class KeysEvent(StrEnum):
     KEY_CHANGED = "key changed"
     NAME_TAKEN = "name taken"
     NOT_READ = "keys not read"
+    LATER = "keys later"
     CUSTOMER_ROWS = "customer rows"
     ROW_LINK = "row link"
     ROW_UNLINK = "row unlink"
@@ -438,11 +442,20 @@ def _realm_row(realm: RealmPlan) -> Row | None:
             return None
 
 
-def keys_plan_rows(keys: KeysPlan) -> tuple[Row, ...]:
-    if keys.not_read is not None:
-        return (
-            Row(Glyph.NEEDS_YOU, LITELLM_SERVICE, KeysEvent.NOT_READ, printable(keys.not_read)),
-        )
+def keys_plan_rows(keys: KeysStep) -> tuple[Row, ...]:
+    match keys:
+        case NotRead(cause):
+            return (Row(Glyph.NEEDS_YOU, LITELLM_SERVICE, KeysEvent.NOT_READ, printable(cause)),)
+        case Restart():
+            fact = f"{restart_text(keys, LITELLM)}{_SEPARATOR}next apply checks them"
+            return (Row(Glyph.UNCHANGED, LITELLM.key, KeysEvent.LATER, fact),)
+        case KeysPlan():
+            return _read_rows(keys)
+        case _:
+            return ()
+
+
+def _read_rows(keys: KeysPlan) -> tuple[Row, ...]:
     return (
         *(
             key_change_row(change, Glyph.ADD if change.new else Glyph.CHANGE)

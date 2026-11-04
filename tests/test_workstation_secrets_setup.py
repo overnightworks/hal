@@ -24,6 +24,7 @@ from support.workstation_secrets_support import (
 )
 
 from hal.output.hidden_paste import TerminalCannotHide, TerminalNotRestored
+from hal.stack import litellm_keys
 from hal.workstation import secrets_setup
 from hal.workstation.manifest_fields import ManifestError
 from hal.workstation.secrets_setup import (
@@ -741,6 +742,25 @@ def test_a_litellm_secret_is_read_by_exactly_the_services_of_compose_that_mount_
     # an app reads its key from the app's own checkout, not from compose
     readers = set(entry.read_by) - {name.rpartition("/")[2]} if name in APP_KEYS else set(entry.read_by)
     assert readers == mounting
+
+
+SHIPPED_COMPOSE = yaml.safe_load((Path(__file__).resolve().parents[1] / "compose.yaml").read_text())
+UNIT_AND_KEY_STEP_SECRETS = sorted(
+    {
+        mount if isinstance(mount, str) else mount["source"]
+        for name, service in SHIPPED_COMPOSE["services"].items()
+        if litellm_keys.UNIT in service.get("profiles", []) or name == litellm_keys.KEYS_SERVICE
+        for mount in service.get("secrets", [])
+    }
+)
+
+
+@pytest.mark.parametrize("secret", UNIT_AND_KEY_STEP_SECRETS)
+def test_each_secret_file_the_litellm_unit_or_its_key_step_mounts_is_one_hal_setup_writes(secret: str) -> None:
+    """S4b1's `next: hal setup` has a file to write for each such secret: a live entry, not optional, that setup writes."""
+    file = SHIPPED_COMPOSE["secrets"][secret]["file"].removeprefix("${HOME}/")
+    (entry,) = [entry for entry in load_manifest(PACKAGED_MANIFEST) if file in map(str, entry.paths)]
+    assert entry.expected_present and entry.written_by_setup
 
 
 def test_each_apps_litellm_key_is_listed_with_its_readers_and_mode_0644_is_no_finding(tmp_path: Path, probe: FakeProbe, capsys) -> None:

@@ -439,7 +439,7 @@ services:
 
   # The one-route front of LiteLLM (agent-service/litellm/front/): the apps' only way to the
   # inference gateway, on each app's agent network. It reads no secret and reaches only `litellm`,
-  # at its fixed address, never by DNS. Not started by any unit yet.
+  # at its fixed address, never by DNS. The unit `litellm` of fleet.yaml starts it.
   litellm-front:
     <<: *traefik
     profiles: [litellm]
@@ -451,8 +451,8 @@ services:
       - ./agent-service/litellm/front/traefik.yml:/etc/traefik/traefik.yml:ro
       - ./agent-service/litellm/front/dynamic:/litellm-front/dynamic:ro
 
-  # LiteLLM's own database: its keys and spend counters, reachable from litellm alone. Not started
-  # by any unit yet.
+  # LiteLLM's own database: its keys and spend counters, reachable from litellm alone. The unit
+  # `litellm` of fleet.yaml starts it.
   litellm-db:
     <<: *postgres
     profiles: [litellm]
@@ -473,8 +473,8 @@ services:
   # LiteLLM, the apps' route to the paid API (agent-service/litellm/). Its own keys and budgets in
   # its database decide who may call; no hal code runs in it. It reads the provider key, the master
   # key and the database password as files and reaches only the front, its database and, through
-  # agent-egress, the provider. A change of its files reaches it only through a recreate. Not
-  # started by any unit yet.
+  # agent-egress, the provider. A change of its files reaches it only through a recreate. The
+  # unit `litellm` of fleet.yaml starts it.
   litellm:
     image: ghcr.io/berriai/litellm:v1.106.6@sha256:37e2dafb088a7723beb998590682957386dfc83ffea1848486f8e0e5cfac0b06
     profiles: [litellm]
