@@ -21,7 +21,7 @@ from support.backup_support import (
     [("backup",), ("restore", "--test"), ("backup", "--unlock"), ("restore", "--list")],
     ids=" ".join,
 )
-def test_no_backup_command_reads_stdin(edge_backup, monkeypatch, command):
+def test_no_backup_command_but_the_live_restore_reads_stdin(edge_backup, monkeypatch, command):
     class Forbidden:
         def __getattr__(self, name):
             raise AssertionError(f"read stdin ({name})")
@@ -62,6 +62,8 @@ def test_an_undeclared_app_runs_nothing_and_writes_no_status(
 
 
 TARGETLESS = "--test restores to a throwaway, so --target does not apply"
+NEEDS_TARGET_OR_LIVE = "restore needs the name of an app and --target or --live"
+LIVE_ALONE = "--live loads into the app's database, so --target, --test and --list do not apply"
 STANDALONE = "--init and --unlock stand alone, without an app, --pre-apply or --json"
 
 
@@ -97,9 +99,14 @@ STANDALONE = "--init and --unlock stand alone, without an app, --pre-apply or --
         (("restore", "--list", "--test"), "--list stands alone"),
         (("restore", "--list", "--snapshot", ""), "--list stands alone"),
         (("restore", "--list", "--target", ""), "--list stands alone"),
-        (("restore",), "restore needs the name of an app and --target"),
-        (("restore", "radio"), "restore needs the name of an app and --target"),
-        (("restore", "--target", "somewhere"), "restore needs the name of an app and --target"),
+        (("restore",), NEEDS_TARGET_OR_LIVE),
+        (("restore", "radio"), NEEDS_TARGET_OR_LIVE),
+        (("restore", "--target", "somewhere"), NEEDS_TARGET_OR_LIVE),
+        (("restore", "--live"), "--live needs the name of an app"),
+        (("restore", "--live", "--snapshot", "0" * 8), "--live needs the name of an app"),
+        (("restore", "radio", "--live", "--target", "somewhere"), LIVE_ALONE),
+        (("restore", "radio", "--live", "--test"), LIVE_ALONE),
+        (("restore", "radio", "--live", "--list"), LIVE_ALONE),
     ],
 )
 def test_a_wrong_flag_combination_is_a_usage_error_that_runs_nothing(

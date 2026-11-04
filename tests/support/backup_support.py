@@ -6,7 +6,7 @@ import json
 import re
 import stat
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -17,11 +17,14 @@ from hal.backup import host, sqlite_copy
 from hal.backup.apps import PRE_APPLY_TAG, PostgresDatabase, parse_apps
 from hal.backup.cli import DEFAULT_APPS
 from hal.backup.docker import (
+    DATABASE_START_LABEL,
     FILE_COUNT_LABEL,
+    LIVE_LOAD_LABEL,
     RESTORE_OWNER_LABEL,
     RESTORE_OWNER_ROLE,
     SERVER_REMOVAL_LABEL,
     SERVER_START_LABEL,
+    SESSION_COUNT_LABEL,
     SQLITE_CHECK_LABEL,
     SQLITE_COPY_LABEL,
     SQLITE_OWNER_LABEL,
@@ -204,6 +207,22 @@ class Machine:
     """What the script's Python would print to stderr when it fails, as it quotes paths and rows."""
     private_modes: dict[str, int] = field(default_factory=dict)
     """Modes of the staging and restore directories and files, seen while restic used them."""
+    stopped_containers: set[str] = field(default_factory=set)
+    """Database containers that exist but are stopped; `docker start` runs them."""
+    started_containers: list[str] = field(default_factory=list)
+    """The containers `docker start` was named, in order."""
+    restore_sessions: int = 0
+    """The sessions of pg_restore the live database holds, as a killed run's load leaves one."""
+    live_code: int | None = 0
+    """What the shell around the live pg_restore prints as its code line; None: no line."""
+    live_client_exit: int = 0
+    """The exit of `docker exec` itself for the live load: non-zero is a failed client."""
+    live_loads: list[bytes] = field(default_factory=list)
+    """The dumps the live load was fed, each as its bytes."""
+    live_new_session: list[bool] = field(default_factory=list)
+    """Whether each live load's client ran in its own session."""
+    during_live_load: Callable[[], None] | None = None
+    """What happens while the live load runs, such as a signal to hal."""
 
     def run(
         self,
@@ -214,8 +233,11 @@ class Machine:
         stdout: Path | None = None,
         timeout: timedelta | None = None,
         discard_stderr: bool = False,
+        new_session: bool = False,
     ) -> bytes:
         argv = list(argv)
+        if label == LIVE_LOAD_LABEL:
+            self.live_new_session.append(new_session)
         self.calls.append((label, argv))
         assert len(self.calls) < 10_000, "the runner never gives up"
         if label in self.hanging:
@@ -253,6 +275,9 @@ class Machine:
             "restic forget": self._forget,
             "restic check": self._maintenance,
             "restic unlock": self._silent,
+            DATABASE_START_LABEL: self._start_container,
+            SESSION_COUNT_LABEL: self._session_count,
+            LIVE_LOAD_LABEL: self._live_load,
         }
         if label not in answers:
             pytest.fail(f"the scripted machine does not know {label!r}")
@@ -358,7 +383,25 @@ class Machine:
         return "\n".join(found).encode()
 
     def _state(self, argv, **_) -> bytes:
-        return b"running healthy\n"
+        return b"exited \n" if argv[-1] in self.stopped_containers else b"running healthy\n"
+
+    def _start_container(self, argv, **_) -> bytes:
+        self.started_containers.append(argv[-1])
+        self.stopped_containers.discard(argv[-1])
+        return b""
+
+    def _session_count(self, argv, **_) -> bytes:
+        return f"{self.restore_sessions}\n".encode()
+
+    def _live_load(self, argv, *, stdin, **_) -> bytes:
+        """The shell around pg_restore: it prints pg_restore's code as its last line."""
+        assert argv[argv.index("sh") - 1] not in self.stopped_containers, "a load into a stopped database"
+        self.live_loads.append(stdin.read_bytes())
+        if self.during_live_load:
+            self.during_live_load()
+        if self.live_client_exit:
+            return exit_with(LIVE_LOAD_LABEL, self.live_client_exit)
+        return b"" if self.live_code is None else f"{self.live_code}\n".encode()
 
     def _volumes(self, argv, **_) -> bytes:
         if (
