@@ -77,7 +77,7 @@ from hal.backup.verify import DUMP_NAME
 from hal.grammar import ExitCode
 from hal.output import write_line
 from hal.output.command import Verb, command
-from hal.stack import litellm_keys, switches
+from hal.stack import api_limits, switches
 from hal.stack.litellm_keys import ADMIN_BUDGET_ID, KeysDone, Target
 
 APP = "litellm"
@@ -440,12 +440,12 @@ class BackupProbe(KeysProbe, AdmissionProbe):
         self.wait_for(
             "B1",
             "hopin's spend past its budget",
-            lambda: self.key_of("hopin")["spend"] > litellm_keys.APP_BUDGET_DOLLARS,
+            lambda: self.key_of("hopin")["spend"] > api_limits.APP_BUDGET_DOLLARS,
         )
         self.wait_for(
             "B1",
             "P's spend past the person budget",
-            lambda: self.customer_spend(self.person) > litellm_keys.PERSON_BUDGET_DOLLARS,
+            lambda: self.customer_spend(self.person) > api_limits.PERSON_BUDGET_DOLLARS,
         )
         self.wait_for("B1", "P's daily row", lambda: self.person_rows() > 0)  # fmt: skip
         self.expect_refused("B1", self.file_keys["hopin"], self.fingerprint())
@@ -460,8 +460,8 @@ class BackupProbe(KeysProbe, AdmissionProbe):
         row = re.search(r"✓ litellm\s+backed up\s+(\w+) ·", result.stdout)
         expect(row is not None, f"B1: no backed-up row in {result.stdout.strip()[-300:]!r}")
         expect(self.last_snapshot().startswith(row[1]), "B1: the status names another snapshot")
-        self.hold("B1", f"hopin's key past {litellm_keys.APP_BUDGET_DOLLARS} and P past "
-                  f"{litellm_keys.PERSON_BUDGET_DOLLARS} dollars each refused, F unchanged; "
+        self.hold("B1", f"hopin's key past {api_limits.APP_BUDGET_DOLLARS} and P past "
+                  f"{api_limits.PERSON_BUDGET_DOLLARS} dollars each refused, F unchanged; "
                   f"`hal backup litellm` exit 0, ✓ litellm backed up {row[1]}, the status "
                   f"names it; D {self.digest_b1} equal before and after it")  # fmt: skip
 
