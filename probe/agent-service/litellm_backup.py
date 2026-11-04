@@ -8,8 +8,8 @@ client:
     flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \\
         uv run --frozen python3 probe/agent-service/litellm_backup.py --scratch DIR
 
-Measured: B1 to B7 take about two minutes and the teardown a few seconds; the L cells are not
-measured whole yet.
+Measured on two runs: 4 to 7.5 minutes whole, of which the stack's start and B1 to B7 take 2 to
+3.5 minutes, the L cells 2 to 4 minutes, and the teardown 11 s.
 
 The checkout's `hal` runs under the scratch HOME, with its own restic repository, password and
 status, and with `--apps` naming a scratch record: the shipped `litellm` record of

@@ -5,8 +5,8 @@ in the live project, and it holds the live project unchanged after its last cell
     flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \\
         uv run --frozen python3 probe/keycloak/live_restore.py --scratch DIR
 
-Not run yet, so its run and teardown are not measured; the hold's own teardown is 11 s
-(probe/keycloak/README.md). `timeout`'s TERM reaches the hold in the same process group.
+Measured: 124 s whole, of which the hold's teardown is 10 s. `timeout`'s TERM reaches the hold in
+the same process group.
 
 The checkout's `hal` runs under a scratch HOME with its own restic repository and password, and
 with `--apps` naming the shipped `keycloak` record with only `compose_project` replaced by the
