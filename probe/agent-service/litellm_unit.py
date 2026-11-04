@@ -67,7 +67,11 @@ ENTRY = re.compile(r"^ {2}litellm:\n(?: {4}.*\n)+", re.MULTILINE)
 KEYCLOAK_OFF = "  keycloak:\n    run:\n      enabled: false\n"
 DOCKER_STAND_IN = """\
 #!/bin/sh
-# The mode of each litellm-keys one-off, after the service name; nothing else is written.
+# The mode of each litellm-keys one-off, after the service name; and, when DOCKER_CALLS names a
+# file, each call behind its caller's command line.
+if [ -n "$DOCKER_CALLS" ]; then
+  printf '%s\\t%s\\n' "$(tr '\\0' ' ' < /proc/$PPID/cmdline)" "$*" >> "$DOCKER_CALLS"
+fi
 named=
 for argument in "$@"; do
   if [ -n "$named" ]; then
@@ -212,9 +216,7 @@ class Probe:
 
     def wait_until_listening(self, cell: str) -> None:
         """Until LiteLLM answers on litellm-backend, from a throwaway beside the key step."""
-        image = json.loads(self.compose("config", "--format", "json"))["services"][
-            litellm_keys.KEYS_SERVICE
-        ]["image"]
+        image = self.keys_image()
         program = (
             "import urllib.request; "
             "urllib.request.urlopen('http://litellm:4000/health/liveliness', timeout=3)"
@@ -230,6 +232,11 @@ class Probe:
                 time.monotonic() < deadline, f"{cell}: LiteLLM did not listen in {LISTEN_SECONDS} s"
             )
             time.sleep(3)
+
+    def keys_image(self) -> str:
+        """The key step's image: plain Python, which the probe's throwaways run."""
+        resolved = json.loads(self.compose("config", "--format", "json"))
+        return resolved["services"][litellm_keys.KEYS_SERVICE]["image"]
 
     def write_secret(self, relative: Path, value: str) -> None:
         """A new file at `relative`, as `hal setup` writes one: 0644 in 0700 folders."""
