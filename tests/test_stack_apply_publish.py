@@ -14,10 +14,13 @@ from pathlib import Path
 import pytest
 import support.stack_apply_publish as stack_apply_publish_support
 from support.stack_apply import (
+    LITELLM_ON,
     at_terminal,  # noqa: F401 the fixture, requested by name below
     ingress,  # noqa: F401 the fixture, requested by name below
+    litellm_running,
     scripted,  # noqa: F401 the fixture, requested by name below
     scripted_git,  # noqa: F401 the fixture, requested by name below
+    secret_files,  # noqa: F401 the fixture, requested by name below
     setup_check,  # noqa: F401 the fixture, requested by name below
     setup_run,  # noqa: F401 the fixture, requested by name below
     state,  # noqa: F401 the fixture, requested by name below
@@ -37,6 +40,7 @@ from support.stack_external import (
     home,  # noqa: F401 the fixture, requested by name below
     live_checkout,  # noqa: F401 the fixture, requested by name below
 )
+from support.workstation_support import write_hal_config
 
 from hal import cli
 from hal.grammar import ExitCode
@@ -310,7 +314,7 @@ def interrupting(phase, *, after_running: bool):
 
 
 def local_part_returns(monkeypatch, exit_code: int) -> None:
-    monkeypatch.setattr(apply, "apply_local", lambda _state: exit_code)
+    monkeypatch.setattr(apply, "apply_local", lambda _state, *, api: exit_code)
 
 
 def publish_returns(monkeypatch, exit_code: int) -> list[tuple]:
@@ -427,6 +431,30 @@ def test_the_publish_is_entered_with_the_home_directory(world):
     world.run("yes")
 
     assert [arguments for arguments, _ in world.publish_entries] == [(Path.home(),)]
+
+
+@pytest.mark.parametrize("arguments", [("apply",), ("apply", "--local")], ids=" ".join)
+def test_both_branches_hand_the_settings_file_to_the_key_step(
+    world,
+    repository,
+    home,  # noqa: F811
+    secret_files,  # noqa: F811
+    arguments,
+):
+    """#889 C6: `[api.hopin]` of `config.toml` reaches the key step's write on either branch."""
+    fleet = repository / "fleet.yaml"
+    fleet.write_text(fleet.read_text() + LITELLM_ON)
+    keys = litellm_running(repository, world.scripted, secret_files)
+    write_hal_config(home, "[api.hopin]\nbudget_dollars = 6\n")
+
+    world.run("yes", "yes", arguments=arguments)
+
+    assert [
+        change["fields"]
+        for write in keys.writes
+        for change in write
+        if change["subject"] == "hopin"
+    ] == [{"max_budget": 6.0}]
 
 
 def test_help_names_both_parts(capsys):
