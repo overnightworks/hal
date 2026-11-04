@@ -159,11 +159,12 @@ with its own `--prune`, each one taken before the host clock minus 90 days; when
 forget runs. The last 10 apply within the bound. Past it, a rollback through that snapshot is lost
 (for Keycloak, an older realm state); the weekly snapshots stay.
 
-The bound is measured on the host clock, and no guard checks that clock: one set far ahead forgets
-every pre-apply snapshot of each app forgotten in that run, irreversibly (the weekly snapshots stay);
-one set far back forgets nothing until it is right. A snapshot taken after the host clock is never
-forgotten by the age bound; the policy forget that runs first still keeps only the last 10, future-dated
-ones included.
+The bound is measured on the host clock, and no guard checks that clock: one set far ahead makes
+the age pass forget every pre-apply snapshot of each app forgotten in that run, irreversibly (the
+weekly snapshots stay); one set far back makes it forget nothing until the clock is right. The age
+pass never forgets a snapshot taken after the host clock. The policy forget before it still
+applies: a pre-apply run keeps only the last 10 of the app, future-dated ones included, while a
+weekly run keeps every pre-apply snapshot.
 
 What the bound does not reach:
 
