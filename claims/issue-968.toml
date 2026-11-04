@@ -1,7 +1,0 @@
-claim_id = "b0c5198724c8466a93532bdb73b9e28b"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "5cc7f3617714dde2ab0e6c0d8e39135a67544ddf"
-branch = "claude/issue-968-songmaker-reference-delete"
-scope = ["docs/design/legal-pages.html", "legal/sections/songmaker/datenschutz.html"]
-opened_commit = "914cf5b6f0347783f5b22622e55b665588142626"
