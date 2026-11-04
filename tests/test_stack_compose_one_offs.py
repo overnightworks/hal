@@ -1,10 +1,12 @@
 """A one-off container of the edge stack logs to driver `none`; a long-running service does not.
 
 The one-offs are the services of the `apply` profile: `compose run` starts them for their output,
-which belongs to the caller alone and must not reach the journal a second time.
+which belongs to the caller alone and must not reach the journal a second time. A failed one-off
+keeps the last line of its standard error apart from its standard output (#965).
 """
 
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -80,3 +82,32 @@ def test_the_restic_container_starts_with_log_driver_none(tmp_path):
     argv = container_argv(Settings.for_home(tmp_path, uid=1000, gid=1000))
 
     assert argv[argv.index("--log-driver") + 1] == "none"
+
+
+def test_a_failed_one_off_names_its_exit_and_last_error_line_and_never_its_standard_output() -> (
+    None
+):
+    """#965: a one-off whose standard output may carry values names its cause from stderr alone."""
+    value = "fp-a-value-the-one-off-printed"
+
+    def runner(command: list[str], _timeout: int, _stdin: str | None = None):
+        return subprocess.CompletedProcess(command, 3, f"{value}\n", "first\nthe last error\n\n")
+
+    one_offs = compose.Compose(run=runner)
+
+    with pytest.raises(compose.ComposeError) as raised:
+        one_offs.run_once("litellm-keys", ["--read", "x"])
+
+    assert raised.value.one_off_cause("litellm-keys") == "litellm-keys exited 3: the last error"
+
+
+def test_a_one_off_that_never_exited_is_named_by_the_failure_itself() -> None:
+    def runner(command: list[str], timeout: int, _stdin: str | None = None):
+        raise compose.ComposeError(f"`{' '.join(command[:3])}` took longer than {timeout}s")
+
+    one_offs = compose.Compose(run=runner)
+
+    with pytest.raises(compose.ComposeError) as raised:
+        one_offs.run_once("litellm-keys", ["--write"])
+
+    assert raised.value.one_off_cause("litellm-keys") == str(raised.value)

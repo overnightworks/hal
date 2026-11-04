@@ -1,5 +1,6 @@
 """What the `test_stack_apply_publish` tests share with other test modules."""
 
+import dataclasses
 import functools
 import sys
 from contextlib import ExitStack
@@ -79,6 +80,7 @@ class World:
     stack: ExitStack
     reader: FakeReader
     fake_tofu: object
+    collaborators: apply.Collaborators
     publish_entries: list[tuple] = field(default_factory=list)
     check_entries: list[None] = field(default_factory=list)
 
@@ -115,25 +117,24 @@ def world(
     repository, scripted, scripted_git, setup_check, setup_run, ingress, state, fake_tofu,  # noqa: F811
     at_terminal, capsys, monkeypatch,  # noqa: F811
 ):  # fmt: skip
+    collaborators = apply.Collaborators(
+        engine=compose.Compose(scripted.run, repository),
+        check=setup_check,
+        run_setup=setup_run,
+        verifier=ingress.verifier,
+        watch=ingress.watch,
+        git=scripted_git,
+        ensure_environment=trusted_environment,
+    )
     monkeypatch.setattr(
         apply,
         "apply_local",
-        functools.partial(
-            REAL_APPLY_LOCAL,
-            engine=compose.Compose(scripted.run, repository),
-            repository=repository,
-            check=setup_check,
-            run_setup=setup_run,
-            verifier=ingress.verifier,
-            watch=ingress.watch,
-            git=scripted_git,
-            ensure_environment=trusted_environment,
-        ),
+        functools.partial(REAL_APPLY_LOCAL, repository=repository, collaborators=collaborators),
     )
     reader = FakeReader(CLEAN_SNAPSHOT)
     made = World(
         None, None, scripted, scripted_git, setup_check, setup_run, state, ExitStack(),
-        reader, fake_tofu,
+        reader, fake_tofu, collaborators,
     )  # fmt: skip
 
     def spy_on_publish(*arguments, **keywords):
@@ -192,7 +193,13 @@ def failing_app(world, repository, home, tmp_path, monkeypatch):  # noqa: F811
     monkeypatch.setattr(
         apply,
         "apply_local",
-        functools.partial(apply.apply_local, app_runtime=runtime_of(home, world.state, docker)),
+        functools.partial(
+            REAL_APPLY_LOCAL,
+            repository=repository,
+            collaborators=dataclasses.replace(
+                world.collaborators, app_runtime=runtime_of(home, world.state, docker)
+            ),
+        ),
     )
 
 

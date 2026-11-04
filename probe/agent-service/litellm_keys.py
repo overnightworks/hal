@@ -1,136 +1,114 @@
-"""Probe of `hal apply`'s key step (#964 cells S1-S9): the step's plan and run, through the
-one-off `litellm-keys`, against the LiteLLM of litellm.py in its throwaway project. Nothing live
-and nothing paid: the probe refuses to start unless `internet` is internal and holds only the
-fakes.
+"""Probe of `hal apply`'s key step (#964 cells S1-S9, #965 cells A2-A8): the step's plan and run,
+through the one-off `litellm-keys`, against the LiteLLM of litellm.py in its throwaway project.
+Nothing live and nothing paid: the probe refuses to start unless `internet` is internal and holds
+only the fakes. It runs in hal's environment, which holds the agent-runtime client:
 
     flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \\
-        python3 probe/agent-service/litellm_keys.py --scratch DIR
+        uv run --frozen python3 probe/agent-service/litellm_keys.py --scratch DIR
 
 Measured: a run takes about four minutes and its teardown a few seconds (K 30 s, CAP 1800 s).
 
 It writes three app key files beside litellm.py's scratch secrets and drives the checkout's
 `hal.stack.litellm_keys` with a Compose runner on the probe's project, which records every argv,
-standard input, standard output and standard error the step's one-off sees. LiteLLM runs at log
-level INFO, as litellm.py sets it for LA. F is the fake provider's request log, LA LiteLLM's log,
-D a digest of `LiteLLM_VerificationToken` and `LiteLLM_BudgetTable` read by SQL. Keys are scratch
-values the probe generates and never prints; the probe's own SQL names keys by alias, never by
-hash. Exit 0: every cell held.
+standard input, standard output and standard error the step's one-off sees. The step plans as
+`hal apply` with Keycloak on and running; the runner answers its `realm-observer` call with the
+scenario's members of the admin group (cell LM1 of probe/keycloak proves the real answer), an empty
+group in the S cells. LiteLLM runs at log level INFO, as litellm.py sets it for LA. F is the fake
+provider's request log, LA LiteLLM's log, D a digest of `LiteLLM_VerificationToken`,
+`LiteLLM_BudgetTable` and `LiteLLM_EndUserTable` read by SQL, P the rows and partials the step's
+plans and runs print. Keys, subjects and fingerprints are scratch values the probe generates and
+never prints; the probe's own SQL names keys by alias, never by hash. Exit 0: every cell held.
 """
 
 from __future__ import annotations
 
+import contextlib
+import io
+import json
 import secrets
 import subprocess
 import sys
-import time
+import uuid
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from agent_runtime_client.turn import Principal, person_fingerprint
 from litellm import (
     DATABASE,
-    FAKE_PROVIDER,
-    FRONT,
-    GATEWAY,
+    DEFAULT_MODEL,
     LITELLM,
     REPO,
-    LitellmProbe,
+    error_of,
     expect,
     hashed,
     run_scratch_probe,
     shipped_config,
 )
+from litellm_key_files import APP_KEYS_FOLDER, APPS, KeyFiles
 from scratch_secrets import write_new
 
-from hal.output import write_line
-from hal.stack import compose, litellm_keys
-from hal.stack.litellm_keys import KeysDone, KeysFailed, KeysPlan, Target
-from hal.stack.result_rows import keys_partial
+from hal.output import Row, write_line, write_row
+from hal.output.command import Verb, command
+from hal.stack import core, litellm_keys
+from hal.stack.litellm_keys import (
+    ADMIN_BUDGET_ID,
+    ADMIN_GROUP,
+    Change,
+    KeysDone,
+    KeysFailed,
+    KeysPlan,
+    KeysResult,
+    RowChange,
+    Target,
+)
+from hal.stack.plan_rows import keys_plan_rows
+from hal.stack.realm import OBSERVER_SERVICE
+from hal.stack.realm.reconcile import KEYCLOAK_SERVICE, MembersNotRead
+from hal.stack.result_rows import keys_partial, keys_rows
 
-APPS = ("hopin", "presentator", "songmaker")
-APP_KEYS_FOLDER = Path(".secrets/litellm/apps")
-READ_SECONDS = 180
 FOURTH_MODEL = "text/fourth"
-TABLES = ("LiteLLM_VerificationToken", "LiteLLM_BudgetTable")
+TABLES = ("LiteLLM_VerificationToken", "LiteLLM_BudgetTable", "LiteLLM_EndUserTable")
+CUSTOMERS = TABLES.index("LiteLLM_EndUserTable")
+CUSTOMER_TABLE = TABLES[CUSTOMERS]
+ISSUER = "https://auth.probe.invalid/realms/hallucinai"  # the scenario's; LM1 proves Keycloak's
+PEOPLE = ("O", "O2", "O3", "X", "Y")
+OTHER_BUDGET = "probe-by-hand"
+OBSERVER_STOPPED = "realm-observer: stopped"
+NOT_READ_PARTIAL = (
+    f"partial, {ADMIN_BUDGET_ID} members not read from Keycloak",
+    command(Verb.APPLY),
+)
 
 
-@dataclass
-class Seen:
-    """What the step's one-offs saw and said."""
+@dataclass(frozen=True)
+class Person:
+    """A scenario person: a Keycloak id and the fingerprint the client's recipe makes of it."""
 
-    argv: list[list[str]] = field(default_factory=list)
-    stdin: list[str] = field(default_factory=list)
-    output: list[str] = field(default_factory=list)
+    name: str
+    subject: str = field(default_factory=lambda: str(uuid.uuid4()), repr=False)
 
-    def text(self) -> str:
-        return "\n".join((*(" ".join(argv) for argv in self.argv), *self.stdin, *self.output))
+    @property
+    def fingerprint(self) -> str:
+        return person_fingerprint(Principal(iss=ISSUER, sub=self.subject))
 
 
-class KeysProbe(LitellmProbe):
+class KeysProbe(KeyFiles):
     """litellm.py's stack without the service, and the key step against it."""
 
     def __init__(self, scratch: Path) -> None:
         super().__init__(scratch)
-        self.home = Path(self.environment["HOME"])
-        self.written: list[str] = []  # every app key file value, S6's replaced one included
-        self.file_keys = {app: self.write_app_key(app) for app in APPS}
-        self.seen = Seen()
         self.earlier_logs: list[str] = []
-        self.engine = compose.Compose(run=self.step_runner, repository=REPO)
-        self.budget_id = shipped_config()["litellm_settings"][litellm_keys.BUDGET_ID_SETTING]
+        self.people = {name: Person(name) for name in PEOPLE}
+        self.members: list[str] | None = []  # the admin group's ids; None: no such group
+        self.observer_stopped = False
+        self.keycloak_running = True
+        self.printed: list[str] = []  # P
 
-    def services_to_start(self) -> tuple[str, ...]:
-        return (GATEWAY, FAKE_PROVIDER, FRONT, DATABASE, LITELLM)
-
-    # --- scratch and plumbing -----------------------------------------------------------------
-
-    def write_app_key(self, app: str, replace: bool = False) -> str:
-        key = f"sk-{secrets.token_urlsafe(32)}"
-        folder = self.home / APP_KEYS_FOLDER
-        folder.mkdir(mode=0o700, exist_ok=True)
-        path = folder / app
-        if replace:
-            path.unlink()
-        write_new(path, (key + "\n").encode(), 0o644)
-        self.app_keys.append(key)
-        self.written.append(key)
-        return key
-
-    def step_runner(
-        self, command: list[str], timeout: int, stdin: str | None = None
-    ) -> subprocess.CompletedProcess[str]:
-        """The step's compose call on the probe's project: its verb and arguments after the
-        probe's own files, overlays and project name."""
-        verb_and_arguments = command[6:]  # docker compose --project-directory D --file F
-        argv = [*self.compose_command(guard=True), *verb_and_arguments]
-        result = subprocess.run(  # noqa: S603 - argv is the step's own compose call behind the probe's prefix
-            argv,
-            input=stdin,
-            capture_output=True,
-            text=True,
-            env=self.environment,
-            cwd=REPO,
-            check=False,
-            timeout=timeout,
-        )
-        if "run" in verb_and_arguments:
-            self.seen.argv.append(argv)
-            self.seen.stdin.append(stdin or "")
-            self.seen.output += [result.stdout, result.stderr]
-        return result
-
-    def plan(self) -> KeysPlan:
-        return litellm_keys.plan_keys(self.engine, self.engine.states(), REPO)
-
-    def read_plan(self, cell: str) -> KeysPlan:
-        """The plan once the keys can be read: LiteLLM answers 502 while it migrates."""
-        deadline = time.monotonic() + READ_SECONDS
-        while (plan := self.plan()).not_read is not None:
-            expect(time.monotonic() < deadline, f"{cell}: keys not read ({plan.not_read})")
-            time.sleep(3)
-        return plan
+    # --- plumbing -----------------------------------------------------------------------------
 
     def key_rows(self, **asked: object) -> list[dict]:
         return self.admin("POST", "/v2/key/info", asked)["info"]
@@ -185,8 +163,81 @@ class KeysProbe(LitellmProbe):
     def change_by_hand(self, app: str, **settings: object) -> None:
         self.admin("POST", "/key/update", {"key": self.file_keys[app], **settings})
 
-    def run_step(self, plan: KeysPlan):
-        return litellm_keys.run_keys(plan, self.engine)
+    def step_runner(
+        self, command: list[str], timeout: int, stdin: str | None = None
+    ) -> subprocess.CompletedProcess[str]:
+        if OBSERVER_SERVICE not in command:
+            return super().step_runner(command, timeout, stdin)
+        answer = self.observer_answer(command)
+        self.seen.argv.append(command)
+        self.seen.output += [answer.stdout, answer.stderr]
+        return answer
+
+    def observer_answer(self, command: list[str]) -> subprocess.CompletedProcess[str]:
+        """The members mode's answer as scenario data: absent, stopped after its output, or the
+        members; its lines are the program's own."""
+        if self.members is None:
+            absent = f"realm-observer: hallucinai has no group {ADMIN_GROUP}\n"
+            return subprocess.CompletedProcess(command, 1, "", absent)
+        document = json.dumps({"issuer": ISSUER, "members": self.members}) + "\n"
+        if self.observer_stopped:
+            return subprocess.CompletedProcess(command, 1, document, f"{OBSERVER_STOPPED}\n")
+        return subprocess.CompletedProcess(command, 0, document, "")
+
+    def plan(self) -> KeysPlan:
+        """The step as `hal apply` plans it with Keycloak's gate on; its rows go to P."""
+        states = self.engine.states()
+        if self.keycloak_running:
+            states[KEYCLOAK_SERVICE] = {"running"}
+        plan = litellm_keys.plan_keys(self.engine, states, REPO, core.Gate.ON, None)
+        self.print_rows(keys_plan_rows(plan))
+        return plan
+
+    def run_step(self, plan: KeysPlan) -> KeysResult | None:
+        result = super().run_step(plan)
+        if result is not None:
+            self.print_rows(keys_rows(result))
+            if (partial := keys_partial(result)) is not None:
+                self.printed.append(partial[0])
+        return result
+
+    def print_rows(self, rows: Iterable[Row]) -> None:
+        with contextlib.redirect_stdout(io.StringIO()) as printed:
+            for row in rows:
+                write_row(row)
+        self.printed += printed.getvalue().splitlines()
+
+    def name_of(self, user_id: str) -> str:
+        """A row's scenario name, so no message prints its fingerprint."""
+        names = {person.fingerprint: person.name for person in self.people.values()}
+        return names.get(user_id, "another row")
+
+    def customer(self, person: Person, columns: str) -> list[str]:
+        """The person's row in D's customer table, as `columns` of one SELECT name it."""
+        row = f"\"{CUSTOMER_TABLE}\" AS r WHERE user_id = '{person.fingerprint}'"
+        return self.query(f"SELECT {columns} FROM {row};")  # noqa: S608 - the columns and the fingerprint are the probe's own
+
+    def customer_text(self, person: Person) -> list[str]:
+        return self.customer(person, "r::text")
+
+    def set_spend(self, person: Person, spend: float) -> None:
+        row = f"user_id = '{person.fingerprint}'"
+        self.query(f'UPDATE "{CUSTOMER_TABLE}" SET spend = {spend} WHERE {row};')  # noqa: S608 - the spend and the fingerprint are the probe's own
+
+    def new_customer(self, person: Person, **fields: object) -> None:
+        self.admin("POST", "/customer/new", {"user_id": person.fingerprint, **fields})
+
+    def budget_ids(self) -> list[str]:
+        return self.query('SELECT budget_id FROM "LiteLLM_BudgetTable" ORDER BY budget_id;')
+
+    def row_changes(self, plan: KeysPlan) -> list[tuple[str, bool, bool]]:
+        """The plan's row changes by name; any other change as a name of its own."""
+        return [
+            (self.name_of(change.fingerprint), change.link, change.new)
+            if isinstance(change, RowChange)
+            else (change.subject, False, False)
+            for change in plan.changes
+        ]
 
     # --- the cells ----------------------------------------------------------------------------
 
@@ -201,6 +252,13 @@ class KeysProbe(LitellmProbe):
         self.cell_s6()
         self.cell_s7()
         self.cell_s9()
+        self.cell_a2()
+        self.cell_a5()
+        self.cell_a3()
+        self.cell_a7()
+        self.cell_a4()
+        self.cell_a8()
+        self.cell_a6()
         self.cell_s8()
 
     def cell_s1(self) -> None:
@@ -208,11 +266,15 @@ class KeysProbe(LitellmProbe):
         planned = [(change.target, change.subject, change.new) for change in plan.changes]
         expect(
             planned
-            == [(Target.BUDGET, self.budget_id, True), *((Target.KEY, app, True) for app in APPS)],
+            == [
+                (Target.BUDGET, self.budget_id, True),
+                *((Target.KEY, app, True) for app in APPS),
+                (Target.BUDGET, ADMIN_BUDGET_ID, True),
+            ],
             f"S1: planned {planned}",
         )
         result = self.run_step(plan)
-        expect(isinstance(result, KeysDone) and len(result.done) == 4, f"S1: {result}")
+        expect(isinstance(result, KeysDone) and len(result.done) == 5, f"S1: {result}")
         budget = self.budget()
         expect(
             (budget["max_budget"], budget["budget_duration"])
@@ -233,11 +295,16 @@ class KeysProbe(LitellmProbe):
         self.wait_for(
             "S1", "each key's spend", lambda: all(self.key_of(app)["spend"] > 0 for app in APPS)
         )
+        spent = sum(self.key_of(app)["spend"] for app in APPS)  # D holds once the row has it all
+        self.wait_for(
+            "S1", "the person's spend", lambda: abs(self.customer_spend(fingerprint) - spent) < 1e-9
+        )
         self.hold(
             "S1",
             f"budget {self.budget_id} and three keys made by hash with the defaults, "
-            f"models as /v1/models, reset {reset:%Y-%m-%d %H:%M} UTC; each key served "
-            "through the front; the person's row keeps budget_id NULL",
+            f"models as /v1/models, reset {reset:%Y-%m-%d %H:%M} UTC, and {ADMIN_BUDGET_ID} for "
+            "the empty admin group; each key served through the front; the person's row keeps "
+            "budget_id NULL",
         )
 
     def expect_default_keys(self, models: list[str], reset: datetime) -> None:
@@ -281,10 +348,13 @@ class KeysProbe(LitellmProbe):
         plan = self.read_plan("S2")
         expect(plan == KeysPlan(), f"S2: planned {plan}")
         expect(self.run_step(plan) is None, "S2: the step acted")
-        ran = self.seen.argv[calls:]
-        expect(len(ran) == 1 and "--read" in ran[0], f"S2: {len(ran)} one-offs ran")
+        ran = [argv for argv in self.seen.argv[calls:] if litellm_keys.KEYS_SERVICE in argv]
+        expect(len(ran) == 1 and "--read" in ran[0], f"S2: {len(ran)} key one-offs ran")
         expect(self.digest() == before, "S2: D changed")
-        self.hold("S2", "nothing to change; one --read and no --write ran; D unchanged")
+        self.hold(
+            "S2",
+            "nothing to change; one --read and no --write ran beside the members read; D unchanged",
+        )
 
     def cell_s3(self) -> None:
         self.query("DELETE FROM \"LiteLLM_VerificationToken\" WHERE key_alias = 'hopin';")
@@ -482,6 +552,191 @@ class KeysProbe(LitellmProbe):
             f"{len(self.seen.argv)} argv and standard inputs, their output, LA or "
             "`compose config litellm-keys`",
         )
+
+    # --- the admin group's rows (#965) --------------------------------------------------------
+
+    def cell_a2(self) -> None:
+        o, o2, o3, x, y = (self.people[name] for name in PEOPLE)
+        self.admin("POST", "/budget/new", {"budget_id": OTHER_BUDGET})
+        self.new_customer(o2)
+        self.new_customer(o3, budget_id=OTHER_BUDGET)
+        self.new_customer(
+            x, budget_id=ADMIN_BUDGET_ID, alias="probe-x", default_model=DEFAULT_MODEL
+        )
+        self.new_customer(y)
+        for person in (o2, x):
+            self.set_spend(person, 1)
+        y_before, budgets = self.customer_text(y), self.budget_ids()
+        self.members = [o.subject, o2.subject, o3.subject]
+        plan = self.read_plan("A2")
+        links = sorted((o, o2, o3), key=lambda person: person.fingerprint)
+        wanted = [("X", False, False), *((person.name, True, person is o) for person in links)]
+        expect(self.row_changes(plan) == wanted, f"A2: planned {self.row_changes(plan)}")
+        result = self.run_step(plan)
+        expect(isinstance(result, KeysDone) and len(result.done) == 4, f"A2: {result}")
+        linked = self.query(f'SELECT user_id FROM "{CUSTOMER_TABLE}" WHERE budget_id IS NOT NULL;')  # noqa: S608 - the table is this probe's literal
+        names = sorted(map(self.name_of, linked))
+        expect(names == ["O", "O2", "O3"], f"A2: the rows with a budget link are {names}")
+        spends = [self.customer(person, "spend::text") for person in (o2, x)]
+        expect(spends == [["1"], ["1"]], f"A2: O2's and X's spends {spends}")
+        kept = self.customer(x, "coalesce(budget_id, '-') || '|' || alias || '|' || default_model")
+        expect(kept == [f"-|probe-x|{DEFAULT_MODEL}"], f"A2: X's row holds {kept}")
+        expect(self.budget_ids() == budgets, f"A2: the budgets are {self.budget_ids()}")
+        expect(self.customer_text(y) == y_before, "A2: Y's row changed")
+        (budget,) = self.admin("POST", "/budget/info", {"budgets": [ADMIN_BUDGET_ID]})
+        settings = (budget["max_budget"], budget["budget_duration"])
+        expect(
+            settings == (None, litellm_keys.BUDGET_DURATION), f"A2: {ADMIN_BUDGET_ID} {settings}"
+        )
+        self.hold(
+            "A2",
+            f"O made, O2 and O3 linked to {ADMIN_BUDGET_ID}, O2's spend 1; X unlinked with spend "
+            "1, its alias and default model, no new budget; Y untouched; the linked rows are O, "
+            f"O2 and O3; {ADMIN_BUDGET_ID} has no max_budget and the period {settings[1]}",
+        )
+
+    def cell_a5(self) -> None:
+        before = self.digest()
+        plan = self.read_plan("A5")
+        expect(plan == KeysPlan(), f"A5: planned {plan}")
+        expect(self.run_step(plan) is None, "A5: the step acted")
+        expect(self.digest() == before, "A5: D changed")
+        self.hold("A5", "the same members again: nothing to change; D unchanged")
+
+    def cell_a3(self) -> None:
+        """O's key is presentator's and X's songmaker's, each with its budget left."""
+        o, x = self.people["O"], self.people["X"]
+        o_key, x_key = self.file_keys["presentator"], self.file_keys["songmaker"]
+        o_spend = self.push_person("A3", o_key, o.fingerprint)
+        before = len(self.provider_requests())
+        answer = self.complete(o_key, user=o.fingerprint)
+        self.served("A3", answer, self.provider_requests()[before:])
+        x_spend = self.push_person("A3", x_key, x.fingerprint)
+        before = len(self.provider_requests())
+        refusal = self.complete(x_key, user=x.fingerprint)
+        self.refused("A3", refusal, before)
+        self.hold(
+            "A3",
+            f"O at {o_spend:.2f} dollars served; X, served at spend 1, at {x_spend:.2f} dollars "
+            f"refused: {refusal['status']} {error_of(refusal)}, F 0",
+        )
+
+    def cell_a7(self) -> None:
+        o = self.people["O"]
+        before_reset = self.customer_spend(o.fingerprint)
+        self.move_due("LiteLLM_BudgetTable", "budget_id", ADMIN_BUDGET_ID)
+        took = self.wait_for("A7", "the reset", lambda: self.customer_spend(o.fingerprint) == 0)
+        before = len(self.provider_requests())
+        answer = self.complete(self.file_keys["presentator"], user=o.fingerprint)
+        self.served("A7", answer, self.provider_requests()[before:])
+        self.wait_for("A7", "O's spend", lambda: self.customer_spend(o.fingerprint) > 0)
+        since = self.customer_spend(o.fingerprint)
+        self.members = [self.people["O2"].subject, self.people["O3"].subject]
+        plan = self.read_plan("A7")
+        expect(self.row_changes(plan) == [("O", False, False)], f"A7: {self.row_changes(plan)}")
+        expect(isinstance(self.run_step(plan), KeysDone), "A7: the unlink failed")
+        (row,) = self.customer(o, "coalesce(budget_id, '-'), spend")
+        link, spend = row.split("|")
+        expect((link, float(spend)) == ("-", since), f"A7: O's row after the unlink {row}")
+        self.hold(
+            "A7",
+            f"{ADMIN_BUDGET_ID} moved due: O's spend {before_reset:.2f} reset to 0 after "
+            f"{took:.0f} s; O left the group, its row unlinked with the {since} dollars spent "
+            "since the reset",
+        )
+
+    def cell_a4(self) -> None:
+        """The members not read beside a key and budget change, then with no change."""
+        not_read = MembersNotRead("Keycloak is not running")
+        self.keycloak_running = False
+        try:
+            self.change_budget(1.5)
+            self.change_by_hand("songmaker", max_budget=7.0)
+            customers = self.digest()[CUSTOMERS]
+            plan = self.read_plan("A4")
+            subjects = [change.subject for change in plan.changes if isinstance(change, Change)]
+            expect(len(subjects) == len(plan.changes), f"A4: planned {plan}")
+            expect(
+                subjects == [self.budget_id, "songmaker"] and plan.admin == not_read, f"A4: {plan}"
+            )
+            first = self.run_step(plan)
+            expect(isinstance(first, KeysDone) and len(first.done) == 2, f"A4: {first}")
+            partials = [keys_partial(first)]
+            again = self.read_plan("A4")
+            expect(again == KeysPlan(admin=not_read), f"A4: planned again {again}")
+            partials.append(keys_partial(self.run_step(again)))
+            expect(partials == [NOT_READ_PARTIAL] * 2, f"A4: {partials}")
+            expect(self.digest()[CUSTOMERS] == customers, "A4: D of the customer rows changed")
+        finally:
+            self.keycloak_running = True
+        self.hold(
+            "A4",
+            f"Keycloak not running: the person budget and songmaker done, then nothing to change; "
+            f"D of the customer rows unchanged; both {NOT_READ_PARTIAL[0]!r}, next "
+            f"{NOT_READ_PARTIAL[1]}",
+        )
+
+    def cell_a8(self) -> None:
+        x = self.people["X"]
+        self.admin(
+            "POST", "/customer/update", {"user_id": x.fingerprint, "budget_id": ADMIN_BUDGET_ID}
+        )
+        members, self.members = self.members, None
+        try:
+            plan = self.read_plan("A8")
+            result = self.run_step(plan)
+        finally:
+            self.members = members
+        cause = f"realm-observer exited 1: realm-observer: hallucinai has no group {ADMIN_GROUP}"
+        expect(plan == KeysPlan(admin=MembersNotRead(cause)), f"A8: planned {plan}")
+        expect(keys_partial(result) == NOT_READ_PARTIAL, f"A8: {result}")
+        linked = self.customer(x, "coalesce(budget_id, '-')")
+        expect(linked == [ADMIN_BUDGET_ID], f"A8: X's row is linked to {linked}")
+        self.hold("A8", f"the group absent: members not read ({cause}); X stays linked; partial")
+
+    def cell_a6(self) -> None:
+        """The failing runs, then one search of P for every subject, fingerprint, key and hash."""
+        stopped = self.failing_members_read()
+        plan = self.read_plan("A6")
+        expect(self.row_changes(plan) == [("X", False, False)], f"A6: {self.row_changes(plan)}")
+        self.compose("stop", DATABASE, timeout=120)
+        try:
+            failed, unread = self.run_step(plan), self.plan()
+        finally:
+            self.compose("start", DATABASE, timeout=120)
+        expect(isinstance(failed, KeysFailed) and failed.failed == plan.changes[0], f"A6: {failed}")
+        expect(unread.not_read is not None, f"A6: read with the database stopped: {unread}")
+        expect(isinstance(self.run_step(self.read_plan("A6")), KeysDone), "A6: the retry failed")
+        people = self.people.values()
+        secret_values = [self.master_key, *self.written]
+        hidden = [*(value for p in people for value in (p.subject, p.fingerprint)), *secret_values]
+        hidden += map(hashed, secret_values)
+        found = sum(value in line for line in self.printed for value in hidden)
+        sent = "\n".join(self.seen.stdin)
+        control = sorted(person.name for person in people if person.fingerprint in sent)
+        measured = f"{found} values in {len(self.printed)} lines of P; control {control}"
+        write_line(f"A6 measured: {measured}", flush=True)
+        expect(control == ["O", "O2", "O3", "X"], f"A6: the control finds {control}")
+        expect(found == 0, f"A6: {found} values printed")
+        expect(self.people["Y"].fingerprint not in self.seen.text(), "A6: Y's row left the one-off")
+        self.hold(
+            "A6",
+            f"{len(self.printed)} lines of P, among them a failing members read ({stopped}), a "
+            f"failing unlink ({failed.cause}) and a failing --read ({unread.not_read}): no "
+            "subject, fingerprint, key or hash; the control finds O, O2, O3 and X in "
+            "litellm-keys' standard input, Y nowhere",
+        )
+
+    def failing_members_read(self) -> str:
+        """The observer stopped after it printed the members: the cause quotes none of them."""
+        self.observer_stopped = True
+        try:
+            plan = self.read_plan("A6")
+        finally:
+            self.observer_stopped = False
+        cause = f"realm-observer exited 1: {OBSERVER_STOPPED}"
+        expect(plan.admin == MembersNotRead(cause), f"A6: the members read gave {plan.admin}")
+        return cause
 
 
 def first_of_next_month() -> datetime:

@@ -1,11 +1,12 @@
-"""`hal apply`'s key step (#964): its rows in the one question, its run
-before the apps, and every ending of the item's table "How the run ends"."""
+"""`hal apply`'s key step (#964, #965): its rows in the one question, its run
+before the apps, every ending of the item's table "How the run ends", and the admin group's rows."""
 
 import re
 import subprocess
 
 import pytest
 import yaml
+from agent_runtime_client.turn import Principal, person_fingerprint
 from support.stack_apply import (
     DISABLED,
     ENABLED,
@@ -13,6 +14,7 @@ from support.stack_apply import (
     home,  # noqa: F401 the fixture, requested by name below
     ingress,  # noqa: F401 the fixture, requested by name below
     realm_backup,  # noqa: F401 the fixture, requested by name below
+    realm_unit,  # noqa: F401 the fixture, requested by name below
     repository,  # noqa: F401 the fixture, requested by name below
     scripted,  # noqa: F401 the fixture, requested by name below
     scripted_git,  # noqa: F401 the fixture, requested by name below
@@ -30,7 +32,9 @@ from support.stack_apply_fakes import ScriptedCompose
 from support.stack_plan_rows import find_row, plain
 
 from hal.stack import litellm_keys
+from hal.stack.litellm_keys import ADMIN_BUDGET_ID
 from hal.stack.plan_rows import KeysEvent, PlanGroup
+from hal.stack.realm.reconcile import KEYCLOAK_SERVICE
 from hal.stack.result_rows import ResultEvent
 
 APPS = ("hopin", "presentator", "songmaker")
@@ -50,8 +54,9 @@ def desired_row(app: str, models: tuple[str, ...]) -> dict:
 
 @pytest.fixture
 def keys(repository, scripted: ScriptedCompose):  # noqa: F811
-    """LiteLLM running beside a disabled fleet, its config naming the budget id; every key and the
-    person budget as desired, so the step alone has nothing to change."""
+    """LiteLLM and Keycloak running beside a disabled fleet that has no Keycloak unit, its config
+    naming the budget id; every key, the person budget and the admin budget as desired, and the
+    admin group empty, so the step alone has nothing to change."""
     write_fleet(repository, DISABLED)
     config = repository / litellm_keys.CONFIG_FILE
     config.parent.mkdir(parents=True, exist_ok=True)
@@ -59,9 +64,10 @@ def keys(repository, scripted: ScriptedCompose):  # noqa: F811
         yaml.safe_dump({"litellm_settings": {litellm_keys.BUDGET_ID_SETTING: BUDGET_ID}})
     )
     scripted.config["services"][litellm_keys.LITELLM_SERVICE] = {"profiles": ["litellm"]}
-    scripted.put_containers({litellm_keys.LITELLM_SERVICE: "running"})
+    scripted.put_containers({litellm_keys.LITELLM_SERVICE: "running", KEYCLOAK_SERVICE: "running"})
     scripted.keys.rows = {app: desired_row(app, scripted.keys.models) for app in APPS}
     scripted.keys.budget = dict(litellm_keys.desired_budget())
+    scripted.keys.admin_budget = dict(litellm_keys.desired_admin_budget())
     return scripted.keys
 
 
@@ -142,7 +148,7 @@ def test_keys_not_read_with_nothing_else_to_change_ask_nothing_and_refuse(switch
     assert "Type yes" not in plain(out)
     assert find_row(plain(out), PlanGroup.LITELLM, KeysEvent.NOT_READ)
     assert lines_of(err) == [
-        "error: litellm: keys not read (`docker compose run` exited 1: "
+        "error: litellm: keys not read (litellm-keys exited 1: "
         "litellm-keys: status 502 at /v2/key/info)",
         "next: hal apply",
     ]
@@ -279,8 +285,146 @@ def test_a_write_the_one_off_could_not_finish_is_a_failed_step(switch, keys, scr
 
     assert exit_code == 1
     assert re.search(
-        r"^  ✗ litellm +keys failed +`docker compose run` exited 130: litellm-keys: stopped",
+        r"^  ✗ litellm +keys failed +litellm-keys exited 130: litellm-keys: stopped",
         plain(out),
         re.M,
     )
     assert lines_of(err) == ["error: partial, litellm keys failed", "next: hal apply"]
+
+
+# --- the admin group's rows (#965) ---------------------------------------------------------------
+
+
+KEYCLOAK_OFF = "services:\n  keycloak:\n    run: {enabled: false, setup: keycloak/init}\n"
+
+
+def fingerprint_of(compose: ScriptedCompose, subject: str) -> str:
+    return person_fingerprint(Principal(iss=compose.realm_issuer, sub=subject))
+
+
+def admin_rows(keys) -> dict[str, str | None]:
+    return {fingerprint: row["budget_id"] for fingerprint, row in keys.customers.items()}
+
+
+def assert_no_value_printed(out: str, err: str, *values: str) -> None:
+    assert not any(value in out + err for value in values)
+
+
+def test_the_members_rows_are_linked_and_a_former_members_row_unlinked_after_the_one_yes(
+    switch,  # noqa: F811
+    keys,
+    scripted,  # noqa: F811
+):
+    """A2 and A5 through hal apply: one counted row, the writes, then nothing to change."""
+    scripted.realm_members = ["subject-p"]
+    member, former = fingerprint_of(scripted, "subject-p"), "fp-" + "0" * 64
+    keys.customers = {former: {"budget_id": ADMIN_BUDGET_ID, "spend": 1.0}}
+
+    exit_code, out, err = switch()
+
+    assert (exit_code, err) == (0, "")
+    plan, _, result = plain(out).partition("Type yes")
+    assert find_row(plan, ADMIN_BUDGET_ID, KeysEvent.CUSTOMER_ROWS, "1 linked · 1 unlinked")
+    assert find_row(result, ADMIN_BUDGET_ID, KeysEvent.CUSTOMER_ROWS, "1 linked · 1 unlinked")
+    assert admin_rows(keys) == {former: None, member: ADMIN_BUDGET_ID}
+    assert_no_value_printed(out, err, member, former, "subject-p")
+    again = switch()
+    assert (again[0], "nothing to change" in again[1]) == (0, True)
+
+
+@pytest.mark.parametrize(
+    ("arrange", "cause"),
+    [
+        pytest.param(
+            lambda compose: compose.containers.pop(KEYCLOAK_SERVICE),
+            "Keycloak is not running",
+            id="Keycloak not running",
+        ),
+        pytest.param(
+            lambda compose: setattr(compose, "realm_members", None),
+            "realm-observer exited 1: realm-observer: hallucinai has no group "
+            + litellm_keys.ADMIN_GROUP,
+            id="the group absent",
+        ),
+    ],
+)
+def test_members_not_read_with_nothing_else_to_change_ask_nothing_and_refuse_naming_keycloak(
+    switch,  # noqa: F811
+    keys,
+    scripted,  # noqa: F811
+    arrange,
+    cause: str,
+):
+    """A4 and A8: the rows stay, the run ends exit 1 naming Keycloak."""
+    linked = {"fp-" + "0" * 64: {"budget_id": ADMIN_BUDGET_ID, "spend": 1.0}}
+    keys.customers = dict(linked)
+    arrange(scripted)
+
+    exit_code, out, err = switch()
+
+    assert exit_code == 1
+    assert "Type yes" not in plain(out)
+    assert find_row(plain(out), ADMIN_BUDGET_ID, KeysEvent.MEMBERS_NOT_READ, cause)
+    assert lines_of(err) == [
+        f"error: {ADMIN_BUDGET_ID}: members not read from Keycloak ({cause})",
+        "next: hal apply",
+    ]
+    assert (keys.writes, keys.customers) == ([], linked)
+
+
+def test_members_not_read_beside_a_key_change_make_the_key_and_end_partial_naming_keycloak(
+    switch,  # noqa: F811
+    keys,
+    scripted,  # noqa: F811
+):
+    """A4 with a key change: the key is made, the rows stay, exit 1."""
+    scripted.containers.pop(KEYCLOAK_SERVICE)
+    keys.rows["hopin"] = None
+    linked = {"fp-" + "0" * 64: {"budget_id": ADMIN_BUDGET_ID, "spend": 1.0}}
+    keys.customers = dict(linked)
+
+    exit_code, out, err = switch()
+
+    assert exit_code == 1
+    result = plain(out).partition("Type yes")[2]
+    assert find_row(result, "hopin", KeysEvent.NEW_KEY)
+    assert find_row(result, ADMIN_BUDGET_ID, KeysEvent.MEMBERS_NOT_READ)
+    assert lines_of(err) == [
+        f"error: partial, {ADMIN_BUDGET_ID} members not read from Keycloak",
+        "next: hal apply",
+    ]
+    assert [change["subject"] for change in keys.writes[0]] == ["hopin"]
+    assert keys.customers == linked
+
+
+@pytest.mark.parametrize(
+    ("running", "realm_changed"),
+    [
+        pytest.param(False, False, id="Keycloak off, the realm unchanged"),
+        pytest.param(False, True, id="Keycloak off, the realm changed"),
+        pytest.param(True, False, id="a running Keycloak switched off by this run"),
+    ],
+)
+def test_keycloak_held_holds_the_admin_rows_with_a_row_and_leaves_the_ending_as_it_is(
+    switch,  # noqa: F811
+    realm_unit,  # noqa: F811
+    keys,
+    scripted,  # noqa: F811
+    repository,  # noqa: F811
+    running: bool,
+    realm_changed: bool,
+):
+    """Decision 13: no members read, no customer change, a held row and exit 0."""
+    write_fleet(repository, KEYCLOAK_OFF)
+    if not running:
+        scripted.containers.pop(KEYCLOAK_SERVICE)
+    if realm_changed:
+        (repository / "keycloak/realm.yaml").write_text("realm: changed\n")
+    scripted.realm_members = ["subject-p"]
+
+    exit_code, out, err = switch()
+
+    assert (exit_code, err) == (0, "")
+    assert find_row(plain(out), ADMIN_BUDGET_ID, KeysEvent.ROWS_HELD, "Keycloak is off")
+    assert not [call for call in scripted.calls if "--members" in call]
+    assert (keys.writes, keys.customers) == ([], {})

@@ -20,6 +20,9 @@ an inventory, which never parses. Stdout is an inventory only when the exit is 0
 `--import-checksums` prints `{realm: {attribute: value}}` instead: the realms'
 `de.adorsys.keycloak.config.import-checksum…` attributes, and nothing else. It reads no
 inventory and needs no digest key, so a console name that breaks the inventory cannot block it.
+
+`--members PATH` prints hallucinai's issuer, from its discovery document (the one GET sent with
+no token), and the ids of the group's direct members; a group that does not exist fails.
 """
 
 from __future__ import annotations
@@ -40,7 +43,8 @@ from urllib.error import HTTPError
 from urllib.parse import quote, urlencode
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
-REALMS = ("master", "hallucinai")
+PEOPLE_REALM = "hallucinai"
+REALMS = ("master", PEOPLE_REALM)
 CLIENT_ID = "config-cli"
 TOKEN_PATH = "/realms/master/protocol/openid-connect/token"  # noqa: S105 - an OpenID endpoint path and no credential
 ADMIN_PATH = "/admin/realms"
@@ -105,14 +109,7 @@ def shape(
     elsewhere: str = "",
     secret: str = "",
 ) -> Shape:
-    return Shape(
-        name,
-        frozenset(required.split()),
-        frozenset(optional.split()),
-        maps or {},
-        frozenset(elsewhere.split()),
-        frozenset(secret.split()),
-    )
+    return Shape(name, keys(required), keys(optional), maps or {}, keys(elsewhere), keys(secret))
 
 
 def keys(names: str) -> frozenset[str]:
@@ -208,22 +205,18 @@ PROTOCOL_MAPPER = shape(
     "consentRequired config",
     maps={"config": MAPPER_CONFIG},
 )
+SCOPE_ATTRIBUTES = MapShape(
+    keys("include.in.token.scope display.on.consent.screen consent.screen.text gui.order")
+)
 CLIENT_SCOPE = shape(
     "client scope",
     "name",
     "description protocol attributes",
-    maps={
-        "attributes": MapShape(
-            keys("include.in.token.scope display.on.consent.screen consent.screen.text gui.order")
-        )
-    },
+    maps={"attributes": SCOPE_ATTRIBUTES},
     elsewhere="protocolMappers",
 )
 FLOW = shape(
-    "flow",
-    "alias",
-    "description providerId topLevel builtIn",
-    elsewhere="authenticationExecutions",
+    "flow", "alias", "description providerId topLevel builtIn", elsewhere="authenticationExecutions"
 )
 # One entry of /authentication/flows/{alias}/executions: an authenticator or a sub-flow.
 FLOW_STEP = shape(
@@ -244,21 +237,20 @@ REQUIRED_ACTION = shape(
     "name providerId enabled defaultAction priority config",
     maps={"config": MapShape(keys("max_auth_age"))},
 )
+IDP_CONFIG = MapShape(
+    keys(
+        """clientId authorizationUrl tokenUrl userInfoUrl issuer jwksUrl logoutUrl
+        defaultScope syncMode validateSignature useJwksUrl pkceEnabled pkceMethod
+        clientAuthMethod"""
+    ),
+    secret=re.compile(r"^clientSecret$"),
+)
 IDP = shape(
     "identity provider",
     "alias providerId",
     """displayName enabled trustEmail storeToken addReadTokenRoleOnCreate authenticateByDefault
     linkOnly hideOnLogin firstBrokerLoginFlowAlias postBrokerLoginFlowAlias config""",
-    maps={
-        "config": MapShape(
-            keys(
-                """clientId authorizationUrl tokenUrl userInfoUrl issuer jwksUrl logoutUrl
-                defaultScope syncMode validateSignature useJwksUrl pkceEnabled pkceMethod
-                clientAuthMethod"""
-            ),
-            secret=re.compile(r"^clientSecret$"),
-        )
-    },
+    maps={"config": IDP_CONFIG},
 )
 IDP_MAPPER = shape(
     "identity provider mapper",
@@ -363,8 +355,7 @@ class Digester:
 
 def project(form: Shape, representation: Representation, digest: Digester) -> Entity:
     """The allow-listed fields of one representation, every other key as a digest."""
-    missing = sorted(name for name in form.required if name not in representation)
-    if missing:
+    if missing := sorted(name for name in form.required if name not in representation):
         raise ObserveError(f"a {form.name} representation lacks {', '.join(missing)}")
     fields: dict[str, Any] = dict.fromkeys(form.listed - form.maps.keys())
     digests: dict[str, str] = {}
@@ -372,7 +363,8 @@ def project(form: Shape, representation: Representation, digest: Digester) -> En
         if key in VOLATILE or key in form.elsewhere or key in form.secret:
             continue
         if key in form.maps:
-            project_map(key, form.maps[key], value or {}, fields, digests, digest)
+            mapped = project_map(key, form.maps[key], value or {}, digest)
+            fields, digests = fields | mapped["fields"], digests | mapped["digests"]
         elif key in form.listed:
             fields[key] = canonical(value)
         else:
@@ -389,21 +381,16 @@ def without_volatile(value: Any) -> Any:
     return value
 
 
-def project_map(
-    name: str,
-    form: MapShape,
-    values: Mapping[str, Any],
-    fields: dict[str, Any],
-    digests: dict[str, str],
-    digest: Digester,
-) -> None:
+def project_map(name: str, form: MapShape, values: Mapping[str, Any], digest: Digester) -> Entity:
+    projected = empty()
     for key, value in values.items():
         if key.startswith(CONFIG_CLI_STATE) or form.is_secret(key):
             continue
         if key in form.allowed:
-            fields[f"{name}.{key}"] = canonical(value)
+            projected["fields"][f"{name}.{key}"] = canonical(value)
         else:
-            digests[f"{name}.{key}"] = digest(value)
+            projected["digests"][f"{name}.{key}"] = digest(value)
+    return projected
 
 
 # --- Reading ----------------------------------------------------------------------------------
@@ -432,13 +419,8 @@ class Session:
     token: str = field(default="", repr=False)
 
     def sign_in(self) -> None:
-        form = urlencode(
-            {
-                "grant_type": "client_credentials",
-                "client_id": self.client_id,
-                "client_secret": self.secret,
-            }
-        ).encode()
+        credentials = {"client_id": self.client_id, "client_secret": self.secret}
+        form = urlencode({"grant_type": "client_credentials", **credentials}).encode()
         status, body = self.send(Request(self.base_url + TOKEN_PATH, data=form, method="POST"))  # noqa: S310 - the base URL is the observer own --base-url argument
         if status in (400, 401):
             raise ObserveError(f"sign-in refused (status {status} at {TOKEN_PATH})")
@@ -461,6 +443,14 @@ class Session:
         headers = {"Authorization": f"Bearer {self.token}", "Accept": "application/json"}
         return self.send(Request(self.base_url + target, headers=headers, method="GET"))  # noqa: S310 - the base URL is the observer own --base-url argument
 
+    def public(self, path: str) -> Any:
+        """A GET with no token, of a document Keycloak serves to anyone."""
+        request = Request(self.base_url + path, headers={"Accept": "application/json"})  # noqa: S310 - the base URL is the observer own --base-url argument
+        status, body = self.send(request)
+        if status != 200:
+            raise ObserveError(f"status {status} at {path}")
+        return parsed(body, path)
+
     def send(self, request: Request) -> tuple[int, bytes]:
         path = request.selector.split("?", 1)[0]
         try:
@@ -470,9 +460,8 @@ class Session:
             error.close()
             return error.code, b""
         except OSError as error:
-            timed_out = isinstance(error, TimeoutError) or isinstance(
-                getattr(error, "reason", None), TimeoutError
-            )
+            cause = getattr(error, "reason", None)
+            timed_out = isinstance(error, TimeoutError) or isinstance(cause, TimeoutError)
             reason = "timed out" if timed_out else "unreachable"
             raise ObserveError(f"Keycloak does not answer {path} ({reason})") from error
 
@@ -502,6 +491,22 @@ def counted(path: str, items: list[Any], expected: int) -> list[Any]:
     if len(items) != expected:
         raise ObserveError(f"{ADMIN_PATH}{path} returned {len(items)} of {expected}")
     return items
+
+
+def groups(session: Session, realm: str) -> Iterator[Representation]:
+    """Every group of a realm; a group's subgroups are read once it was handed on."""
+    top = session.paged(f"/{realm}/groups", briefRepresentation="false")
+    pending = counted("/groups", top, session.get(f"/{realm}/groups/count", top="true")["count"])
+    while pending:
+        yield (group := pending.pop())
+        if group["subGroupCount"]:
+            children_path = f"/groups/{group['id']}/children"
+            children = session.paged(f"/{realm}{children_path}", briefRepresentation="false")
+            pending += counted(children_path, children, group["subGroupCount"])
+
+
+def members(session: Session, realm: str, group: Representation) -> list[Any]:
+    return session.paged(f"/{realm}/groups/{group['id']}/members", briefRepresentation="true")
 
 
 @dataclass
@@ -553,11 +558,7 @@ class RealmReader:
             entity["fields"][name] = sorted(scope["name"] for scope in self.get(path))
 
     def read_groups(self) -> None:
-        top = self.paged("/groups", briefRepresentation="false")
-        counted("/groups", top, self.get("/groups/count", top="true")["count"])
-        pending = list(top)
-        while pending:
-            group = pending.pop()
+        for group in groups(self.session, self.realm):
             entity = self.keep_shaped(GROUP, group["path"], group)
             entity["fields"].pop("subGroupCount")
             entity["fields"]["realmRoles"] = sorted(group.get("realmRoles", []))
@@ -566,13 +567,9 @@ class RealmReader:
                 for client, roles in group.get("clientRoles", {}).items()
                 for role in roles
             )
-            members = self.paged(f"/groups/{group['id']}/members", briefRepresentation="true")
-            entity["fields"]["members"] = len(members)
-            entity["digests"]["members"] = self.digest(sorted(m["id"] for m in members))
-            if group["subGroupCount"]:
-                children_path = f"/groups/{group['id']}/children"
-                children = self.paged(children_path, briefRepresentation="false")
-                pending += counted(children_path, children, group["subGroupCount"])
+            direct = members(self.session, self.realm, group)
+            entity["fields"]["members"] = len(direct)
+            entity["digests"]["members"] = self.digest(sorted(m["id"] for m in direct))
 
     def read_roles(self, path: str, kind: str, owner: str) -> None:
         for role in self.paged(path, briefRepresentation="false"):
@@ -610,8 +607,7 @@ class RealmReader:
             for role in client.get("mappings", []):
                 identity = f"{username}/{client_id}/{role['name']}"
                 self.keep("service-account client role", identity, empty())
-        groups = self.paged(f"/users/{user['id']}/groups", briefRepresentation="true")
-        for group in groups:
+        for group in self.paged(f"/users/{user['id']}/groups", briefRepresentation="true"):
             self.keep("service-account group", f"{username}{group['path']}", empty())
 
     def read_client_scopes(self) -> None:
@@ -658,13 +654,11 @@ class RealmReader:
             self.keep_shaped(REQUIRED_ACTION, action["alias"], action)
 
     def read_identity_providers(self) -> None:
-        providers = self.paged(
-            "/identity-provider/instances", identity="alias", briefRepresentation="false"
-        )
-        for provider in providers:
+        instances = "/identity-provider/instances"
+        for provider in self.paged(instances, identity="alias", briefRepresentation="false"):
             alias = provider["alias"]
             self.keep_shaped(IDP, alias, provider)
-            for mapper in self.get(f"/identity-provider/instances/{quote(alias, safe='')}/mappers"):
+            for mapper in self.get(f"{instances}/{quote(alias, safe='')}/mappers"):
                 self.keep_shaped(IDP_MAPPER, f"{alias}/{mapper['name']}", mapper)
 
     def read_components(self) -> None:
@@ -702,18 +696,16 @@ def step_identities(flow: str, steps: list[Any]) -> Iterator[tuple[str, Represen
             parents.append(step["displayName"])
 
 
-def observe(session: Session, digest: Digester, realms: tuple[str, ...] = REALMS) -> Inventory:
+def observe(session: Session, digest: Digester) -> Inventory:
     try:
         session.sign_in()
-        return {realm: RealmReader(session, realm, digest).read() for realm in realms}
+        return {realm: RealmReader(session, realm, digest).read() for realm in REALMS}
     except KeyError as error:
         # An identity or a UUID read before its representation is projected and checked.
         raise ObserveError(f"a reply lacks the key {error}") from error
 
 
-def import_checksums(
-    session: Session, realms: tuple[str, ...] = REALMS
-) -> dict[str, dict[str, str]]:
+def import_checksums(session: Session) -> dict[str, dict[str, str]]:
     """Each realm's import-checksum attributes, and nothing else of it."""
     try:
         session.sign_in()
@@ -723,10 +715,21 @@ def import_checksums(
                 for name, value in session.get(f"/{realm}").get("attributes", {}).items()
                 if name.startswith(IMPORT_CHECKSUM)
             }
-            for realm in realms
+            for realm in REALMS
         }
     except (KeyError, AttributeError) as error:
         raise ObserveError(f"a reply lacks the realm attributes ({error})") from error
+
+
+def group_members(session: Session, path: str) -> dict[str, Any]:
+    """The people realm's issuer and the ids of one group's direct members."""
+    session.sign_in()
+    found = (group for group in groups(session, PEOPLE_REALM) if group["path"] == path)
+    if (group := next(found, None)) is None:
+        raise ObserveError(f"{PEOPLE_REALM} has no group {path}")
+    issuer = session.public(f"/realms/{PEOPLE_REALM}/.well-known/openid-configuration")["issuer"]
+    direct = members(session, PEOPLE_REALM, group)
+    return {"issuer": issuer, "members": [member["id"] for member in direct]}
 
 
 # --- The command ------------------------------------------------------------------------------
@@ -739,28 +742,37 @@ def stop(_signum: int, _frame: object) -> None:
 def main(
     argv: list[str] | None = None, stdin: TextIO | None = None, secret_file: Path = SECRET_FILE
 ) -> int:
-    """The command; `stdin` carries the digest key line, which `--import-checksums` does not read,
-    and defaults to the process's stdin."""
+    """The command; `stdin` carries the digest key line, which only the inventory reads, and
+    defaults to the process's stdin."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--base-url", required=True, help="Keycloak, e.g. http://keycloak:8080")
-    parser.add_argument(
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
         "--import-checksums",
         action="store_true",
         help="print the realms' import-checksum attributes instead of the inventory",
     )
+    mode.add_argument("--members", metavar="PATH", help="print the issuer and the group's members")
     arguments = parser.parse_args(argv)
     # PID 1 in a container ignores SIGTERM unless it handles it.
     signal.signal(signal.SIGTERM, stop)
+    reads_key = not (arguments.import_checksums or arguments.members)
     try:
-        key = None if arguments.import_checksums else digest_key((stdin or sys.stdin).readline())
+        key = digest_key((stdin or sys.stdin).readline()) if reads_key else None
         session = Session(arguments.base_url.rstrip("/"), read_secret(secret_file))
-        found = import_checksums(session) if key is None else observe(session, Digester(key))
+        if arguments.members:
+            found: Any = group_members(session, arguments.members)
+        else:
+            found = import_checksums(session) if key is None else observe(session, Digester(key))
     except ObserveError as error:
         print(f"realm-observer: {error}", file=sys.stderr, flush=True)  # noqa: T201 - this container program imports nothing of hal and prints itself
         return 1
     except KeyboardInterrupt:
         print("realm-observer: stopped", file=sys.stderr, flush=True)  # noqa: T201 - this container program imports nothing of hal and prints itself
         return 130
+    except Exception as error:  # its text may quote a reply; only its type is printed
+        print(f"realm-observer: unexpected {type(error).__name__}", file=sys.stderr, flush=True)  # noqa: T201 - this container program imports nothing of hal and prints itself
+        return 1
     json.dump(found, sys.stdout, sort_keys=True)
     sys.stdout.write("\n")
     return 0

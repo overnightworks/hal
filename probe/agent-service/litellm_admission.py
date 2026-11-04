@@ -36,7 +36,6 @@ from litellm import (
     LITELLM,
     OPERATOR_BUDGET,
     PARALLEL,
-    PERSON_BUDGET,
     PROJECT,
     REPO,
     ROUTE,
@@ -58,8 +57,7 @@ REQUEST_SECONDS = 60
 HOLDER_SECONDS = 150
 CACHE_SECONDS = 180
 UPSTREAM_FAILURE = 529
-# Steered usages on text/opus: one past the person budget, one past the app budget.
-PERSON_PUSH = {"input_tokens": 600_000, "output_tokens": 1}
+# A steered usage on text/opus past the app budget; litellm.py's PERSON_PUSH passes the person's.
 APP_PUSH = {"input_tokens": 3_000_000, "output_tokens": 1}
 
 
@@ -109,19 +107,6 @@ class AdmissionProbe(LitellmProbe):
     def released(self) -> list[str]:
         return [line for line in self.log_of(FAKE_PROVIDER).splitlines() if line.startswith("held")]
 
-    def push(self, key: str, user: str, usage: dict) -> None:
-        """One served request whose steered usage LiteLLM prices."""
-        self.steer_fake(usage=usage)
-        answer = self.complete(key, user=user)
-        self.steer_fake()
-        expect(answer["status"] == 200, f"the push was refused: {answer['status']}")
-
-    def push_person(self, cell: str, key: str, user: str) -> float:
-        self.push(key, user, PERSON_PUSH)
-        self.wait_for(cell, "the person's spend past the budget",
-                      lambda: self.customer_spend(user) > PERSON_BUDGET)  # fmt: skip
-        return self.customer_spend(user)
-
     def expect_served(self, cell: str, key: str, user: str) -> None:
         before = len(self.provider_requests())
         self.served(cell, self.complete(key, user=user), self.provider_requests()[before:])
@@ -143,11 +128,6 @@ class AdmissionProbe(LitellmProbe):
                f"{cell}: BUDGET PASSED BY ?model={second}: {answer['status']}")  # fmt: skip
         self.refused(cell, answer, before)
         return f"?model={second}: {answer['status']} {error_of(answer)}, F 0"
-
-    def move_due(self, table: str, column: str, value: str) -> None:
-        """Moves a budget's reset into the past in LiteLLM's database."""
-        moved = "budget_reset_at = now() - interval '1 minute'"
-        self.sql(f"UPDATE \"{table}\" SET {moved} WHERE {column} = '{value}'")  # noqa: S608 - the probe names the table and the value
 
     # --- the cells ----------------------------------------------------------------------------
 

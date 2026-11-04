@@ -17,10 +17,10 @@ from pathlib import Path
 import pytest
 from support.stack_core import tracked
 
-from hal.stack import compose, core, switches
+from hal.stack import compose, core, switches, unit_plans
 from hal.stack import realm as realm_lines
 from hal.stack.realm import observe, reconcile
-from hal.stack.realm.reconcile import RealmAction, RealmPlan, RealmRestart, Stage
+from hal.stack.realm.reconcile import RealmAction, RealmPlan, Stage
 
 REPOSITORY = Path(__file__).resolve().parents[1]
 SNAPSHOT = "ab12cd34"
@@ -147,7 +147,7 @@ class World:
     # the step ----------------------------------------------------------------------------------
 
     def plan(
-        self, gate: core.Gate | None = core.Gate.ON, restart: RealmRestart | None = None
+        self, gate: core.Gate | None = core.Gate.ON, restart: unit_plans.Restart | None = None
     ) -> RealmPlan:
         return reconcile.plan_realm(self, self.record, self.config, self.checkout, gate, restart)
 
@@ -273,10 +273,10 @@ def test_a_changed_file_while_keycloak_is_off_is_one_line_and_reads_nothing(
 
 
 def test_keycloak_starting_in_this_run_is_not_checked_and_one_line_says_so(world: World) -> None:
-    plan = world.plan(restart=RealmRestart.KEYCLOAK)
+    plan = world.plan(restart=unit_plans.Restart.SERVICE)
 
     assert (plan.action, plan.settled) == (RealmAction.NOT_CHECKED, True)
-    assert plan.restart is RealmRestart.KEYCLOAK
+    assert plan.restart is unit_plans.Restart.SERVICE
 
 
 def test_a_catalog_without_keycloak_plans_nothing(world: World) -> None:

@@ -1,7 +1,7 @@
 """The planned run as rows: each part of a `Plan` is mapped from its typed fields to the rows
 `hal.output` prints, in the order hal works. Nothing here parses a string or prints."""
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import replace
 from enum import StrEnum
 
@@ -12,10 +12,30 @@ from hal.stack.appkit_step import APPKIT_UNIT, TARGETS, AppkitPlan
 from hal.stack.apps import AppKind, AppPlan, AppsPlan, OffPlan, SkippedNote, StaysStoppedNote
 from hal.stack.built_image import ENDS_RUNS, BuiltRecreate
 from hal.stack.legal_step import LEGAL_UNIT, BlockChange, LegalPlan, PageChange
-from hal.stack.litellm_keys import LITELLM_SERVICE, Change, FieldChange, KeysPlan, Target, Value
+from hal.stack.litellm_keys import (
+    ADMIN_BUDGET_ID,
+    LITELLM_SERVICE,
+    AdminHeld,
+    AdminState,
+    Change,
+    FieldChange,
+    KeysPlan,
+    RowChange,
+    StepChange,
+    Target,
+    Value,
+)
 from hal.stack.plan import Plan
-from hal.stack.realm.reconcile import REALM_UNIT, RealmAction, RealmPlan
-from hal.stack.unit_plans import Action, ImageReference, KeptImage, Recreate, UnitPlan
+from hal.stack.realm.reconcile import KEYCLOAK, REALM_UNIT, MembersNotRead, RealmAction, RealmPlan
+from hal.stack.unit_plans import (
+    Action,
+    DatabaseUnit,
+    ImageReference,
+    KeptImage,
+    Recreate,
+    Restart,
+    UnitPlan,
+)
 
 _SEPARATOR = " · "
 _DIGEST_SHOWN = 4
@@ -49,6 +69,11 @@ class KeysEvent(StrEnum):
     KEY_CHANGED = "key changed"
     NAME_TAKEN = "name taken"
     NOT_READ = "keys not read"
+    CUSTOMER_ROWS = "customer rows"
+    ROW_LINK = "row link"
+    ROW_UNLINK = "row unlink"
+    ROWS_HELD = "rows held"
+    MEMBERS_NOT_READ = "members unread"  # the event column holds 14 characters
 
 
 NAME_TAKEN_FACT = "another key holds the name"
@@ -84,6 +109,10 @@ class FileNoun(Noun):
 class ListNoun(Noun):
     MODEL = "model"
     ROUTE = "route"
+
+
+class RowNoun(TrailingNoun):
+    CUSTOMER_ROW = "customer row"
 
 
 class PlanGroup(StrEnum):
@@ -211,7 +240,7 @@ def plan_groups(plan: Plan) -> tuple[Group, ...]:
         Group(None, (*_appkit_rows(plan.appkit), *_legal_rows(plan.legal))),
         Group(PlanGroup.CORE, _core_rows(plan)),
         Group(PlanGroup.UNITS, _unit_rows(plan)),
-        Group(PlanGroup.LITELLM, _keys_rows(plan.keys)),
+        Group(PlanGroup.LITELLM, keys_plan_rows(plan.keys)),
         Group(PlanGroup.APPS, _app_rows(plan.app_plans)),
     )
 
@@ -388,6 +417,10 @@ def _image_text(image: ImageReference, shows_name: bool = True) -> str:
     return f"{image.name if shows_name else ''}{digest}"
 
 
+def restart_text(restart: Restart, unit: DatabaseUnit) -> str:
+    return f"{unit.name} starts now" if restart is Restart.SERVICE else "its database restarts now"
+
+
 def _realm_row(realm: RealmPlan) -> Row | None:
     match realm.action:
         case RealmAction.RUN:
@@ -397,7 +430,7 @@ def _realm_row(realm: RealmPlan) -> Row | None:
             fact = f"{realm.why}{_SEPARATOR}Keycloak is {realm.gate}"
             return Row(Glyph.UNCHANGED, REALM_UNIT, PlanEvent.REALM_HELD, fact)
         case RealmAction.NOT_CHECKED:
-            fact = f"{realm.restart}{_SEPARATOR}next apply checks it"
+            fact = f"{restart_text(realm.restart, KEYCLOAK)}{_SEPARATOR}next apply checks it"
             return Row(Glyph.UNCHANGED, REALM_UNIT, PlanEvent.REALM_LATER, fact)
         case RealmAction.UNREADABLE:
             return Row(Glyph.NEEDS_YOU, REALM_UNIT, PlanEvent.REALM_SKIPPED, realm.error)
@@ -405,7 +438,7 @@ def _realm_row(realm: RealmPlan) -> Row | None:
             return None
 
 
-def _keys_rows(keys: KeysPlan) -> tuple[Row, ...]:
+def keys_plan_rows(keys: KeysPlan) -> tuple[Row, ...]:
     if keys.not_read is not None:
         return (
             Row(Glyph.NEEDS_YOU, LITELLM_SERVICE, KeysEvent.NOT_READ, printable(keys.not_read)),
@@ -414,9 +447,41 @@ def _keys_rows(keys: KeysPlan) -> tuple[Row, ...]:
         *(
             key_change_row(change, Glyph.ADD if change.new else Glyph.CHANGE)
             for change in keys.changes
+            if isinstance(change, Change)
         ),
+        *customer_rows(keys.changes, Glyph.CHANGE),
         *(name_taken_row(app) for app in keys.name_taken),
+        *admin_rows(keys.admin),
     )
+
+
+def customer_rows(changes: Sequence[StepChange], glyph: Glyph) -> tuple[Row, ...]:
+    """The row changes as one row per budget: how many rows it links and unlinks, never which."""
+    by_budget: dict[str, list[RowChange]] = {}
+    for change in changes:
+        if isinstance(change, RowChange):
+            by_budget.setdefault(change.budget, []).append(change)
+    return tuple(
+        Row(glyph, budget, KeysEvent.CUSTOMER_ROWS, _row_counts(rows))
+        for budget, rows in by_budget.items()
+    )
+
+
+def _row_counts(changes: Sequence[RowChange]) -> str:
+    linked = sum(change.link for change in changes)
+    counts = ((linked, "linked"), (len(changes) - linked, "unlinked"))
+    return _SEPARATOR.join(f"{count} {word}" for count, word in counts if count)
+
+
+def admin_rows(admin: AdminState) -> Iterator[Row]:
+    """Why the admin rows wait: Keycloak held, or its members not read."""
+    match admin:
+        case AdminHeld(gate):
+            fact = f"Keycloak is {gate}"
+            yield Row(Glyph.UNCHANGED, ADMIN_BUDGET_ID, KeysEvent.ROWS_HELD, fact)
+        case MembersNotRead(cause):
+            fact = printable(cause)
+            yield Row(Glyph.NEEDS_YOU, ADMIN_BUDGET_ID, KeysEvent.MEMBERS_NOT_READ, fact)
 
 
 def key_change_row(change: Change, glyph: Glyph) -> Row:
@@ -427,10 +492,17 @@ def key_change_row(change: Change, glyph: Glyph) -> Row:
     return Row(glyph, change.subject, change_event(change), _SEPARATOR.join(map(texts, shown)))
 
 
-def change_event(change: Change) -> KeysEvent:
+def change_event(change: StepChange) -> KeysEvent:
+    if isinstance(change, RowChange):
+        return KeysEvent.ROW_LINK if change.link else KeysEvent.ROW_UNLINK
     if change.target is Target.BUDGET:
         return KeysEvent.NEW_BUDGET if change.new else KeysEvent.BUDGET_CHANGED
     return KeysEvent.NEW_KEY if change.new else KeysEvent.KEY_CHANGED
+
+
+def shown_subject(change: StepChange) -> str:
+    """What a change prints as: a row change by its budget, never its fingerprint."""
+    return change.budget if isinstance(change, RowChange) else change.subject
 
 
 def name_taken_row(app: str) -> Row:
@@ -469,7 +541,7 @@ def _changed_field_text(field: FieldChange) -> str:
         added = (f"+{printable(item)}" for item in field.new if item not in old)
         removed = (f"-{printable(item)}" for item in old if item not in field.new)
         return " ".join((label, *added, *removed))
-    unit = " dollars" if field.name == "max_budget" else ""
+    unit = " dollars" if field.name == "max_budget" and field.new is not None else ""
     return f"{label} {_shown(field.old)} \N{RIGHTWARDS ARROW} {_shown(field.new)}{unit}"
 
 
