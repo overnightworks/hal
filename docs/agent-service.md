@@ -221,10 +221,13 @@ privacy section, which owns it.
 **Whose account.** Only the operator and his own test accounts are members of `/services/agent-service/subscription`, so his
 Claude subscription serves only his own use. Every other person reaches the provider only through the
 API route, under Anthropic's commercial API terms: an app's own key at LiteLLM, not the service
-(see „The API route“). Nothing runs that route yet. The operator ruled on 28.10.2026
-([#299 comment](https://github.com/overnightworks/hal/issues/299#issuecomment-6464712955)) that the
-agent service writes its own privacy section, `agent-dienst` in `legal/sections/agent-service/datenschutz.html`,
-and describes only the API route; it does not speak of the subscription, which no user can ever use, and no
+(see „The API route“). No app takes that route yet. The privacy section `agent-dienst` in
+`legal/sections/agent-service/datenschutz.html` describes only that route as an app takes it, through the
+front, LiteLLM with its database and the gateway to Anthropic: what a request carries, what LiteLLM keeps
+per app and per person, when that is deleted, how long the backup keeps it and the legal basis of the budget per person (Art. 6 Abs. 1 lit. f DSGVO, with the right to object in the general part). The Keycloak section states the same backup bound for a snapshot before an update. hal writes it itself
+(operator, 03.11.2026, [#110](https://github.com/overnightworks/hal/issues/110)); by the operator's ruling
+of 28.10.2026 ([#299 comment](https://github.com/overnightworks/hal/issues/299#issuecomment-6464712955))
+it does not speak of the subscription, which no user can ever use, and no
 text a person reads speaks of the subscription. Every other app or service links
 `/datenschutz#agent-dienst` and says in its own text only what it sends. Who may use the subscription is decided by the service's subscription group, and who may
 use the API route by LiteLLM's keys and budgets, the same in every app; an app adds no AI group of its own. Membership in the app (`/apps/<name>`) stays separate access to the app.
@@ -270,9 +273,9 @@ and the admin budget with its customer rows (the key step below).
   names `text/opus`, `text/sonnet`, `text/haiku` of `config.yaml`; 403 otherwise), a path among
   the key's `allowed_routes` (403 otherwise, the provider routes `/v1/messages` and
   `/v1/completions` included), and a `user`, the person's fingerprint (`enforce_user_param`; 401
-  without one). LiteLLM also routes by a `model` in the query string, which the key's `models` do
-  not bind: one unknown to `config.yaml` is refused with 400, but a configured name outside the
-  key's `models` is served by that model and its spend counts on the key, and a key or person
+  without one), which LiteLLM sends on to the provider as `metadata.user_id`. The privacy text rests on the client wheel v0.20.0 (`pyproject.toml`): the fingerprint is `person_fingerprint`, a SHA-256 of issuer and subject, the same in every app, and the gateway backend sends the app's key as the only bearer, the fingerprint in the body's `user`. LiteLLM also routes
+  by a `model` in the query string, which the key's `models` do not bind: one unknown to
+  `config.yaml` is refused with 400, but a configured name outside the key's `models` is served by that model and its spend counts on the key, and a key or person
   past its budget is refused (measured). The front therefore answers any query string on its
   route itself with 400 and no `Location`, so nothing of such a request reaches LiteLLM. It sets
   `User-Agent` to one constant, `litellm-front`, and removes `x-litellm-tags`, which LiteLLM would
