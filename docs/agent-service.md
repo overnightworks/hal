@@ -224,7 +224,7 @@ API route, under Anthropic's commercial API terms: an app's own key at LiteLLM, 
 (see „The API route“). Nothing runs that route yet. The privacy section `agent-dienst` in
 `legal/sections/agent-service/datenschutz.html` describes only that route as an app takes it, through the
 front, LiteLLM with its database and the gateway to Anthropic: what a request carries, what LiteLLM keeps
-per app and per person, when that is deleted and how long the backup keeps it. hal writes it itself
+per app and per person, when that is deleted, how long the backup keeps it and the legal basis of the budget per person (Art. 6 Abs. 1 lit. f DSGVO, with the right to object in the general part). The Keycloak section states the same backup bound for a snapshot before an update. hal writes it itself
 (operator, 03.11.2026, [#110](https://github.com/overnightworks/hal/issues/110)); by the operator's ruling
 of 28.10.2026 ([#299 comment](https://github.com/overnightworks/hal/issues/299#issuecomment-6464712955))
 it does not speak of the subscription, which no user can ever use, and no
