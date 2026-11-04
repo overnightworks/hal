@@ -431,14 +431,11 @@ Keycloak's live database in one transaction, after you type `yes` at a terminal,
 Keycloak is switched off. It starts `keycloak-db` alone if it is stopped, leaves `keycloak` stopped,
 holds the backup lock and removes the restored dump when it ends:
 
-```sh
-hal stop keycloak
-hal restore keycloak --live
-hal start keycloak
-```
+1. `hal stop keycloak`
+2. `hal restore keycloak --live`, and check that its loaded row names the snapshot you meant
+3. `hal start keycloak`
 
-Before `hal start keycloak`, check that the loaded row names the snapshot you meant. A failed realm
-step of `hal apply` names its pre-apply snapshot; load that one with
+A failed realm step of `hal apply` names its pre-apply snapshot; load that one with
 `hal restore keycloak --live --snapshot <ID>`. A failed load's line names its own rerun (above).
 
 A run killed outright (SIGKILL, the terminal closed) reports nothing: its load ends whole or not
@@ -450,11 +447,9 @@ at all, nobody reports which, and Keycloak stays stopped. Run
 
 The same three commands load LiteLLM's database:
 
-```sh
-hal stop litellm
-hal restore litellm --live
-hal start litellm
-```
+1. `hal stop litellm`
+2. `hal restore litellm --live`
+3. `hal start litellm`
 
 Every key and person then counts from the snapshot's spend: one past its budget stays refused, and
 spend since the snapshot is lost. A snapshot from an earlier month is reset by LiteLLM's own budget
