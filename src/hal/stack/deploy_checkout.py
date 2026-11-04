@@ -23,6 +23,7 @@ ORIGIN = "origin"
 TAG_NAMESPACE = "refs/edge/releases/"
 COMPOSE_FILE = "compose.yaml"
 _REGULAR_FILE_MODES = {"100644", "100755"}
+_SYMLINK_MODE = "120000"
 _NAMED_CHANGES = 5
 
 
@@ -60,11 +61,20 @@ class AppCheckout:
                 return
         except OSError as error:
             raise CheckoutRefused(f"cannot be made ({error.strerror})") from error
-        if not marker.is_dir() or marker.is_symlink():
-            raise CheckoutRefused("is not a main worktree (its .git is not a directory)")
+        self.require_repository()
         self._refuse_foreign_origin()
         self._refuse_unusual_head()
         self._refuse_changes()
+
+    def require_repository(self) -> None:
+        """Refuses unless the checkout's own `.git` is a real directory holding a repository; git
+        would otherwise discover a repository above an invalid one, or follow a symlink."""
+        marker = self.git.tree / ".git"
+        if not marker.is_dir() or marker.is_symlink():
+            raise CheckoutRefused("is not a main worktree (its .git is not a directory)")
+        valid = ["--git-dir=" + str(marker), "rev-parse", "--git-dir"]
+        if self.git.call(valid, accepted=(0, 128)).returncode:
+            raise CheckoutRefused("is not a main worktree (its .git is no repository)")
 
     def fetch(self) -> None:
         branch, mirror = self.branch, f"{TAG_NAMESPACE}v*"
@@ -89,16 +99,16 @@ class AppCheckout:
             return None
         return _text(self.git.call(["rev-parse", "--verify", "HEAD^{commit}"]).stdout).strip()
 
-    def compose_file(self, sha: str) -> str | None:
-        """`compose.yaml` at the root of the commit; None when it has none or it is no file."""
-        listed = _text(self.git.call(["ls-tree", sha, "--", COMPOSE_FILE]).stdout).split()
-        if len(listed) < 2 or listed[0] not in _REGULAR_FILE_MODES or listed[1] != "blob":
+    def file_at(self, sha: str, path: str) -> bytes | None:
+        """The bytes of the regular file at `path` in the commit; None when the commit has no
+        entry there. A symlink or any other entry is refused, never read as absent."""
+        listed = _text(self.git.call(["ls-tree", sha, "--", path]).stdout).split()
+        if not listed:
             return None
-        content = self.git.call(["cat-file", "blob", f"{sha}:{COMPOSE_FILE}"]).stdout
-        try:
-            return content.decode()
-        except UnicodeDecodeError:
-            raise CheckoutRefused(f"{COMPOSE_FILE} is not UTF-8") from None
+        if listed[0] not in _REGULAR_FILE_MODES or listed[1:2] != ["blob"]:
+            kind = "a symlink" if listed[0] == _SYMLINK_MODE else "no regular file"
+            raise CheckoutRefused(f"{path} at {sha} is {kind}")
+        return self.git.call(["cat-file", "blob", f"{sha}:{path}"]).stdout
 
     def check_out(self, sha: str) -> None:
         """HEAD detached at the commit; an ignored file a path of it would overwrite refuses."""

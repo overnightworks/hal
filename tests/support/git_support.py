@@ -26,10 +26,13 @@ FETCH_WRITES = (
 )
 
 
-def plain_git(tree: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
+def plain_git(
+    tree: Path, *arguments: str, environment: Mapping[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
     """Git as the operator's shell runs it, global config, hooks and all (the positive control),
-    but with no `GIT_*` of the shell that runs the tests."""
-    environment = {name: value for name, value in os.environ.items() if not name.startswith("GIT_")}
+    but with no `GIT_*` of the shell that runs the tests, and `environment` on top."""
+    inherited = {name: value for name, value in os.environ.items() if not name.startswith("GIT_")}
+    environment = inherited | dict(environment or {})
     return subprocess.run(
         ["git", "-C", str(tree), *arguments],
         capture_output=True, text=True, check=True, stdin=subprocess.DEVNULL, env=environment,
