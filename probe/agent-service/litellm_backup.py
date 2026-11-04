@@ -335,8 +335,10 @@ class BackupProbe(KeysProbe, AdmissionProbe):
         self.wait_for(cell, "the load waiting on the stall", lambda: self.restore_sessions(True))
 
     def staging(self) -> set[str]:
+        """The runs' staging directories, without the run mark each keeps beside its own."""
         work = self.settings.work_dir
-        return {entry.name for entry in work.iterdir() if entry.name.startswith(STAGING_PREFIX)}
+        return {entry.name for entry in work.iterdir()
+                if entry.is_dir() and entry.name.startswith(STAGING_PREFIX)}  # fmt: skip
 
     def live_run(self) -> LiveRun:
         """`hal restore litellm --live` of B1's snapshot at a pseudo-terminal of its own."""
