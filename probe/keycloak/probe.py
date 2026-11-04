@@ -58,6 +58,7 @@ sys.path[:0] = [str(REPO / "src"), str(REPO / "probe/keycloak")]
 import agents_client_cell  # noqa: E402
 import backchannel_cell  # noqa: E402
 import device_grant_cell  # noqa: E402
+import litellm_admin_cell  # noqa: E402
 import logout_actions_cell  # noqa: E402
 import service_audience_cell  # noqa: E402
 import terms_cell  # noqa: E402
@@ -397,8 +398,7 @@ def stored_event_types(events: list[dict[str, Any]], request_address: str) -> li
     """The sorted types of stored user events, each proven to carry `request_address`.
 
     The address is the one Cloudflare put in `Forwarded`, which Traefik and Keycloak pass on and
-    read; a dropped link would store Traefik's address on the keycloak network instead.
-    """
+    read; a dropped link would store Traefik's address on the keycloak network instead."""
     for event in events:
         address = event.get("ipAddress")
         expect(
@@ -1639,8 +1639,7 @@ class Probe:
         """Signs in to the admin console like a browser does and returns the token response.
 
         `second_factor(page)` answers the page that follows the password: it returns the form
-        action and the fields to post. The authorization code is a credential too.
-        """
+        action and the fields to post. The authorization code is a credential too."""
         opener, verifier, factor_page = self.admin_console_password_step(holder, username, password)
         action, fields = second_factor(factor_page)
         done = within_keycloak(
@@ -2116,6 +2115,7 @@ class Probe:
         terms_cell.prove(self, expect, form_with, client)
         service_audience_cell.prove(self, expect, client, tokens["access_token"])
         agents_client_cell.prove(self, expect, form_with, client, APP_CLIENTS)
+        litellm_admin_cell.prove(self, expect, name, member_id, tokens["access_token"])
         self.held(
             "10",
             f"a member of {client.group} signs in to {name} with PKCE and gets a code "

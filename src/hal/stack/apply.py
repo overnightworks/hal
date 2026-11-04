@@ -205,15 +205,12 @@ def _plan(
     core_plans = core.plan_core(fleet.config, containers, hashes, tracked, record)
     follower_plans = core.plan_followers(fleet.config, containers, hashes, tracked, record, gates)
     unit_services = plan_unit_services(fleet, containers, hashes, plans, followers, gates, engine)
+    keycloak_gate = gates.get(reconcile.REALM_UNIT)
+    keycloak_restart = restart_of(plans, unit_services.recreates, reconcile.KEYCLOAK)
     realm = reconcile.plan_realm(
-        reconcile.Observer(engine),
-        record,
-        fleet.config,
-        tracked,
-        gates.get(reconcile.REALM_UNIT),
-        restart_of(plans, unit_services.recreates, reconcile.KEYCLOAK),
+        reconcile.Observer(engine), record, fleet.config, tracked, keycloak_gate, keycloak_restart
     )
-    keys = litellm_keys.plan_keys(engine, states, repository)
+    keys = litellm_keys.plan_keys(engine, states, repository, keycloak_gate, keycloak_restart)
     app_plans = plan_apps(repository, fleet, app_runtime, marks)
     appkit = plan_appkit(repository, rename=rename)
     legal = plan_legal(repository, record.directory / RECORD_FILE, fleet)
@@ -425,7 +422,8 @@ def _plan_and_apply(
 
 def _refused_unsettled(planned: Plan) -> int | None:
     """How a plan that changes nothing ends when a step could not settle it, None when every step
-    did: an unread realm, unread keys, or an app whose key name another key holds."""
+    did: an unread realm, unread keys, the admin group's members not read, or an app whose key
+    name another key holds."""
     keys = planned.keys
     if (realm := planned.realm).action is reconcile.RealmAction.UNREADABLE:
         write_error(
@@ -433,6 +431,9 @@ def _refused_unsettled(planned: Plan) -> int | None:
         )
     elif keys.not_read is not None:
         write_error(f"litellm: keys not read ({keys.not_read})", command(Verb.APPLY))
+    elif isinstance(keys.admin, reconcile.MembersNotRead):
+        cause = f"members not read from Keycloak ({keys.admin.cause})"
+        write_error(f"{litellm_keys.ADMIN_BUDGET_ID}: {cause}", command(Verb.APPLY))
     elif keys.name_taken:
         write_error(f"litellm: {', '.join(keys.name_taken)} name taken; nothing changed")
     else:

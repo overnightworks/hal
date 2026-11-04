@@ -72,6 +72,7 @@ FRONT_PORT = 4000
 # The scenario of an app key and a person (docs/agent-service.md, "The API route"): each app key
 # has a money budget per month and a parallel bound, each person a budget per month.
 APP_BUDGET, PERSON_BUDGET, PERIOD, PARALLEL = 10.0, 2.0, "1mo", 5
+PERSON_PUSH = {"input_tokens": 600_000, "output_tokens": 1}  # on text/opus, past PERSON_BUDGET
 OPERATOR_BUDGET = "probe-operator"  # a budget with no max_budget, linked to the operator's row
 RESCHEDULER_SECONDS = 3
 SPEND_SECONDS = 90
@@ -509,6 +510,24 @@ class LitellmProbe(IssuerProbe):
 
     def customer_spend(self, user: str) -> float:
         return (self.customer_row(user) or {"spend": 0.0})["spend"]
+
+    def push(self, key: str, user: str, usage: dict) -> None:
+        """One served request whose steered usage LiteLLM prices."""
+        self.steer_fake(usage=usage)
+        answer = self.complete(key, user=user)
+        self.steer_fake()
+        expect(answer["status"] == 200, f"the push was refused: {answer['status']}")
+
+    def push_person(self, cell: str, key: str, user: str) -> float:
+        self.push(key, user, PERSON_PUSH)
+        self.wait_for(cell, "the person's spend past the budget",
+                      lambda: self.customer_spend(user) > PERSON_BUDGET)  # fmt: skip
+        return self.customer_spend(user)
+
+    def move_due(self, table: str, column: str, value: str) -> None:
+        """Moves a budget's reset into the past in LiteLLM's database."""
+        moved = "budget_reset_at = now() - interval '1 minute'"
+        self.sql(f"UPDATE \"{table}\" SET {moved} WHERE {column} = '{value}'")  # noqa: S608 - the probe names the table and the value
 
     def complete(self, key: str | None, model: str = DEFAULT_MODEL, user: str | None = None,
                  path: str = ROUTE, front: bool = True, network: str | None = None,

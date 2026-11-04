@@ -8,22 +8,27 @@ from support.stack_plan_rows import APP, NEW, app_plan
 
 from hal.output import Glyph, Row
 from hal.output.command import Verb, command
+from hal.stack import core
 from hal.stack import realm as realm_lines
 from hal.stack.apps import AppFailed, AppHeldOff, AppKind, AppOn, AppSwitchedOff, OffPlan
 from hal.stack.barrier import BarriersUnproven, Unproven
 from hal.stack.legal_step import PageChange
 from hal.stack.litellm_keys import (
+    ADMIN_BUDGET_ID,
+    AdminHeld,
     Change,
     FieldChange,
     KeysDone,
     KeysFailed,
     KeysResult,
     KeysSkipped,
+    RowChange,
     Target,
 )
 from hal.stack.plan_rows import KeysEvent
 from hal.stack.realm.reconcile import (
     Leftovers,
+    MembersNotRead,
     NotRecorded,
     OnlyInKeycloak,
     RealmApplied,
@@ -482,3 +487,88 @@ def test_the_key_steps_result_is_a_row_per_change_and_its_partial_names_what_was
 ) -> None:
     assert keys_rows(result) == rows
     assert keys_partial(result) == partial
+
+
+ADMIN = Change(Target.BUDGET, ADMIN_BUDGET_ID, True, (FieldChange("budget_duration", None, "1mo"),))
+PRINTS = tuple(f"fp-{digit * 64}" for digit in "0123")
+LINKS = tuple(RowChange(fingerprint, ADMIN_BUDGET_ID, True, True) for fingerprint in PRINTS[:3])
+UNLINK = RowChange(PRINTS[3], ADMIN_BUDGET_ID, False, False)
+NOT_READ = MembersNotRead("Keycloak is not running")
+NOT_READ_ROW = Row(
+    Glyph.NEEDS_YOU, ADMIN_BUDGET_ID, KeysEvent.MEMBERS_NOT_READ, "Keycloak is not running"
+)
+ADMIN_PARTIAL = f"{ADMIN_BUDGET_ID} members not read from Keycloak"
+
+
+@pytest.mark.parametrize(
+    ("result", "rows", "partial"),
+    [
+        pytest.param(
+            KeysDone((ADMIN, UNLINK, *LINKS), ()),
+            (
+                Row(Glyph.DONE, ADMIN_BUDGET_ID, KeysEvent.NEW_BUDGET, "1mo"),
+                Row(Glyph.DONE, ADMIN_BUDGET_ID, KeysEvent.CUSTOMER_ROWS, "3 linked · 1 unlinked"),
+            ),
+            None,
+            id="every row change done, as counts",
+        ),
+        pytest.param(
+            KeysDone((), (), AdminHeld(core.Gate.OFF)),
+            (Row(Glyph.UNCHANGED, ADMIN_BUDGET_ID, KeysEvent.ROWS_HELD, "Keycloak is off"),),
+            None,
+            id="held, which leaves the ending as it is",
+        ),
+        pytest.param(
+            KeysDone((BUDGET,), (), NOT_READ),
+            (
+                Row(Glyph.DONE, "person", KeysEvent.BUDGET_CHANGED, "budget 1.5 → 2 dollars"),
+                NOT_READ_ROW,
+            ),
+            (f"partial, {ADMIN_PARTIAL}", command(Verb.APPLY)),
+            id="members not read: the rest done, a partial naming Keycloak",
+        ),
+        pytest.param(
+            KeysFailed((ADMIN,), UNLINK, "status 422 at /customer/new after the delete", LINKS, ()),
+            (
+                Row(Glyph.DONE, ADMIN_BUDGET_ID, KeysEvent.NEW_BUDGET, "1mo"),
+                Row(
+                    Glyph.FAILED,
+                    ADMIN_BUDGET_ID,
+                    KeysEvent.ROW_UNLINK,
+                    "status 422 at /customer/new after the delete",
+                ),
+                Row(Glyph.UNCHANGED, ADMIN_BUDGET_ID, ResultEvent.NOT_MADE, "3 customer rows"),
+            ),
+            (f"partial, {ADMIN_BUDGET_ID} {KeysEvent.ROW_UNLINK} failed", command(Verb.APPLY)),
+            id="a failed unlink and the rows not made after it, by budget and count",
+        ),
+        pytest.param(
+            KeysFailed((), HOPIN, "status 500", (), ("songmaker",), NOT_READ),
+            (
+                Row(Glyph.FAILED, "hopin", KeysEvent.NEW_KEY, "status 500"),
+                Row(
+                    Glyph.NEEDS_YOU, "songmaker", KeysEvent.NAME_TAKEN, "another key holds the name"
+                ),
+                NOT_READ_ROW,
+            ),
+            (
+                f"partial, hopin new key failed; songmaker name taken; {ADMIN_PARTIAL}",
+                command(Verb.APPLY),
+            ),
+            id="a failed key beside a taken name and members not read",
+        ),
+    ],
+)
+def test_the_admin_budgets_result_is_counted_rows_and_its_partial_names_keycloak(
+    result: KeysResult, rows: tuple[Row, ...], partial: tuple[str, str | None] | None
+) -> None:
+    assert keys_rows(result) == rows
+    assert keys_partial(result) == partial
+
+
+def test_no_result_row_or_partial_names_a_fingerprint() -> None:
+    result = KeysFailed((ADMIN, *LINKS[:1]), LINKS[1], "status 500", (LINKS[2], UNLINK), ())
+    rows = (f"{row.subject} {row.event} {row.fact}" for row in keys_rows(result))
+
+    printed = " ".join((*rows, *map(str, keys_partial(result) or ())))
+    assert not any(fingerprint in printed for fingerprint in PRINTS)
