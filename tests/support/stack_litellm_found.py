@@ -10,9 +10,10 @@ MODELS = ("text/haiku", "text/opus", "text/sonnet")
 BUDGET_ID = "scenario-budget"
 
 
-def found_key(app: str, **overrides: object) -> dict:
-    """The live row of `app` as the one-off reports it: the desired settings, overridden."""
-    desired = litellm_keys.desired_key(app, MODELS, NONE_SET.limits_of(app))
+def found_key(app: str, models: tuple[str, ...] = MODELS, **overrides: object) -> dict:
+    """The live row of `app` as the one-off reports it: the desired settings at the code
+    defaults, overridden."""
+    desired = litellm_keys.desired_key(app, models, NONE_SET.limits_of(app))
     return {
         name: list(value) if isinstance(value, tuple) else value for name, value in desired.items()
     } | overrides

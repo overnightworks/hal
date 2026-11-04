@@ -21,6 +21,7 @@ import json
 import sys
 import time
 from collections.abc import Callable
+from enum import Enum
 from pathlib import Path
 from typing import NamedTuple
 
@@ -45,6 +46,12 @@ L1_SETTINGS = (
 )
 REPOST_SECONDS = 10
 PERSON_BUDGET_WINDOW = 150
+
+
+class Verdict(Enum):
+    HELD = "held"
+    WAIT = "wait"
+    FAILED = "failed"
 
 
 class Refusal(NamedTuple):
@@ -284,9 +291,10 @@ class LimitsProbe(KeysProbe):
     def until_refused(self, person: str, elapsed: Callable[[], float]) -> str:
         while True:
             answer, sent = self.post("presentator", person)
-            if answer["status"] != 200:
+            verdict = person_budget_verdict(answer["status"] != 200, elapsed())
+            expect(verdict is not Verdict.FAILED, "L7: P not refused within 150 s")
+            if verdict is Verdict.HELD:
                 return self.refused_as("L7", answer, sent, BUDGET_EXCEEDED)
-            expect(elapsed() < PERSON_BUDGET_WINDOW, "L7: P not refused within 150 s")
             time.sleep(REPOST_SECONDS)
 
     def person_spend(self, person: str) -> float:
@@ -297,6 +305,13 @@ class LimitsProbe(KeysProbe):
 
     def calls(self) -> int:
         return len(self.seen.argv)
+
+
+def person_budget_verdict(refused: bool, elapsed: float) -> Verdict:
+    """An answer after the window fails L7, a refusal or not; within it, a refusal holds it."""
+    if elapsed > PERSON_BUDGET_WINDOW:
+        return Verdict.FAILED
+    return Verdict.HELD if refused else Verdict.WAIT
 
 
 def fields_of(plan: KeysPlan) -> Fields:

@@ -32,12 +32,6 @@ from support.stack_apply import (
     write_fleet,
 )
 from support.stack_apply import (
-    LITELLM_APPS as APPS,
-)
-from support.stack_apply import (
-    LITELLM_BUDGET_ID as BUDGET_ID,
-)
-from support.stack_apply import (
     LITELLM_UNIT_SERVICES as UNIT_SERVICES,
 )
 from support.stack_apply_apps import (
@@ -46,6 +40,7 @@ from support.stack_apply_apps import (
 )
 from support.stack_apply_fakes import ScriptedCompose
 from support.stack_core import bind, sha256
+from support.stack_litellm_found import APPS, BUDGET_ID
 from support.stack_plan_rows import find_row, plain
 
 from hal.stack import api_limits, core, litellm_keys

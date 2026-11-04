@@ -33,6 +33,7 @@ from support.stack_apply_fakes import (
     Terminal,
 )
 from support.stack_core import bind, bind_core_files, sha256
+from support.stack_litellm_found import APPS, BUDGET_ID, found_key
 
 from hal.stack import (
     api_limits,
@@ -265,24 +266,14 @@ def write_fleet(repository: Path, text: str) -> None:
     (repository / "fleet.yaml").write_text(text)
 
 
-LITELLM_APPS = ("hopin", "presentator", "songmaker")
-LITELLM_BUDGET_ID = "scenario-budget"
 LITELLM_ON = "  litellm:\n    run: {enabled: true}\n"
 LITELLM_UNIT_SERVICES = (LITELLM.service, LITELLM.database, "litellm-front")
 MASTER_KEY, DB_PASSWORD, PROVIDER_KEY = "master_key", "db_password", "anthropic_key"
-APP_KEYS = tuple(f"app_{app}" for app in LITELLM_APPS)
+APP_KEYS = tuple(f"app_{app}" for app in APPS)
 
 
 def secrets_of(*names: str) -> list[dict]:
     return [{"source": name} for name in names]
-
-
-def desired_row(app: str, models: tuple[str, ...]) -> dict:
-    """`app`'s key at the code defaults, as the one-off reports it."""
-    desired = litellm_keys.desired_key(app, models, api_limits.NONE_SET.limits_of(app))
-    return {
-        name: list(value) if isinstance(value, tuple) else value for name, value in desired.items()
-    }
 
 
 @pytest.fixture
@@ -307,7 +298,7 @@ def litellm_running(repository: Path, scripted: ScriptedCompose, secret_files) -
     config = repository / litellm_keys.CONFIG_FILE
     config.parent.mkdir(parents=True, exist_ok=True)
     config.write_text(
-        yaml.safe_dump({"litellm_settings": {litellm_keys.BUDGET_ID_SETTING: LITELLM_BUDGET_ID}})
+        yaml.safe_dump({"litellm_settings": {litellm_keys.BUDGET_ID_SETTING: BUDGET_ID}})
     )
     services = scripted.config["services"]
     litellm_db_volume = [{"type": "volume", "source": "litellm-db", "target": "/data"}]
@@ -326,7 +317,7 @@ def litellm_running(repository: Path, scripted: ScriptedCompose, secret_files) -
         "secrets": secrets_of(MASTER_KEY, *APP_KEYS),
     }
     scripted.put_containers(dict.fromkeys((*LITELLM_UNIT_SERVICES, KEYCLOAK_SERVICE), "running"))
-    scripted.keys.rows = {app: desired_row(app, scripted.keys.models) for app in LITELLM_APPS}
+    scripted.keys.rows = {app: found_key(app, scripted.keys.models) for app in APPS}
     scripted.keys.budget = dict(litellm_keys.desired_budget(api_limits.NONE_SET.person_budget()))
     scripted.keys.admin_budget = dict(litellm_keys.desired_admin_budget())
     return scripted.keys

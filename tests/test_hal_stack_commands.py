@@ -8,6 +8,8 @@ stand-ins is first on PATH for every test, and every test ends by asserting that
 The exits are hal's: 0, or 3 for every outcome of the stack that is not "applied or nothing to do"
 (exception E in docs/stack.md)."""
 
+import re
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -372,13 +374,19 @@ def test_apply_from_a_checkout_that_is_not_a_clean_main_is_refused(hal, applying
     assert applying.publish_never_began()
 
 
+PAST_THE_DIGIT_LIMIT = sys.get_int_max_str_digits() + 1
+
+
 @pytest.mark.parametrize(
     ("text", "refusal"),
     [
         ("[api]\nbudget_dollars = -1\n", "budget_dollars must be "),
         ("[alarm]\ninterval = 0\n", "interval must be "),
-        (f"[api]\nbudget_dollars = {'9' * 5000}\n", "an integer of more than "),
-        (f"[api]\nmax_parallel_requests = 0x{'f' * 5000}\n", "max_parallel_requests must be "),
+        (f"[api]\nbudget_dollars = {'9' * PAST_THE_DIGIT_LIMIT}\n", "an integer of more than "),
+        (
+            f"[api]\nmax_parallel_requests = 0x{'f' * PAST_THE_DIGIT_LIMIT}\n",
+            "max_parallel_requests must be ",
+        ),
     ],
     ids=["api", "alarm", "decimal past the digit limit", "hex past the digit limit"],
 )
@@ -396,6 +404,7 @@ def test_apply_with_a_malformed_settings_file_ends_2_before_any_guard(
 
     assert result.exit_code == ExitCode.USAGE
     assert f"{config_file}: {refusal}" in result.err
+    assert not any(run in result.err for run in re.findall(r"[0-9a-f]{50,}", text))
     assert applying.scripted.calls == []
     assert applying.scripted_git.calls == []
     assert applying.publish_never_began()
