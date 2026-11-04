@@ -4,8 +4,9 @@
 repository. A unit's key is a compose profile (docs/naming.md). An entry with `repo` and `run` is
 an app: its key is its repository's name under `github.org`, its compose project and its checkout
 `~/srv/<key>`; `apps()` reads them. Entries without `run` are no units and no apps, and `units()`
-and `apps()` ignore them. `hosts()` is the separate reader of every entry's `hosts` list (an entry
-without `run` is enabled). `units()` also reads each unit's hosts, enabled or not, and needs a valid
+and `apps()` ignore them; `host_only_keys()` reads those with no `repo` either, the apps edge only
+fronts. `hosts()` is the separate reader of every entry's `hosts` list (an entry without `run` is
+enabled). `units()` also reads each unit's hosts, enabled or not, and needs a valid
 `cloudflare.zone` once a unit declares one. The top-level `cloudflare:` and `github:` keys belong
 to OpenTofu, which reads the same file and must agree with these readers.
 """

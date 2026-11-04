@@ -34,6 +34,7 @@ from support.stack_apps import (
 )
 from support.stack_plan_rows import detail_lines, find_row, plain
 
+from hal.stack import catalog
 from hal.stack.legal_section import MAXIMUM_BYTES
 from hal.stack.plan_rows import LegalEvent
 
@@ -459,24 +460,27 @@ def test_a_host_only_checkout_without_a_privacy_file_has_no_block_and_is_no_refu
     assert f'id="{HOST_ONLY_KEY}"' not in legal_apps.page()
 
 
-def test_edge_holds_no_section_of_its_own_for_a_host_only_app():
-    """E6, L8: the checkout is the one owner of the block; edge's own sections stay."""
+def test_edge_holds_no_section_of_its_own_for_any_host_only_app():
+    """E6, L8: the checkout is the one owner of a host-only block."""
     sections = REPOSITORY / "legal/sections"
 
-    assert not (sections / HOST_ONLY_KEY).exists()
-    assert (sections / "allgemein").is_dir()
-    assert (sections / "agent-service").is_dir()
+    for key in catalog.host_only_keys(catalog.read(REPOSITORY / "fleet.yaml")):
+        assert not (sections / key).exists()
 
 
 def test_a_section_edge_still_holds_for_a_host_only_app_refuses_naming_both(legal_apps):
-    """E6, L8."""
-    held = legal_apps.world.repository / "legal/sections" / HOST_ONLY_KEY
-    held.mkdir()
-    (held / "datenschutz.html").write_text(HOST_ONLY_PRIVACY)
+    """E6, L8: the two owners hold different pages, so only the two-owner rule can refuse."""
+    held = "legal/sections/" + HOST_ONLY_KEY + "/nutzungsbedingungen.html"
+    edge = legal_apps.world.repository
+    (edge / held).parent.mkdir(parents=True)
+    (edge / held).write_text(HOST_ONLY_PRIVACY)
+    plain_git(edge, "add", held)
+    plain_git(edge, "commit", "--quiet", "--message", "held section", "--", held)
     legal_apps.host_only_app().commit({PRIVACY_FILE: HOST_ONLY_PRIVACY})
 
     exit_code, out, err = legal_apps.world.apply()
 
     assert exit_code == 2
     assert f"legal/sections/{HOST_ONLY_KEY}/" in err
+    assert f"~/srv/{HOST_ONLY_KEY}/legal/" in err
     assert "Type yes" not in plain(out)

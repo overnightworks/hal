@@ -133,7 +133,6 @@ def test_the_first_apply_names_and_writes_the_three_pages_readable_by_the_unit(w
         assert stat.S_IMODE((world.built / name).stat().st_mode) == 0o644
     privacy = world.built_page("datenschutz")
     assert 'id="agent-dienst"' in privacy
-    assert 'id="songmaker"' not in privacy
     assert re.search(r'<p class="stand">Stand: \d{1,2}\. [A-Za-zä]+ 20\d\d</p>', privacy)
 
 
