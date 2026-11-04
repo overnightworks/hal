@@ -338,7 +338,8 @@ budget with its customer rows (the key step below).
 - **The database.** `litellm-db` is Postgres 17 at the image and hardening of `keycloak-db` (one
   `x-postgres` anchor in `compose.yaml`), with its own volume and the file secret `litellm/db-password`,
   which `start.sh` turns into `DATABASE_URL`. It holds the keys (their hashes only), the budgets, and
-  each person's fingerprint with its counters. LiteLLM stays the official image by its digest: BerriAI ships one
+  each person's fingerprint with its counters; the weekly backup copies it whole
+  ([backup.md](backup.md)). LiteLLM stays the official image by its digest: BerriAI ships one
   image whose enterprise part a licence key switches on, and hal sets no key and uses no enterprise
   function, so it builds no image of its own. It runs with no `LITELLM_LICENSE` and none of the settings behind its premium check (`enforced_params`,
   `allowed_ips`, global `allowed_routes`, key `tags`, `model_max_budget`, `/key/regenerate`). It
@@ -353,9 +354,9 @@ budget with its customer rows (the key step below).
   a budget, as an admin's is, stays, and so do keys, budgets and every other table. The period is
   `RETENTION_DAYS` in `src/hal/litellm_expiry.py`, not a setting, because the privacy text states
   it. The run prints counts only; with `litellm-db` not running it deletes nothing and exits 0. A
-  backup that copies the database keeps deleted rows until that copy goes, and a restore brings them
-  back until the next daily run deletes them again. A failed run fails `hal-expire.service`, which
-  `hal check` and `hal alarm` report as `job-failed`; its error line says `nothing deleted` only
+  deleted row stays in the backup's snapshots as long as [backup.md](backup.md), „What a backup
+  holds, and its limit“, states, and a restore brings it back until the next daily run deletes it
+  again. A failed run fails `hal-expire.service`, which `hal check` and `hal alarm` report as `job-failed`; its error line says `nothing deleted` only
   when psql reported the failure, and otherwise that the outcome is unknown and the next run repeats
   it. `probe/agent-service/litellm_expiry.py` proves it on the fake-only stack; re-run it on every
   LiteLLM bump, since a schema change shows in production only as a failed unit.
@@ -398,8 +399,9 @@ budget with its customer rows (the key step below).
   `litellm_admission.py` drives the key's models, the budgets, the person budget, the operator's
   exception and the bound, `litellm_failures.py` the failure and key cases,
   `litellm_retention.py` the retention census of the route and `litellm_live_canary.py` the live canary, both with hopin's key made by
-  the key step, and `litellm_keys.py` the key step through
-  `hal apply`'s own plan and run, on the same stack and with the same caller. Re-run them for every LiteLLM,
+  the key step, `litellm_keys.py` the key step through
+  `hal apply`'s own plan and run, and `litellm_backup.py` the backup, its restore test and a lost
+  volume, on the same stack and with the same caller. Re-run them for every LiteLLM,
   Traefik or Docker bump. The CI job `front` runs the front's table of requests
   (`tests/test_litellm_front.py`) for every Traefik bump; a LiteLLM bump still needs the probes.
 
@@ -412,7 +414,9 @@ argument, the step's input or output, or LiteLLM's log; and the admin group's ro
 scenario data: the links and the unlink, the refusal of a former admin past the person budget, the
 monthly reset, the members not read, and that no printed line carries a fingerprint or a member. It runs
 in hal's environment, which holds the agent-runtime client. Cell LM1 of the Keycloak probe proves the
-members mode against a real Keycloak.
+members mode against a real Keycloak. `litellm_backup.py` proves `hal backup litellm`,
+its pre-apply snapshot and `hal restore --test litellm` under a scratch HOME, that the dump holds every
+table and no key in clear, and that a lost volume rebuilds through the key step with budgets at zero.
 
 **The live smoke** is one command, run in the live checkout after `hal apply` and with the image
 built: `cd ~/srv/hal && python3 agent-service/live_smoke.py`. It signs you in as yourself (the

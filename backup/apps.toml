@@ -27,3 +27,17 @@ postgres_major = 17       # compose.yaml's keycloak-db
 [app.keycloak.restore_test]
 count_table = "realm"
 require_rows = true   # a Keycloak without a realm is no backup
+
+# LiteLLM's whole database, DB-only: the key hashes, budgets, spend per key and per fingerprint
+# with their daily rows, and the tool names.
+[app.litellm]
+compose_project = "hal"
+db_service = "litellm-db"
+dump = "pg_dump_custom"
+db_user = "litellm"
+db_name = "litellm"
+postgres_major = 17       # compose.yaml's litellm-db
+
+[app.litellm.restore_test]
+count_table = "LiteLLM_VerificationToken"
+require_rows = true   # a LiteLLM without a key is no backup
