@@ -6,7 +6,7 @@ database. Nothing live and nothing paid: no provider key, no egress, no app.
     flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 50 1780 \\
         python3 probe/agent-service/litellm_unit.py --scratch DIR
 
-Measured: a run takes about six minutes and its teardown a few seconds (K 50 s, CAP 1780 s).
+Measured: a run takes about three minutes and its teardown 1 s (K 50 s, CAP 1780 s).
 
 The copy is edge_copy's: a scratch HOME whose live checkout runs the lane's files with every fixed
 name moved into the probe's project, and every network of edge_copy.PINNED_NETWORKS moved to a free
