@@ -250,7 +250,17 @@ class Machine:
             if isinstance(failure, int):
                 return exit_with(label, failure)
             raise failure()
-        answers = {
+        answers = self._answers()
+        if label not in answers:
+            pytest.fail(f"the scripted machine does not know {label!r}")
+        answer = answers[label](argv, stdin=stdin, discard_stderr=discard_stderr)
+        if stdout is None:
+            return answer
+        return REAL_HOST_RUN(["printf", "%s", answer.decode()], label=label, stdout=stdout)
+
+    def _answers(self) -> dict[str, Callable[..., bytes]]:
+        """The scripted answer to each host-run label."""
+        return {
             "docker info": self._daemon,
             "docker image inspect": self._image,
             "docker pull": self._pull,
@@ -279,12 +289,6 @@ class Machine:
             SESSION_COUNT_LABEL: self._session_count,
             LIVE_LOAD_LABEL: self._live_load,
         }
-        if label not in answers:
-            pytest.fail(f"the scripted machine does not know {label!r}")
-        answer = answers[label](argv, stdin=stdin, discard_stderr=discard_stderr)
-        if stdout is None:
-            return answer
-        return REAL_HOST_RUN(["printf", "%s", answer.decode()], label=label, stdout=stdout)
 
     def labels(self) -> list[str]:
         return [label for label, _ in self.calls]

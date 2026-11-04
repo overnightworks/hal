@@ -208,7 +208,7 @@ def restore_sessions(container_id: str, database: PostgresDatabase) -> int:
         ["docker", "exec", container_id, "psql",
          "--username", database.db_user, "--dbname", database.db_name,
          "--no-psqlrc", "--tuples-only", "--no-align", "--set", "ON_ERROR_STOP=1",
-         "--command", "SELECT count(*) FROM pg_stat_activity"
+         "--command", "SELECT count(*) FROM pg_stat_activity"  # noqa: S608 - the name is this module's constant and psql's --command takes no variables
          f" WHERE application_name = '{PG_RESTORE_APPLICATION}'"],
         label=SESSION_COUNT_LABEL,
         timeout=PROBE_TIMEOUT,
