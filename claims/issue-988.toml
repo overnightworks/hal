@@ -1,8 +1,0 @@
-claim_id = "a4d9be64dc65441bb3952f8285daa754"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "f559e303e4c8b67b63c232e8dd392a4f378992e1"
-branch = "claude/issue-988-restic-prune-no-unused"
-scope = ["docs/backup.md", "probe/backup/retention.py", "src/hal/backup/restic.py", "tests/test_backup_retention.py", "tests/test_backup_runner.py"]
-opened_commit = "be2986cc80051e493886103e75e3bf1156359560"
-whole_reason = "One flag on restic's prune, its doc line, the two tests that pin the forget arguments, and its probe cell: one change that does not split."
