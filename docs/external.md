@@ -144,7 +144,7 @@ und fehlgeschlagene Anmeldungen, 90 Tage) deshalb die Adresse des Besuchers, nie
 faelschbar; jede liest `Forwarded` oder `Cf-Connecting-IP` selbst.
 
 **Der oeffentliche Ausschluss** (`cloudflare_ruleset.deny_public`, Phase `http_request_firewall_custom`):
-Pfade aus `deny_public` eines Hosts (songmakers Host: `/auth/backchannel-logout` und `/metrics`, hopins Host: `/auth/backchannel-logout`) sind von
+Pfade aus `deny_public` eines Hosts (songmakers Host: `/auth/backchannel-logout` und `/metrics`; die Hosts von hopin und presentator (`presentator`, `presentator-talk`): `/auth/backchannel-logout`) sind von
 aussen nie erreichbar. Eine Block-Regel je Pfad, die alle Hosts abdeckt, die ihn auffuehren, weist
 sie bei Cloudflare ab, vor dem Tunnel; der Host gilt mit und ohne `:<port>`. Cloudflare
 normalisiert die URL vorher ([Doku](https://developers.cloudflare.com/rules/normalization/how-it-works/)),
@@ -156,7 +156,7 @@ wird `/*`: abgewiesen wird jeder dekodierte Pfad mit `auth/` und spaeter `backch
 `/auth/backchannel-logout/`, `//auth/...`, `/auth%2F...`, `/AUTH/...`, `/auth//...` und
 `/oauth/backchannel-logout` (der Ausschluss schlaegt eher zu viel zu); `/metrics` trifft jeden
 Pfad mit `metrics`, songmakers Routen enthalten sonst keinen. Der Free-Plan erlaubt 5
-Custom-Regeln, also fuenf Pfade, nicht fuenf Hosts; songmakers Host fuehrt davon zwei auf, hopins Host fuegt keinen hinzu. Der DNS-Eintrag jedes Hosts wartet auf dieses Regelwerk: ein
+Custom-Regeln, also fuenf Pfade, nicht fuenf Hosts; songmakers Host fuehrt davon zwei auf, die Hosts von hopin und presentator fuegen keinen hinzu. Der DNS-Eintrag jedes Hosts wartet auf dieses Regelwerk: ein
 fehlgeschlagener Ausschluss veroeffentlicht nichts. Gibt es den Einstiegspunkt
 `http_request_firewall_custom` der Zone schon (Dashboard-Regeln), schlaegt das Anlegen fehl: dann
 vor dem ersten `hal apply` importieren (`cloudflare_ruleset.deny_public[0]`, ID `zones/<zone_id>/<ruleset_id>`,
