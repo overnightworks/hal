@@ -63,6 +63,7 @@ BACKUP_SECONDS = 1800
 STOP_GRACE_SECONDS = 120  # what hal backup gets to remove its staging and restore container
 COLLECT_SECONDS = 5  # what the output of a killed hal backup gets before its pipes are closed
 _ERROR_LINE = re.compile(r"^error: (.+)$", re.MULTILINE)
+_NO_MEMBERS = "the realm observer answered no members"
 
 type Checksums = dict[str, dict[str, str]]  # realm -> import-checksum attribute -> value
 type Waiting = Callable[[float], None]  # told the seconds a stopped hal is given to clean up
@@ -153,6 +154,19 @@ class RealmPlan:
         return self.action not in (RealmAction.RUN, RealmAction.UNREADABLE)
 
 
+@dataclass(frozen=True)
+class Members:
+    """hallucinai's issuer and the ids of one group's direct members, which are never printed."""
+
+    issuer: str
+    subjects: tuple[str, ...] = field(repr=False)
+
+
+@dataclass(frozen=True)
+class MembersNotRead:
+    cause: str  # one line naming the failure, never a member
+
+
 class Observer:
     """The realm observer through its compose service (`hal.stack.realm.observe`). One observer
     holds one digest key, so the inventories it reads before and after an apply can be compared."""
@@ -166,6 +180,24 @@ class Observer:
 
     def checksums(self) -> Checksums:
         return self._read(["--import-checksums"], "")
+
+    def members(self, group: str) -> Members | MembersNotRead:
+        """The members mode's answer; its standard output carries subjects, so a failure is
+        named by the one-off's exit and standard error alone, and a malformed answer by its
+        check."""
+        try:
+            output = self.engine.run_once(OBSERVER_SERVICE, ["--members", group], "")
+        except compose.ComposeError as error:
+            return MembersNotRead(error.one_off_cause(OBSERVER_SERVICE))
+        try:
+            answer = json.loads(output)
+            issuer, subjects = answer["issuer"], answer["members"]
+        except ValueError, KeyError, TypeError:
+            return MembersNotRead(_NO_MEMBERS)
+        texts = [issuer, *subjects] if isinstance(subjects, list) else None
+        if texts is None or not all(isinstance(text, str) and text for text in texts):
+            return MembersNotRead(_NO_MEMBERS)
+        return Members(issuer, tuple(subjects))
 
     def _read(self, arguments: list[str], stdin: str) -> dict:
         try:

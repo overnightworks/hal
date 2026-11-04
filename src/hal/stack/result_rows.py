@@ -1,6 +1,7 @@
 """The finished run as rows: each step's typed result is mapped to the rows `hal.output` prints.
 Nothing here parses a string or prints; `plan_rows` is the planned run's twin."""
 
+from collections import Counter
 from enum import StrEnum
 
 from hal.output import Glyph, Noun, Row, counted, format_duration, printable
@@ -20,26 +21,35 @@ from hal.stack.apps import (
 from hal.stack.barrier import BarriersUnproven
 from hal.stack.legal_step import LEGAL_UNIT, LegalPlan, PageChange
 from hal.stack.litellm_keys import (
+    ADMIN_BUDGET_ID,
     LITELLM_SERVICE,
+    AdminState,
     Change,
     KeysDone,
     KeysFailed,
     KeysResult,
     KeysSkipped,
+    RowChange,
+    StepChange,
 )
 from hal.stack.plan_rows import (
     ChangeNoun,
     KeysEvent,
     PlanEvent,
+    RowNoun,
+    admin_rows,
     appkit_row,
     change_event,
+    customer_rows,
     key_change_row,
     name_taken_row,
+    shown_subject,
 )
 from hal.stack.realm import Kind
 from hal.stack.realm.reconcile import (
     REALM_UNIT,
     Leftovers,
+    MembersNotRead,
     NotRecorded,
     RealmApplied,
     RealmFailed,
@@ -135,61 +145,84 @@ def partial_error(result: StepResult) -> str | None:
 
 def keys_rows(result: KeysResult) -> tuple[Row, ...]:
     """The key step's rows: each change done, the failed one with its cause and each one not made
-    after it, then each app whose name another key holds."""
+    after it, then each app whose name another key holds and why the admin rows wait; row changes
+    as counts per budget."""
     rows: list[Row] = []
     match result:
         case KeysSkipped(reason):
             rows.append(
                 Row(Glyph.NEEDS_YOU, LITELLM_SERVICE, ResultEvent.KEYS_SKIPPED, printable(reason))
             )
-        case KeysDone(done, name_taken):
-            rows += [*_done_rows(done), *map(name_taken_row, name_taken)]
-        case KeysFailed(done, failed, cause, not_made, name_taken):
+        case KeysDone(done, name_taken, admin):
+            rows += [*_done_rows(done), *map(name_taken_row, name_taken), *admin_rows(admin)]
+        case KeysFailed(done, failed, cause, not_made, name_taken, admin):
             rows += [
                 *_done_rows(done),
                 _failed_keys_row(failed, cause),
-                *(_not_made_row(change) for change in not_made),
+                *_not_made_rows(not_made),
                 *map(name_taken_row, name_taken),
+                *admin_rows(admin),
             ]
     return tuple(rows)
 
 
 def keys_partial(result: KeysResult) -> tuple[str, str | None] | None:
     """The run's `partial, ...` text for the key step and the command that ends it, None when it
-    did not end partial; a taken name no hal command resolves."""
+    did not end partial; a taken name no hal command resolves, members not read the next apply."""
     match result:
         case KeysSkipped():
             return f"partial, {LITELLM_SERVICE} {ResultEvent.KEYS_SKIPPED}", command(Verb.APPLY)
-        case KeysDone(name_taken=name_taken) if name_taken:
-            return f"partial, {_names_taken(name_taken)}", None
-        case KeysFailed(failed=failed, name_taken=name_taken):
+        case KeysDone(name_taken=name_taken, admin=admin) if unsettled := _unsettled(
+            name_taken, admin
+        ):
+            next_step = command(Verb.APPLY) if isinstance(admin, MembersNotRead) else None
+            return f"partial, {'; '.join(unsettled)}", next_step
+        case KeysFailed(failed=failed, name_taken=name_taken, admin=admin):
             what = (
                 f"{LITELLM_SERVICE} {ResultEvent.KEYS_FAILED}"
                 if failed is None
-                else f"{failed.subject} {change_event(failed)} failed"
+                else f"{shown_subject(failed)} {change_event(failed)} failed"
             )
-            text = "; ".join((what, _names_taken(name_taken)) if name_taken else (what,))
+            text = "; ".join((what, *_unsettled(name_taken, admin)))
             return f"partial, {text}", command(Verb.APPLY)
         case _:
             return None
 
 
-def _done_rows(done: tuple[Change, ...]) -> tuple[Row, ...]:
-    return tuple(key_change_row(change, Glyph.DONE) for change in done)
+def _unsettled(name_taken: tuple[str, ...], admin: AdminState) -> tuple[str, ...]:
+    """What the step left unsettled beside its writes: taken names, members not read."""
+    taken = (f"{', '.join(name_taken)} {KeysEvent.NAME_TAKEN}",) if name_taken else ()
+    not_read = isinstance(admin, MembersNotRead)
+    return (*taken, *((f"{ADMIN_BUDGET_ID} members not read from Keycloak",) if not_read else ()))
 
 
-def _failed_keys_row(failed: Change | None, cause: str) -> Row:
+def _done_rows(done: tuple[StepChange, ...]) -> tuple[Row, ...]:
+    changes = (change for change in done if isinstance(change, Change))
+    return (
+        *(key_change_row(change, Glyph.DONE) for change in changes),
+        *customer_rows(done, Glyph.DONE),
+    )
+
+
+def _failed_keys_row(failed: StepChange | None, cause: str) -> Row:
     if failed is None:
         return Row(Glyph.FAILED, LITELLM_SERVICE, ResultEvent.KEYS_FAILED, printable(cause))
-    return Row(Glyph.FAILED, failed.subject, change_event(failed), printable(cause))
+    return Row(Glyph.FAILED, shown_subject(failed), change_event(failed), printable(cause))
 
 
-def _not_made_row(change: Change) -> Row:
-    return Row(Glyph.UNCHANGED, change.subject, ResultEvent.NOT_MADE, str(change_event(change)))
-
-
-def _names_taken(apps: tuple[str, ...]) -> str:
-    return f"{', '.join(apps)} {KeysEvent.NAME_TAKEN}"
+def _not_made_rows(not_made: tuple[StepChange, ...]) -> tuple[Row, ...]:
+    """Each change not made; the row changes counted by budget."""
+    rows = [
+        Row(Glyph.UNCHANGED, change.subject, ResultEvent.NOT_MADE, str(change_event(change)))
+        for change in not_made
+        if isinstance(change, Change)
+    ]
+    rows_by_budget = Counter(change.budget for change in not_made if isinstance(change, RowChange))
+    rows += [
+        Row(Glyph.UNCHANGED, budget, ResultEvent.NOT_MADE, counted(count, RowNoun.CUSTOMER_ROW))
+        for budget, count in rows_by_budget.items()
+    ]
+    return tuple(rows)
 
 
 def app_row(result: AppResult) -> Row:

@@ -16,7 +16,7 @@ from hal.stack import (
     setup,
     switches,
 )
-from hal.stack.litellm_keys import KEYS_SERVICE
+from hal.stack.litellm_keys import ADMIN_BUDGET_ID, KEYS_SERVICE
 from hal.stack.realm import reconcile
 
 PROJECT_PREFIX = 6  # docker compose --project-directory D --file F
@@ -127,14 +127,17 @@ def resolved_configuration() -> dict:
 @dataclass
 class ScriptedKeys:
     """The key step's one-off: its read reports `rows` (app -> its live key's settings, None when
-    absent), the apps whose name another key holds, `budget` and `models`; its write makes each
-    change into them in turn until the change at `fail_at`, which fails with `cause`, so the next
-    plan sees what the run made."""
+    absent), the apps whose name another key holds, `budget`, `models` and, when asked for the
+    admin group's members, `admin_budget` with each member's row of `customers` and the rows on
+    the admin budget that are no member's; its write makes each change into them in turn until
+    the change at `fail_at`, which fails with `cause`, so the next plan sees what the run made."""
 
     rows: dict[str, dict | None] = field(default_factory=dict)
     taken: set[str] = field(default_factory=set)
     budget: dict | None = None
     models: tuple[str, ...] = ("text/opus", "text/sonnet")
+    admin_budget: dict | None = None
+    customers: dict[str, dict] = field(default_factory=dict)  # fingerprint -> budget_id, spend
     read_fails: bool = False
     fail_at: int | None = None
     cause: str = "status 500"
@@ -147,16 +150,30 @@ class ScriptedKeys:
             if self.read_fails:
                 failure = "litellm-keys: status 502 at /v2/key/info\n"
                 return subprocess.CompletedProcess(command, 1, "", failure)
-            return subprocess.CompletedProcess(command, 0, json.dumps(self.read()), "")
+            answer = self.read(json.loads(stdin or ""))
+            return subprocess.CompletedProcess(command, 0, json.dumps(answer), "")
         changes = json.loads(stdin or "")
         self.writes.append(changes)
         return subprocess.CompletedProcess(command, 0, json.dumps(self.write(changes)), "")
 
-    def read(self) -> dict:
+    def read(self, asked: dict | None) -> dict:
         apps = {
             app: {"key": row, "name_taken": app in self.taken} for app, row in self.rows.items()
         }
-        return {"apps": apps, "budget": self.budget, "models": list(self.models)}
+        found = {"apps": apps, "budget": self.budget, "models": list(self.models)}
+        return found | {"admin": None if asked is None else self.admin_rows(asked["members"])}
+
+    def admin_rows(self, members: list[str]) -> dict:
+        others = (
+            {"fingerprint": fingerprint, "spend": row["spend"]}
+            for fingerprint, row in self.customers.items()
+            if row["budget_id"] == ADMIN_BUDGET_ID and fingerprint not in members
+        )
+        return {
+            "budget": self.admin_budget,
+            "members": [self.customers.get(member) for member in members],
+            "others": list(others),
+        }
 
     def write(self, changes: list[dict]) -> list[dict]:
         outcomes = []
@@ -172,7 +189,12 @@ class ScriptedKeys:
         return outcomes
 
     def make(self, change: dict) -> None:
-        if change["target"] == "budget":
+        if change["target"] == "customer":
+            row = self.customers.setdefault(change["subject"], {"spend": 0.0})
+            row["budget_id"] = change["fields"]["budget_id"]
+        elif change["subject"] == ADMIN_BUDGET_ID:
+            self.admin_budget = (self.admin_budget or {}) | change["fields"]
+        elif change["target"] == "budget":
             self.budget = (self.budget or {}) | change["fields"]
         else:
             self.rows[change["subject"]] = (self.rows[change["subject"]] or {}) | change["fields"]
@@ -218,6 +240,9 @@ class ScriptedCompose:
     realm_applies: int = 0  # how often config-cli ran
     config_cli_fails: bool = False
     keys: ScriptedKeys = field(default_factory=ScriptedKeys)
+    # the observer's members mode: hallucinai's issuer and the group's members; None: no group
+    realm_issuer: str = "https://auth.edge-fixture.invalid/realms/hallucinai"
+    realm_members: list[str] | None = field(default_factory=list)
 
     def run(
         self, command: list[str], _timeout: int, stdin: str | None = None
@@ -235,12 +260,21 @@ class ScriptedCompose:
             )
         if verb == "run" and KEYS_SERVICE in arguments:
             return self.keys.run(command, arguments, stdin)
+        if verb == "run" and "--members" in arguments:
+            return self.members(command, arguments[-1])
         if verb == "run" and self.config_cli_fails and "realm-observer" not in arguments:
             return subprocess.CompletedProcess(command, 1, "", "config-cli broke\n")
         output = getattr(self, f"verb_{verb}")(profile, arguments)
         if verb == "up" and self.unstartable & set(arguments):
             return subprocess.CompletedProcess(command, 1, output, "up broke\ncannot start")
         return subprocess.CompletedProcess(command, 0, output, "")
+
+    def members(self, command: list[str], group: str) -> subprocess.CompletedProcess[str]:
+        if self.realm_members is None:
+            failure = f"realm-observer: hallucinai has no group {group}\n"
+            return subprocess.CompletedProcess(command, 1, "", failure)
+        answer = {"issuer": self.realm_issuer, "members": self.realm_members}
+        return subprocess.CompletedProcess(command, 0, json.dumps(answer), "")
 
     def verb_config(self, _profile: str, arguments: list[str]) -> str:
         if arguments[0] != "--hash":

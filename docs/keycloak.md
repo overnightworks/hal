@@ -83,6 +83,12 @@ the agent service's. songmaker cannot ask for it: the request is refused with
 the group `/services/speech-service` has no subgroup: the service admits exactly that path. A person
 reaches the service by being a member of the group and signing in to hopin or presentator with the scope.
 
+The group `/services/litellm/admin` has one reader, `hal apply`'s key step (docs/agent-service.md,
+„The API route“): at each plan the realm observer's members mode reads the ids of its direct members
+and the realm's issuer from its discovery document, the one GET the observer sends without a token,
+and the step links those members' LiteLLM customer rows to the admin budget. The group starts empty;
+who joins it is decided in the admin console.
+
 What an audience scope does under other settings was measured on Keycloak 26.8.1 (cells U3, U4 and RF1
 to RF2 of the Keycloak probe, #674). They run on clients, a scope and a realm role the probe makes: the
 scope is a copy of `speech-service-audience` read from `realm.yaml` (so `include.in.token.scope` is

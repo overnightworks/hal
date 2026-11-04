@@ -50,7 +50,23 @@ class Runner(Protocol):
 
 
 class ComposeError(Exception):
-    """A `docker compose` call failed or answered nonsense; the message is one line."""
+    """A `docker compose` call failed or answered nonsense; the message is one line. A call that
+    exited carries its exit code and its standard error's last line apart, since a one-off's
+    standard output may carry values its failure must not print."""
+
+    def __init__(
+        self, message: str, exit_code: int | None = None, error_line: str | None = None
+    ) -> None:
+        super().__init__(message)
+        self.exit_code = exit_code
+        self.error_line = error_line
+
+    def one_off_cause(self, service: str) -> str:
+        """The failure of a one-off of `service` by its exit code and its standard error's last
+        line, never its standard output; a call that never exited is its own message."""
+        if self.exit_code is None:
+            return str(self)
+        return f"{service} exited {self.exit_code}: {self.error_line}"
 
 
 def profile_services(config: Mapping[str, Any]) -> dict[str, tuple[str, ...]]:
@@ -252,7 +268,8 @@ class Compose:
         command = [*prefix, "--profile", profile, verb, *arguments]
         result = self.run(command, timeout) if stdin is None else self.run(command, timeout, stdin)
         if result.returncode != 0:
-            raise ComposeError(_failure_line(verb, result))
+            error_line = last_line(result.stderr)
+            raise ComposeError(_failure_line(verb, result), result.returncode, error_line)
         return result.stdout
 
 

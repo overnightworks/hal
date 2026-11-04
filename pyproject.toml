@@ -7,6 +7,7 @@ requires-python = ">=3.14"
 dependencies = [
     "pyyaml>=6",
     "overnightworks-appkit @ https://github.com/overnightworks/appkit/releases/download/v0.12.1/overnightworks_appkit-0.12.1-py3-none-any.whl#sha256=713041332b779dca028b240cec48ebb4ba4c085c492784dd5046e43d8c284a71",
+    "overnightworks-agent-runtime-client @ git+https://github.com/overnightworks/agent-runtime@62f302b0f2588743ed321c1ae5780b519d773793#subdirectory=packages/client",
 ]
 
 [project.scripts]
