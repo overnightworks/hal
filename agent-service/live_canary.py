@@ -46,8 +46,9 @@ INSPECT_NAME = "{{.Name}}"
 # plus randint(0, 5) (proxy_server.py:10936), and a job of its own writes the daily tag rows every
 # int(that interval * DAILY_TAG_SPEND_BATCH_MULTIPLIER = 2.3) s (constants.py:1901,
 # proxy_server.py:10983). The longest of these is the tag job's, the longest interval of the
-# writers a request feeds. The front strips body and header tags, so this canary writes no tag row;
-# the settle still outlasts both writers, and the retention probe's barrier timeout reads it.
+# writers a request feeds. This canary sends no body tags, the front removes `x-litellm-tags` and
+# the configuration disables user-agent tags, so it writes no tag row; the settle still outlasts
+# both writers, and the retention probe's barrier timeout reads it.
 LITELLM_BATCH_SECONDS = 10
 LITELLM_BATCH_JITTER_SECONDS = 5
 LITELLM_TAG_MULTIPLIER = 2.3

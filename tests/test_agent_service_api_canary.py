@@ -100,6 +100,8 @@ def sent(connections: list[Connection]) -> tuple[str, str, dict, dict]:
 def test_the_canary_sends_only_the_model_one_message_with_the_marker_and_a_fresh_fingerprint(
     canary, monkeypatch, tmp_path
 ):
+    drawn = iter(["a" * 64, "b" * 64])
+    monkeypatch.setattr(canary.secrets, "token_hex", lambda _bytes: next(drawn))
     _, _, first = run_canary(canary, monkeypatch, tmp_path, Response(200, completion("m4rker")))
     _, _, second = run_canary(canary, monkeypatch, tmp_path, Response(200, completion("m4rker")))
 
@@ -111,7 +113,8 @@ def test_the_canary_sends_only_the_model_one_message_with_the_marker_and_a_fresh
     assert message["role"] == "user"
     assert "m4rker" in message["content"]
     assert FINGERPRINT.fullmatch(body["user"])
-    assert sent(second)[2]["user"] != body["user"]
+    assert body["user"].endswith("a" * 64)
+    assert sent(second)[2]["user"].endswith("b" * 64)
 
 
 def test_the_canary_sends_the_key_files_key_as_bearer_and_no_litellm_or_anthropic_header(

@@ -212,15 +212,17 @@ def test_the_census_dumps_the_database_with_the_login_compose_resolves(capsys):
     ]  # fmt: skip
 
 
-def test_a_new_run_has_a_new_marker(capsys):
+def test_a_new_run_has_a_new_marker(capsys, monkeypatch):
+    drawn = iter(["first-draw", "second-draw"])
+    monkeypatch.setattr(live_canary.secrets, "token_hex", lambda _bytes: next(drawn))
     markers = []
     for _ in range(2):
         route = Route()
         drive(route, capsys)
         markers.append(route.marker)
 
-    assert markers[0]
-    assert markers[0] != markers[1]
+    assert "first-draw" in markers[0]
+    assert "second-draw" in markers[1]
 
 
 # --- C0 --------------------------------------------------------------------------------------
