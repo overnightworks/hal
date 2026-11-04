@@ -1,0 +1,8 @@
+claim_id = "25f57a2d998f4fa1aea1ef489feeb97c"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "470f6d54f1a742208fce779033982a5e1296a0d4"
+branch = "claude/issue-965-hal-2-4b-admin-group-budget"
+scope = ["docs/agent-service.md", "docs/architecture.md", "docs/design/hal-output.html", "docs/keycloak.md", "keycloak/realm.yaml", "probe/agent-service/litellm.py", "probe/agent-service/litellm_admission.py", "probe/agent-service/litellm_keys.py", "probe/keycloak/README.md", "probe/keycloak/litellm_admin_cell.py", "probe/keycloak/probe.py", "pyproject.toml", "src/hal/stack/apply.py", "src/hal/stack/compose.py", "src/hal/stack/litellm_admin.py", "src/hal/stack/litellm_keys.py", "src/hal/stack/plan.py", "src/hal/stack/plan_rows.py", "src/hal/stack/realm/observe.py", "src/hal/stack/realm/reconcile.py", "src/hal/stack/result_rows.py", "tests/support/litellm_fake.py", "tests/support/realm_fake.py", "tests/support/stack_apply_fakes.py", "tests/test_stack_apply_litellm_keys.py", "tests/test_stack_compose_one_offs.py", "tests/test_stack_litellm_admin.py", "tests/test_stack_litellm_admin_customers.py", "tests/test_stack_litellm_keys.py", "tests/test_stack_plan_rows.py", "tests/test_stack_plan_rows_admin.py", "tests/test_stack_realm_observe_members.py", "tests/test_stack_result_rows.py", "uv.lock"]
+opened_commit = "c87890e1d8974193a2ac6c14572c822869cf2f71"
+whole_reason = "One extension of the key step: the realm group, the observer's members mode, the fingerprint from the client, the row writes and their ending through hal apply are each unread or dead without the others, and their rows are the step's last write."
