@@ -1178,12 +1178,12 @@ Type <span class="w">yes</span> to apply 3 changes: yes
 <span class="c">next:</span> hal apply</pre>
       </figure>
       <figure id="f-apply-litellm-keys">
-        <figcaption><span class="tag new">neu #964</span> der Schlüssel-Schritt unter <code>litellm</code>: nicht lesbar und allein, nicht lesbar neben einer anderen Änderung, ein vergebener Name, ein Schreiben scheitert</figcaption>
+        <figcaption><span class="tag new">neu #964, #965</span> der Schlüssel-Schritt unter <code>litellm</code>: nicht lesbar und allein, nicht lesbar neben einer anderen Änderung, ein vergebener Name, ein Schreiben scheitert; das Admin-Budget mit seinen Kundenzeilen als Zahlen, ein Entkoppeln scheitert, die Mitglieder nicht gelesen, Keycloak aus</figcaption>
 <pre class="term"><span class="p">$</span> <span class="u">hal apply</span>
 <span class="d">…</span>
 <span class="hd">litellm</span>
-<span class="y">  !</span> litellm         keys not read  <span class="d">`docker compose run` exited 1: litellm-keys: status 502 at /v2/key/info</span>
-<span class="rw">error:</span> litellm: keys not read (`docker compose run` exited 1: litellm-keys: status 502 at /v2/key/info)
+<span class="y">  !</span> litellm         keys not read  <span class="d">litellm-keys exited 1: litellm-keys: status 502 at /v2/key/info</span>
+<span class="rw">error:</span> litellm: keys not read (litellm-keys exited 1: litellm-keys: status 502 at /v2/key/info)
 <span class="c">next:</span> hal apply
 
 <span class="p">$</span> <span class="u">hal apply</span>
@@ -1191,10 +1191,10 @@ Type <span class="w">yes</span> to apply 3 changes: yes
 <span class="hd">units</span>
 <span class="g">  +</span> step-ca         switch on      <span class="d">step-ca, traefik-mcp</span>
 <span class="hd">litellm</span>
-<span class="y">  !</span> litellm         keys not read  <span class="d">`docker compose run` exited 1: litellm-keys: status 502 at /v2/key/info</span>
+<span class="y">  !</span> litellm         keys not read  <span class="d">litellm-keys exited 1: litellm-keys: status 502 at /v2/key/info</span>
 Type <span class="w">yes</span> to apply 1 change: yes
 <span class="d">…</span>
-<span class="y">  !</span> litellm         keys skipped   <span class="d">`docker compose run` exited 1: litellm-keys: status 502 at /v2/key/info</span>
+<span class="y">  !</span> litellm         keys skipped   <span class="d">litellm-keys exited 1: litellm-keys: status 502 at /v2/key/info</span>
 <span class="rw">error:</span> partial, litellm keys skipped
 <span class="c">next:</span> hal apply
 
@@ -1223,7 +1223,32 @@ Type <span class="w">yes</span> to apply 4 changes: yes
 <span class="d">  · presentator     not made       new key</span>
 <span class="d">  · songmaker       not made       new key</span>
 <span class="rw">error:</span> partial, person-monthly new budget failed
-<span class="c">next:</span> hal apply</pre>
+<span class="c">next:</span> hal apply
+
+<span class="p">$</span> <span class="u">hal apply</span>
+<span class="d">…</span>
+<span class="hd">litellm</span>
+<span class="g">  +</span> litellm-admin   new budget     <span class="d">1mo</span>
+<span class="b">  ~</span> litellm-admin   customer rows  <span class="d">2 linked · 1 unlinked</span>
+Type <span class="w">yes</span> to apply 2 changes: yes
+<span class="g">  ✓</span> litellm-admin   new budget     <span class="d">1mo</span>
+<span class="r">  ✗</span> litellm-admin   row unlink     <span class="d">status 422 at /customer/new after the delete</span>
+<span class="d">  · litellm-admin   not made       2 customer rows</span>
+<span class="rw">error:</span> partial, litellm-admin row unlink failed
+<span class="c">next:</span> hal apply
+
+<span class="p">$</span> <span class="u">hal apply</span>
+<span class="d">…</span>
+<span class="hd">litellm</span>
+<span class="y">  !</span> litellm-admin   members unread <span class="d">Keycloak is not running</span>
+<span class="rw">error:</span> litellm-admin: members not read from Keycloak (Keycloak is not running)
+<span class="c">next:</span> hal apply
+
+<span class="p">$</span> <span class="u">hal apply</span>
+<span class="d">…</span>
+<span class="hd">litellm</span>
+<span class="d">  · litellm-admin   rows held      Keycloak is off</span>
+<span class="w">✓ nothing to change</span> <span class="d">· units, apps and cloudflare checked · 21s</span></pre>
       </figure>
     </div>
   </div>

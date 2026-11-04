@@ -8,7 +8,12 @@ import sys
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from support.backup_support import declare_shipped_apps, declare_two_apps, no_restore_server_left
+from support.backup_support import (
+    declare_shipped_apps,
+    declare_songmaker_and_keycloak,
+    declare_two_apps,
+    no_restore_server_left,
+)
 
 
 @pytest.mark.parametrize(
@@ -234,11 +239,11 @@ def test_an_unreadable_backup_summary_fails_the_app_as_not_backed_up(
 
 
 def test_a_failed_app_has_its_rows_while_the_others_are_backed_up_and_the_repository_pruned(
-    edge_backup, machine
+    edge_backup, machine, home
 ):
     machine.lose_keycloak_database()
 
-    outcome = edge_backup(*declare_shipped_apps(), "backup")
+    outcome = edge_backup(*declare_songmaker_and_keycloak(home), "backup")
 
     rows = outcome.out.splitlines()
     assert outcome.exit_code == 3
@@ -266,10 +271,10 @@ def test_a_single_failed_app_is_named_on_the_error_line(edge_backup, machine):
     ]
 
 
-def _fail_keycloak_after_a_good_run(edge_backup, machine, *arguments):
-    edge_backup(*declare_shipped_apps(), "backup")
+def _fail_keycloak_after_a_good_run(edge_backup, machine, home, *arguments):
+    edge_backup(*declare_songmaker_and_keycloak(home), "backup")
     machine.lose_keycloak_database()
-    return edge_backup(*declare_shipped_apps(), "backup", *arguments)
+    return edge_backup(*declare_songmaker_and_keycloak(home), "backup", *arguments)
 
 
 @pytest.mark.parametrize(
@@ -291,9 +296,9 @@ def _fail_keycloak_after_a_good_run(edge_backup, machine, *arguments):
     ids=["several apps", "one app", "one app before apply"],
 )
 def test_the_error_line_names_the_failed_apps_last_good_backup_in_local_time(
-    edge_backup, machine, berlin_time, arguments, error_line
+    edge_backup, machine, home, berlin_time, arguments, error_line
 ):
-    outcome = _fail_keycloak_after_a_good_run(edge_backup, machine, *arguments)
+    outcome = _fail_keycloak_after_a_good_run(edge_backup, machine, home, *arguments)
 
     assert outcome.exit_code == 3
     assert outcome.err.splitlines()[0] == error_line
@@ -423,11 +428,11 @@ def test_a_good_restore_test_prints_a_row_per_app_the_repository_row_and_the_ver
 
 
 def test_a_failed_app_has_its_row_while_the_others_are_proven_and_the_repository_is_checked(
-    edge_backup, machine
+    edge_backup, machine, home
 ):
     edge_backup("backup")
 
-    outcome = edge_backup(*declare_shipped_apps(), "restore", "--test")
+    outcome = edge_backup(*declare_songmaker_and_keycloak(home), "restore", "--test")
 
     assert outcome.exit_code == 3
     assert outcome.out.splitlines() == [
@@ -503,12 +508,12 @@ def test_an_interrupted_restore_test_names_the_app_it_stopped_in(
 
 
 def test_a_repository_that_fails_its_check_after_a_failed_app_has_its_row_and_the_app_count(
-    edge_backup, machine
+    edge_backup, machine, home
 ):
     edge_backup("backup")
     machine.failing["restic check"] = 1
 
-    outcome = edge_backup(*declare_shipped_apps(), "restore", "--test")
+    outcome = edge_backup(*declare_songmaker_and_keycloak(home), "restore", "--test")
 
     rows = outcome.out.splitlines()
     assert outcome.exit_code == 3

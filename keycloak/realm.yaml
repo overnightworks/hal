@@ -68,6 +68,11 @@ groups:
           - name: api
       # Exactly this path is the speech service's right; it has no subgroup.
       - name: speech-service
+      - name: litellm
+        subGroups:
+          # Its members' LiteLLM rows sit on the admin budget, which has no limit; hal apply
+          # reads them (docs/agent-service.md).
+          - name: admin
 clientScopes:
   - name: groups
     description: The user's groups as full paths, for example /apps/songmaker

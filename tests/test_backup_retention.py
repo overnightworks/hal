@@ -7,7 +7,7 @@ import pytest
 from support.backup_support import (
     Machine,
     app_history,
-    declare_shipped_apps,
+    declare_songmaker_and_keycloak,
     declare_two_apps,
 )
 
@@ -22,7 +22,7 @@ def _bound(machine: Machine) -> datetime:
 
 
 def _fail_radio_readiness(machine: Machine) -> None:
-    machine.other_db_containers["radio"] = ["beef01", "beef02"]
+    machine.other_db_containers[("radio", "postgres")] = ["beef01", "beef02"]
 
 
 @pytest.mark.parametrize("arguments", [(), ("--pre-apply",)], ids=["weekly", "pre-apply"])
@@ -188,12 +188,12 @@ def test_a_failed_app_is_not_pruned_while_the_others_are_forgotten_and_checked(
     ids=["every app", "one app", "one app before apply"],
 )
 def test_a_run_whose_every_app_failed_forgets_and_checks_nothing_and_prints_no_repository_row(
-    edge_backup, machine, arguments, rows, error_line
+    edge_backup, machine, home, arguments, rows, error_line
 ):
     machine.db_containers = ["c0ffee", "c0ffee2"]
     machine.lose_keycloak_database()
 
-    outcome = edge_backup(*declare_shipped_apps(), "backup", *arguments)
+    outcome = edge_backup(*declare_songmaker_and_keycloak(home), "backup", *arguments)
 
     assert outcome.exit_code == 3
     assert outcome.out.splitlines() == rows

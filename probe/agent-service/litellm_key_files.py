@@ -100,7 +100,7 @@ class KeyFiles(LitellmProbe):
         return result
 
     def plan(self) -> KeysPlan:
-        return litellm_keys.plan_keys(self.engine, self.engine.states(), REPO)
+        return litellm_keys.plan_keys(self.engine, self.engine.states(), REPO, None, None)
 
     def read_plan(self, cell: str) -> KeysPlan:
         """The plan once the keys can be read: LiteLLM answers 502 while it migrates."""
