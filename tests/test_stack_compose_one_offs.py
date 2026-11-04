@@ -93,8 +93,10 @@ def test_a_failed_one_off_names_its_exit_and_last_error_line_and_never_its_stand
     def runner(command: list[str], _timeout: int, _stdin: str | None = None):
         return subprocess.CompletedProcess(command, 3, f"{value}\n", "first\nthe last error\n\n")
 
+    one_offs = compose.Compose(run=runner)
+
     with pytest.raises(compose.ComposeError) as raised:
-        compose.Compose(run=runner).run_once("litellm-keys", ["--read", "x"])
+        one_offs.run_once("litellm-keys", ["--read", "x"])
 
     assert raised.value.one_off_cause("litellm-keys") == "litellm-keys exited 3: the last error"
 
@@ -103,7 +105,9 @@ def test_a_one_off_that_never_exited_is_named_by_the_failure_itself() -> None:
     def runner(command: list[str], timeout: int, _stdin: str | None = None):
         raise compose.ComposeError(f"`{' '.join(command[:3])}` took longer than {timeout}s")
 
+    one_offs = compose.Compose(run=runner)
+
     with pytest.raises(compose.ComposeError) as raised:
-        compose.Compose(run=runner).run_once("litellm-keys", ["--write"])
+        one_offs.run_once("litellm-keys", ["--write"])
 
     assert raised.value.one_off_cause("litellm-keys") == str(raised.value)

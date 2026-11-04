@@ -67,6 +67,7 @@ WRITES = {  # (target, new) -> the route that makes it
     ("customer", True): "/customer/new",
     ("customer", False): "/customer/update",
 }
+UNKNOWN_CHANGE = "a change of an unknown kind"
 UNLINK = "unlink"  # a customer change to a null budget, which LiteLLM's update cannot make
 # The fields of a customer row that `/customer/new` takes back as they are: none of a budget's,
 # any of which makes it a budget of its own.
@@ -273,18 +274,18 @@ def _request(change: Any, app_keys: dict[str, str]) -> tuple[str, dict[str, Any]
         )
         path = WRITES[(target, new)]
     except (KeyError, TypeError) as error:
-        raise AdminError("a change of an unknown kind") from error
+        raise AdminError(UNKNOWN_CHANGE) from error
     if not isinstance(fields, dict):
-        raise AdminError("a change of an unknown kind")
+        raise AdminError(UNKNOWN_CHANGE)
     if target == "budget":
         return path, {"budget_id": subject, **fields}
     if target == "customer":
         if not isinstance(subject, str) or fields.keys() != {"budget_id"}:
-            raise AdminError("a change of an unknown kind")
+            raise AdminError(UNKNOWN_CHANGE)
         if new or fields["budget_id"] is not None:
             return path, {"user_id": subject, **fields}
         if not isinstance(leaves := change.get("leaves"), str):
-            raise AdminError("a change of an unknown kind")
+            raise AdminError(UNKNOWN_CHANGE)
         return UNLINK, {"user_id": subject, "leaves": leaves}
     if subject not in app_keys:
         raise AdminError(f"no key file for {subject}")

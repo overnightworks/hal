@@ -1,7 +1,7 @@
 """The planned run as rows: each part of a `Plan` is mapped from its typed fields to the rows
 `hal.output` prints, in the order hal works. Nothing here parses a string or prints."""
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import replace
 from enum import StrEnum
 
@@ -473,17 +473,15 @@ def _row_counts(changes: Sequence[RowChange]) -> str:
     return _SEPARATOR.join(f"{count} {word}" for count, word in counts if count)
 
 
-def admin_rows(admin: AdminState) -> tuple[Row, ...]:
+def admin_rows(admin: AdminState) -> Iterator[Row]:
     """Why the admin rows wait: Keycloak held, or its members not read."""
     match admin:
         case AdminHeld(gate):
             fact = f"Keycloak is {gate}"
-            return (Row(Glyph.UNCHANGED, ADMIN_BUDGET_ID, KeysEvent.ROWS_HELD, fact),)
+            yield Row(Glyph.UNCHANGED, ADMIN_BUDGET_ID, KeysEvent.ROWS_HELD, fact)
         case MembersNotRead(cause):
             fact = printable(cause)
-            return (Row(Glyph.NEEDS_YOU, ADMIN_BUDGET_ID, KeysEvent.MEMBERS_NOT_READ, fact),)
-        case _:
-            return ()
+            yield Row(Glyph.NEEDS_YOU, ADMIN_BUDGET_ID, KeysEvent.MEMBERS_NOT_READ, fact)
 
 
 def key_change_row(change: Change, glyph: Glyph) -> Row:
