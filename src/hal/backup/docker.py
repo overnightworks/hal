@@ -1,5 +1,6 @@
 """The apps' containers and volumes, found by compose labels, and the throwaway restore server."""
 
+import hashlib
 import re
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -24,7 +25,10 @@ SERVICE_LABEL = "com.docker.compose.service"
 VOLUME_LABEL = "com.docker.compose.volume"
 # `docker compose run` leaves one-off containers with the same project and service labels.
 ONEOFF_LABEL = "com.docker.compose.oneoff"
-RESTORE_SERVER = "hal-backup-restore-test"
+# A throwaway server's name carries its home, so a run under another HOME (a probe's) never meets
+# it; the runs of one home are serialised by its lock.
+RESTORE_SERVER_PREFIX = "hal-backup-restore-test"
+_HOME_DIGEST_LENGTH = 8
 # Marks a throwaway server as hal backup's own: only a container carrying it is ever removed.
 RESTORE_OWNER_LABEL = "hal-backup.role"
 RESTORE_OWNER_ROLE = "restore-test"
@@ -273,16 +277,25 @@ _SILENT_SERVER_SETTINGS = (
 )  # fmt: skip
 
 
-@contextmanager
-def restore_server(image: str) -> Iterator[RestoreServer]:
-    """A PostgreSQL without network or volume of ours; removed again whatever happens.
+def restore_server_name(lock_file: Path) -> str:
+    """The home's own name: the first hex digits of the sha256 of its lock file's absolute path."""
+    digest = hashlib.sha256(str(lock_file.absolute()).encode()).hexdigest()
+    return f"{RESTORE_SERVER_PREFIX}-{digest[:_HOME_DIGEST_LENGTH]}"
 
-    Removal goes by container ID and only to containers with our owner label: a foreign
-    container holding the name makes the start fail instead of being deleted.
+
+@contextmanager
+def restore_server(image: str, lock_file: Path) -> Iterator[RestoreServer]:
+    """A PostgreSQL without network or volume of ours, under the name of the home whose lock is
+    held; removed again whatever happens.
+
+    Removal goes by container ID and only to containers with our owner label and this home's
+    name: a foreign container holding the name makes the start fail instead of being deleted,
+    and another home's server is never seen.
     """
-    _remove_owned_restore_servers()
+    name = restore_server_name(lock_file)
+    _remove_owned_restore_servers(name)
     started = host.run(
-        ["docker", "run", "--detach", "--name", RESTORE_SERVER, "--network", "none",
+        ["docker", "run", "--detach", "--name", name, "--network", "none",
          "--label", f"{RESTORE_OWNER_LABEL}={RESTORE_OWNER_ROLE}",
          # No container log and no server-side error logging: a failed COPY logs row values.
          "--log-driver", "none",
@@ -296,7 +309,7 @@ def restore_server(image: str) -> Iterator[RestoreServer]:
     finally:
         # By name and owner label, not by the reported ID: the server goes even when
         # docker run's output could not be read.
-        _remove_owned_restore_servers()
+        _remove_owned_restore_servers(name)
 
 
 @dataclass(frozen=True)
@@ -374,11 +387,11 @@ def _started_container(run_output: bytes) -> str:
             raise host.UnreadableOutputError("docker run reported no container id")
 
 
-def _remove_owned_restore_servers() -> None:
+def _remove_owned_restore_servers(name: str) -> None:
     for container_id in _lines(
         host.run(
             ["docker", "ps", "--all", "--quiet", "--no-trunc",
-             "--filter", f"name=^{RESTORE_SERVER}$",
+             "--filter", f"name=^{name}$",
              *_label_filter(RESTORE_OWNER_LABEL, RESTORE_OWNER_ROLE)],
             label="docker ps",
         )
