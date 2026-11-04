@@ -219,17 +219,15 @@ def _plan(
     plans = plan_switches(fleet.units, fleet.profile_services, fleet.config, states, switched_off)
     core_plans = core.plan_core(fleet.config, containers, hashes, tracked, record)
     follower_plans = core.plan_followers(fleet.config, containers, hashes, tracked, record, gates)
-    unit_services = plan_unit_services(
+    services = plan_unit_services(
         fleet, containers, hashes, plans, followers, gates, engine, DATABASE_UNITS
     )
     keycloak_gate = gates.get(reconcile.REALM_UNIT)
-    keycloak_restart = restart_of(plans, unit_services.recreates, reconcile.KEYCLOAK)
+    keycloak_restart = restart_of(plans, services.recreates, reconcile.KEYCLOAK)
     realm = reconcile.plan_realm(
         reconcile.Observer(engine), record, fleet.config, tracked, keycloak_gate, keycloak_restart
     )
-    keys = litellm_keys.plan_keys(
-        engine, states, repository, api, gates, plans, unit_services.recreates
-    )
+    keys = litellm_keys.plan_keys(engine, states, repository, api, gates, plans, services.recreates)
     app_plans = plan_apps(repository, fleet, app_runtime, marks)
     appkit = plan_appkit(repository, rename=rename)
     legal = plan_legal(repository, record.directory / RECORD_FILE, fleet, app_plans)
@@ -239,10 +237,10 @@ def _plan(
         read,
         core_plans,
         follower_plans,
-        unit_services.built,
-        unit_services.recreates,
+        services.built,
+        services.recreates,
         plans,
-        unit_services.images,
+        services.images,
         realm,
         keys,
         app_plans,
