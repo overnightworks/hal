@@ -73,6 +73,7 @@ PICTURE_USAGE = {"input_tokens": 1000, "output_tokens": 1000}
 # P-slow: the fake holds a picture longer than the maxDurationSeconds agent-runtime's client gives
 # songmaker's cover, which the route must carry.
 SLOW_PICTURE_SECONDS, MAX_PICTURE_SECONDS = 95, 88
+MODERATION_CODE = "moderation_blocked"  # OpenAI's code of a safety refusal; the fake sends it
 
 
 def refused(answer: dict) -> str:
@@ -412,9 +413,11 @@ class AdmissionProbe(PictureCalls):
         shown = (answer["status"], error_of(answer))
         expect(shown != (over_budget["status"], error_of(over_budget)),
                f"P-moderation: {shown} equals the over-budget refusal")  # fmt: skip
+        message = error_message(answer) or ""
+        named = "naming" if MODERATION_CODE in message else "not naming"
         self.hold("P-moderation", f"the client sees {shown[0]} {shown[1]}, a message "
-                  f"{'present' if error_message(answer) else 'absent'}, FP 1; the over-budget "
-                  f"refusal is {over_budget['status']} {error_of(over_budget)}, FP 0")  # fmt: skip
+                  f"{'present' if message else 'absent'} and {named} {MODERATION_CODE}, FP 1; "
+                  f"the over-budget refusal is {refused(over_budget)}")  # fmt: skip
 
     def cell_p_slow(self, key: str) -> None:
         """A picture the fake holds for SLOW_PICTURE_SECONDS passes the front, LiteLLM and the
