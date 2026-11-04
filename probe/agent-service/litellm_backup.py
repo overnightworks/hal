@@ -335,7 +335,7 @@ class BackupProbe(KeysProbe, AdmissionProbe):
         found = self.compose("ps", "--all", "--quiet", *services).stdout.split()
         lines = self.run(["docker", "inspect", "--format", "{{.Id}} {{.State.StartedAt}}", *found])
         pairs = (line.split(" ", 1) for line in lines.stdout.splitlines())
-        return {container: moment for container, moment in pairs}
+        return dict(pairs)
 
     def stop_app(self) -> None:
         """The probe's own stop of LiteLLM and its front; `hal stop` would act on the live

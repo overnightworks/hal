@@ -478,10 +478,12 @@ def test_an_interrupt_at_the_host_lock_claims_nothing_or_keeps_the_outcome(
     assert (outcome.exit_code, outcome.err.splitlines()) == (exit_code, lines)
 
 
+@pytest.mark.parametrize("code", [0, 1], ids=["loaded", "failed load"])
 @pytest.mark.parametrize("where", ["after the step returned", "at the exit of the staging"])
 def test_an_interrupt_after_the_client_was_spawned_never_says_nothing_loaded(
-    live, machine, monkeypatch, where
+    live, machine, monkeypatch, where, code
 ):
+    machine.live_code = code
     if where == "after the step returned":
         real_held = live_step._held
 
@@ -493,17 +495,25 @@ def test_an_interrupt_after_the_client_was_spawned_never_says_nothing_loaded(
     else:
 
         class InterruptedAtExit(ExitStack):
+            """Interrupts the leaving of the with block, after the step's own close ran."""
+
             def __exit__(self, *exception):
+                was_closed = not self._exit_callbacks
                 super().__exit__(*exception)
-                raise KeyboardInterrupt
+                if was_closed:
+                    raise KeyboardInterrupt
 
         monkeypatch.setattr(live_step, "ExitStack", InterruptedAtExit)
 
     outcome = live()
 
-    assert f"✓ {APP} loaded" in squeezed(outcome.out)
     assert "nothing loaded" not in outcome.err
-    assert (outcome.exit_code, outcome.err) == (0, "")
+    if code == 0:
+        assert f"✓ {APP} loaded" in squeezed(outcome.out)
+        assert (outcome.exit_code, outcome.err) == (0, "")
+    else:
+        assert f"{APP} load failed" in outcome.err
+        assert outcome.exit_code == 3
 
 
 def test_an_interrupt_in_the_client_itself_is_plain_and_never_says_nothing_loaded(

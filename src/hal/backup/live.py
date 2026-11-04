@@ -143,7 +143,7 @@ def _held(load: _Load, guards: Guards, staging: ExitStack, client: _Client) -> S
 
 
 def _load(load: _Load, staging: ExitStack, client: _Client) -> StepExit:
-    """Spawns the client, prints the outcome and decides the exit, then removes the plaintext."""
+    """Spawns the client, prints the outcome, removes the plaintext, then decides the exit."""
     client.spawned = True
     try:
         cause = _cause(docker.load_live(load.container, load.database, load.dump))
@@ -158,9 +158,10 @@ def _load(load: _Load, staging: ExitStack, client: _Client) -> StepExit:
             f"{app} load failed · {cause} · a rerun loads the snapshot whole",
             command(Verb.RESTORE, app, "--live", "--snapshot", short),
         )
-    client.exit = StepExit.OK if cause is None else StepExit.FAILED
+    outcome = StepExit.OK if cause is None else StepExit.FAILED
     staging.close()
-    return client.exit
+    client.exit = outcome
+    return outcome
 
 
 def _cause(code: int | None) -> str | None:

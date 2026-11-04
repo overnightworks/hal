@@ -225,12 +225,12 @@ class LiveRestoreProbe:
         finally:
             holding.stdin.close()
             try:
-                ended = holding.stdout.read()
                 holding.wait(timeout=HAL_SECONDS)
             finally:
                 if holding.poll() is None:
                     holding.kill()
                     holding.wait()
+                ended = holding.stdout.read()
             write_line(ended.strip().splitlines()[-1] if ended.strip() else "hold: no line")
         keycloak.expect(holding.returncode == 0, f"the hold ended with {holding.returncode}")
         self.cell_k2()
