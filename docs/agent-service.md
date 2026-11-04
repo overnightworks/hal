@@ -273,7 +273,7 @@ budget with its customer rows (the key step below).
   names `text/opus`, `text/sonnet`, `text/haiku` of `config.yaml`; 403 otherwise), a path among
   the key's `allowed_routes` (403 otherwise, the provider routes `/v1/messages` and
   `/v1/completions` included), and a `user`, the person's fingerprint (`enforce_user_param`; 401
-  without one), which LiteLLM sends on to the provider as `metadata.user_id`. LiteLLM also routes
+  without one), which LiteLLM sends on to the provider as `metadata.user_id`. The privacy text rests on the client wheel v0.20.0 (`pyproject.toml`): the fingerprint is `person_fingerprint`, a SHA-256 of issuer and subject, the same in every app (`turn.py:281-284`), and the gateway backend sends the app's key as the only bearer, the fingerprint in the body's `user` (`backend/gateway.py:258`, `:428`). LiteLLM also routes
   by a `model` in the query string, which the key's `models` do not bind: one unknown to
   `config.yaml` is refused with 400, but a configured name outside the key's `models` is served by that model and its spend counts on the key, and a key or person
   past its budget is refused (measured). The front therefore answers any query string on its
