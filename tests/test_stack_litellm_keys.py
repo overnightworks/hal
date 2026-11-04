@@ -581,7 +581,11 @@ def test_the_admin_budget_follows_the_person_budget_and_the_keys_then_unlinks_th
 def test_with_keycloak_running_the_read_gets_the_fingerprints_of_the_groups_members(
     repository: Path,
 ) -> None:
-    admin = {"budget": None, "members": [None, None], "others": []}
+    admin = {
+        "budget": None,
+        "members": [{"budget_id": "elsewhere"}, None],
+        "others": [{"fingerprint": FORMER, "spend": 1.0}],
+    }
     runner = OneOff(read_answer(found(), admin), observer=members_answer("p", "q"))
     plan = plan_with(runner, repository)
 
@@ -595,8 +599,13 @@ def test_with_keycloak_running_the_read_gets_the_fingerprints_of_the_groups_memb
     assert not any(fingerprint in word for fingerprint in asked["members"] for word in words)
     assert set(row_changes(plan)) == {
         (fingerprint_of("p"), True, ADMIN),
-        (fingerprint_of("q"), True, ADMIN),
+        (fingerprint_of("q"), False, ADMIN),
+        (FORMER, False, None),
     }
+
+
+def keycloak_running(observed: Answer, cause: str, id: str) -> object:
+    return pytest.param(KEYCLOAK_RUNNING, None, observed, cause, id=id)
 
 
 @pytest.mark.parametrize(
@@ -610,66 +619,44 @@ def test_with_keycloak_running_the_read_gets_the_fingerprints_of_the_groups_memb
             "Keycloak starts in this run",
             id="started by this run",
         ),
-        pytest.param(
-            KEYCLOAK_RUNNING,
-            None,
+        keycloak_running(
             Answer(1, json.dumps({"issuer": ISSUER, "members": ["subject-p"]}), "x: stopped\n"),
             "realm-observer exited 1: x: stopped",
             id="a failed read with members already on its stdout",
         ),
-        pytest.param(
-            KEYCLOAK_RUNNING,
-            None,
+        keycloak_running(
             Answer(1, "", f"realm-observer: hallucinai has no group {litellm_keys.ADMIN_GROUP}\n"),
             f"realm-observer exited 1: realm-observer: hallucinai has no group "
             f"{litellm_keys.ADMIN_GROUP}",
             id="the group absent",
         ),
-        pytest.param(
-            KEYCLOAK_RUNNING,
-            None,
+        keycloak_running(
             Answer(0, json.dumps({"issuer": ISSUER, "members": "subject-p"})),
             NO_MEMBERS,
             id="a members value that is no list",
         ),
-        pytest.param(
-            KEYCLOAK_RUNNING,
-            None,
-            Answer(0, "subject-p is not JSON"),
-            NO_MEMBERS,
-            id="an answer that is not JSON",
+        keycloak_running(
+            Answer(0, "subject-p is not JSON"), NO_MEMBERS, id="an answer that is not JSON"
         ),
-        pytest.param(
-            KEYCLOAK_RUNNING,
-            None,
+        keycloak_running(
             Answer(0, json.dumps({"members": ["subject-p"]})),
             NO_MEMBERS,
             id="an answer without issuer",
         ),
-        pytest.param(
-            KEYCLOAK_RUNNING,
-            None,
-            Answer(0, json.dumps({"issuer": ISSUER})),
-            NO_MEMBERS,
-            id="an answer without members",
+        keycloak_running(
+            Answer(0, json.dumps({"issuer": ISSUER})), NO_MEMBERS, id="an answer without members"
         ),
-        pytest.param(
-            KEYCLOAK_RUNNING,
-            None,
+        keycloak_running(
             Answer(0, json.dumps({"issuer": ISSUER, "members": ["subject-p", 7]})),
             NO_MEMBERS,
             id="a member that is a number",
         ),
-        pytest.param(
-            KEYCLOAK_RUNNING,
-            None,
+        keycloak_running(
             Answer(0, json.dumps({"issuer": ISSUER, "members": ["subject-p", ""]})),
             NO_MEMBERS,
             id="an empty subject",
         ),
-        pytest.param(
-            KEYCLOAK_RUNNING,
-            None,
+        keycloak_running(
             Answer(0, json.dumps({"issuer": "", "members": ["subject-p"]})),
             NO_MEMBERS,
             id="an empty issuer",
@@ -759,10 +746,18 @@ def test_a_failed_read_names_its_exit_and_last_error_line_never_the_fingerprints
     assert plan.not_read == "litellm-keys exited 1: litellm-keys: status 502 at /customer/list"
 
 
-def test_a_read_whose_rows_do_not_answer_each_member_is_an_unexpected_shape(
-    repository: Path,
+@pytest.mark.parametrize(
+    ("members", "others"),
+    [
+        pytest.param([], [{"fingerprint": FORMER}], id="no row for a member"),
+        pytest.param([None], [{"fingerprint": 7}], id="other not text"),
+        pytest.param([{"budget_id": 7}], [], id="budget id a number"),
+    ],
+)
+def test_a_read_whose_admin_rows_do_not_fit_is_an_unexpected_shape(
+    repository: Path, members: list, others: list
 ) -> None:
-    admin = {"budget": None, "members": [], "others": [{"fingerprint": FORMER, "spend": 1.0}]}
+    admin = {"budget": None, "members": members, "others": others}
     runner = OneOff(read_answer(found(), admin), observer=members_answer("p"))
     plan = plan_with(runner, repository)
 
