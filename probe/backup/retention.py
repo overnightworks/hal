@@ -519,7 +519,7 @@ class RetentionProbe:
         [forgotten_blob], kept_blobs = contents["1-forgotten"], set(contents["2-kept"])
         before = self.pack_of_blobs(home)
         shared = {b for b in kept_blobs if before[b] == before[forgotten_blob]}
-        expect(shared, "P9: the forgotten file shares no pack with the kept file")
+        expect(bool(shared), "P9: the forgotten file shares no pack with the kept file")
         self.hal_ran(home, "P9", "backup", ALPHA)
         listed = {s.snapshot_id for s in self.snapshots(home)}
         expect(forgotten not in listed and kept in listed, "P9: the wrong snapshot was forgotten")
