@@ -5,13 +5,13 @@ import json
 import os
 import re
 import sys
-from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
 from textwrap import dedent
 from types import SimpleNamespace
 
 import pytest
+import support.probe_modules as probe_modules
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -20,7 +20,6 @@ sys.path.insert(0, str(ROOT / "src"))
 
 import edge_copy  # noqa: E402
 from support.git_support import committed_main, plain_git  # noqa: E402
-from support.script_module import loaded_script  # noqa: E402
 
 from hal.backup.apps import parse_apps  # noqa: E402
 from hal.backup.docker import PROJECT_LABEL  # noqa: E402
@@ -246,19 +245,6 @@ def test_the_guard_resolves_the_files_and_profiles_a_compose_call_runs_with(
     assert seen == [[*prefix, *options, "config", "--format", "json"] for options in resolved]
     command = ["docker", *runs]
     assert command == [*prefix, *arguments]
-
-
-OCCUPIED = ["172.31.250.0/24", "172.31.251.0/24", "10.0.0.0/8"]
-CANDIDATES = ["172.31.250.0/24", "172.31.251.0/24", "172.31.249.0/24"]
-
-
-def test_the_first_candidate_that_overlaps_no_occupied_subnet_is_free():
-    assert str(edge_copy.free_subnet(CANDIDATES, OCCUPIED)) == "172.31.249.0/24"
-
-
-def test_a_candidate_inside_a_wider_occupied_subnet_is_taken():
-    with pytest.raises(edge_copy.ProbeFailed, match="no free /24"):
-        edge_copy.free_subnet(CANDIDATES, ["172.31.0.0/16"])
 
 
 MIXED_CATALOG = dedent(
@@ -497,7 +483,8 @@ def test_an_app_written_after_the_copy_and_published_stays(tmp_path):
 
 
 class DockerLog:
-    """A docker executable on PATH that logs each call and answers `config` with `resolved`."""
+    """A docker executable on PATH that logs each call, answers `config` with `resolved` and lists
+    no network."""
 
     def __init__(self, directory: Path, monkeypatch: pytest.MonkeyPatch, resolved: dict) -> None:
         self.log = directory / "docker.log"
@@ -509,7 +496,8 @@ class DockerLog:
         docker.write_text(
             "#!/bin/sh\n"
             f"""printf '%s\\n' "$*" >> "{self.log}"\n"""
-            f"""case "$*" in *" config "*) cat "{answer}" ;; *) exit 1 ;; esac\n"""
+            f"""case "$*" in *" config "*) cat "{answer}" ;;\n"""
+            f"""  "network ls -q") ;; *) exit 1 ;; esac\n"""
         )
         docker.chmod(0o755)
         monkeypatch.setenv("PATH", f"{executables}{os.pathsep}{os.environ['PATH']}")
@@ -538,16 +526,7 @@ def resolved_stack(project: str, step_ca_volume: str | None = None) -> dict:
     }
 
 
-@pytest.fixture(scope="module")
-def step_ca_probe() -> Iterator:
-    yield from loaded_script("step_ca_probe", ROOT / "probe" / "step-ca" / "probe.py")
-
-
-@pytest.fixture(scope="module")
-def apps_probe() -> Iterator:
-    with pytest.MonkeyPatch.context() as patch:
-        patch.syspath_prepend(str(ROOT / "probe" / "apps"))
-        yield from loaded_script("apps_probe", ROOT / "probe" / "apps" / "probe.py")
+step_ca_probe, apps_probe = probe_modules.step_ca_probe, probe_modules.apps_probe
 
 
 @pytest.mark.parametrize("flags", [(), ("--check",)], ids=["init", "init --check"])

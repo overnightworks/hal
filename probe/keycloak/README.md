@@ -4,7 +4,9 @@
 directory, no live data) from this checkout. It runs beside the live edge, which stays up: its
 Traefik entrypoints listen on two free loopback ports it picks (a copy of `traefik.yml` in the
 scratch directory), its admin front end is `http://localhost:<admin port>`, and its keycloak
-network takes a free /24 from 172.31.200.0 up. Both modes need an empty or new `--scratch`
+and key-set (`keycloak-keys`) networks each take a free /24 from 172.31.200.0 up, skipping every
+/24 compose.yaml pins (probe/edge_subnets.py), Keycloak's address on the key-set network moving
+along. Both modes need an empty or new `--scratch`
 directory and always tear the stack down. While a probe runs, `hal check exposure` reports its Keycloak as a
 routing name that is not valid, by design of the `edge.name: PROBE` label that keeps the live Traefik away.
 
@@ -181,8 +183,9 @@ names; a case a check accepts or refuses for another reason stops the run. It th
   port, and Keycloak's `edge.name` `PROBE`, which the live `LabelRegex` refuses; its traefik.yml
   listens on two free ports of 127.0.0.1 and routes the project label only; go-live's two
   addresses are the copy's; its fleet, read as hal reads it, switches on keycloak and step-ca
-  alone and has no app (an app runs through hal's app compose, which no check of the copy
-  resolves); its backup records name the project.
+  alone and has no app but the stand's `Fleet.apps` (an app runs through hal's app compose, so
+  `expect_isolated` runs each app's own check of what hal starts it from); its backup records
+  name the project.
   No service hal or a compose call of the probe starts, in the configuration that call's files
   merge to (the bootstrap overlay included, and while `bootstrap-admin-password` exists also for
   the start go-live makes with it), carries an `edge.name` the live constraint accepts, publishes
@@ -208,10 +211,12 @@ names; a case a check accepts or refuses for another reason stops the run. It th
   copy's edge entrypoint carry `iss` `https://auth.hallucinai.de/realms/hallucinai`, and the `kid`
   of each token is in the copy's key set.
 - H5, the live stack untouched: the live project, its containers and the `hal_*` networks with
-  their ids are as before; every container of the project, inspected after each start and apply,
+  their ids are as before; every container of `KeycloakCopy.projects` (the copy's and each app's),
+  inspected after each start and apply,
   carries no `edge.name` the live constraint accepts, so the live `auth` router never has it as a
   server; every HTTP request went to the copy's two entrypoints.
-- H6, teardown: the project's containers, networks and volumes are gone, measured.
+- H6, teardown: the containers, networks and volumes of `KeycloakCopy.projects` are gone,
+  measured; the label sweeps cover the same projects.
 
 `copy_isolation.install(stand, files, message)` is the one way a later probe puts a file set
 (base, candidate, revert) into the copy: it maps each path to its text, or to None for a file that
@@ -221,7 +226,7 @@ publishes the copy and checks its isolation again. `apply(stand)` checks it agai
 `hal apply`, `KeycloakCopy.compose` before each call that starts something, and the teardown
 before its `compose down`; a teardown whose check or down fails still removes the copy's project
 by its label and then fails with that error, naming both when the removal fails too.
-`KeycloakCopy` carries the steps: `prepare(Fleet(units_on))`, `bootstrap()` and `gate()`.
+`KeycloakCopy` carries the steps: `prepare(Fleet(units_on, apps))`, `bootstrap()` and `gate()`.
 
 It never touches the live project `hal`, its containers or volumes, and never creates or removes a
 `hal_*` network: every compose call goes through edge_copy's `NetworkGuard`. It never sends a
