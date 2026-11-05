@@ -18,6 +18,7 @@ import re
 import sys
 import time
 from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 
 PROBE_DIRECTORY = Path(__file__).resolve().parent
@@ -87,6 +88,11 @@ def lane_files() -> tuple[dict[str, str | None], dict[str, str | None]]:
         return git_text("show", f"{commit}:{name}") if listed else None
 
     return {n: at(base, n) for n in names}, {n: at("HEAD", n) for n in names}
+
+
+def moment(stamp: str) -> datetime:
+    """A Docker timestamp (nanoseconds, `Z` or an offset) as an aware datetime, for ordering."""
+    return datetime.fromisoformat(re.sub(r"(\.\d{6})\d+", r"\1", stamp))
 
 
 def row_pattern(subject: str, event: str, fact: str = "") -> str:
@@ -244,12 +250,12 @@ class SpeechProbe(in_copy.Probe, NetworkCells, AdmissionCells):
         joined = set(speech["NetworkSettings"]["Networks"])
         expect(joined == {t.issuer, *t.callers.values()}, f"D5b: the app joins {sorted(joined)}")
         created = {
-            n: inspected("network", n)["Created"][:23] for n in (t.issuer, *t.callers.values())
+            n: moment(inspected("network", n)["Created"]) for n in (t.issuer, *t.callers.values())
         }
-        gateway_created = inspected("container", self.gateway_id)["Created"][:23]
+        gateway_created = moment(inspected("container", self.gateway_id)["Created"])
         expect(
-            all(c < speech["Created"][:23] for c in created.values())
-            and helper["FinishedAt"][:23] < speech["Created"][:23],
+            all(c < moment(speech["Created"]) for c in created.values())
+            and moment(helper["FinishedAt"]) < moment(speech["Created"]),
             f"D5b: networks {created}, helper {helper['FinishedAt']}, app {speech['Created']}",
         )
         self.app_image = speech["Config"]["Image"]
@@ -263,8 +269,8 @@ class SpeechProbe(in_copy.Probe, NetworkCells, AdmissionCells):
             "D5b",
             f"{sorted(changed)} replaced (gateway created {gateway_created}), "
             f"{list(kept)} kept; networks created {created}; helper exited 0 at "
-            f"{helper['FinishedAt'][:23]}; app {self.app_image} created "
-            f"{speech['Created'][:23]}, healthy, on {sorted(joined)}",
+            f"{moment(helper['FinishedAt']):%H:%M:%S.%f}; app {self.app_image} created "
+            f"{moment(speech['Created']):%H:%M:%S.%f}, healthy, on {sorted(joined)}",
         )
 
     def cell_d2(self) -> None:
