@@ -26,11 +26,15 @@ default) have passed, and the log gets `held disconnected`, `held released` or `
 afterwards; the held request is then answered) or `echo`
 (an error of `status` whose message is `request_canary` when the request holds it, as an upstream
 that quotes its input); and optionally `tool_use` (`name` and `input`: the answer then also holds a
-tool call of that name, as a model that calls a tool absent from the request's `tools`),
+tool call of that name, as a model that calls a tool absent from the request's `tools`;
+with `tool_use_once` only while no message of the request holds a `tool_result` block, so a
+client that runs the tool and sends its result gets the closing answer, and the log line says
+whether a `tool_result` arrived),
 `usage` (the answer's `input_tokens` and `output_tokens`, which LiteLLM prices), `provider_key`
 and `marker`, which stand in for the values of `expect.json`, `secrets` (keys that
 must not arrive, counted as `secret_hits`) and `request_canary`, whose occurrences in a request the
-log line counts.
+log line counts. `declares` (a tool name) and `arrivals` (labels with values) make the log line
+say whether `tools` declares that tool and how often each value occurs in the request body.
 A request with `"stream": true` in mode `answer` or `stream_hold` gets Anthropic's event stream as
 server-sent events, ended by closing the connection: `message_start`, `content_block_start`, one
 `content_block_delta` per text of `texts` (else the marker), `content_block_stop`, `message_delta`
@@ -136,6 +140,31 @@ def counts(expect: dict, raw: bytes) -> dict:
     }
 
 
+def holds_tool_result(document: dict) -> bool:
+    """Whether a message of an Anthropic request holds a `tool_result` block."""
+    messages = document.get("messages")
+    return isinstance(messages, list) and any(
+        isinstance(block, dict) and block.get("type") == "tool_result"
+        for item in messages if isinstance(item, dict) and isinstance(item.get("content"), list)
+        for block in item["content"]
+    )  # fmt: skip
+
+
+def arrivals(expect: dict, document: dict, body: bytes) -> dict:
+    """What the request body shows of the client's turn: whether `tools` declares the tool named
+    by `declares`, and how often each value of `arrivals` occurs in the body; counts and
+    booleans, never the bytes."""
+    tools = document.get("tools")
+    return {
+        "declared_tool": isinstance(tools, list) and any(
+            isinstance(tool, dict) and tool.get("name") == expect["declares"] for tool in tools
+        ) if "declares" in expect else False,
+        "arrivals": {
+            label: body.count(value.encode()) for label, value in expect.get("arrivals", {}).items()
+        },
+    }  # fmt: skip
+
+
 def provider_record(expect: dict, request: http.server.BaseHTTPRequestHandler, body: bytes) -> dict:
     document = document_of(body)
     metadata = document.get("metadata")
@@ -146,6 +175,8 @@ def provider_record(expect: dict, request: http.server.BaseHTTPRequestHandler, b
         "user_id": metadata.get("user_id") if isinstance(metadata, dict) else None,
         "key_ok": request.headers.get("x-api-key") == expect["provider_key"],
         "authorization": "authorization" in request.headers,
+        "tool_result": holds_tool_result(document),
+        **arrivals(expect, document, body),
         **counts(expect, str(request.headers).encode() + body),
     }
 
@@ -173,8 +204,10 @@ def picture(expect: dict) -> bytes:
     }).encode()  # fmt: skip
 
 
-def message(expect: dict) -> bytes:
+def message(expect: dict, body: bytes) -> bytes:
     call = expect.get("tool_use")
+    if expect.get("tool_use_once") and holds_tool_result(document_of(body)):
+        call = None
     content = [{"type": "text", "text": expect["marker"]}]
     if call:
         content.append({"type": "tool_use", "id": "toolu_probe", **call})
@@ -298,7 +331,7 @@ def handler(role: str, expect: dict) -> type[http.server.BaseHTTPRequestHandler]
             if mode == "hold":
                 seconds = steering.get("hold_seconds", HOLD_SECONDS)
                 print(f"held {wait_for_disconnect(self.connection, seconds)}", flush=True)  # noqa: T201 - this in-container program prints its own request log
-            return 200, message({**expect, **steering})
+            return 200, message({**expect, **steering}, body)
 
         do_GET = do_POST
 
