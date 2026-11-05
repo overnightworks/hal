@@ -1,8 +1,0 @@
-claim_id = "2bb38cc67a6846ffb1565ee46a9b43b3"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "e086a0ba4b324f8df07eb47a5bce63b083b0a25c"
-branch = "claude/issue-1001-songmaker-legal-from-checkout"
-scope = ["docs/architecture.md", "docs/design/hal-output.html", "docs/design/legal-pages.html", "legal/sections/songmaker", "src/hal/stack/apps.py", "src/hal/stack/legal_step.py", "tests/support/stack_apps.py", "tests/test_stack_apply_legal.py", "tests/test_stack_legal_apps.py", "tests/test_stack_legal_unit.py"]
-opened_commit = "0a8136b1d126161d4acc358ef01fceaa230e58fa"
-whole_reason = "Reading songmaker's own file and deleting hal's copy land together: one without the other leaves two owners of one block (L8) or no songmaker block at all."
