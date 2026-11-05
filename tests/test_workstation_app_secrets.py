@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import shutil
 import stat
 from collections.abc import Callable, Iterator
 from datetime import datetime
@@ -11,7 +12,7 @@ from pathlib import Path, PurePosixPath
 import pytest
 from support.workstation_support import FakeProbe, Sandbox, lines_of_the_run, plant_secrets, run_captured_hal_setup, run_hal_secrets, run_hal_setup
 from support.workstation_secrets_support import never_run, FakeSync, FakeTerminal, guided_boundaries, secrets_terminal
-from support.workstation_secrets_report import findings_of, report_of
+from support.workstation_secrets_report import cells_of, findings_of, report_of
 
 from support.terminal_support import put_stdout_on_a_terminal
 from hal.grammar import ExitCode
@@ -121,6 +122,57 @@ def test_the_packaged_manifest_names_its_readers_in_english() -> None:
     reader_names = [name for entry in load_manifest(PACKAGED_MANIFEST) for name in entry.read_by]
 
     assert all(name.isascii() for name in reader_names)
+
+
+# --- songmaker's secret files: five copied from its .env, the Redis ones generated -----------------------------------
+
+# Where songmaker's scripts/secret_files.py copied its .env values to, and the Redis files songmaker#2270 mounts.
+COPIED_SONGMAKER_FILES = tuple(f".secrets/songmaker/{file}" for file in ("session-secret", "postgres-password", "internal-token", "monitoring-token", "hf-token"))
+REDIS_SONGMAKER_FILES = tuple(f".secrets/songmaker/{file}" for file in ("redis-ops", "redis-app", "redis-gpu-acestep-worker-0"))
+
+
+def entry_at(relative: str) -> SecretEntry:
+    return next(entry for entry in load_manifest(PACKAGED_MANIFEST) if PurePosixPath(relative) in entry.paths)
+
+
+@pytest.fixture
+def songmaker_home(packaged_home: Sandbox) -> Sandbox:
+    """The packaged home with songmaker's 0700 folder holding only the copies, at 0644 as the copy wrote them, hf-token empty."""
+    folder = (packaged_home.home / COPIED_SONGMAKER_FILES[0]).parent
+    shutil.rmtree(folder, ignore_errors=True)
+    folder.mkdir(mode=0o700)
+    for relative in COPIED_SONGMAKER_FILES:
+        copy = packaged_home.home / relative
+        copy.write_text("" if copy.name == "hf-token" else f"copied {copy.name}")
+        copy.chmod(0o644)
+    return packaged_home
+
+
+def test_setup_generates_only_the_missing_redis_files_at_their_declared_mode_and_keeps_the_copied_bytes(
+    songmaker_home: Sandbox, capsys: pytest.CaptureFixture[str]
+) -> None:
+    copied = {relative: (songmaker_home.home / relative).read_bytes() for relative in COPIED_SONGMAKER_FILES}
+
+    output = run_packaged_setup(songmaker_home, capsys)
+
+    folder = (songmaker_home.home / COPIED_SONGMAKER_FILES[0]).parent
+    assert {path.name for path in folder.iterdir()} == {PurePosixPath(relative).name for relative in COPIED_SONGMAKER_FILES + REDIS_SONGMAKER_FILES}
+    assert {relative: (songmaker_home.home / relative).read_bytes() for relative in COPIED_SONGMAKER_FILES} == copied
+    generated = {relative: songmaker_home.home / relative for relative in REDIS_SONGMAKER_FILES}
+    assert {relative: stat.S_IMODE(path.stat().st_mode) for relative, path in generated.items()} == {
+        relative: entry_at(relative).loosest_mode for relative in generated
+    }
+    assert all(URL_SAFE_48_BYTES.fullmatch(value) and value not in output for value in (path.read_text() for path in generated.values()))
+
+
+def test_hal_secrets_knows_the_copied_songmaker_files_at_their_copied_mode_and_an_empty_hf_token(songmaker_home: Sandbox, probe: FakeProbe) -> None:
+    run_hal_secrets(songmaker_home.home, probe, now=NOW)
+
+    report = report_of(songmaker_home.home)
+    places = {f"~/{relative}" for relative in COPIED_SONGMAKER_FILES}
+    assert places.isdisjoint({**findings_of(report, "unknown-file"), **findings_of(report, "loose-mode")})
+    status_table = report.split("\n\n")[1]
+    assert places <= {row[5] for row in cells_of(status_table) if row[2] == "present"}
 
 
 # --- HopIn's TURN key: asked hidden, stored unverified (O6) ---------------------------------------------------------
