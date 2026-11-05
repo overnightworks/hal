@@ -1,0 +1,7 @@
+claim_id = "593e21afe218455a9e597070e027a5f0"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "aa1b1737112db36f491117bcd2ce804295fd942e"
+branch = "claude/issue-1028-legal-own-app-links"
+scope = ["docs/architecture.md", "src/hal/stack/legal_pages.py", "tests/test_stack_legal_pages.py"]
+opened_commit = "4bd2af329ee023dfe226366755e53ed36aadfa03"
