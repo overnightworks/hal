@@ -50,8 +50,11 @@ LITELLM = DatabaseUnit(UNIT, LITELLM_SERVICE, "litellm-db", "LiteLLM")
 CONFIG_FILE = Path("agent-service") / "litellm" / "config.yaml"
 BUDGET_ID_SETTING = "max_end_user_budget_id"
 BUDGET_DURATION = "1mo"
-# The paths litellm-front serves: the completion call and the picture call.
-ROUTES = ("/v1/chat/completions", "/v1/images/generations")
+# The paths litellm-front serves: the completion call, the picture call and the model list.
+COMPLETION_ROUTE = "/v1/chat/completions"
+PICTURE_ROUTE = "/v1/images/generations"
+MODELS_ROUTE = "/v1/models"
+ROUTES = (COMPLETION_ROUTE, PICTURE_ROUTE, MODELS_ROUTE)
 ADMIN_GROUP = "/services/litellm/admin"
 ADMIN_BUDGET_ID = "litellm-admin"  # hal's own; LiteLLM never reads it by name
 FINGERPRINT = re.compile(r"fp-[0-9a-f]{64}")
