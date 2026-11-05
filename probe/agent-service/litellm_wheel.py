@@ -1,8 +1,8 @@
 """Probe of the wheel cell (HAL-2.8w): `GatewayBackend` from hal's own pin of the agent-runtime
 client runs one tool turn from a throwaway on hopin's network, with hopin's key as a file, through
 the real front and LiteLLM to the fake Anthropic; 2.8's census (litellm_retention.py) then
-searches the route for the turn's canaries. Before the turn, the same throwaway calls the wheel's
-`list_gateway_models` through the front (HAL-2.6m's W models).
+searches the route for the turn's canaries. Before the turn, the same throwaway runner
+calls the wheel's `list_gateway_models` through the front (HAL-2.6m's W models).
 
     flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \\
         uv run --frozen python3 probe/agent-service/litellm_wheel.py --scratch DIR

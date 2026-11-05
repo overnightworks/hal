@@ -284,7 +284,7 @@ and the admin budget with its customer rows (the key step below).
   by a `model` in the query string, which the key's `models` do not bind: one unknown to
   `config.yaml` is refused with 400, but a configured name outside the key's `models` is served by that model and its spend counts on the key, and a key or person
   past its budget is refused (measured). The front therefore answers any query string on its
-  route itself with 400 and no `Location`, so nothing of such a request reaches LiteLLM. It sets
+  routes itself with 400 and no `Location`, so nothing of such a request reaches LiteLLM. It sets
   `User-Agent` to one constant, `litellm-front`, and removes `x-litellm-tags`, which LiteLLM would
   turn into request tags; the bearer and `Content-Type` pass unchanged.
   LiteLLM's ban list refuses `api_base` in the body with 401, and a fallback naming a URL with 401
