@@ -331,7 +331,7 @@ ids stay: edge renames or removes none of the stable ids without asking the apps
 **Links.** `https://` with a host of two or more lowercase labels (no port, user, IP address or `#`), then an
 optional path and query; `mailto:name@host` without a query; `#id`; `/impressum`, `/datenschutz` or
 `/nutzungsbedingungen`, optionally with `#id`. A link to these pages written in full on the zone's apex or `www` is
-refused: write the short form. A text may link its own ids and the stable ids below, nothing else, and every
+refused: write the short form. A text may link the ids of its own file, those of its own app or service on the other page, and the stable ids below, nothing else, and every
 `#id` link needs its target in the assembled pages. If the block it points at has left, the whole run is refused;
 edge never rewrites a text to drop the link.
 
