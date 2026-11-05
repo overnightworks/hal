@@ -6,6 +6,7 @@ import os
 import shutil
 import signal
 import socket
+import sys
 import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -19,6 +20,7 @@ from support.backup_support import (
 )
 from support.host_support import write_host_shims
 from support.live_stack import LIVE_STACK_PORTS
+from support.script_module import script_module_names
 from support.workstation_support import (
     FAKE_MISE_SHA256,
     HOME_README,
@@ -51,6 +53,26 @@ from hal.workstation import check, jobs, secrets_view, setup, system_step, tunne
 from hal.workstation import ports as home_ports
 
 LOOPBACK_ADDRESSES = {"127.0.0.1", "::1"}
+IMPORT_PATH_OF_THE_SESSION = list(sys.path)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def module_leaves_imports_unchanged(request: pytest.FixtureRequest) -> Iterator[None]:
+    """Fails the module that leaves `sys.path` other than the session began with, or a script
+    module of the repository in `sys.modules` that it found absent, as a probe script puts its
+    directories on the path and imports its siblings by bare name: a later module's imports
+    would depend on the order. Restores both afterwards, so one leak fails one module."""
+    scripts_before = script_module_names()
+    yield
+    leaked = [entry for entry in sys.path if entry not in IMPORT_PATH_OF_THE_SESSION]
+    changed = sys.path != IMPORT_PATH_OF_THE_SESSION
+    sys.path[:] = IMPORT_PATH_OF_THE_SESSION
+    remaining = script_module_names() - scripts_before
+    for name in remaining:
+        del sys.modules[name]
+    module = request.module.__name__
+    assert not changed, f"{module} left sys.path changed; added {leaked}"
+    assert not remaining, f"{module} left script modules imported: {sorted(remaining)}"
 
 
 @pytest.fixture

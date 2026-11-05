@@ -4,19 +4,13 @@ import io
 import json
 import os
 import subprocess
-import sys
 import threading
-from pathlib import Path
 
+import live_signer
 import pytest
-
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "agent-service"))
-
-import live_signer  # noqa: E402
-from device_sign_in import SignInFailed  # noqa: E402
-from live_smoke import LiveSmokeFailed, Report, Verdict  # noqa: E402
-from support.live_smoke_fakes import (  # noqa: E402
+from device_sign_in import SignInFailed
+from live_smoke import LiveSmokeFailed, Report, Verdict
+from support.live_smoke_fakes import (
     KNOWN,
     SECRET_FILES,
     SERVICE_NETWORKS,

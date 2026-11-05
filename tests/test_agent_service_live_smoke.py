@@ -5,20 +5,15 @@ probe/agent-service/unit.py (cell U16) and by the operator.
 
 import json
 import subprocess
-import sys
 import tomllib
 from pathlib import Path
 
+import live_smoke
 import pytest
-
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "agent-service"))
-
-import live_smoke  # noqa: E402
-from device_sign_in import SignInFailed  # noqa: E402
-from live_smoke import Cell, LiveSmokeFailed, Report, Verdict  # noqa: E402
-from smoke import served_line  # noqa: E402
-from support.live_smoke_fakes import (  # noqa: E402
+from device_sign_in import SignInFailed
+from live_smoke import Cell, LiveSmokeFailed, Report, Verdict
+from smoke import served_line
+from support.live_smoke_fakes import (
     GATEWAY,
     KNOWN,
     LITELLM_GATEWAY,
@@ -32,6 +27,8 @@ from support.live_smoke_fakes import (  # noqa: E402
 )
 
 JWT = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJhIn0.c2lnbmF0dXJl"
+ROOT = Path(__file__).resolve().parents[1]
+
 
 # --- the report -------------------------------------------------------------------------------
 

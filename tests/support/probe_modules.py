@@ -1,11 +1,9 @@
 """What the probe tests share: the probe scripts they load as modules, each for the length of a
-module-scoped fixture with `sys.path` as it was afterwards (a probe script puts its own
-directories on it), and a docker daemon holding networks, whose subnets the probes' /24 rule
+module-scoped fixture, and a docker daemon holding networks, whose subnets the probes' /24 rule
 reads."""
 
 import json
 import os
-import sys
 from collections.abc import Iterator
 from pathlib import Path
 from types import ModuleType
@@ -18,30 +16,19 @@ from hal.backup.docker import PROJECT_LABEL
 PROBES = Path(__file__).resolve().parents[2] / "probe"
 
 
-def loaded_probe(name: str, path: Path, *directories: Path) -> Iterator[ModuleType]:
-    """The module of the probe script at `path` under `name`, `directories` first on `sys.path`
-    while it loads, until the iterator is resumed; then `sys.path` is restored."""
-    path_before = list(sys.path)
-    sys.path[:0] = [str(directory) for directory in directories]
-    try:
-        yield from loaded_script(name, path)
-    finally:
-        sys.path[:] = path_before
-
-
 @pytest.fixture(scope="module")
 def step_ca_probe() -> Iterator[ModuleType]:
-    yield from loaded_probe("step_ca_probe", PROBES / "step-ca" / "probe.py")
+    yield from loaded_script("step_ca_probe", PROBES / "step-ca" / "probe.py")
 
 
 @pytest.fixture(scope="module")
 def egress_probe() -> Iterator[ModuleType]:
-    yield from loaded_probe("egress_probe", PROBES / "agent-service" / "egress.py")
+    yield from loaded_script("egress_probe", PROBES / "agent-service" / "egress.py")
 
 
 @pytest.fixture(scope="module")
 def apps_probe() -> Iterator[ModuleType]:
-    yield from loaded_probe("apps_probe", PROBES / "apps" / "probe.py", PROBES / "apps")
+    yield from loaded_script("apps_probe", PROBES / "apps" / "probe.py", PROBES / "apps")
 
 
 def a_daemon(directory: Path, monkeypatch: pytest.MonkeyPatch, networks: dict[str, str]) -> None:

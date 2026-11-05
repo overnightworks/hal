@@ -4,19 +4,13 @@ the teardown on every way out, and remove only what lies under the directory the
 import os
 import signal
 import subprocess
-import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import edge_copy
 import pytest
-
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "probe"))
-sys.path.insert(0, str(ROOT / "src"))
-
-import edge_copy  # noqa: E402
-from support.git_support import committed_main  # noqa: E402
+from support.git_support import committed_main
 
 PASSED = "PROBE PASSED"
 
