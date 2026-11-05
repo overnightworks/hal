@@ -52,6 +52,7 @@ from litellm_unit import (  # noqa: E402
     APPS,
     COMPOSE_FILE,
     LABEL,
+    PICTURES,
     PLAN_END,
     PROJECT,
     PROVIDER,
@@ -154,6 +155,7 @@ class MoveProbe(Probe):
         LitellmProbe.write_fakes(
             SimpleNamespace(
                 provider_key=self.files[PROVIDER],
+                picture_key=self.files[PICTURES],
                 identity={},
                 marker=self.marker,
                 scratch_secrets=authority,

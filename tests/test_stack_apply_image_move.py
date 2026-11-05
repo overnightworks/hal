@@ -28,7 +28,7 @@ from support.stack_plan_rows import find_row, plain
 
 from hal import cli
 from hal.grammar import ExitCode
-from hal.stack import apply, compose, litellm_keys
+from hal.stack import apply, compose, litellm_keys, switches
 from hal.stack.external import cli as external_cli
 from hal.stack.plan_rows import KeysEvent, PlanEvent
 from hal.stack.realm.reconcile import KEYCLOAK, REALM_UNIT
@@ -382,8 +382,52 @@ def test_ctrl_c_in_the_recreate_after_the_snapshot_names_it_and_the_live_restore
 
     exit_code, _, err = switch()
 
-    assert exit_code == 1
+    assert exit_code == apply.ApplyExit.REFUSED
     assert "interrupted while changing keycloak" in err
+    assert "hal restore keycloak --live --snapshot ab12cd34" in err
+
+
+def _lock_cannot_be_taken(marks_directory, monkeypatch) -> None:
+    marks_directory.chmod(0)
+
+
+def _ctrl_c_at_the_lock(marks_directory, monkeypatch) -> None:
+    def interrupted(_marks):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(switches.Switches, "lock", interrupted)
+
+
+def _switched_off(marks_directory, monkeypatch) -> None:
+    switch_off(marks_directory, unit=KEYCLOAK.key)
+
+
+@pytest.mark.parametrize(
+    "disturb",
+    [
+        pytest.param(_lock_cannot_be_taken, id="the lock fails"),
+        pytest.param(_ctrl_c_at_the_lock, id="Ctrl-C at the lock"),
+        pytest.param(_switched_off, id="the unit is switched off"),
+    ],
+)
+@pytest.mark.usefixtures("database_units")
+def test_a_stop_before_the_apps_recreate_still_names_the_live_restore_the_database_needs(
+    disturb,
+    switch,  # noqa: F811
+    scripted,  # noqa: F811
+    state,  # noqa: F811
+    monkeypatch,
+):
+    """C8: the database of the unit was recreated, so the way back holds for the app's turn."""
+    scripted.change_image(KEYCLOAK.service, KEYCLOAK_BUMP)
+    scripted.change_image(KEYCLOAK.database, POSTGRES_BUMP)
+    scripted.after_up = lambda: disturb(state, monkeypatch)
+
+    try:
+        _, _, err = switch()
+    finally:
+        state.chmod(0o700)
+
     assert "hal restore keycloak --live --snapshot ab12cd34" in err
 
 

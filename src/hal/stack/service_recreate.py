@@ -87,13 +87,17 @@ class ServiceRecreator:
         image its tag names (#376), and a database unit's moved service, which runs the image
         compose.yaml names (#995)."""
         snapshots: dict[str, str] = {}  # unit -> its pre-apply snapshot of this run
+        began: set[str] = set()  # the units one of whose services is being or was recreated
         for plan in recreates:
-            if failure := self._unit_service(plan, snapshots):
+            if failure := self._unit_service(plan, snapshots, began):
                 return failure
         return None
 
     def _unit_service(
-        self, plan: Recreate | built_image.BuiltRecreate, snapshots: dict[str, str]
+        self,
+        plan: Recreate | built_image.BuiltRecreate,
+        snapshots: dict[str, str],
+        began: set[str],
     ) -> str | None:
         """Recreate one, after its unit's proven snapshot when it is the unit's first; a snapshot
         that fails leaves the unit as it runs, and a failure after it names the snapshot, and the
@@ -101,11 +105,9 @@ class ServiceRecreator:
         self.progress.unit = plan.service
         started = self.watch.clock()
         taken = None
-        recreating = False
 
         def begin() -> None:
-            nonlocal recreating
-            recreating = True
+            began.add(plan.unit)
 
         try:
             if isinstance(plan, Recreate) and plan.snapshot:
@@ -116,11 +118,11 @@ class ServiceRecreator:
         except (compose.ComposeError, switches.SwitchError) as error:
             failure = f"could not {self.progress.step}, {error}"
         except KeyboardInterrupt as interruption:
-            if way_back := _way_back(plan.unit, snapshots.get(plan.unit), recreating):
+            if way_back := _way_back(plan.unit, snapshots.get(plan.unit), plan.unit in began):
                 interruption.add_note(way_back)
             raise
         if failure:
-            way_back = _way_back(plan.unit, snapshots.get(plan.unit), recreating)
+            way_back = _way_back(plan.unit, snapshots.get(plan.unit), plan.unit in began)
             return f"{failure}; {way_back}" if way_back else failure
         self.tell(Recreated(plan.service, self.watch.clock() - started, snapshot=taken))
         return None
