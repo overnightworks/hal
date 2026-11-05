@@ -62,6 +62,7 @@ from hal.output import write_line  # noqa: E402
 from hal.stack import releases  # noqa: E402
 from hal.stack.plan_rows import PlanEvent  # noqa: E402
 from hal.stack.realm.reconcile import KEYCLOAK, KEYCLOAK_SERVICE, REALM_UNIT  # noqa: E402
+from hal.stack.result_rows import ResultEvent  # noqa: E402
 
 PROJECT = in_copy.PROJECT
 APP_KEY = f"{PROJECT}-speech"  # never the shipped key: the live app's project is its key
@@ -382,18 +383,17 @@ class SpeechProbe(in_copy.Probe, NetworkCells, AdmissionCells):
             files=self.candidate_files,
             exit_code=HAL_FAILURE,
         )
-        missing = "|".join(re.escape(name) for name in speech_networks)
-        lines = [line for line in out.splitlines() if re.search(missing, line)]
-        expect(
-            APP_KEY in out and lines, f"D4: no {APP_KEY} row naming a missing network: {out[-600:]}"
-        )
+        failed = re.search(row_pattern(APP_KEY, ResultEvent.APP_FAILED), out)
+        expect(failed is not None, f"D4: no failed row of {APP_KEY} in {out[-600:]}")
+        named = self.app.networks_named_by_create(self.stand, speech_networks)
+        expect(bool(named), f"D4: the app's create in its checkout names none of {speech_networks}")
         expect(not self.speech_containers(), f"D4: the app has {self.speech_containers()}")
         left = set(speech_networks) & set(networks_of(PROJECT))
         expect(not left, f"D4: the apply created {sorted(left)}")
         self.hold(
             "D4",
-            f"exit {HAL_FAILURE}, `{lines[0].strip()}`; no app container; {speech_networks} still "
-            "absent",
+            f"exit {HAL_FAILURE}, `{failed[0]}` with Compose's output withheld; the app's create "
+            f"in its checkout names {named}; no app container; {speech_networks} still absent",
         )
 
     # --- teardown ----------------------------------------------------------------------------
