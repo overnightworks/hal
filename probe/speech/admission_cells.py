@@ -8,15 +8,13 @@ goes to curl on stdin; it is never printed, logged or passed as an argument.
 
 from __future__ import annotations
 
-import io
 import json
 import secrets
-import wave
 from array import array
 from dataclasses import dataclass
 from typing import Any
 
-from edge_copy import expect
+from edge_copy import ProbeFailed, expect
 from speech_docker import Answer, container_log
 
 # speech-runtime's wire (docs/wire.md, Headers and Request): its contract, not hal's
@@ -41,10 +39,24 @@ class Tokens:
 
 
 def loudest_sample(body: bytes) -> int:
-    with wave.open(io.BytesIO(body)) as audio:
-        expect(audio.getsampwidth() == 2, "the WAV is not 16-bit")
-        samples = array("h", audio.readframes(audio.getnframes()))
-    return max((abs(sample) for sample in samples), default=0)
+    """The largest absolute sample of a streamed WAV, whose header cannot know its sizes, so the
+    data chunk runs to the body's end (wire.md, Response)."""
+    expect(body[:4] == b"RIFF" and body[8:12] == b"WAVE", "the answer is no WAV")
+    position, bits = 12, None
+    while position + 8 <= len(body):
+        chunk, size = (
+            body[position : position + 4],
+            int.from_bytes(body[position + 4 : position + 8], "little"),
+        )
+        payload = position + 8
+        if chunk == b"fmt ":
+            bits = int.from_bytes(body[payload + 14 : payload + 16], "little")
+        elif chunk == b"data":
+            expect(bits == 16, f"the WAV holds {bits}-bit samples, not 16-bit")
+            pcm = body[payload : len(body) - (len(body) - payload) % 2]
+            return max((abs(sample) for sample in array("h", pcm)), default=0)
+        position = payload + size
+    raise ProbeFailed("the WAV has no data chunk")
 
 
 def error_code(answer: Answer) -> str | None:
@@ -176,7 +188,10 @@ class AdmissionCells:
 
     def cell_a7(self, words: str) -> None:
         answer = self.speak("hopin", self.admitted_tokens, words)
-        expect(answer.status == 200, f"A7: {answer.status} {error_code(answer)}")
+        expect(
+            answer.status == 200 and answer.exit_code == 0,
+            f"A7: {answer.status} {error_code(answer)}, curl {answer.exit_code}",
+        )
         loudest = loudest_sample(answer.body)
         expect(loudest > SILENCE, f"A7: the WAV is silent (loudest sample {loudest})")
         self.recording = self.scratch / "a7.wav"
