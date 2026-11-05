@@ -1,8 +1,0 @@
-claim_id = "62bc7abfd6144d8cbbe665f68f9153c3"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "d9748991012b7a2ac90685c47663a9ab1f5d5277"
-branch = "claude/issue-1037-take-appkit-v0-14-0"
-scope = ["keycloak/themes/hallucinai/account/theme.properties", "keycloak/themes/hallucinai/login/theme.properties", "legal/frame/datenschutz.html", "legal/frame/impressum.html", "legal/frame/nutzungsbedingungen.html", "pyproject.toml", "uv.lock"]
-opened_commit = "77182b48296d9d2e9a840b5cd63e2a176348f924"
-whole_reason = "One version bump: the wheel pin, its lock and the five files naming the served appkit directory, held equal to the lock by two tests."
