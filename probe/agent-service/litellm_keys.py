@@ -469,8 +469,7 @@ class KeysProbe(KeyFiles):
         )
 
     def cell_s10(self) -> None:
-        """The mirror of S5: the name it added leaves config.yaml again."""
-        self.write_litellm_config(shipped_config())
+        self.write_litellm_config(shipped_config())  # the mirror of S5: its name leaves again
         self.earlier_logs.append(self.log_of(LITELLM))
         self.recreate_litellm()
         plan = self.read_plan("S10")
@@ -478,23 +477,17 @@ class KeysProbe(KeyFiles):
             change.subject: [f.new for f in change.fields if f.name == "models"]
             for change in plan.changes
         }
-        expect(
-            set(kept) == set(APPS)
-            and all(len(models) == 1 and FOURTH_MODEL not in models[0] for models in kept.values()),
-            f"S10: {kept}",
-        )
+        dropped = all(len(new) == 1 and FOURTH_MODEL not in new[0] for new in kept.values())
+        expect(set(kept) == set(APPS) and dropped, f"S10: {kept}")
         expect(isinstance(self.run_step(plan), KeysDone), "S10: the run failed")
         models = sorted(self.models())
         expect(FOURTH_MODEL not in models, f"S10: /v1/models still lists {FOURTH_MODEL}")
         for app in APPS:
             row, listed = sorted(self.key_of(app)["models"]), self.listed(self.file_keys[app])
             expect(row == listed == models, f"S10: {app}'s key holds {row} and lists {listed}")
-        self.hold(
-            "S10",
-            f"{FOURTH_MODEL} dropped from config.yaml: the plan names each key's models change "
-            f"without it; after the run each key holds and lists through the front the "
-            f"{len(models)} names /v1/models lists",
-        )
+        self.hold("S10", f"{FOURTH_MODEL} dropped from config.yaml: the plan names each key's "
+                  "models change without it; after the run each key holds and lists through the "
+                  f"front the {len(models)} names /v1/models lists")  # fmt: skip
 
     def cell_s6(self) -> None:
         old_key = self.file_keys["hopin"]
