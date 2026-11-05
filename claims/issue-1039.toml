@@ -1,0 +1,8 @@
+claim_id = "dd9487ebe47f4118917446343912090b"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "b7171e49055a51095742cdbbdc043e07bd145a1e"
+branch = "claude/issue-1039-one-probe-loader"
+scope = [".github/workflows/ci.yml", "pyproject.toml", "tests/conftest.py", "tests/support/agent_service_setup.py", "tests/support/live_smoke_fakes.py", "tests/support/probe_modules.py", "tests/support/probe_support.py", "tests/support/script_module.py", "tests/test_agent_egress.py", "tests/test_agent_service_image.py", "tests/test_agent_service_live_canary.py", "tests/test_agent_service_live_signer.py", "tests/test_agent_service_live_smoke.py", "tests/test_agent_service_mcp_signer.py", "tests/test_agent_service_smoke.py", "tests/test_device_sign_in.py", "tests/test_hal_output_hidden_paste.py", "tests/test_probe_isolation.py", "tests/test_probe_run.py", "tests/test_probe_subnets.py", "tests/test_step_ca_verdict.py"]
+opened_commit = "7cb1f51b2bf2e80764557993316cae9835da3019"
+whole_reason = "One decision, tests import probe code one way: a single loader plus two shared pythonpath entries, across the pytest harness and the test modules that import probe code, with no probe or product file changed."
