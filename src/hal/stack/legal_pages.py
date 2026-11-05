@@ -158,6 +158,14 @@ def _anchored_bodies(frame: Frame, block: Block) -> list[tuple[str, str]]:
 
 
 @dataclass(frozen=True)
+class _Owner:
+    """What owns an id: the frame or a block file, and the unit that block belongs to."""
+
+    name: str
+    unit: str | None  # a service's or app's anchor; None for the frame and the general part
+
+
+@dataclass(frozen=True)
 class _Rendered:
     body: str
     toc: str
@@ -171,6 +179,10 @@ def _in_page_order(blocks: Sequence[Block], page: str) -> list[Block]:
 
 def _anchor(block: Block) -> str:
     return "" if block.kind is BlockKind.GENERAL else block.parsed.headings[0].id
+
+
+def _owner_of(block: Block) -> _Owner:
+    return _Owner(block.path, None if block.kind is BlockKind.GENERAL else _anchor(block))
 
 
 def _fill(text: str, path: str, **fields: str) -> str:
@@ -229,17 +241,19 @@ def _page(frame: Frame, page: str, rendered: Sequence[tuple[Block, _Rendered]]) 
 
 def _owners_of_ids(
     frame: Frame, page: str, rendered: Sequence[tuple[Block, _Rendered]]
-) -> dict[str, str]:
+) -> dict[str, _Owner]:
     """Every id of the assembled page with its owner (the frame or a block file); a clash raises."""
-    owners = dict.fromkeys(_ids(_page(frame, page, [])), FRAME_OWNER)
+    owners = dict.fromkeys(_ids(_page(frame, page, [])), _Owner(FRAME_OWNER, None))
     for block, one in rendered:
         for identifier in _ids(one.body):
             if identifier in owners:
                 line = _heading_line(block, identifier)
                 raise refusal(
-                    block.path, line, f'id "{identifier}" is already used by {owners[identifier]}'
+                    block.path,
+                    line,
+                    f'id "{identifier}" is already used by {owners[identifier].name}',
                 )
-            owners[identifier] = block.path
+            owners[identifier] = _owner_of(block)
     return owners
 
 
@@ -254,18 +268,22 @@ def _heading_line(block: Block, identifier: str) -> int | None:
     return None
 
 
-def _check_links(block: Block, owners: Mapping[str, Mapping[str, str]]) -> None:
-    """A text links its own ids and the stable ids, and each target must exist."""
+def _check_links(block: Block, owners: Mapping[str, Mapping[str, _Owner]]) -> None:
+    """A text links the ids of its own file or unit and the stable ids; each target must exist."""
+    mine = _owner_of(block)
     for link in block.parsed.links:
         page = link.page or block.page
         owner = owners[page].get(link.fragment)
-        if owner != block.path and link.fragment not in STABLE_IDS[page]:
-            whose = f" (an id of {owner})" if owner else ""
+        own = owner is not None and (
+            owner.name == mine.name or (mine.unit is not None and owner.unit == mine.unit)
+        )
+        if not own and link.fragment not in STABLE_IDS[page]:
+            whose = f" (an id of {owner.name})" if owner else ""
             raise refusal(
                 block.path,
                 link.line,
                 f"link to #{link.fragment} on /{page}{whose} is not allowed "
-                "(own ids and the stable ids only)",
+                "(ids of its own unit and the stable ids only)",
             )
         if owner is None:
             raise refusal(

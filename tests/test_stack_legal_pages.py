@@ -240,8 +240,33 @@ def test_a_link_to_another_apps_id_is_refused_naming_its_owner():
     assert message == (
         "legal: legal/sections/alpha/datenschutz.html: line 2: link to #zeta-eins on /datenschutz "
         "(an id of legal/sections/zeta/datenschutz.html) is not allowed "
-        "(own ids and the stable ids only)"
+        "(ids of its own unit and the stable ids only)"
     )
+
+
+@pytest.mark.parametrize("link", ["/datenschutz#alpha", "/datenschutz#alpha-eins"])
+def test_an_apps_terms_may_link_the_ids_of_its_own_privacy_part(link):
+    """L13."""
+    sections = '<section id="alpha-eins">\n<h3>Eins</h3>\n<p>x</p>\n</section>\n'
+    terms = app("alpha", body=f'<p><a href="{link}">l</a></p>\n', page="nutzungsbedingungen")
+    privacy = app("alpha", sections=sections)
+
+    assert build_pages(FRAME, [general(), privacy, terms])
+
+
+@pytest.mark.parametrize(
+    ("target", "other_blocks"),
+    [
+        ("/datenschutz#zeta-eins", [app("zeta", sections=SECTIONS)]),
+        ("/datenschutz#recht", []),
+    ],
+    ids=["another apps id", "a central id that is not stable"],
+)
+def test_an_apps_terms_may_not_link_the_ids_of_another_part_than_its_own(target, other_blocks):
+    """L13."""
+    terms = app("alpha", body=f'<p><a href="{target}">l</a></p>\n', page="nutzungsbedingungen")
+
+    assert "is not allowed" in refusal([general(), *other_blocks, app("alpha"), terms])
 
 
 def test_a_link_to_an_unknown_id_is_refused():
