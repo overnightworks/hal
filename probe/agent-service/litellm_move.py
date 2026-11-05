@@ -82,6 +82,7 @@ SERVICE_BLOCK = r"^  {service}:\n(?: {{4}}.*\n|\n)+"
 MOVE_ROW = re.compile(rf"~ {LITELLM} recreate image (\S+) → (\S+) · snapshot first")
 PROVEN_ROW = re.compile(rf"{LITELLM} recreated snapshot ([0-9a-f]+) proven")
 SHOWN_DIGEST = re.compile(r"@([0-9a-f]+)…")  # the first hex digits of a digest, as hal shows it
+DIGEST_PREFIX = "sha256:"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -185,7 +186,7 @@ class MoveProbe(Probe):
         ).stdout.splitlines()
         for row in map(json.loads, listing):
             same_major = row["Tag"].split(".")[0] == tag.split(".")[0]
-            if same_major and row["Digest"].startswith("sha256:") and row["Digest"] != digest:
+            if same_major and row["Digest"].startswith(DIGEST_PREFIX) and row["Digest"] != digest:
                 return f"{repository}:{row['Tag']}@{row['Digest']}"
         return None
 
@@ -364,8 +365,8 @@ class MoveProbe(Probe):
         shown = [SHOWN_DIGEST.search(text) for text in row.groups()]
         expect(
             all(shown)
-            and digest_of(litellm.local).removeprefix("sha256:").startswith(shown[0][1])
-            and digest_of(litellm.pinned).removeprefix("sha256:").startswith(shown[1][1]),
+            and digest_of(litellm.local).removeprefix(DIGEST_PREFIX).startswith(shown[0][1])
+            and digest_of(litellm.pinned).removeprefix(DIGEST_PREFIX).startswith(shown[1][1]),
             f"M1: the row names other images: {row[0]}",
         )
         proven = PROVEN_ROW.search(after)
