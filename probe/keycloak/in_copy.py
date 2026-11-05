@@ -308,9 +308,12 @@ class KeycloakCopy:
         volume = f"{PROJECT}_teardown-self-check"
         label = f"{PROJECT_LABEL}={PROJECT}"
         run_checked(["docker", "volume", "create", "--label", label, volume], os.environ)
-        missing: CopyStand = replace(stand, copy=stand.copy / "missing")
+        missing = replace(stand, copy=stand.copy / "missing")
         try:
-            removed_whatever_fails(lambda: expect_isolated(missing), self.sweep)
+            removed_whatever_fails(
+                lambda: expect_isolated(missing),  # NOSONAR(S5655) replace() keeps type
+                self.sweep,
+            )
         except FileNotFoundError as failure:
             expect(not project_resources("volume"), f"self-check: the sweep left {volume}")
             swept = f"the label sweep removed the volume {volume}"
