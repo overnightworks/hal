@@ -241,11 +241,11 @@ jobs:
               sys.exit(f"realm-observer does not run python -I -B: {observer['entrypoint']}")
           PY
 
-      # traefik-mcp has no host listener: it sits on the four internal MCP networks and nowhere
-      # else, sets the sysctl that lets uid 65534 bind 443, and copies traefik.yml's global, log and
-      # hardening blocks, so the two Traefiks cannot drift apart. The address check above stays
-      # as it is.
-      - name: traefik-mcp has no host networking, exactly the four MCP networks and the 443 sysctl
+      # traefik-mcp has no host listener: it sits on the four internal MCP networks, on keycloak-keys
+      # to Keycloak and on speech-issuer to the speech service, and nowhere else, sets the sysctl
+      # that lets uid 65534 bind 443, and copies traefik.yml's global, log and hardening blocks, so
+      # the two Traefiks cannot drift apart. The address check above stays as it is.
+      - name: traefik-mcp has no host networking, exactly its six networks and the 443 sysctl
         run: |
           python3 - <<'PY'
           import sys, yaml
@@ -253,7 +253,8 @@ jobs:
           mcp = compose["services"]["traefik-mcp"]
           if "network_mode" in mcp or "ports" in mcp:
               sys.exit("traefik-mcp has host networking or published ports")
-          if sorted(mcp["networks"]) != ["mcp", "mcp-backends", "mcp-ca", "mcp-songmaker"]:
+          allowed = ["keycloak-keys", "mcp", "mcp-backends", "mcp-ca", "mcp-songmaker", "speech-issuer"]
+          if sorted(mcp["networks"]) != allowed:
               sys.exit(f"traefik-mcp is on {sorted(mcp['networks'])}")
           if mcp.get("sysctls") != {"net.ipv4.ip_unprivileged_port_start": 0}:
               sys.exit(f"traefik-mcp sysctls are {mcp.get('sysctls')}")
