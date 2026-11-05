@@ -266,7 +266,8 @@ def test_each_router_of_the_front_passes_its_one_method_on_one_exact_path_and_no
     for router in dynamic["http"]["routers"].values():
         rule = re.fullmatch(r"Method\(`(?P<method>[A-Z]+)`\) && Path\(`(?P<path>[^`]+)`\)",
                             router["rule"])  # fmt: skip
-        assert rule and methods[rule["path"]] == rule["method"]
+        assert rule is not None
+        assert methods[rule["path"]] == rule["method"]
         assert router["entryPoints"] == ["api"]
         (server,) = dynamic["http"]["services"][router["service"]]["loadBalancer"]["servers"]
         assert server["url"] == f"http://{LITELLM}:{port}"
