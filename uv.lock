@@ -425,10 +425,10 @@ provides-extras = ["backend", "dev", "mcp-server"]
 
 [[package]]
 name = "overnightworks-appkit"
-version = "0.12.1"
-source = { url = "https://github.com/overnightworks/appkit/releases/download/v0.12.1/overnightworks_appkit-0.12.1-py3-none-any.whl" }
+version = "0.14.0"
+source = { url = "https://github.com/overnightworks/appkit/releases/download/v0.14.0/overnightworks_appkit-0.14.0-py3-none-any.whl" }
 wheels = [
-    { url = "https://github.com/overnightworks/appkit/releases/download/v0.12.1/overnightworks_appkit-0.12.1-py3-none-any.whl", hash = "sha256:713041332b779dca028b240cec48ebb4ba4c085c492784dd5046e43d8c284a71" },
+    { url = "https://github.com/overnightworks/appkit/releases/download/v0.14.0/overnightworks_appkit-0.14.0-py3-none-any.whl", hash = "sha256:fc88979e819d7ca5b0608072156b6be93ee9f6f7bfc2a3e8292c6c5b02aee189" },
 ]
 
 [[package]]
@@ -453,7 +453,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "overnightworks-agent-runtime-client", url = "https://github.com/overnightworks/agent-runtime/releases/download/v0.20.0/overnightworks_agent_runtime_client-0.20.0-py3-none-any.whl" },
-    { name = "overnightworks-appkit", url = "https://github.com/overnightworks/appkit/releases/download/v0.12.1/overnightworks_appkit-0.12.1-py3-none-any.whl" },
+    { name = "overnightworks-appkit", url = "https://github.com/overnightworks/appkit/releases/download/v0.14.0/overnightworks_appkit-0.14.0-py3-none-any.whl" },
     { name = "pyyaml", specifier = ">=6" },
 ]
 
