@@ -23,7 +23,7 @@ from hal.backup.status import ExitCategory
 from hal.grammar import Asks, Command, ExitCode
 from hal.output import write_error
 from hal.output.command import Verb, command
-from hal.stack import catalog, compose, switches, terminal, unit_plans
+from hal.stack import catalog, compose, emergency, switches, terminal, unit_plans
 from hal.stack.external.apply import signals_ignored, terminate_like_interrupt
 
 HAL_BACKUP = command(Verb.BACKUP)
@@ -179,21 +179,11 @@ def _switched_off(app: str) -> switches.Mark | _Refusal:
     global switch is not read, so one that is on is refused whatever the tunnel."""
     try:
         fleet = unit_plans.read_fleet(compose.Compose(), compose.REPOSITORY)
-        enabled = {unit.key: unit.enabled for unit in fleet.units}
-        apps: dict[str, bool] = {}
-        if app not in enabled:  # an invalid app entry never stands between an operator and a unit
-            document = catalog.read(compose.REPOSITORY / catalog.FLEET_FILE)
-            every = catalog.apps(document, fleet.profile_services, fleet.config["name"])
-            apps = {entry.key: entry.enabled for entry in every}
-        if app not in enabled | apps:
-            units, named = ", ".join(sorted(enabled)), ", ".join(sorted(apps))
-            return _Refusal(
-                ExitCode.REFUSED,
-                f"{app} is not a unit of fleet.yaml (units: {units}; apps: {named})",
-            )
-        if not (enabled | apps)[app]:
+        if not emergency.subject_named(fleet, compose.REPOSITORY, app).enabled:
             return _Refusal(ExitCode.REFUSED, f"{app} is disabled in the catalog")
         mark = switches.Switches(switches.default_state_directory()).mark(app)
+    except emergency.UnknownSubject as unknown:
+        return _Refusal(ExitCode.REFUSED, str(unknown))
     except (compose.ComposeError, catalog.CatalogError, switches.SwitchError) as error:
         return _Refusal(ExitCode.FAILURE, str(error))
     if mark is None:

@@ -62,25 +62,34 @@ def _apps_of(fleet: unit_plans.Fleet, repository: Path) -> tuple[catalog.App, ..
     return catalog.apps(document, fleet.profile_services, fleet.config["name"])
 
 
+class UnknownSubject(Exception):
+    """A key naming neither a unit nor an app of the catalog; its text is the refusal."""
+
+
+def subject_named(
+    fleet: unit_plans.Fleet, repository: Path, key: str
+) -> catalog.Unit | catalog.App:
+    """The unit `key` names, else its catalog app: UnknownSubject or CatalogError when neither."""
+    if unit := next((unit for unit in fleet.units if unit.key == key), None):
+        return unit  # an invalid app entry never stands between an operator and a unit
+    every = _apps_of(fleet, repository)
+    if app := next((app for app in every if app.key == key), None):
+        return app
+    units = ", ".join(sorted(unit.key for unit in fleet.units))
+    named = ", ".join(sorted(app.key for app in every))
+    raise UnknownSubject(f"{key} is not a unit of fleet.yaml (units: {units}; apps: {named})")
+
+
 def _read_subject(
     engine: compose.Compose, repository: Path, key: str
 ) -> tuple[unit_plans.Fleet, catalog.Unit | catalog.App] | CannotPlan:
     fleet = _read_fleet(engine, repository)
     if isinstance(fleet, CannotPlan):
         return fleet
-    unit = next((unit for unit in fleet.units if unit.key == key), None)
-    if unit:
-        return fleet, unit  # an invalid app entry never stands between an operator and a unit
     try:
-        every = _apps_of(fleet, repository)
-    except catalog.CatalogError as error:
+        return fleet, subject_named(fleet, repository, key)
+    except (catalog.CatalogError, UnknownSubject) as error:
         return CannotPlan(str(error))
-    app = next((app for app in every if app.key == key), None)
-    if app is None:
-        known = ", ".join(sorted(unit.key for unit in fleet.units))
-        named_apps = ", ".join(sorted(app.key for app in every))
-        return CannotPlan(f"{key} is not a unit of fleet.yaml (units: {known}; apps: {named_apps})")
-    return fleet, app
 
 
 @dataclass(frozen=True)

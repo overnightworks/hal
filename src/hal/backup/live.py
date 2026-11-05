@@ -80,12 +80,23 @@ class _SqliteTarget:
 
 
 @dataclass(frozen=True)
+class _PostgresDump:
+    target: _PostgresTarget
+    file: Path
+
+
+@dataclass(frozen=True)
+class _SqliteCopy:
+    target: _SqliteTarget
+    file: Path
+    rows: int  # the rows its verification counted
+
+
+@dataclass(frozen=True)
 class _Load:
     settings: Settings
     app: App
-    target: _PostgresTarget | _SqliteTarget
-    staged: Path  # the dump, or the verified SQLite copy
-    rows: int | None  # the SQLite copy's verified rows
+    staged: _PostgresDump | _SqliteCopy
     snapshot: str
     taken: str  # the snapshot's time as the question showed it
 
@@ -152,7 +163,7 @@ def _staged(
     taken = checked(restic.snapshot_time, settings, app.name, snapshot)
     restored = staging.enter_context(runner.private_directory(settings.work_dir))
     checked(restic.restore, settings, app.name, snapshot, restored)
-    staged, rows = _verified(settings, app, target, restored)
+    staged = _verified(settings, app, target, restored)
     shown = format_moment(taken, host.now())
     short = snapshot[:MIN_SNAPSHOT_PREFIX]
     if not confirmed(f"load snapshot {short} of {shown} into {app.name}'s live database"):
@@ -160,12 +171,12 @@ def _staged(
         return StepExit.DECLINED
     if isinstance(target, _PostgresTarget) and _earlier_load_running(app, target):
         return StepExit.REFUSED
-    return _Load(settings, app, target, staged, rows, snapshot, shown)
+    return _Load(settings, app, staged, snapshot, shown)
 
 
 def _verified(
     settings: Settings, app: App, target: _PostgresTarget | _SqliteTarget, restored: Path
-) -> tuple[Path, int | None]:
+) -> _PostgresDump | _SqliteCopy:
     """The staged dump, or the SQLite copy with the rows it holds."""
     if isinstance(target, _PostgresTarget):
         dump = restored / DB_FOLDER / DUMP_NAME
@@ -173,11 +184,12 @@ def _verified(
             raise StepFailed(
                 ExitCategory.VERIFICATION_FAILED, "the snapshot holds no database dump"
             )
-        return dump, None
+        return _PostgresDump(target, dump)
     try:
-        return checked(runner.verified_sqlite_copy, settings, app, restored)
+        copy, rows = checked(runner.verified_sqlite_copy, settings, app, restored)
     except VerificationError as error:
         raise StepFailed(ExitCategory.VERIFICATION_FAILED, str(error)) from error
+    return _SqliteCopy(target, copy, rows)
 
 
 def _earlier_load_running(app: App, target: _PostgresTarget) -> bool:
@@ -204,10 +216,13 @@ def _held(load: _Load, guards: Guards, staging: ExitStack, client: _Client) -> S
         if not guards.switch_unchanged():
             write_error(f"{load.app.name}'s switch changed · nothing loaded")
             return StepExit.REFUSED
-        if isinstance(load.target, _SqliteTarget) and checked(
-            docker.volume_users, load.target.volume
+        if isinstance(load.staged, _SqliteCopy) and checked(
+            docker.volume_users, load.staged.target.volume
         ):
-            write_error(f"a container still uses {load.app.name}'s database · nothing loaded")
+            write_error(
+                f"a container still uses {load.app.name}'s database · nothing loaded",
+                command(Verb.STOP, load.app.name),
+            )
             return StepExit.REFUSED
         with guards.hold():
             return _load(load, staging, client)
@@ -216,11 +231,11 @@ def _held(load: _Load, guards: Guards, staging: ExitStack, client: _Client) -> S
 def _load(load: _Load, staging: ExitStack, client: _Client) -> StepExit:
     """Spawns the client, prints the outcome, removes the plaintext, then decides the exit."""
     client.spawned = True
-    match load.target:
-        case _PostgresTarget() as target:
-            failure = _postgres_failure(load, target)
-        case _SqliteTarget() as target:
-            failure = _sqlite_failure(load, target)
+    match load.staged:
+        case _PostgresDump() as dump:
+            failure = _postgres_failure(load, dump)
+        case _SqliteCopy() as copy:
+            failure = _sqlite_failure(load, copy)
     app, short = load.app.name, load.snapshot[:MIN_SNAPSHOT_PREFIX]
     if failure is None:
         write_row(Row(Glyph.DONE, app, LiveEvent.LOADED, f"{short} · {load.taken}"))
@@ -233,9 +248,10 @@ def _load(load: _Load, staging: ExitStack, client: _Client) -> StepExit:
     return outcome
 
 
-def _postgres_failure(load: _Load, target: _PostgresTarget) -> _Failure | None:
+def _postgres_failure(load: _Load, dump: _PostgresDump) -> _Failure | None:
+    target = dump.target
     try:
-        cause = _cause(docker.load_live(target.container, target.database, load.staged))
+        cause = _cause(docker.load_live(target.container, target.database, dump.file))
     except host.HostError as error:
         cause = str(error)
     if cause is None:
@@ -246,16 +262,16 @@ def _postgres_failure(load: _Load, target: _PostgresTarget) -> _Failure | None:
     )
 
 
-def _sqlite_failure(load: _Load, target: _SqliteTarget) -> _Failure | None:
+def _sqlite_failure(load: _Load, copy: _SqliteCopy) -> _Failure | None:
     """Only the loader's own refusal says nothing changed; any other end may have loaded."""
-    app = load.app.name
+    app, target = load.app.name, copy.target
     try:
         rows = docker.load_sqlite(
             load.settings,
             target.volume,
             target.database,
             target.owner,
-            load.staged,
+            copy.file,
             load.app.restore_test.count_table,
         )
     except host.HostError as error:
@@ -265,7 +281,7 @@ def _sqlite_failure(load: _Load, target: _SqliteTarget) -> _Failure | None:
             return _Failure(f"{app} load refused · {refusal} · nothing changed", StepExit.REFUSED)
         cause = _UNFINISHED[LoadExit(code)] if code in _UNFINISHED else str(error)
     else:
-        if rows == load.rows:
+        if rows == copy.rows:
             return None
         cause = "the loaded database counts other rows than the snapshot"
     return _Failure(

@@ -1,4 +1,4 @@
-"""`hal restore presentator --live` (#1026): the script's `load` against real database files
+"""`hal restore presentator --live`: the script's `load` against real database files
 without Docker, then the door on the scripted Docker host."""
 
 import hashlib
@@ -566,7 +566,10 @@ def test_a_container_that_is_not_stopped_on_the_volume_refuses_the_load(
     if refused:
         assert (outcome.exit_code, outcome.err.splitlines()) == (
             4,
-            [f"error: a container still uses {APP}'s database · nothing loaded"],
+            [
+                f"error: a container still uses {APP}'s database · nothing loaded",
+                f"next: hal stop {APP}",
+            ],
         )
         assert loader.loads == []
     else:
@@ -626,12 +629,43 @@ def test_a_load_that_did_not_end_as_loaded_says_whether_it_began_and_names_its_r
     assert list(work_directory(home).iterdir()) == []
 
 
+class _ClosedPipe:
+    """A stdout whose reader went away."""
+
+    def write(self, _text: str) -> int:
+        raise BrokenPipeError
+
+
+def test_a_load_whose_count_cannot_be_printed_after_its_copy_says_old_or_new(
+    tmp_path, monkeypatch, live, loader
+):
+    files = tmp_path / "loader"
+    files.mkdir()
+    staged = _staged(files)
+    live_file = _live(files)
+    with monkeypatch.context() as patched:
+        patched.setattr(sys, "stdout", _ClosedPipe())
+        loader.exit_code = sqlite_copy.main(staged.arguments(live_file))
+    assert _dump(live_file) == staged.content
+
+    outcome = live()
+
+    [line, _] = outcome.err.splitlines()
+    assert outcome.exit_code == 3
+    assert line.startswith(f"error: {APP} load failed · ")
+    assert line.endswith(
+        " · it holds the old or the new database · a rerun loads the snapshot whole"
+    )
+
+
 def test_an_old_snapshot_with_built_decks_loads_only_its_database(
     live, edge_backup, machine, loader, home
 ):
     record_with_files = SQLITE_TOML.replace(
         "[app.presentator.restore_test]", 'files_volume = "builds"\n[app.presentator.restore_test]'
     )
+    del machine.other_volumes[APP]
+    machine.volumes_by_label |= {"database": [VOLUME], "builds": ["presentator_builds"]}
     machine.volume_files["presentator_builds"] = {"deck/index.html": b"<html>"}
     assert edge_backup(*declare_apps(home, record_with_files), "backup", APP).exit_code == 0
     assert machine.snapshots[-1]["volumes"]["builds"]
@@ -643,3 +677,4 @@ def test_an_old_snapshot_with_built_decks_loads_only_its_database(
     assert edge_backup(*database_only, "restore", "--test", APP).exit_code == 0
     assert edge_backup(*database_only, "restore", APP, "--target", str(target)).exit_code == 0
     assert (target / "db" / "db.sqlite3").is_file()
+    assert (target / "builds" / "deck" / "index.html").read_bytes() == b"<html>"

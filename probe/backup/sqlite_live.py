@@ -1,4 +1,4 @@
-"""Probe of `hal restore presentator --live` (#1026): the checkout's `hal backup presentator` and
+"""Probe of `hal restore presentator --live`: the checkout's `hal backup presentator` and
 `hal restore presentator --live` under a scratch HOME with its own restic repository, against a
 stand-in database the probe writes itself.
 
@@ -336,7 +336,7 @@ class SqliteLiveProbe:
             f"equals the snapshot's, journal wal, inode, uid:gid {OWNER} and mode unchanged",
         )
 
-    def cell_m21_stand_in_serves_the_rows(self) -> None:
+    def cell_m21_stand_in_reads_the_rows(self) -> None:
         reader = (
             "import sqlite3, sys; db = sqlite3.connect(sys.argv[1]); "
             "print(db.execute('SELECT count(*) FROM users').fetchone()[0])"
@@ -346,7 +346,9 @@ class SqliteLiveProbe:
         )
         expect(count.strip() == "31", f"the stand-in counts {count.strip()} users")
         self.held(
-            "M21", "a stand-in started by the probe (not `hal start`) reads the snapshot's 31 users"
+            "M21",
+            "a one-shot reader with the service labels, started by the probe (not `hal start`), "
+            "reads the snapshot's 31 users",
         )
 
     def cell_m2_m3_refusals_before_anything(self) -> None:
@@ -510,7 +512,8 @@ class SqliteLiveProbe:
         self.held(
             "M19",
             f"SIGKILL of hal mid-write: {state}, the file held the {which} content; the rerun "
-            "with the question's snapshot loaded it",
+            "with the question's snapshot loaded it; not driven: a rerun refused while the "
+            "orphaned loader still runs",
         )
 
     def failure_of_the_cells(self) -> str | None:
@@ -521,7 +524,7 @@ class SqliteLiveProbe:
             self.start,
             self.cell_m13_backup_beside_a_wal_writer,
             self.cell_m13_m14_m16_load_over_stale_wal,
-            self.cell_m21_stand_in_serves_the_rows,
+            self.cell_m21_stand_in_reads_the_rows,
             self.cell_m2_m3_refusals_before_anything,
             self.cell_m9_consumers,
             self.cell_m11_page_size,

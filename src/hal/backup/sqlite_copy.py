@@ -11,11 +11,12 @@ import hashlib
 import sqlite3
 import stat
 import sys
-from contextlib import closing
+from contextlib import ExitStack, closing
 from enum import IntEnum
 from pathlib import Path
 
-# The script's verdict that the database or copy is bad; CPython's own exit 1 stays a crash.
+# The script's verdict that the database or copy is bad, and for `load` an error no step of it
+# placed; CPython's own exit 1 stays a crash.
 VERDICT_EXIT = 3
 # How long the load waits for another connection's lock before it gives up.
 BUSY_SECONDS = 5.0
@@ -23,12 +24,14 @@ _BLOCKED = frozenset({sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED})
 
 
 class LoadExit(IntEnum):
-    """How `load` ended, when not with its count."""
+    """How `load` ended, when not with its count. No value is CPython's 1, the usage 2 or
+    `main`'s catch-all `VERDICT_EXIT`, so an error no step of `load` placed never reads as
+    unchanged."""
 
-    REFUSED = VERDICT_EXIT  # established before the copy began: the live content is unchanged
     UNFINISHED = 4  # the copy began and did not finish: SQLite keeps the old or the new content
     UNCHECKED = 5  # the copy is in; the check of the live file after it failed
     BUSY = 6  # another connection held the live file before the copy began: unchanged
+    REFUSED = 7  # established before the copy began: the live content is unchanged
 
 
 class LoadFailed(Exception):
@@ -64,17 +67,8 @@ def check(database: Path, table: str) -> int:
 def load(staged: Path, size: int, sha256: str, live: Path, table: str) -> int:
     """The staged copy, verified against the host's size and digest, written into the live file
     whole; then the live file's row count. A missing live file is refused, never created."""
-    _require_bytes(staged, size, sha256)
-    with (
-        closing(_immutable(staged)) as source,
-        closing(
-            sqlite3.connect(
-                f"{live.as_uri()}?mode=rw", uri=True, timeout=BUSY_SECONDS, isolation_level=None
-            )
-        ) as destination,
-    ):
-        _require_intact(source)
-        _require_writable(source, destination)
+    with ExitStack() as connections:
+        source, destination = _prepared(connections, staged, size, sha256, live)
         try:
             source.backup(destination, pages=-1, progress=_abort_when_blocked)
         except sqlite3.Error as error:
@@ -83,6 +77,28 @@ def load(staged: Path, size: int, sha256: str, live: Path, table: str) -> int:
             return _checked_rows(destination, table)
         except sqlite3.Error as error:
             raise LoadFailed(LoadExit.UNCHECKED) from error
+
+
+def _prepared(
+    connections: ExitStack, staged: Path, size: int, sha256: str, live: Path
+) -> tuple[sqlite3.Connection, sqlite3.Connection]:
+    """The verified copy and the live file opened, and what SQLite would refuse inside the copy
+    established; the copy has not begun, so every failure here is a refusal."""
+    try:
+        _require_bytes(staged, size, sha256)
+        source = connections.enter_context(closing(_immutable(staged)))
+        destination = connections.enter_context(
+            closing(
+                sqlite3.connect(
+                    f"{live.as_uri()}?mode=rw", uri=True, timeout=BUSY_SECONDS, isolation_level=None
+                )
+            )
+        )
+        _require_intact(source)
+        _require_writable(source, destination)
+    except (sqlite3.Error, OSError) as error:
+        raise LoadFailed(LoadExit.REFUSED) from error
+    return source, destination
 
 
 def _immutable(database: Path) -> sqlite3.Connection:
