@@ -361,6 +361,7 @@ class SpeechProbe(in_copy.Probe, NetworkCells, AdmissionCells):
         docker("rm", orphans[0])
         names = set(networks_of(PROJECT))
         expect({t.issuer, t.keys, *t.callers.values()} <= names, f"R2: networks {sorted(names)}")
+        self.keycloak.wait_until_ready(self.stand.isolation.admin_url)  # its realm: next apply
         quiet = in_copy.apply(self.stand)
         expect(NOTHING_TO_CHANGE in quiet, f"R2: the next apply said {quiet[-400:]}")
         self.hold(
