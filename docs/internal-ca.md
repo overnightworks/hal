@@ -73,8 +73,13 @@ internal and isolated, each joined by its app and the service alone. No running 
 them, and Compose creates only the networks of the services it starts, so the one-shot
 `speech-networks` joins both and exits; `traefik-mcp` waits for it to complete, so the networks exist
 whenever `step-ca` is on. The speech service's compose file declares all three as external, so it
-does not start before they exist. A rollback leaves the exited `speech-networks` container behind as
-an orphan (`docker rm` it) and the networks in place.
+does not start before they exist.
+
+A rollback switches the speech service off first: `speech-runtime`'s `run.enabled: false` in
+`fleet.yaml`, then `hal apply`, which removes its containers. Only then is the change reverted and
+`hal apply` run again; reverted first, the fleet entry is gone and the speech containers stay
+behind. The revert leaves the exited `speech-networks` container as an orphan: `docker rm` it. The
+networks stay, inert, for callers that join them.
 
 A new app adds its name to the `x-mcp-origins` list in `compose.yaml`, a router file under
 `mcp/dynamic/` and a network of its own (`hal_mcp_<app>`, internal and isolated, joined by
