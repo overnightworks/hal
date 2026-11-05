@@ -11,9 +11,11 @@ seconds (K 30 s, CAP 1800 s).
 
 The throwaway runs on the agent-service image's pinned base (the first `FROM` of its Dockerfile)
 with this interpreter's site-packages mounted read-only, so the wheel is exactly the one hal's lock
-pins, and as the service's user, which can read them. Its program builds the turn from the wheel's
-own types; the tool's handler answers with the result canary. The fake calls the steered tool only
-while no tool result came back, so the turn ends with the answer canary.
+pins, and as the service's user. That user reads the mounted files where the host user's uid is the
+service's (1000 here), which owns the venv's files; on another host a read error stops the run.
+Its program builds the turn from the wheel's own types; the tool's handler answers with the result
+canary. The fake calls the steered tool only while no tool result came back, so the turn ends with
+the answer canary.
 
 Evidence: W the throwaway's turn events, F the fake's request log, C the census with its planted
 row, Q an SQL count. Exit 0: K0 and W held.
@@ -122,7 +124,8 @@ class WheelProbe(RetentionProbe):
 
     def wheel_command(self) -> list[str]:
         """The throwaway's argv: hopin's network only, the venv and the key file read-only, as
-        the service's user, who owns the venv's files."""
+        the service's user. That user reads the mounted files only where the host user's uid is
+        the service's, which owns the venv's files."""
         self.throwaways += 1
         site_packages = sysconfig.get_path("purelib")
         hopin_key = Path(self.environment["HOME"]) / APP_KEYS_FOLDER / "hopin"
@@ -151,7 +154,8 @@ class WheelProbe(RetentionProbe):
         person = person_fingerprint(Principal(**principal))
         self.steer(marker=canaries["answer"], request_canary=canaries["result"],
                    tool_use={"name": tool, "input": {"q": canaries["arguments"]}},
-                   tool_use_once=True)  # fmt: skip
+                   tool_use_once=True, declares=tool,
+                   arrivals={k: canaries[k] for k in ("message", "description")})  # fmt: skip
         before = len(self.provider_requests())
         events = self.turn({
             "tool": tool, "description": canaries["description"], "message": canaries["message"],
@@ -164,9 +168,13 @@ class WheelProbe(RetentionProbe):
         rounds = self.provider_requests()[before:]
         seen = [(r["tool_result"], r["request_canary_hits"], r["user_id"]) for r in rounds]
         expect(seen == [(False, 0, person), (True, 1, person)], f"W: F saw {seen}")
+        first = rounds[0]
+        arrived = (first["declared_tool"], first["arrivals"])
+        expect(arrived == (True, {"message": 1, "description": 1}), f"W: round 1 showed {arrived}")
         self.hold("W turn", f"{len(events)} events: the call of the one declared tool with the "
                   "fake's arguments, the handler's result, the answer; F saw two rounds for the "
-                  "wheel's fingerprint, the second with a tool_result block holding the "
+                  "wheel's fingerprint, the first declaring the tool and carrying the message and "
+                  "description canaries once, the second with a tool_result block holding the "
                   "result")  # fmt: skip
         self.expect_the_census(tool, person, canaries)
 
@@ -201,8 +209,11 @@ class WheelProbe(RetentionProbe):
                   f"user agent; the fingerprint in {sorted(FINGERPRINT_TABLES)} alone")  # fmt: skip
         self.tag_barrier("W")
         hopin = self.count(self.tag_rows_of(self.key))
+        control = self.count(self.tag_rows_of(self.file_keys["presentator"]))
         expect(hopin == 0, f"W: {hopin} daily tag rows of hopin's key")
-        self.hold("W tags", "no daily tag row of hopin's key after the barrier's own tag row")
+        expect(control >= 1, "W: the control finds no tag row of presentator's barrier")
+        self.hold("W tags", "no daily tag row of hopin's key after the barrier's own tag row; "
+                  f"the same query finds {control} of presentator's")  # fmt: skip
 
 
 def main() -> int:

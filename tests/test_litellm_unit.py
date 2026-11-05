@@ -596,6 +596,39 @@ def test_the_fake_calls_the_steered_tool_once_only_while_no_tool_result_came_bac
     assert (called, answer["stop_reason"] == "tool_use") == (calls, calls)
 
 
+ROUND_WITH_A_TOOL = {
+    "tools": [{"name": "other", "description": "d"}, {"name": "wanted", "description": "DESC-1"}],
+    "messages": [{"role": "user", "content": "MSG-1"}],
+}
+
+
+@pytest.mark.parametrize(
+    ("steering", "request_body", "declared", "counted"),
+    [
+        pytest.param({}, ROUND_WITH_A_TOOL, False, {}, id="nothing steered, nothing observed"),
+        pytest.param(
+            {"declares": "wanted", "arrivals": {"description": "DESC-1", "message": "MSG-1"}},
+            ROUND_WITH_A_TOOL, True, {"description": 1, "message": 1}, id="all arrived",
+        ),
+        pytest.param(
+            {"declares": "absent", "arrivals": {"description": "DESC-2", "message": "MSG-1"}},
+            ROUND_WITH_A_TOOL, False, {"description": 0, "message": 1}, id="declaration lacks",
+        ),
+        pytest.param(
+            {"declares": "wanted"}, {"tools": "wanted"}, False, {}, id="tools of another shape",
+        ),
+    ],
+)  # fmt: skip
+def test_the_fake_records_whether_the_steered_tool_was_declared_and_how_often_canaries_arrived(
+    fake_provider, steering, request_body, declared, counted
+):
+    body = json.dumps(request_body).encode()
+
+    observed = fake_provider.arrivals(steering, fake_provider.document_of(body), body)
+
+    assert observed == {"declared_tool": declared, "arrivals": counted}
+
+
 def test_the_fakes_stream_answers_with_one_delta_per_steered_text_and_no_byte_of_the_request(
     fake_provider,
 ):

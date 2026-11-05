@@ -33,7 +33,8 @@ whether a `tool_result` arrived),
 `usage` (the answer's `input_tokens` and `output_tokens`, which LiteLLM prices), `provider_key`
 and `marker`, which stand in for the values of `expect.json`, `secrets` (keys that
 must not arrive, counted as `secret_hits`) and `request_canary`, whose occurrences in a request the
-log line counts.
+log line counts. `declares` (a tool name) and `arrivals` (labels with values) make the log line
+say whether `tools` declares that tool and how often each value occurs in the request body.
 A request with `"stream": true` in mode `answer` or `stream_hold` gets Anthropic's event stream as
 server-sent events, ended by closing the connection: `message_start`, `content_block_start`, one
 `content_block_delta` per text of `texts` (else the marker), `content_block_stop`, `message_delta`
@@ -149,6 +150,21 @@ def holds_tool_result(document: dict) -> bool:
     )  # fmt: skip
 
 
+def arrivals(expect: dict, document: dict, body: bytes) -> dict:
+    """What the request body shows of the client's turn: whether `tools` declares the tool named
+    by `declares`, and how often each value of `arrivals` occurs in the body; counts and
+    booleans, never the bytes."""
+    tools = document.get("tools")
+    return {
+        "declared_tool": isinstance(tools, list) and any(
+            isinstance(tool, dict) and tool.get("name") == expect["declares"] for tool in tools
+        ) if "declares" in expect else False,
+        "arrivals": {
+            label: body.count(value.encode()) for label, value in expect.get("arrivals", {}).items()
+        },
+    }  # fmt: skip
+
+
 def provider_record(expect: dict, request: http.server.BaseHTTPRequestHandler, body: bytes) -> dict:
     document = document_of(body)
     metadata = document.get("metadata")
@@ -160,6 +176,7 @@ def provider_record(expect: dict, request: http.server.BaseHTTPRequestHandler, b
         "key_ok": request.headers.get("x-api-key") == expect["provider_key"],
         "authorization": "authorization" in request.headers,
         "tool_result": holds_tool_result(document),
+        **arrivals(expect, document, body),
         **counts(expect, str(request.headers).encode() + body),
     }
 
