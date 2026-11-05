@@ -338,7 +338,7 @@ edge never rewrites a text to drop the link.
 | Page | Stable ids |
 |---|---|
 | /datenschutz | `verantwortlicher`, `cloudflare`, `rechte`, `widerspruch`, `kein-tracking`, `automatisierte-entscheidungen`, `pseudonym`, `anmeldung`, `agent-dienst` |
-| /nutzungsbedingungen | `recht` |
+| /nutzungsbedingungen | `haftung`, `recht` |
 | /impressum | `verantwortlich`, `kontakt` |
 
 **Stand** is the newest commit date of the page's section files (`git log -1 --format=%cs`), an app's file dated at the release it is read at; a commit that

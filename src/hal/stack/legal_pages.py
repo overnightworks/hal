@@ -41,7 +41,7 @@ STABLE_IDS: Mapping[str, frozenset[str]] = {
             "agent-dienst",
         }
     ),
-    "nutzungsbedingungen": frozenset({"recht"}),
+    "nutzungsbedingungen": frozenset({"haftung", "recht"}),
     "impressum": frozenset({"verantwortlich", "kontakt"}),
 }
 _MONTHS = (
