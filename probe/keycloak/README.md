@@ -129,8 +129,9 @@ or a `teardown: stack edge-kc-probe FAILED` line, remove the project under the l
 directory without a compose file, because Compose finds its containers, networks and volumes by the
 name:
 
-    flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM \
-        timeout -k 30 300 docker compose --project-name edge-kc-probe down --volumes --remove-orphans
+    flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 300 \
+        env -u COMPOSE_FILE -u COMPOSE_PROJECT_NAME \
+        docker compose --project-name edge-kc-probe down --volumes --remove-orphans
 
 This command is itself the teardown: its K of 30 seconds covers compose's own stop.
 
@@ -168,18 +169,26 @@ Keycloak changes through hal itself.
 Measured: a run takes 143 s and its teardown 1.7 s (K 30 s, CAP 1800 s).
 
 It needs an existing, empty `--scratch` directory and leaves it empty, passed or failed, and `uv`:
-it runs `uv sync` in the copy. It prints one `H<n> held:` line per cell and ends with
-`PASSED: H1, ..., H6` (exit 0), or `PROBE FAILED: <what>` (exit 1).
+it runs `uv sync` in the copy. Before anything of the copy starts it prints one `self-check:`
+line per negative case, each refused by the check that guards it (below); a case a check accepts
+stops the run. It then prints one `H<n> held:` line per cell and ends with `PASSED: H1, ..., H6`
+(exit 0), or `PROBE FAILED: <what>` (exit 1).
 
-- H1, copy isolation: the copy's compose.yaml has every fixed name in the project, the pinned /24s
-  and the `&keycloak-subnet` anchor on free /24s (the IPAM pool and `KC_PROXY_TRUSTED_ADDRESSES`
-  move together), the `&admin-hostname` anchor on the copy's admin port, and Keycloak's
-  `edge.name` `PROBE`, which the live `LabelRegex` refuses; its traefik.yml listens on two free
-  ports of 127.0.0.1 and routes the project label only; go-live's two addresses are the copy's;
-  its fleet switches on keycloak and step-ca alone; its backup records name the project. No
-  service of the started profiles carries an `edge.name` the live constraint accepts, publishes a
-  port or, but Traefik, joins the host network. Installing the shipped files again leaves the copy
-  byte-identical: the allocation is the same.
+- H1, copy isolation: the copy's compose.yaml names the project at its top and has every fixed
+  name in it, the pinned /24s and the `&keycloak-subnet` anchor on free /24s (the IPAM pool and
+  `KC_PROXY_TRUSTED_ADDRESSES` move together), the `&admin-hostname` anchor on the copy's admin
+  port, and Keycloak's `edge.name` `PROBE`, which the live `LabelRegex` refuses; its traefik.yml
+  listens on two free ports of 127.0.0.1 and routes the project label only; go-live's two
+  addresses are the copy's; its fleet, read as hal reads it, switches on keycloak and step-ca
+  alone and has exactly the caller's apps, each under a project `edge-kc-in-copy-...`; its backup
+  records name the project.
+  No service hal or a compose call of the probe starts, in the configuration that call's files
+  merge to (the bootstrap overlay included), carries an `edge.name` the live constraint accepts,
+  publishes a port, joins the host network (but Traefik), binds a path or reads a secret or config
+  file outside the scratch HOME (but the socket proxy's docker socket), joins the network, process
+  or IPC namespace or takes the volumes of a container outside the copy, or has a fixed container
+  name outside the project. Installing the shipped files again leaves the copy byte-identical: the
+  allocation is the same.
 - H2, bootstrap as go-live's steps, never go-live itself: the copy's compose with
   `keycloak/bootstrap.compose.yaml` starts Keycloak, the copy's core (Traefik included) starts and
   its admin entrypoint answers, `admin-frontend.sh` moves master, one `keycloak-config-cli` run
@@ -198,12 +207,15 @@ it runs `uv sync` in the copy. It prints one `H<n> held:` line per cell and ends
   server; every HTTP request went to the copy's two entrypoints.
 - H6, teardown: the project's containers, networks and volumes are gone, measured.
 
-`install(stand, files, message)` is the one way a later probe puts a file set (base, candidate,
-revert) into the copy: it maps each path to its text, or to None for a file that set lacks, applies
-the same allocation to every file it rewrites, publishes the copy and checks its isolation again.
-`apply(stand)` checks it again before each `hal apply`, and the teardown before its `compose down`.
-`KeycloakCopy` carries the steps: `prepare(Fleet(units_on, app_entries))`, `bootstrap()` and
-`gate()`.
+`copy_isolation.install(stand, files, message)` is the one way a later probe puts a file set
+(base, candidate, revert) into the copy: it maps each path to its text, or to None for a file that
+set lacks, refuses a path that is absolute or leaves the copy and finds a rewrite by the path it
+writes (`./fleet.yaml` is `fleet.yaml`), applies the same allocation to every file it rewrites,
+publishes the copy and checks its isolation again. `apply(stand)` checks it again before each
+`hal apply`, `KeycloakCopy.compose` before each call that starts something, and the teardown
+before its `compose down`; a teardown whose check or down fails still removes the copy's projects
+by their labels and then fails with that error. `KeycloakCopy` carries the steps:
+`prepare(Fleet(units_on, app_entries))`, `bootstrap()` and `gate()`.
 
 It never touches the live project `hal`, its containers or volumes, and never creates or removes a
 `hal_*` network: every compose call goes through edge_copy's `NetworkGuard`. It never sends a
@@ -215,5 +227,9 @@ the live configuration: every secret is a scratch value under the scratch HOME. 
 After an exit 137 or a teardown that failed, remove the project under the lock, from a directory
 without a compose file:
 
-    flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM \
-        timeout -k 30 300 docker compose --project-name edge-kc-in-copy down --volumes --remove-orphans
+    flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 300 \
+        env -u COMPOSE_FILE -u COMPOSE_PROJECT_NAME \
+        docker compose --project-name edge-kc-in-copy down --volumes --remove-orphans
+
+and the same for each app project a caller added. `env -u` keeps an exported `COMPOSE_FILE` from
+pointing the call at the live compose.yaml.
