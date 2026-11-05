@@ -67,10 +67,11 @@ NAME_LINE = re.compile(r"^(\s+name:\s+)(\S+)\s*$", re.MULTILINE)
 GUARDED_COMPOSE_VERBS = {"up", "run", "down"}  # what creates or removes networks
 BACKUP_PROJECT_LINE = re.compile(r'^(compose_project = )"[^"]*"$', re.MULTILINE)
 # The networks of compose.yaml that pin a /24: so agent-egress has one address on each of its two,
-# and so LiteLLM has one on litellm-backend. A probe moves each to a free /24 of its own, so it
-# never collides with the live stack's.
+# so LiteLLM has one on litellm-backend and Keycloak one on keycloak-keys. A probe moves each to a
+# free /24 of its own, so it never collides with the live stack's.
 GATEWAY_NETWORKS = ("egress", "litellm-egress")
-PINNED_NETWORKS = (*GATEWAY_NETWORKS, "litellm-backend")
+KEY_SET_NETWORK = "keycloak-keys"
+PINNED_NETWORKS = (*GATEWAY_NETWORKS, "litellm-backend", KEY_SET_NETWORK)
 NETWORK_BLOCK = re.compile(r"^ {2}(?P<network>[\w-]+):\n(?P<block>(?: {4}.*\n)+)", re.MULTILINE)
 PINNED_PREFIX = re.compile(r"subnet:\s+(\d+\.\d+\.\d+\.)0/24")
 # The loopback address a probe's Traefik listens on beside the live one: `lo` routes all of
@@ -199,6 +200,43 @@ def moved_to_probe_subnets(text: str, moved: Mapping[str, str]) -> str:
     for live in moved:
         expect(live in text, f"the file does not name {live}")
     return re.sub("|".join(map(re.escape, moved)), lambda found: moved[found[0]], text)
+
+
+def subnet_overlay(text: str, subnets: Mapping[str, str]) -> str:
+    """A compose overlay over `text` of compose.yaml that moves each network of `subnets` off its
+    one /24 onto the given one, with every service's attachment to it and every extra_hosts mapping
+    that name an address there (moved_to_probe_subnets). A compose file cannot replace the base
+    file's lists, so the overlay drops each with compose's own `!override` tag."""
+    shipped = yaml.safe_load(text)
+    configs = {network: shipped["networks"][network]["ipam"]["config"] for network in subnets}
+    moves = {subnet_prefix(c["subnet"]): subnet_prefix(subnets[n]) for n, (c,) in configs.items()}
+
+    def pinned(value: object) -> bool:
+        return any(live in json.dumps(value) for live in moves)
+
+    def moved(value: object) -> str:
+        found = json.dumps(value)
+        return moved_to_probe_subnets(
+            found, {old: new for old, new in moves.items() if old in found}
+        )
+
+    lines = ["networks:"]
+    lines += [f"  {n}:\n    ipam:\n      config: !override {moved(c)}" for n, c in configs.items()]
+    lines.append("services:")
+    for name, service in shipped["services"].items():
+        joined = service.get("networks") if isinstance(service.get("networks"), dict) else {}
+        attached = [f"      {n}: {moved(joined[n])}" for n in subnets if pinned(joined.get(n))]
+        hosts = service.get("extra_hosts")
+        entry = ["    networks:", *attached] if attached else []
+        entry += [f"    extra_hosts: !override {moved(hosts)}"] if pinned(hosts) else []
+        lines += [f"  {name}:", *entry] if entry else []
+    return "\n".join(lines) + "\n"
+
+
+def subnet_prefix(subnet: str) -> str:
+    """The first three octets, with the trailing dot, of the /24 `subnet`."""
+    expect(subnet.endswith(".0/24"), f"{subnet} is no /24")
+    return subnet.removesuffix("0/24")
 
 
 def without_inherited_apps(text: str) -> str:

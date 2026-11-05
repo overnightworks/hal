@@ -4,7 +4,7 @@ It starts its own compose project from this checkout with throwaway secrets in t
 directory, stands in for Cloudflare by sending `Host: auth.<domain>` and
 `X-Forwarded-Proto: https` to its edge entrypoint, prints one line per proof, and always tears
 the stack down, volumes included. Its Traefik entrypoints listen on free loopback ports it picks
-and its keycloak network takes a free /24, so it runs beside the live edge, which stays up.
+and its two Keycloak networks take free /24s, so it runs beside the live edge, which stays up.
 
     flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 50 720 \
         python3 probe/keycloak/probe.py --scratch DIR  # teardown measured 11 s (K 50 s, CAP 720 s)
@@ -35,7 +35,7 @@ import struct
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from http.cookiejar import Cookie, CookieJar, DefaultCookiePolicy, parse_ns_headers
@@ -53,11 +53,13 @@ from urllib.request import (
 )
 
 REPO = Path(__file__).resolve().parents[2]
-# The probe runs from a bare checkout with system python; hal.stack.realm is standard library only.
-sys.path[:0] = [str(REPO / "src"), str(REPO / "probe/keycloak")]
+# The probe runs from a bare checkout with system python; hal.stack.realm and edge_copy need only
+# the standard library and PyYAML.
+sys.path[:0] = [str(REPO / "src"), str(REPO / "probe/keycloak"), str(REPO / "probe")]
 import agents_client_cell  # noqa: E402
 import backchannel_cell  # noqa: E402
 import device_grant_cell  # noqa: E402
+import edge_copy  # noqa: E402
 import litellm_admin_cell  # noqa: E402
 import logout_actions_cell  # noqa: E402
 import service_audience_cell  # noqa: E402
@@ -74,7 +76,7 @@ from service_audience_cell import (  # noqa: E402
 from test_rp import token_claims as claims  # noqa: E402
 
 from hal.output import write_line  # noqa: E402
-from hal.stack import checkout, compose, core, pre_apply, switches  # noqa: E402
+from hal.stack import checkout, compose, core, deploy_checkout, pre_apply, switches  # noqa: E402
 from hal.stack.realm import OBSERVER_SERVICE, change_lines, new_digest_key, reconcile  # noqa: E402
 from hal.stack.realm.observe import CLIENT, FLOW, GROUP, IMPORT_CHECKSUM, Inventory  # noqa: E402
 from hal.stack.result_rows import result_rows  # noqa: E402
@@ -435,6 +437,7 @@ class Stack:
     traefik_config: Path = field(init=False)
     network_overlay: Path = field(init=False)
     keycloak_subnet: str = field(init=False)
+    key_set_subnet: str = field(init=False)
     secrets_dir: Path = field(init=False)
     config_dir: Path = field(init=False)
     # Everything a secret could leak into, for proof 7: each container's Config.Env as it was
@@ -450,6 +453,7 @@ class Stack:
         self.edge_url = f"http://127.0.0.1:{self.edge_port}"
         self.admin_url = self.admin_url or f"http://localhost:{self.admin_port}"
         self.keycloak_subnet = free_subnet()
+        self.key_set_subnet = free_subnet(also_taken=[self.keycloak_subnet])
         self.network_overlay = self.scratch / NETWORK_OVERLAY
         self.write_network_overlay()
 
@@ -478,14 +482,12 @@ class Stack:
         }
 
     def write_network_overlay(self) -> None:
-        """The keycloak network on this stack's free subnet instead of the live one. A compose
-        file cannot replace the base file's list of subnets, so the base file's is dropped with
-        compose's own `!override` tag here, which the repository's YAML checks never read."""
+        """The keycloak and key-set networks on this stack's free subnets instead of the live
+        ones, with what compose.yaml pins in them (edge_copy.subnet_overlay)."""
+        shipped = (REPO / deploy_checkout.COMPOSE_FILE).read_text()
+        moves = {"keycloak": self.keycloak_subnet, edge_copy.KEY_SET_NETWORK: self.key_set_subnet}
         self.scratch.mkdir(parents=True, exist_ok=True)
-        self.network_overlay.write_text(
-            "networks:\n  keycloak:\n    ipam:\n      config: !override\n"
-            f"        - subnet: {self.keycloak_subnet}\n"
-        )
+        self.network_overlay.write_text(edge_copy.subnet_overlay(shipped, moves))
 
     def write_traefik_config(self) -> None:
         """The repository's traefik.yml with the entrypoints on the probe's free ports and the
@@ -750,12 +752,12 @@ def free_loopback_ports(count: int) -> list[int]:
             held.close()
 
 
-def free_subnet() -> str:
-    """The first of SUBNET_CANDIDATES that no Docker network on this host overlaps."""
+def free_subnet(also_taken: Sequence[str] = ()) -> str:
+    """The first of SUBNET_CANDIDATES that no Docker network here nor `also_taken` overlaps."""
     listed = docker("network", "ls", "--quiet")
     expect(listed.returncode == 0, f"docker network ls failed:\n{tail(listed.stderr)}")
     ids = listed.stdout.split()
-    taken: list[ipaddress.IPv4Network] = []
+    taken = [*map(ipaddress.ip_network, also_taken)]
     if ids:
         inspected = docker(
             "network", "inspect", "--format", "{{range .IPAM.Config}}{{.Subnet}} {{end}}", *ids
@@ -763,10 +765,8 @@ def free_subnet() -> str:
         expect(
             inspected.returncode == 0, f"docker network inspect failed:\n{tail(inspected.stderr)}"
         )
-        taken = [
-            network
-            for network in map(ipaddress.ip_network, inspected.stdout.split())
-            if isinstance(network, ipaddress.IPv4Network)
+        taken += [
+            net for net in map(ipaddress.ip_network, inspected.stdout.split()) if net.version == 4
         ]
     for candidate in SUBNET_CANDIDATES:
         if not any(ipaddress.ip_network(candidate).overlaps(network) for network in taken):

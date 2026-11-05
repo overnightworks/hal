@@ -1,8 +1,8 @@
 # Probe overlay (probe/keycloak/probe.py): throwaway secrets and config copies from the probe's
 # scratch directory, plus a test relying party that records back-channel logouts. It also moves the
 # stack off the live edge's addresses: Traefik's entrypoints (a copy of traefik.yml), the admin
-# front end and the trusted subnet (the network itself: probe.py's generated overlay). Never used
-# live.
+# front end and the trusted subnet (the network itself, and the key-set network with Keycloak's
+# address on it: probe.py's generated overlay). Never used live.
 services:
   traefik:
     volumes:
@@ -63,6 +63,12 @@ networks:
     name: ${COMPOSE_PROJECT_NAME}_backchannel_hopin
   backchannel-presentator:
     name: ${COMPOSE_PROJECT_NAME}_backchannel_presentator
+  speech-issuer:
+    name: ${COMPOSE_PROJECT_NAME}_speech_issuer
+  speech-hopin:
+    name: ${COMPOSE_PROJECT_NAME}_speech_hopin
+  speech-presentator:
+    name: ${COMPOSE_PROJECT_NAME}_speech_presentator
 
 volumes:
   # compose.yaml gives these two volumes fixed names; here they belong to the probe's project.

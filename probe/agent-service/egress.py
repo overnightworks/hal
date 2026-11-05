@@ -8,7 +8,7 @@ the real `agent-service` of compose.yaml, in a throwaway compose project of thei
 Measured teardown: 2 s (K 50 s, CAP 1780 s).
 
 The stack runs from a copy of compose.yaml and of the gateway's static file with each network that
-pins an address (`egress`, `litellm-egress`, `litellm-backend`; edge_copy.PINNED_NETWORKS) moved to
+pins an address (edge_copy.PINNED_NETWORKS, `egress` and `litellm-egress` among them) moved to
 a free /24 of its own (the addresses and the `extra_hosts` follow through the anchors), so it
 never collides with the live stack's. E3-E5 and E10 are observed through the packet windows of
 capture.py, each with a control; a window that dropped a frame, held a frame it could not decode,

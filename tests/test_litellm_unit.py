@@ -91,7 +91,8 @@ def test_every_pinned_network_the_agent_probe_joins_is_one_the_probe_moves(compo
     joined = {network for name in probe_services for network in services[name]["networks"]}
     pinned = {name for name, network in compose["networks"].items() if "ipam" in (network or {})}
 
-    assert pinned & joined == set(PINNED_NETWORKS)
+    assert pinned & joined
+    assert pinned & joined <= set(PINNED_NETWORKS)
 
 
 def app_networks(compose: dict) -> set[str]:

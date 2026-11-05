@@ -4,7 +4,8 @@
 directory, no live data) from this checkout. It runs beside the live edge, which stays up: its
 Traefik entrypoints listen on two free loopback ports it picks (a copy of `traefik.yml` in the
 scratch directory), its admin front end is `http://localhost:<admin port>`, and its keycloak
-network takes a free /24 from 172.31.200.0 up. Both modes need an empty or new `--scratch`
+and key-set (`keycloak-keys`) networks each take a free /24 from 172.31.200.0 up, Keycloak's
+address on the key-set network moving along. Both modes need an empty or new `--scratch`
 directory and always tear the stack down. While a probe runs, `hal check exposure` reports its Keycloak as a
 routing name that is not valid, by design of the `edge.name: PROBE` label that keeps the live Traefik away.
 

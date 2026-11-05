@@ -1,6 +1,7 @@
 """The probes' network isolation (#346 P26): what probe/edge_copy.py moves and refuses, and what a
 probe's shipped script and teardown resolve."""
 
+import ipaddress
 import json
 import os
 import re
@@ -12,6 +13,7 @@ from textwrap import dedent
 from types import SimpleNamespace
 
 import pytest
+import support.keycloak_probe as keycloak_support
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -27,6 +29,8 @@ from hal.backup.docker import PROJECT_LABEL  # noqa: E402
 from hal.stack import catalog, checkout  # noqa: E402
 
 PROJECT = "edge-some-probe"
+# The Keycloak probe's module and the docker host it runs on: the support module's fixtures.
+keycloak_probe, docker_host = keycloak_support.probe, keycloak_support.docker_host
 
 
 def fixed_names(text: str, section: str = "networks") -> dict[str, str]:
@@ -52,6 +56,54 @@ def test_the_keycloak_overlay_moves_every_fixed_name_of_compose_into_its_project
     fixed = fixed_names((ROOT / "compose.yaml").read_text(), section)
     assert fixed.keys() <= moved.keys()
     assert all(moved[key].startswith("${COMPOSE_PROJECT_NAME}_") for key in fixed)
+
+
+def subnets_of(compose: dict) -> list[ipaddress.IPv4Network]:
+    return [
+        ipaddress.IPv4Network(config["subnet"])
+        for network in compose["networks"].values()
+        for config in ((network or {}).get("ipam") or {}).get("config", [])
+    ]
+
+
+def pinned_addresses(compose: dict) -> dict[str, set[str]]:
+    """Each network on which a service holds a fixed address, with those addresses."""
+    pinned: dict[str, set[str]] = {}
+    for service in compose["services"].values():
+        networks = service.get("networks")
+        for network, joined in networks.items() if isinstance(networks, dict) else ():
+            if (joined or {}).get("ipv4_address"):
+                pinned.setdefault(network, set()).add(joined["ipv4_address"])
+    return pinned
+
+
+def assert_pins_moved_off(moved: dict, shipped: dict) -> None:
+    """Each network of `moved` that pins an address lies off every subnet of `shipped` and holds
+    its addresses, and each extra_hosts entry of `moved` names one of them."""
+    addresses = pinned_addresses(moved)
+    assert addresses
+    for network, members in addresses.items():
+        (config,) = moved["networks"][network]["ipam"]["config"]
+        subnet = ipaddress.IPv4Network(config["subnet"])
+        assert not any(subnet.overlaps(live) for live in subnets_of(shipped)), network
+        assert all(ipaddress.ip_address(member) in subnet for member in members), network
+    named = {a for s in moved["services"].values() for a in (s.get("extra_hosts") or {}).values()}
+    assert named
+    assert named <= set().union(*addresses.values())
+
+
+def test_the_keycloak_probe_moves_keycloaks_networks_and_pinned_address_onto_its_own_subnets(
+    keycloak_probe, docker_host, tmp_path
+):
+    stack = keycloak_probe.Stack(tmp_path)
+
+    # compose's `!override` tag says only how the overlay's values merge
+    overlay = yaml.safe_load(stack.network_overlay.read_text().replace("!override", ""))
+
+    taken = {stack.keycloak_subnet, stack.key_set_subnet}
+    assert len(taken) == 2
+    assert {str(subnet) for subnet in subnets_of(overlay)} == taken
+    assert_pins_moved_off(overlay, yaml.safe_load((ROOT / "compose.yaml").read_text()))
 
 
 def test_a_compose_text_with_no_fixed_name_is_refused():
@@ -259,6 +311,17 @@ def test_the_first_candidate_that_overlaps_no_occupied_subnet_is_free():
 def test_a_candidate_inside_a_wider_occupied_subnet_is_taken():
     with pytest.raises(edge_copy.ProbeFailed, match="no free /24"):
         edge_copy.free_subnet(CANDIDATES, ["172.31.0.0/16"])
+
+
+def test_an_edge_copy_moves_every_network_that_pins_an_address_and_the_addresses_follow():
+    text = (ROOT / "compose.yaml").read_text()
+    live = [str(subnet) for subnet in subnets_of(yaml.safe_load(text))]
+    candidates = [f"10.{second}.0.0/24" for second in range(8)]
+    moved = edge_copy.free_probe_prefixes(edge_copy.live_pinned_prefixes(text), candidates, live)
+
+    copy = yaml.safe_load(edge_copy.moved_to_probe_subnets(text, moved))
+
+    assert_pins_moved_off(copy, yaml.safe_load(text))
 
 
 MIXED_CATALOG = dedent(
