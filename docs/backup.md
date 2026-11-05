@@ -241,9 +241,10 @@ LiteLLM shows of each key; never a key in clear. In plain text it exists in the 
 places as Keycloak's. LiteLLM writes spend to its database in batches every 10 seconds
 (`PROXY_BATCH_WRITE_AT`), so a dump lacks at most that last batch.
 
-presentator's copy is its SQLite database and its built decks (`builds`, without the half-built
-`staged-*` directories). The database holds the people's sessions, their Keycloak `sub`s and the
-source secrets, which are encrypted with presentator's master key (the file
+presentator's copy is its SQLite database alone: its built decks (`builds`) and Git mirrors
+(`mirrors`) are caches its rows rebuild, so they are in no backup. The database holds the people's
+sessions, their Keycloak `sub`s and the source secrets, which are encrypted with presentator's
+master key (the file
 `~/.secrets/presentator/secret-key`). The master key is not in the data backup, so a restored copy
 cannot read those secrets without it. Until the separate backups of secrets and data of #291 exist,
 the master key and the data backups sit on the same disk. The session ids (the signed session
@@ -503,6 +504,11 @@ removes the restored copy when it ends:
 1. `hal stop presentator`
 2. `hal restore presentator --live`, and check that its loaded row names the snapshot you meant
 3. `hal start presentator`, which runs presentator's schema steps and waits for `/health`
+
+`--live` keeps the `builds` volume as it is. A restore onto an empty one rebuilds every deck at
+presentator's next refresh; a deck whose newest commit fails to build, or whose Git host does not
+answer, stays at 404 until a fix lands or the host answers. Older snapshots also hold `builds`;
+`--live` loads only their database, and `--target` restores their decks too.
 
 The load discards every write since the chosen snapshot that no other snapshot holds; nothing makes a
 completed load reversible, so the question names the snapshot's time. A release that migrated the
