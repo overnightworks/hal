@@ -14,7 +14,13 @@ dependencies = [
 hal = "hal.cli:main"
 
 [dependency-groups]
-dev = ["ansible-core==2.21.5", "pytest>=8", "pytest-cov>=6", "ruff>=0.15"]
+dev = [
+    "ansible-core==2.21.5",
+    "overnightworks-agent-runtime-client[backend]",
+    "pytest>=8",
+    "pytest-cov>=6",
+    "ruff>=0.15",
+]
 
 [build-system]
 requires = ["uv_build>=0.10,<0.11"]
