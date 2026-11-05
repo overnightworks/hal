@@ -54,7 +54,9 @@ SERVICES = ("litellm", "litellm-db", "litellm-front")  # Compose's resolved orde
 FRONT = "litellm-front"
 APPS = ("hopin", "presentator", "songmaker")
 SECRETS = Path(".secrets/litellm")
-PROVIDER, MASTER, PASSWORD = (SECRETS / name for name in ("anthropic", "master-key", "db-password"))
+PROVIDER, MASTER, PASSWORD, PICTURES = (
+    SECRETS / name for name in ("anthropic", "master-key", "db-password", "openai")
+)
 LISTEN_SECONDS = 240
 LABEL = f"{PROJECT}.throwaway=1"
 KEY_TABLE = '"LiteLLM_VerificationToken"'
@@ -298,7 +300,7 @@ class Probe:
         (self.copy / catalog.FLEET_FILE).write_text(without)
         publish(self.copy, "probe: the pinned networks moved, the catalog without litellm")
         self.expect_no_egress()
-        for relative in (PROVIDER, MASTER):
+        for relative in (PROVIDER, MASTER, PICTURES):
             self.write_secret(relative, f"sk-{secrets.token_hex(32)}")
         self.write_secret(PASSWORD, secrets.token_hex(24))
         for app in APPS:
@@ -374,7 +376,7 @@ class Probe:
         )
 
     def cell_u1(self) -> None:
-        for relative in (PROVIDER, MASTER, PASSWORD):
+        for relative in (PROVIDER, MASTER, PASSWORD, PICTURES):
             path, value = self.home / relative, self.files[relative]
             path.unlink()
             output, ran = self.apply("U1", HAL_REFUSED)
@@ -384,7 +386,7 @@ class Probe:
             self.write_secret(relative, value)
         self.hold(
             "U1",
-            "each of the three files missing: `litellm needs <path>; nothing switched`, "
+            "each of the four files missing: `litellm needs <path>; nothing switched`, "
             "next: hal setup, exit 4, no question, nothing runs",
         )
 

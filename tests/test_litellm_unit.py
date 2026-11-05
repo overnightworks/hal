@@ -31,13 +31,17 @@ KEYS = litellm_keys.KEYS_SERVICE
 NEW_NETWORKS = ("litellm-api", "litellm-backend", "litellm-egress", "litellm-db")
 ISOLATED_MODE = {"com.docker.network.bridge.gateway_mode_ipv4": "isolated"}
 DIGEST_PINNED = re.compile(r"^[^@\s]+:[^@\s]+@sha256:[0-9a-f]{64}$")
-KEY_SECRET = "litellm_anthropic_key"
+KEY_SECRETS = ("litellm_anthropic_key", "litellm_openai_key")
 MASTER_SECRET, PASSWORD_SECRET = "litellm_master_key", "litellm_db_password"
 CLAUDE_ID = re.compile(r"anthropic/claude-(?P<family>[a-z]+)-[\w.-]+")
+IMAGE_ID = re.compile(r"openai/gpt-image[\w.-]*")
 START_SCRIPT = (LITELLM_DIRECTORY / "start.sh").read_text()
 START_LISTENER = re.compile(r"--port (?P<port>\d+)")
 APP_NETWORK_NAME = re.compile(r"hal_agent_[a-z]+")
 ROUTE_FILE = LITELLM_DIRECTORY / "front" / "dynamic" / "route.yml"
+EGRESS_FILE = ROOT / "agent-service" / "egress" / "dynamic" / "allowed.yml"
+HOST_SNI = re.compile(r"HostSNI\(`([^`]+)`\)")
+LITELLM_ENTRYPOINT = "litellm"  # the gateway's entrypoint on litellm-egress
 
 
 def load(path: Path) -> dict:
@@ -141,7 +145,7 @@ def test_the_front_finds_litellm_at_its_fixed_backend_address_and_never_by_dns(c
     assert compose["services"][FRONT]["extra_hosts"] == {LITELLM: backend["ipv4_address"]}
 
 
-def test_litellm_is_pinned_by_digest_hardened_and_reaches_the_provider_through_the_gateway(compose):
+def test_litellm_is_pinned_by_digest_hardened_and_behind_a_profile(compose):
     service = compose["services"][LITELLM]
 
     assert DIGEST_PINNED.match(service["image"])
@@ -154,8 +158,21 @@ def test_litellm_is_pinned_by_digest_hardened_and_reaches_the_provider_through_t
     assert service["ulimits"] == {"core": 0}
     assert service["init"] is True
     assert not {"ports", "expose", "network_mode", "cap_add"} & service.keys()
-    assert service["extra_hosts"] == {"api.anthropic.com": compose["x-litellm-egress-address"]}
     assert service["profiles"] == ["litellm"]
+
+
+def test_litellm_finds_exactly_the_names_the_gateway_passes_it_at_the_gateways_address(compose):
+    routers = load(EGRESS_FILE)["tcp"]["routers"].values()
+    passed = {
+        HOST_SNI.fullmatch(router["rule"]).group(1)
+        for router in routers
+        if LITELLM_ENTRYPOINT in router["entryPoints"]
+    }
+
+    assert passed
+    assert compose["services"][LITELLM]["extra_hosts"] == dict.fromkeys(
+        passed, compose["x-litellm-egress-address"]
+    )
 
 
 def test_dependabot_proposes_no_litellm_image_with_or_without_its_registry_host(compose):
@@ -219,13 +236,15 @@ def test_the_database_keeps_keycloaks_postgres_image_and_hardening_and_its_volum
     assert DATABASE in compose["volumes"]
 
 
-def test_only_litellm_reads_the_provider_key_and_only_it_and_the_key_step_the_master_key(compose):
+def test_only_litellm_reads_the_provider_keys_and_only_it_and_the_key_step_the_master_key(compose):
     holders = {
         secret: {n for n, s in compose["services"].items() if secret in s.get("secrets", [])}
-        for secret in (KEY_SECRET, MASTER_SECRET)
+        for secret in (*KEY_SECRETS, MASTER_SECRET)
     }
 
-    assert holders == {KEY_SECRET: {LITELLM}, MASTER_SECRET: {LITELLM, KEYS}}
+    assert holders == {secret: {LITELLM} for secret in KEY_SECRETS} | {
+        MASTER_SECRET: {LITELLM, KEYS}
+    }
 
 
 def test_the_fronts_http_block_global_and_log_are_those_of_the_public_traefik(front_static):
@@ -240,30 +259,34 @@ def test_the_fronts_http_block_global_and_log_are_those_of_the_public_traefik(fr
     assert set(front_static["providers"]) == {"file"}
 
 
-def test_the_fronts_dynamic_file_has_one_router_for_the_completion_call_and_nothing_else():
+def test_each_router_of_the_front_posts_one_exact_path_to_litellm_and_nothing_else_is_declared():
     dynamic = load(ROUTE_FILE)
+    port = START_LISTENER.search(START_SCRIPT).group("port")
 
     assert set(dynamic) == {"http"}
-    (router,) = dynamic["http"]["routers"].values()
-    assert router["rule"] == "Method(`POST`) && Path(`/v1/chat/completions`)"
-    assert router["entryPoints"] == ["api"]
-    (server,) = dynamic["http"]["services"][router["service"]]["loadBalancer"]["servers"]
-    assert server["url"] == f"http://{LITELLM}:{START_LISTENER.search(START_SCRIPT).group('port')}"
+    for router in dynamic["http"]["routers"].values():
+        assert re.fullmatch(r"Method\(`POST`\) && Path\(`[^`]+`\)", router["rule"])
+        assert router["entryPoints"] == ["api"]
+        (server,) = dynamic["http"]["services"][router["service"]]["loadBalancer"]["servers"]
+        assert server["url"] == f"http://{LITELLM}:{port}"
 
 
-def test_the_key_steps_route_is_the_one_path_the_front_serves():
-    dynamic = load(ROUTE_FILE)
-    (router,) = dynamic["http"]["routers"].values()
+def test_the_key_steps_routes_are_the_paths_the_front_serves():
+    routers = load(ROUTE_FILE)["http"]["routers"].values()
+    paths = [
+        path for router in routers for path in re.findall(r"Path\(`([^`]+)`\)", router["rule"])
+    ]
 
-    assert re.findall(r"Path\(`([^`]+)`\)", router["rule"]) == [litellm_keys.ROUTE]
+    assert sorted(paths) == sorted(litellm_keys.ROUTES)
 
 
-def test_the_completion_router_chains_only_middlewares_the_file_declares():
+def test_every_router_of_the_front_chains_the_same_middlewares_the_file_declares():
     dynamic = load(ROUTE_FILE)["http"]
-    (router,) = dynamic["routers"].values()
+    chains = [router["middlewares"] for router in dynamic["routers"].values()]
 
-    assert router["middlewares"]
-    assert set(router["middlewares"]) <= set(dynamic["middlewares"])
+    assert chains[0]
+    assert all(chain == chains[0] for chain in chains)
+    assert set(chains[0]) <= set(dynamic["middlewares"])
 
 
 def test_the_fronts_directories_are_mounted_where_its_static_file_reads_them(compose, front_static):
@@ -273,17 +296,44 @@ def test_the_fronts_directories_are_mounted_where_its_static_file_reads_them(com
     assert "/etc/traefik/traefik.yml" in mounted
 
 
-def test_each_text_name_maps_to_a_claude_id_of_its_own_family_and_retries_nothing(config):
-    entries = {e["model_name"]: e["litellm_params"] for e in config["model_list"]}
+def entries_under(config: dict, kind: str) -> dict[str, dict]:
+    """The parameters of each model name of config.yaml that begins with `<kind>/`."""
+    return {
+        entry["model_name"]: entry["litellm_params"]
+        for entry in config["model_list"]
+        if entry["model_name"].startswith(f"{kind}/")
+    }
+
+
+def test_every_model_name_is_a_text_or_an_image_name_and_retries_nothing(config):
+    names = [entry["model_name"] for entry in config["model_list"]]
+
+    assert all(name.partition("/")[0] in {"text", "image"} for name in names)
+    assert all(entry["litellm_params"]["max_retries"] == 0 for entry in config["model_list"])
+
+
+def test_each_text_name_maps_to_a_claude_id_of_its_own_family(config):
+    entries = entries_under(config, "text")
     families = {name: CLAUDE_ID.fullmatch(p["model"])["family"] for name, p in entries.items()}
 
     assert all(name == f"text/{family}" for name, family in families.items())
     assert len(set(families.values())) == 3
-    assert all(parameters["max_retries"] == 0 for parameters in entries.values())
+
+
+def test_each_image_name_maps_to_an_openai_image_model_on_a_key_of_its_own(config):
+    images, texts = entries_under(config, "image"), entries_under(config, "text")
+    image_keys = {parameters["api_key"] for parameters in images.values()}
+
+    assert images
+    assert all(IMAGE_ID.fullmatch(parameters["model"]) for parameters in images.values())
+    assert image_keys.isdisjoint(parameters["api_key"] for parameters in texts.values())
+    for key in image_keys:
+        variable = key.removeprefix("os.environ/")
+        assert re.search(rf"^{variable}=\$\(read_key ", START_SCRIPT, re.MULTILINE)
 
 
 def test_each_text_name_carries_a_positive_whole_max_tokens(config):
-    ceilings = [entry["litellm_params"]["max_tokens"] for entry in config["model_list"]]
+    ceilings = [parameters["max_tokens"] for parameters in entries_under(config, "text").values()]
 
     assert all(type(ceiling) is int and ceiling > 0 for ceiling in ceilings)
 
@@ -395,33 +445,41 @@ def test_litellm_mounts_only_its_config_and_start_script_and_loads_no_hal_code(c
 
 @pytest.fixture
 def stub_path(tmp_path) -> Path:
-    """A directory with a `litellm` that reports whether the key arrived in its environment."""
+    """A directory with a `litellm` that reports whether the keys arrived in its environment."""
     directory = tmp_path / "bin"
     directory.mkdir()
     stub = directory / "litellm"
     stub.write_text(
         '#!/bin/sh\n[ "$ANTHROPIC_API_KEY" = "$(cat "$KEY_FILE")" ] '
+        '&& [ "$OPENAI_API_KEY" = "$(cat "$OPENAI_FILE")" ] '
         '&& [ "$LITELLM_MASTER_KEY" = "$(cat "$MASTER_FILE")" ] && echo "$DATABASE_URL"\n'
     )
     stub.chmod(stub.stat().st_mode | stat.S_IEXEC)
     return directory
 
 
+def written_key(path: Path) -> Path:
+    path.write_text(secrets.token_urlsafe(32) + "\n")
+    return path
+
+
 def start(
-    stub_path, key_file: Path, master_file: Path | None = None, password_file: Path | None = None
+    stub_path,
+    key_file: Path,
+    master_file: Path | None = None,
+    password_file: Path | None = None,
+    openai_file: Path | None = None,
 ):
-    if master_file is None:
-        master_file = key_file.with_name("master")
-        master_file.write_text(secrets.token_urlsafe(32) + "\n")
-    if password_file is None:
-        password_file = key_file.with_name("password")
-        password_file.write_text(secrets.token_urlsafe(32) + "\n")
+    master_file = master_file or written_key(key_file.with_name("master"))
+    password_file = password_file or written_key(key_file.with_name("password"))
+    openai_file = openai_file or written_key(key_file.with_name("openai"))
     return subprocess.run(
         [
             str(LITELLM_DIRECTORY / "start.sh"),
             str(key_file),
             str(master_file),
             str(password_file),
+            str(openai_file),
         ],
         capture_output=True,
         text=True,
@@ -430,6 +488,7 @@ def start(
             "PATH": f"{stub_path}:/usr/bin:/bin",
             "KEY_FILE": str(key_file),
             "MASTER_FILE": str(master_file),
+            "OPENAI_FILE": str(openai_file),
         },
     )
 
@@ -452,7 +511,7 @@ def test_start_execs_litellm_with_the_database_url_of_the_composed_database(
     assert result.stderr == ""
 
 
-@pytest.mark.parametrize("bad", ["provider", "master", "password"])
+@pytest.mark.parametrize("bad", ["provider", "master", "password", "openai"])
 @pytest.mark.parametrize(
     "contents",
     [
@@ -479,9 +538,11 @@ def test_start_refuses_a_bad_key_file_with_one_line_that_names_the_path_only(
     good.write_text(secrets.token_urlsafe(32) + "\n")
     if contents is not None:
         refused.write_text(contents)
-    files = {"provider": good, "master": good, "password": good} | {bad: refused}
+    files = dict.fromkeys(("provider", "master", "password", "openai"), good) | {bad: refused}
 
-    result = start(stub_path, files["provider"], files["master"], files["password"])
+    result = start(
+        stub_path, files["provider"], files["master"], files["password"], files["openai"]
+    )
 
     assert result.returncode != 0
     assert result.stdout == ""

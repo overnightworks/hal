@@ -1,15 +1,17 @@
-# LiteLLM's configuration (compose.yaml, service `litellm`). Three model names an app sends, each
-# mapped to the current id of its family, with `max_tokens`: what LiteLLM sends for a request that
-# names none, and the output it reserves against a budget, so the ceiling of a conforming app; an
-# app that names more is bound by the budgets alone. A change reaches LiteLLM only through a
-# recreate of the container. No callback, cache or fallback; the provider key, the master key and
-# the database URL come from the environment start.sh fills from their files. LiteLLM's own keys
-# decide who may call: each app holds one, with its models, its route, its money budget and its
-# bound on parallel requests. Every request names its person as `user`, whose spend the budget
-# `max_end_user_budget_id` bounds unless the person's own row links another. The database holds
-# keys, budgets and each person's fingerprint with its counters; no spend or error log row is
-# written, and no prompt reaches one. No app knows the master key, so the admin routes stay closed
-# to apps.
+# LiteLLM's configuration (compose.yaml, service `litellm`). Three text names an app sends, each
+# mapped to the current id of its family on Anthropic, with `max_tokens`: what LiteLLM sends for a
+# request that names none, and the output it reserves against a budget, so the ceiling of a
+# conforming app; an app that names more is bound by the budgets alone. One picture name, mapped
+# to an OpenAI image model, which answers with the picture's bytes and its usage; it has no
+# `max_tokens`, so nothing is reserved and one picture can pass a budget. A change reaches LiteLLM
+# only through a recreate of the container. No callback, cache or fallback; the provider keys, the
+# master key and the database URL come from the environment start.sh fills from their files.
+# LiteLLM's own keys decide who may call: each app holds one, with its models, its routes, its
+# money budget and its bound on parallel requests. Every request names its person as `user`, whose
+# spend the budget `max_end_user_budget_id` bounds unless the person's own row links another. The
+# database holds keys, budgets and each person's fingerprint with its counters; no spend or error
+# log row is written, and no prompt reaches one. No app knows the master key, so the admin routes
+# stay closed to apps.
 model_list:
   - model_name: text/opus
     litellm_params:
@@ -29,6 +31,11 @@ model_list:
       api_key: os.environ/ANTHROPIC_API_KEY
       max_retries: 0
       max_tokens: 16384
+  - model_name: image/flare
+    litellm_params:
+      model: openai/gpt-image-2.5-flare
+      api_key: os.environ/OPENAI_API_KEY
+      max_retries: 0
 
 router_settings:
   num_retries: 0

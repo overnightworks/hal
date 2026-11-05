@@ -1,8 +1,8 @@
-"""The fake provider of the LiteLLM probe (probe/agent-service/litellm.py): a TLS server that
-stands in for api.anthropic.com or auth.hallucinai.de behind the gateway, inside the probe's
-internal `internet` network. Standard library only; it runs in the service image.
+"""The fake providers of the LiteLLM probe (probe/agent-service/litellm.py): a TLS server that
+stands in for api.anthropic.com, api.openai.com or auth.hallucinai.de behind the gateway, inside
+the probe's internal `internet` network. Standard library only; it runs in the service image.
 
-    python -I -B fake_anthropic.py {provider|issuer}
+    python -I -B fake_anthropic.py {provider|pictures|issuer}
 
 It reads `/fake/cert.pem`, `/fake/key.pem` and `/fake/expect.json` (the scratch provider key, the
 scratch identity strings and the answer marker; all of them
@@ -10,7 +10,12 @@ throwaway values). The `issuer` role answers `{}` to anything. The `provider` ro
 Anthropic message with the marker and prints one JSON line per request on standard output: the
 model, `max_tokens`, `metadata.user_id` (the fingerprint, which must arrive), whether the key
 matched, and counts of what must not arrive here. It prints a verdict and no other value of the
-request, and its answer holds only values it builds itself.
+request, and its answer holds only values it builds itself. The `pictures` role answers OpenAI's
+picture call (https://platform.openai.com/docs/api-reference/images/create) with the marker as
+`b64_json` and the `usage` the control file steers (mode `hold` holds it as above, mode
+`moderation` refuses it as OpenAI's safety system does), and prints one JSON line per request: the
+path, the model, the `user` that arrived (None when none did), whether `Authorization` carried the
+key, and the same counts.
 
 The `provider` role re-reads `/fake/control.json` on every request, so one container serves every
 cell of the failure probe (probe/agent-service/litellm_failures.py). The file holds `mode`:
@@ -62,6 +67,12 @@ TEXT_BLOCK = {"type": "text", "text": ""}
 ERRORS = {
     400: "invalid_request_error", 402: "billing_error", 500: "api_error", 529: "overloaded_error",
 }  # fmt: skip
+# OpenAI's refusal of a picture prompt by its safety system, as clients report it: a 400 whose
+# error code is `moderation_blocked`.
+MODERATION = json.dumps({"error": {
+    "message": "Your request was rejected as a result of our safety system.",
+    "type": "image_generation_user_error", "param": None, "code": "moderation_blocked",
+}}).encode()  # fmt: skip
 LOW_CREDIT = (
     "Your credit balance is too low to access the Anthropic API. "
     "Please go to Plans & Billing to upgrade or purchase credits."
@@ -106,14 +117,27 @@ def wait_for_disconnect(connection: socket.socket, seconds: float, mode: str = "
     return "timed out"
 
 
-def provider_record(expect: dict, request: http.server.BaseHTTPRequestHandler, body: bytes) -> dict:
-    raw = str(request.headers).encode() + body
+def document_of(body: bytes) -> dict:
     try:
         document = json.loads(body)
     except ValueError:
-        document = None
-    if not isinstance(document, dict):
-        document = {}
+        return {}
+    return document if isinstance(document, dict) else {}
+
+
+def counts(expect: dict, raw: bytes) -> dict:
+    """What must not arrive at a provider, and the canary that must."""
+    return {
+        "secret_hits": sum(raw.count(value.encode()) for value in expect.get("secrets", [])),
+        "identity_hits": sum(raw.count(value.encode()) for value in expect["identity"]),
+        "jwt_hits": len(JWT.findall(raw)),
+        "uuid_hits": len(UUID.findall(raw)),
+        "request_canary_hits": raw.count(expect.get("request_canary", "").encode() or b"\0"),
+    }
+
+
+def provider_record(expect: dict, request: http.server.BaseHTTPRequestHandler, body: bytes) -> dict:
+    document = document_of(body)
     metadata = document.get("metadata")
     return {
         "path": request.path,
@@ -122,12 +146,31 @@ def provider_record(expect: dict, request: http.server.BaseHTTPRequestHandler, b
         "user_id": metadata.get("user_id") if isinstance(metadata, dict) else None,
         "key_ok": request.headers.get("x-api-key") == expect["provider_key"],
         "authorization": "authorization" in request.headers,
-        "secret_hits": sum(raw.count(value.encode()) for value in expect.get("secrets", [])),
-        "identity_hits": sum(raw.count(value.encode()) for value in expect["identity"]),
-        "jwt_hits": len(JWT.findall(raw)),
-        "uuid_hits": len(UUID.findall(raw)),
-        "request_canary_hits": raw.count(expect.get("request_canary", "").encode() or b"\0"),
+        **counts(expect, str(request.headers).encode() + body),
     }
+
+
+def picture_record(expect: dict, request: http.server.BaseHTTPRequestHandler, body: bytes) -> dict:
+    document = document_of(body)
+    return {
+        "path": request.path,
+        "model": document.get("model"),
+        "user": document.get("user"),
+        "key_ok": request.headers.get("authorization") == f"Bearer {expect['provider_key']}",
+        **counts(expect, str(request.headers).encode() + body),
+    }
+
+
+def picture(expect: dict) -> bytes:
+    """OpenAI's answer of a gpt-image model: the picture's bytes in base64 and the token usage."""
+    usage = expect.get("usage", {"input_tokens": 1, "output_tokens": 1})
+    return json.dumps({
+        "created": int(time.time()), "data": [{"b64_json": expect["marker"]}],
+        "usage": {
+            **usage, "total_tokens": usage["input_tokens"] + usage["output_tokens"],
+            "input_tokens_details": {"text_tokens": usage["input_tokens"], "image_tokens": 0},
+        },
+    }).encode()  # fmt: skip
 
 
 def message(expect: dict) -> bytes:
@@ -141,6 +184,18 @@ def message(expect: dict) -> bytes:
         "stop_reason": "tool_use" if call else "end_turn", "stop_sequence": None,
         "usage": expect.get("usage", {"input_tokens": 1, "output_tokens": 1}),
     }).encode()  # fmt: skip
+
+
+def picture_answer(connection: socket.socket, steering: dict) -> tuple[int, bytes]:
+    """`moderation` refuses as OpenAI's safety system does; `hold` holds as the provider's does,
+    then answers the picture."""
+    mode = steering.get("mode", "answer")
+    if mode == "moderation":
+        return 400, MODERATION
+    if mode == "hold":
+        seconds = steering.get("hold_seconds", HOLD_SECONDS)
+        print(f"held {wait_for_disconnect(connection, seconds)}", flush=True)  # noqa: T201 - this in-container program prints its own request log
+    return 200, picture(steering)
 
 
 def server_sent(kind: str, data: dict) -> bytes:
@@ -200,6 +255,10 @@ def handler(role: str, expect: dict) -> type[http.server.BaseHTTPRequestHandler]
         def do_POST(self) -> None:
             body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
             status, reply = 200, b"{}"
+            if role == "pictures":
+                steering = {**expect, **control()}
+                print(json.dumps(picture_record(steering, self, body)), flush=True)  # noqa: T201 - this in-container program prints its own request log
+                status, reply = picture_answer(self.connection, steering)
             if role == "provider":
                 steering = control()
                 record = provider_record({**expect, **steering}, self, body)
