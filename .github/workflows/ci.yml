@@ -431,7 +431,7 @@ jobs:
       - name: overnightworks-hal installs from the lock file
         run: uv sync --locked --no-build --no-install-project
 
-      - name: The front forwards only POST /v1/chat/completions
+      - name: The front forwards only POST /v1/chat/completions, POST /v1/images/generations and GET /v1/models
         run: uv run --no-sync --no-build pytest tests/test_litellm_front.py
 
   quality:

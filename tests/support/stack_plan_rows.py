@@ -125,8 +125,12 @@ DIGEST_A, DIGEST_B = "79c6" + "0" * 60, "a78d" + "0" * 60
 KEYCLOAK = "quay.io/keycloak/keycloak:26.8.1"
 
 
+STEP_CA_IMAGE = "smallstep/step-ca:0.30.2"
+
+
 def kept(running: ImageReference, configured: ImageReference) -> KeptImage:
-    return KeptImage("keycloak", running, configured)
+    """An image of a unit whose image move is the operator's: step-ca's."""
+    return KeptImage("step-ca", running, configured)
 
 
 STEP_CA = Unit("step-ca", True, None)

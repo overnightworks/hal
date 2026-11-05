@@ -12,13 +12,15 @@ The copy is edge_copy's: a scratch HOME whose live checkout runs the lane's file
 name moved into the probe's project, and every network of edge_copy.PINNED_NETWORKS moved to a free
 /24 (the live project owns the shipped ones). Its catalog is the shipped one with the entry
 `litellm` as shipped and Keycloak switched off, so no setup asks and the key step holds the admin
-rows. Secrets are random scratch values under the scratch HOME's `~/.secrets/litellm/`, never a real
-key; every network a service of profile `litellm` joins must be internal, and `agent-egress` is in
-no unit, or the probe refuses to start. E counts the key step's one-off containers in `docker
-events` of the project during a run and names each one's mode, `--read` or `--write`, from a
-`docker` stand-in in front of the real one (U5 is its control); D digests the complete rows of the
-key table and the budget table, read by SQL in `litellm-db`, and prints the digest alone. Exit 0:
-every cell held.
+rows. Its `backup/apps.toml` names the probe's project (edge_copy), and its restic repository and
+password are the scratch HOME's: U12's switch-on over the kept volume takes LiteLLM's pre-apply
+snapshot first. Secrets are random scratch values under the scratch HOME's `~/.secrets/litellm/`,
+never a real key; every network a service of profile `litellm` joins must be internal, and
+`agent-egress` is in no unit, or the probe refuses to start. E counts the key step's one-off
+containers in `docker events` of the project during a run and names each one's mode, `--read` or
+`--write`, from a `docker` stand-in in front of the real one (U5 is its control); D digests the
+complete rows of the key table and the budget table, read by SQL in `litellm-db`, and prints the
+digest alone. Exit 0: every cell held.
 """
 
 from __future__ import annotations
@@ -34,6 +36,7 @@ import stat
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import NamedTuple
 
@@ -43,6 +46,7 @@ sys.path[:0] = [str(Path(__file__).resolve().parent), str(REPO / "probe"), str(R
 import edge_copy  # noqa: E402
 from edge_copy import HAL_DECLINED, HAL_FAILURE, HAL_OK, HAL_REFUSED, expect, publish  # noqa: E402
 
+from hal.backup.settings import Settings  # noqa: E402
 from hal.output import write_line  # noqa: E402
 from hal.stack import api_limits, catalog, core, litellm_keys  # noqa: E402
 from hal.stack.litellm_admin import hashed  # noqa: E402
@@ -53,7 +57,9 @@ SERVICES = ("litellm", "litellm-db", "litellm-front")  # Compose's resolved orde
 FRONT = "litellm-front"
 APPS = ("hopin", "presentator", "songmaker")
 SECRETS = Path(".secrets/litellm")
-PROVIDER, MASTER, PASSWORD = (SECRETS / name for name in ("anthropic", "master-key", "db-password"))
+PROVIDER, MASTER, PASSWORD, PICTURES = (
+    SECRETS / name for name in ("anthropic", "master-key", "db-password", "openai")
+)
 LISTEN_SECONDS = 240
 LABEL = f"{PROJECT}.throwaway=1"
 KEY_TABLE = '"LiteLLM_VerificationToken"'
@@ -61,13 +67,18 @@ COMPOSE_FILE = "compose.yaml"
 YES_PROMPT = "Type yes"
 PLAN_END = "to apply"
 LITELLM_ON = "litellm is on"
+LIVE_RESTORE = re.compile(r"pre-apply snapshot [0-9a-f]+, `hal restore litellm --live --snapshot")
 CELL_U14C = "U14 (c)"
 SUBNET_CANDIDATES = [f"172.31.{third}.0/24" for third in range(230, 210, -1)]
 ENTRY = re.compile(r"^ {2}litellm:\n(?: {4}.*\n)+", re.MULTILINE)
 KEYCLOAK_OFF = "  keycloak:\n    run:\n      enabled: false\n"
 DOCKER_STAND_IN = """\
 #!/bin/sh
-# The mode of each litellm-keys one-off, after the service name; nothing else is written.
+# The mode of each litellm-keys one-off, after the service name; and, when DOCKER_CALLS names a
+# file, each call behind its caller's command line.
+if [ -n "$DOCKER_CALLS" ]; then
+  printf '%s\\t%s\\n' "$(tr '\\0' ' ' < /proc/$PPID/cmdline)" "$*" >> "$DOCKER_CALLS"
+fi
 named=
 for argument in "$@"; do
   if [ -n "$named" ]; then
@@ -113,6 +124,13 @@ class Probe:
         self.copy = Path()
         self.held: list[str] = []
         self.files: dict[Path, str] = {}
+        # the scratch HOME's restic password: a switch-on over the kept volume backs it up first
+        settings = Settings.for_home(self.home, os.getuid(), os.getgid())
+        (self.home / ".secrets").mkdir(mode=0o700)
+        settings.password_file.parent.mkdir(mode=0o700)
+        descriptor = os.open(settings.password_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, "w") as file:
+            file.write(secrets.token_urlsafe(32))
 
     # --- plumbing -----------------------------------------------------------------------------
 
@@ -212,9 +230,7 @@ class Probe:
 
     def wait_until_listening(self, cell: str) -> None:
         """Until LiteLLM answers on litellm-backend, from a throwaway beside the key step."""
-        image = json.loads(self.compose("config", "--format", "json"))["services"][
-            litellm_keys.KEYS_SERVICE
-        ]["image"]
+        image = self.keys_image()
         program = (
             "import urllib.request; "
             "urllib.request.urlopen('http://litellm:4000/health/liveliness', timeout=3)"
@@ -230,6 +246,11 @@ class Probe:
                 time.monotonic() < deadline, f"{cell}: LiteLLM did not listen in {LISTEN_SECONDS} s"
             )
             time.sleep(3)
+
+    def keys_image(self) -> str:
+        """The key step's image: plain Python, which the probe's throwaways run."""
+        resolved = json.loads(self.compose("config", "--format", "json"))
+        return resolved["services"][litellm_keys.KEYS_SERVICE]["image"]
 
     def write_secret(self, relative: Path, value: str) -> None:
         """A new file at `relative`, as `hal setup` writes one: 0644 in 0700 folders."""
@@ -290,13 +311,15 @@ class Probe:
         (self.copy / catalog.FLEET_FILE).write_text(without)
         publish(self.copy, "probe: the pinned networks moved, the catalog without litellm")
         self.expect_no_egress()
-        for relative in (PROVIDER, MASTER):
+        for relative in (PROVIDER, MASTER, PICTURES):
             self.write_secret(relative, f"sk-{secrets.token_hex(32)}")
         self.write_secret(PASSWORD, secrets.token_hex(24))
         for app in APPS:
             self.write_secret(SECRETS / "apps" / app, f"sk-{secrets.token_urlsafe(32)}")
         entry = ENTRY.search(shipped)
         expect(entry is not None, "the shipped fleet.yaml has no litellm entry")
+        code, said, _ = self.hal("backup", "--init")
+        expect(code == HAL_OK, f"hal backup --init exited {code}: {said[-200:]}")
         return without, without + entry[0]
 
     def expect_no_egress(self) -> None:
@@ -366,7 +389,7 @@ class Probe:
         )
 
     def cell_u1(self) -> None:
-        for relative in (PROVIDER, MASTER, PASSWORD):
+        for relative in (PROVIDER, MASTER, PASSWORD, PICTURES):
             path, value = self.home / relative, self.files[relative]
             path.unlink()
             output, ran = self.apply("U1", HAL_REFUSED)
@@ -376,7 +399,7 @@ class Probe:
             self.write_secret(relative, value)
         self.hold(
             "U1",
-            "each of the three files missing: `litellm needs <path>; nothing switched`, "
+            "each of the four files missing: `litellm needs <path>; nothing switched`, "
             "next: hal setup, exit 4, no question, nothing runs",
         )
 
@@ -521,11 +544,13 @@ class Probe:
             "partial, litellm is not on after the change" in output and LITELLM_ON not in output,
             f"U12: {output[-300:]}",
         )
+        expect(LIVE_RESTORE.search(output) is not None, f"U12: no way back: {output[-300:]}")
         expect({"litellm-db", FRONT} <= self.running(), f"U12: running {self.running()}")
         expect(ran.created == 0, f"U12: E saw {ran}")
         self.hold(
             "U12",
-            "partial, litellm is not on after the change, exit 3; litellm-db and the front run",
+            "partial, litellm is not on after the change, exit 3, after the kept volume's proven "
+            "snapshot, `hal restore litellm --live` named; litellm-db and the front run",
         )
 
     def cell_r1(self) -> None:
@@ -610,11 +635,17 @@ def prove(probe: Probe) -> int:
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
+def run(probe_class: Callable[[Path], Probe], argv: list[str] | None) -> int:
+    """A probe program's command line and run, described by its module's first docstring line."""
+    description = sys.modules[probe_class.__module__].__doc__.splitlines()[0]
     return edge_copy.run_main(
-        __doc__.splitlines()[0], argv, Probe, prove,
+        description, argv, probe_class, prove,
         lambda probe: edge_copy.passed_line(f"PASSED: {', '.join(probe.held)}"),
     )  # fmt: skip
+
+
+def main(argv: list[str] | None = None) -> int:
+    return run(Probe, argv)
 
 
 if __name__ == "__main__":

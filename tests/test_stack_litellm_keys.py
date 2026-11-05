@@ -53,7 +53,7 @@ def test_a_new_key_carries_its_app_as_name_its_numbers_and_every_model_litellm_l
         "max_budget": 6.0,
         "budget_duration": litellm_keys.BUDGET_DURATION,
         "models": MODELS,
-        "allowed_routes": (litellm_keys.ROUTE,),
+        "allowed_routes": litellm_keys.ROUTES,
         "max_parallel_requests": 3,
         "rpm_limit": None,
         "tpm_limit": None,
@@ -93,8 +93,13 @@ def test_the_person_budget_holds_its_dollars_for_the_period() -> None:
         ),
         pytest.param(
             {"allowed_routes": []},
-            {"allowed_routes": (litellm_keys.ROUTE,)},
-            id="a key without its route gets it",
+            {"allowed_routes": litellm_keys.ROUTES},
+            id="a key without its routes gets them",
+        ),
+        pytest.param(
+            {"allowed_routes": [litellm_keys.COMPLETION_ROUTE, litellm_keys.PICTURE_ROUTE]},
+            {"allowed_routes": litellm_keys.ROUTES},
+            id="a key without the model list gets every route",
         ),
     ],
 )

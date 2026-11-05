@@ -374,15 +374,17 @@ trace, not Keycloak, and it is also the setup check of `hal apply --local` for t
 
 ## Patch upgrade
 
-1. **Back up the database** with `hal backup` (the dump holds signing keys and
-   credential hashes; the backup keeps it encrypted, see [backup.md](backup.md)). It must end
-   with exit 0.
-2. **Bump the pin** of `quay.io/keycloak/keycloak` in `compose.yaml` (version and digest), and of
+1. **Bump the pin** of `quay.io/keycloak/keycloak` in `compose.yaml` (version and digest), and of
    keycloak-config-cli if a build for the new version exists.
-3. **Re-run the probe.** It runs beside the live edge, which stays up, and its cell N1 fails on a
+2. **Re-run the probe.** It runs beside the live edge, which stays up, and its cell N1 fails on a
    refreshed ID token with a `nonce` key: [probe/keycloak/README.md](../probe/keycloak/README.md).
-4. **Start** as in [stack.md](stack.md) and wait until Keycloak answers the master realm on 8090;
-   Keycloak migrates its database on the first start of the new version.
+3. **Apply** once the pull request is merged. `hal apply` names
+   `keycloak recreate image … → … · snapshot first`. After its `yes` it takes and proves Keycloak's
+   pre-apply snapshot (the dump holds signing keys and credential hashes; the backup keeps it
+   encrypted, see [backup.md](backup.md)), then recreates Keycloak; Keycloak migrates its database
+   on the first start of the new version. If the snapshot fails, the old container keeps running.
+   If the new one does not run, the error line names the snapshot for `hal restore keycloak --live`
+   ([backup.md](backup.md), „Restore Keycloak“).
 
 ## Probe
 

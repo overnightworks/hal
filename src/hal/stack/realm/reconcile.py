@@ -18,25 +18,18 @@ config-cli and filled only after the observe, so a step that did not finish is p
 Nothing is deleted but what config-cli resets to the file; those removals say so.
 """
 
-import contextlib
 import hashlib
 import json
-import os
-import re
-import signal
-import subprocess
 import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
-from functools import partial
 from pathlib import Path
 from typing import Any, TypeGuard
 
-from hal.output import LOG_FORMAT_VARIABLE, LogFormat, printable
-from hal.output.command import PROGRAM, Verb, command
 from hal.stack import compose, core, switches
 from hal.stack import realm as realm_lines
+from hal.stack.pre_apply import Backup, PreApplyError
 from hal.stack.realm import OBSERVER_SERVICE, new_digest_key
 from hal.stack.realm import declared as declared_identities
 from hal.stack.realm.observe import (
@@ -59,14 +52,9 @@ CONFIG_CLI = "keycloak-config-cli"
 # config-cli imports these from its directory bind of keycloak/, which `core.file_binds` skips.
 REALM_FILES = ("keycloak/master.yaml", "keycloak/realm.yaml")
 DEFINITION_KEY = "definition"  # the entry's key for `definition_digest` of config-cli
-BACKUP_SECONDS = 1800
-STOP_GRACE_SECONDS = 120  # what hal backup gets to remove its staging and restore container
-COLLECT_SECONDS = 5  # what the output of a killed hal backup gets before its pipes are closed
-_ERROR_LINE = re.compile(r"^error: (.+)$", re.MULTILINE)
 NO_MEMBERS = "the realm observer answered no members"
 
 type Checksums = dict[str, dict[str, str]]  # realm -> import-checksum attribute -> value
-type Waiting = Callable[[float], None]  # told the seconds a stopped hal is given to clean up
 
 
 class RealmError(Exception):
@@ -262,113 +250,6 @@ def _why(reading: core.Reading, inputs: Inputs, observed: Checksums | None) -> s
 # --- The step ----------------------------------------------------------------------------------
 
 
-def run_edge_backup(
-    command: list[str], timeout: int, stdin: str | None = None, *, waiting: Waiting
-) -> subprocess.CompletedProcess[str]:
-    """Run hal backup or hal restore to its end, in a session of its own, so the terminal's Ctrl-C
-    reaches only this step. On the timeout or the first Ctrl-C it is stopped as the `hal-backup`
-    systemd unit is (`KillMode=control-group` default): SIGTERM to its whole group, then
-    `STOP_GRACE_SECONDS` to remove its staging and restore container."""
-    try:
-        with subprocess.Popen(  # noqa: S603 - argv is built by the program itself and no shell runs
-            command,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            cwd=compose.REPOSITORY,
-            env={**os.environ, LOG_FORMAT_VARIABLE: LogFormat.TEXT},  # `_cause` reads text
-            start_new_session=True,
-        ) as process:
-            try:
-                stdout, stderr = process.communicate(stdin, timeout)
-            except subprocess.TimeoutExpired as error:
-                _stop(process, waiting)
-                raise compose.ComposeError(
-                    f"`{' '.join(command[:3])}` took longer than {timeout}s"
-                ) from error
-            except KeyboardInterrupt:
-                _stop(process, waiting)
-                raise
-    except OSError as error:
-        raise compose.ComposeError(f"cannot run {command[0]}: {error.strerror}") from error
-    return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
-
-
-def _stop(process: subprocess.Popen[str], waiting: Waiting) -> None:
-    """SIGTERM to the group and a grace that no further Ctrl-C shortens; then the group is killed
-    and the output collected for a bounded time, so a grandchild holding a pipe cannot hang."""
-    waiting(STOP_GRACE_SECONDS)
-    _signal_group(process, signal.SIGTERM)
-    deadline = time.monotonic() + STOP_GRACE_SECONDS
-    while (remaining := deadline - time.monotonic()) > 0:
-        try:
-            process.communicate(timeout=remaining)
-            break
-        except subprocess.TimeoutExpired:
-            break
-        except KeyboardInterrupt:
-            continue  # hal was told once; only its exit or the grace ends the wait
-    _signal_group(process, signal.SIGKILL)
-    with contextlib.suppress(subprocess.TimeoutExpired, KeyboardInterrupt):
-        process.communicate(timeout=COLLECT_SECONDS)  # leaving the `with` closes the pipes
-
-
-def _signal_group(process: subprocess.Popen[str], sent: signal.Signals) -> None:
-    with contextlib.suppress(ProcessLookupError):  # the group is gone already
-        os.killpg(process.pid, sent)
-
-
-@dataclass(frozen=True)
-class Backup:
-    """`hal backup` and `hal restore` as the timers run them, for Keycloak alone."""
-
-    command: tuple[str, ...]
-    run: compose.Runner
-
-    @classmethod
-    def installed(cls, repository: Path, waiting: Waiting) -> Backup:
-        """`waiting` is told when a stopped hal is waited for."""
-        return cls(
-            (str(repository / ".venv" / "bin" / PROGRAM),),
-            partial(run_edge_backup, waiting=waiting),
-        )
-
-    def pre_apply(self) -> str:
-        """The new snapshot's ID."""
-        arguments = ["backup", REALM_UNIT, "--pre-apply", "--json"]
-        result = self._run(arguments, "the Keycloak backup failed")
-        try:
-            snapshot = json.loads(result.stdout)["snapshot"]
-        except ValueError, KeyError, TypeError:
-            snapshot = None
-        if not isinstance(snapshot, str):
-            raise RealmError(f"{command(Verb.BACKUP)} named no pre-apply snapshot")
-        return snapshot
-
-    def restore_test(self, snapshot: str) -> None:
-        """Proves the snapshot just made, whatever a timer backs up in between."""
-        arguments = ["restore", "--test", REALM_UNIT, "--snapshot", snapshot]
-        self._run(arguments, "the restore test failed")
-
-    def _run(self, arguments: list[str], failure: str) -> subprocess.CompletedProcess[str]:
-        try:
-            result = self.run([*self.command, *arguments], BACKUP_SECONDS)
-        except compose.ComposeError as error:
-            raise RealmError(f"{failure} ({error})") from error
-        if result.returncode != 0:
-            raise RealmError(f"{failure} ({_cause(result)})")
-        return result
-
-
-def _cause(result: subprocess.CompletedProcess[str]) -> str:
-    """The `error:` line hal wrote, never its `next:` line; the last line of a failure that is not
-    hal's own."""
-    output = result.stderr + result.stdout
-    errors = _ERROR_LINE.findall(output)
-    return printable(errors[-1].strip()) if errors else compose.last_line(output)
-
-
 class Stage(StrEnum):
     BEFORE = "before"  # nothing is applied yet
     APPLYING = "applying"  # config-cli started
@@ -463,7 +344,13 @@ class Realm:
         progress = _Progress()
         try:
             return self._apply(plan, progress)
-        except (RealmError, compose.ComposeError, core.CoreError, switches.SwitchError) as error:
+        except (
+            RealmError,
+            PreApplyError,
+            compose.ComposeError,
+            core.CoreError,
+            switches.SwitchError,
+        ) as error:
             return _failed(progress, str(error))
         except KeyboardInterrupt:
             return _failed(progress, "interrupted")
@@ -472,8 +359,8 @@ class Realm:
         started = self.clock()
         followed = core.followed_services(self.config, self.checkout)
         self._refuse_while_config_cli_runs()
-        progress.snapshot = self.backup.pre_apply()
-        self.backup.restore_test(progress.snapshot)
+        progress.snapshot = self.backup.pre_apply(KEYCLOAK)
+        self.backup.restore_test(KEYCLOAK, progress.snapshot)
         progress.proven = True
         before = self.observer.inventory()
         self._run_config_cli(progress, followed)

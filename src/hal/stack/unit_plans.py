@@ -1,10 +1,11 @@
 """What each unit needs to become what the catalog says, and how one unit is switched."""
 
+import dataclasses
 from collections.abc import Callable, Collection, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, Protocol
 
 from hal.stack import barrier, built_image, catalog, compose, core, switches
 
@@ -23,6 +24,8 @@ class UnitPlan:
     volumes: tuple[str, ...]
     switched_off_since: str | None = None
     running: bool = False
+    snapshot: DatabaseUnit | None = None  # a switch-on that takes this unit's snapshot first
+    creates_app: bool = False  # ... and whose start then creates the app, which has no container
 
 
 @dataclass(frozen=True)
@@ -64,12 +67,71 @@ def plan_switches(
             action = Action.OFF
         else:
             continue
-        volumes = sorted(
-            {v for name in services for v in compose.named_volumes(config["services"][name])}
-        )
+        volumes = unit_volumes(config, services)
         running = compose.has_running_container(states, services)
-        plans.append(UnitPlan(unit, action, services, tuple(volumes), since, running))
+        plans.append(UnitPlan(unit, action, services, volumes, since, running))
     return plans
+
+
+def unit_volumes(config: Mapping[str, Any], services: Sequence[str]) -> tuple[str, ...]:
+    """The compose volume keys the unit's services mount, sorted."""
+    return tuple(
+        sorted({v for name in services for v in compose.named_volumes(config["services"][name])})
+    )
+
+
+def plan_switch_on_snapshots(
+    plans: Sequence[UnitPlan],
+    fleet: Fleet,
+    states: Mapping[str, set[str]],
+    engine: compose.Compose,
+    database_units: Collection[DatabaseUnit],
+) -> list[UnitPlan]:
+    """The plans, each switch-on that starts a database unit over its data with the unit's
+    snapshot first (`snapshot_before_start`), and whether its start then creates the app."""
+    planned = []
+    for plan in plans:
+        unit = (
+            snapshot_before_start(fleet, plan.unit.key, states, engine, database_units)
+            if plan.action is Action.ON
+            else None
+        )
+        creates_app = unit is not None and unit.service not in states
+        planned.append(dataclasses.replace(plan, snapshot=unit, creates_app=creates_app))
+    return planned
+
+
+def snapshot_before_start(
+    fleet: Fleet,
+    key: str,
+    states: Mapping[str, set[str]],
+    engine: compose.Compose,
+    database_units: Collection[DatabaseUnit],
+) -> DatabaseUnit | None:
+    """The database unit `key` when its start would create its app or database service, which
+    has no container, while a volume of the unit (for Keycloak and LiteLLM their database's)
+    exists: the image that last read that data is unknown then, so the unit's pre-apply snapshot
+    comes before the app starts. A unit with all its containers, or with no volume yet, has
+    nothing to protect from a new image."""
+    unit = next((unit for unit in database_units if unit.key == key), None)
+    if unit is None or {unit.service, unit.database} <= states.keys():
+        return None
+    volumes = unit_volumes(fleet.config, fleet.profile_services[key])
+    names = (compose.volume_name(fleet.config, volume) for volume in volumes)
+    return unit if any(map(engine.volume_exists, names)) else None
+
+
+def services_to_start(
+    fleet: Fleet,
+    key: str,
+    engine: compose.Compose,
+    database_units: Collection[DatabaseUnit],
+) -> tuple[tuple[str, ...], DatabaseUnit | None]:
+    """The services `hal start` starts for the unit `key`, and the database unit whose data they
+    would be created over; then none start, since a switch-on over data is `hal apply`'s, after
+    its snapshot."""
+    over = snapshot_before_start(fleet, key, engine.states(), engine, database_units)
+    return ((), over) if over else (fleet.profile_services[key], None)
 
 
 DIGEST_SEPARATOR = "@"
@@ -145,7 +207,7 @@ def plan_kept_images(
     profile, the services in `planned_elsewhere` (the followers and the built services) have their
     own plan, a unit planned off loses its containers, a built unit that stays stopped is edge's to
     build and only shown as stopped, and a service whose definition names no image has no pin to
-    compare."""
+    compare. `plan_recreates` moves those of a database unit's app or database service (#995)."""
     planned_off = {plan.unit.key for plan in plans if plan.action is Action.OFF}
     built_and_stopped = {
         plan.unit.key
@@ -196,10 +258,15 @@ def _running_images(service: str, live: Sequence[compose.Container]) -> list[str
 
 @dataclass(frozen=True)
 class Recreate:
-    """A live service of a unit that runs on whose compose definition changed."""
+    """A live service of a unit that runs on whose compose definition changed, or the app or
+    database service of a database unit whose container runs another image than compose.yaml
+    names (`moved`). `snapshot` is set on the first recreate of a unit with a move: the unit's
+    pre-apply snapshot is taken and proven before it."""
 
     unit: str
     service: str
+    moved: KeptImage | None = None
+    snapshot: DatabaseUnit | None = None
 
 
 @dataclass(frozen=True)
@@ -248,6 +315,7 @@ def plan_recreates(
     planned_elsewhere: Collection[str],
     kept: Sequence[KeptImage],
     image_id: Callable[[str], str],
+    database_units: Collection[DatabaseUnit],
 ) -> RecreatePlans:
     """Each live service of an enabled unit that is not switched on, off or kept stopped by a
     plan, whose container is labelled with another definition hash than `hashes` (from
@@ -255,30 +323,76 @@ def plan_recreates(
     depends on. The services in `planned_elsewhere` have their own plan, a service whose image
     differs is only named (#91), and a container without the label cannot be planned (#376). A
     reference that is not pinned by digest may name another image than the container runs (a
-    rebuilt local tag), which a recreate would swap in: that service is named, not recreated."""
+    rebuilt local tag), which a recreate would swap in: that service is named, not recreated.
+    The app or database service of one of `database_units` whose image differs is recreated onto
+    it instead, after the unit's pre-apply snapshot (#995)."""
     planned = {plan.unit.key for plan in plans}
-    kept_services = {image.service for image in kept}
+    databases = {unit.key: unit for unit in database_units}
     live = [container for container in containers if container.live]
     recreates: list[Recreate] = []
     moved: list[KeptImage] = []
     for unit in units:
-        if not unit.enabled or unit.key in planned:
-            continue
+        if unit.enabled and unit.key not in planned:
+            planner = _UnitRecreates(config, live, hashes, image_id, databases.get(unit.key))
+            recreates.extend(
+                planner.of(unit.key, profile_services[unit.key], planned_elsewhere, kept, moved)
+            )
+    return RecreatePlans(recreates, moved)
+
+
+@dataclass(frozen=True)
+class _UnitRecreates:
+    """The recreates of one unit; `database` is the unit when it is a database unit."""
+
+    config: Mapping[str, Any]
+    live: Sequence[compose.Container]
+    hashes: Mapping[str, str]
+    image_id: Callable[[str], str]
+    database: DatabaseUnit | None
+
+    def of(
+        self,
+        unit: str,
+        profile: Sequence[str],
+        planned_elsewhere: Collection[str],
+        kept: Sequence[KeptImage],
+        moved: list[KeptImage],
+    ) -> list[Recreate]:
+        """Its recreates in dependency order, the first after its snapshot when an image moves;
+        each named image swap of an unpinned tag joins `moved`."""
+        moves = self._moves(kept)
+        kept_services = {image.service for image in kept}
         services = [
             service
-            for service in profile_services[unit.key]
-            if service not in planned_elsewhere and service not in kept_services
+            for service in profile
+            if service not in planned_elsewhere
+            and (service in moves or service not in kept_services)
         ]
-        changed = core.changed_definitions(live, services, hashes)
-        for service in core.dependency_order(config, services):
-            if service not in changed:
-                continue
-            swapped = _swapped_image(service, config, live, image_id)
-            if swapped is None:
-                recreates.append(Recreate(unit.key, service))
-            elif swapped not in moved:
-                moved.append(swapped)
-    return RecreatePlans(recreates, moved)
+        changed = core.changed_definitions(self.live, services, self.hashes)
+        recreates: list[Recreate] = []
+        for service in core.dependency_order(self.config, services):
+            if service in moves:
+                recreates.append(Recreate(unit, service, moves[service]))
+            elif service in changed:
+                swapped = _swapped_image(service, self.config, self.live, self.image_id)
+                if swapped is None:
+                    recreates.append(Recreate(unit, service))
+                elif swapped not in moved:
+                    moved.append(swapped)
+        if moves:
+            recreates[0] = dataclasses.replace(recreates[0], snapshot=self.database)
+        return recreates
+
+    def _moves(self, kept: Sequence[KeptImage]) -> dict[str, KeptImage]:
+        """The app and database service whose image differs, each with its first kept image."""
+        if self.database is None:
+            return {}
+        movable = (self.database.service, self.database.database)
+        moves: dict[str, KeptImage] = {}
+        for image in kept:
+            if image.service in movable:
+                moves.setdefault(image.service, image)
+        return moves
 
 
 def _swapped_image(
@@ -324,10 +438,12 @@ def plan_unit_services(
     followers: Collection[str],
     gates: Mapping[str, core.Gate],
     engine: compose.Compose,
+    database_units: Collection[DatabaseUnit],
 ) -> UnitServicePlans:
     """What the services of the units need besides their switch: the built service is recreated
-    onto its image, every other live service whose definition changed is recreated, and every
-    other whose image differs is named (#91)."""
+    onto its image, every other live service whose definition changed is recreated, the app or
+    database service of a database unit whose image differs is recreated onto it after the
+    unit's snapshot, and every other whose image differs is named (#91, #995)."""
     built_services = built_image.built_services(
         fleet.units, fleet.profile_services, fleet.config, gates
     )
@@ -348,8 +464,11 @@ def plan_unit_services(
         planned_elsewhere,
         images,
         engine.image_id,
+        database_units,
     )
-    return UnitServicePlans(built, recreates, [*images, *moved])
+    moving = {recreate.service for recreate in recreates if recreate.moved}
+    named = [image for image in images if image.service not in moving]
+    return UnitServicePlans(built, recreates, [*named, *moved])
 
 
 @dataclass
@@ -376,27 +495,66 @@ class NotWritten:
         return f"could not write {self.path} ({self.reason})"
 
 
+type Begin = Callable[[], None]  # told under the switch lock, right before the start
+
+
+class SnapshotFirst(Protocol):
+    """Takes and proves `unit`'s pre-apply snapshot, then runs `start` with what it is told
+    when the start over the data begins; what `start` returns."""
+
+    def __call__(self, unit: DatabaseUnit, start: Callable[[Begin], str | None]) -> str | None: ...
+
+
 def switch(
     engine: compose.Compose,
     plan: UnitPlan,
     progress: Progress,
     marks: switches.Switches,
     read: Mapping[str, switches.Mark | None],
+    snapshot_first: SnapshotFirst,
 ) -> str | None:
-    """Switch one unit; the time of a switch that appeared meanwhile when the unit stays down."""
+    """Switch one unit; the time of a switch that appeared meanwhile when the unit stays down. A
+    switch-on with a snapshot starts the unit's database alone for it, then the rest."""
     progress.unit = plan.unit.key
     if plan.action is Action.ON:
-        progress.step = "start"
-        with marks.lock():
-            if changed := marks.changed(plan.unit.key, read[plan.unit.key]):
-                return since_of(changed)
-            engine.start(plan.unit.key, plan.services)
-        return None
+        starter = _Starter(engine, plan, progress, marks, read[plan.unit.key])
+        if plan.snapshot is None:
+            return starter.start(plan.services, "start")
+        database = plan.snapshot.database
+        if since := starter.start((database,), f"start {database} alone"):
+            return since
+        return snapshot_first(
+            plan.snapshot,
+            lambda begin: starter.start(
+                plan.services, "start", begin if plan.creates_app else None
+            ),
+        )
     progress.step = "stop"
     engine.stop(plan.unit.key, plan.services)
     progress.step = "remove the containers"
     engine.remove_containers(plan.unit.key, plan.services)
     return None
+
+
+@dataclass(frozen=True)
+class _Starter:
+    engine: compose.Compose
+    plan: UnitPlan
+    progress: Progress
+    marks: switches.Switches
+    read: switches.Mark | None
+
+    def start(self, services: tuple[str, ...], step: str, begin: Begin | None = None) -> str | None:
+        """Start `services` of the unit under the switch lock; the time of a switch that
+        appeared since the plan read its mark, and nothing started then."""
+        self.progress.step = step
+        with self.marks.lock():
+            if changed := self.marks.changed(self.plan.unit.key, self.read):
+                return since_of(changed)
+            if begin:
+                begin()
+            self.engine.start(self.plan.unit.key, services)
+        return None
 
 
 def since_of(changed: switches.Changed) -> str:

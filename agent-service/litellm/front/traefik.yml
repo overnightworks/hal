@@ -1,8 +1,8 @@
-# The static configuration of litellm-front (compose.yaml): a one-route HTTP proxy between the
+# The static configuration of litellm-front (compose.yaml): a three-route HTTP proxy between the
 # apps and LiteLLM, so nothing else LiteLLM registers is reachable. One entrypoint on
 # :4000, whose `http` block equals the `edge` entrypoint's (the hardening of traefik.yml), and the
 # global and log blocks of traefik.yml; tests/test_litellm_unit.py and the CI job `front` hold the
-# equality. The api, ping and metrics blocks stay absent. The one route stands in
+# equality. The api, ping and metrics blocks stay absent. The three routes stand in
 # dynamic/route.yml. The front reads no secret file; app keys pass through its
 # memory only.
 global:

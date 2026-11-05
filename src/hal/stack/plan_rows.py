@@ -43,6 +43,7 @@ from hal.stack.unit_plans import (
 _SEPARATOR = " · "
 _DIGEST_SHOWN = 4
 _DEFINITION_CHANGED = "definition changed"
+_SNAPSHOT_FIRST = "snapshot first"  # the pre-apply snapshot is taken and proven before it
 CHECKOUT = "checkout"
 
 
@@ -386,14 +387,20 @@ def _built_row(built: BuiltRecreate) -> Row:
 
 
 def _recreate_row(recreate: Recreate) -> Row:
-    return Row(Glyph.CHANGE, recreate.service, PlanEvent.RECREATE, _DEFINITION_CHANGED)
+    """A database unit's moved image names both images, and its unit's first recreate says the
+    snapshot comes first."""
+    moved = recreate.moved
+    cause = _DEFINITION_CHANGED if moved is None else f"image {_both_images(moved, ' → ')}"
+    facts = (cause, *((_SNAPSHOT_FIRST,) if recreate.snapshot else ()))
+    return Row(Glyph.CHANGE, recreate.service, PlanEvent.RECREATE, _SEPARATOR.join(facts))
 
 
 def _unit_plan_row(plan: UnitPlan) -> Row:
     key, services = plan.unit.key, ", ".join(plan.services)
     match plan.action:
         case Action.ON:
-            return Row(Glyph.ADD, key, PlanEvent.SWITCH_ON, services)
+            facts = (services, *((_SNAPSHOT_FIRST,) if plan.snapshot else ()))
+            return Row(Glyph.ADD, key, PlanEvent.SWITCH_ON, _SEPARATOR.join(facts))
         case Action.OFF:
             facts = (
                 services,
@@ -411,10 +418,16 @@ def _unit_plan_row(plan: UnitPlan) -> Row:
 
 
 def _old_image_row(image: KeptImage) -> Row:
+    fact = _both_images(image, f"{_SEPARATOR}compose.yaml ")
+    return Row(Glyph.NEEDS_YOU, image.service, PlanEvent.OLD_IMAGE, fact)
+
+
+def _both_images(image: KeptImage, between: str) -> str:
+    """The running image, then compose.yaml's, its name only where it differs or no digest shows
+    the change."""
     running, configured = image.running, image.configured
     shows_name = configured.name != running.name or configured.digest is None
-    fact = f"{_image_text(running)}{_SEPARATOR}compose.yaml {_image_text(configured, shows_name)}"
-    return Row(Glyph.NEEDS_YOU, image.service, PlanEvent.OLD_IMAGE, fact)
+    return f"{_image_text(running)}{between}{_image_text(configured, shows_name)}"
 
 
 def _image_text(image: ImageReference, shows_name: bool = True) -> str:

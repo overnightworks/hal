@@ -17,6 +17,7 @@ from support.backup_support import (
     DUMP,
     RADIO_TOML,
     RESTORE_SERVER_ID,
+    SHIPPED_APPS,
     SONGMAKER_CONTAINER,
     STATUS_KEYS,
     Machine,
@@ -32,10 +33,10 @@ from support.backup_support import (
 )
 
 from hal.backup import cli, docker, host
-from hal.backup.apps import AppsError, PostgresMajor, parse_apps
+from hal.backup.apps import AppsError, PostgresDatabase, PostgresMajor, parse_apps
 from hal.backup.docker import RESTORE_OWNER_LABEL, RESTORE_OWNER_ROLE
 from hal.backup.runner import RUN_MARK_SUFFIX, STAGING_PREFIX
-from hal.backup.settings import RESTIC_IMAGE, RESTORE_IMAGES
+from hal.backup.settings import RESTIC_IMAGE, RESTORE_IMAGES, SQLITE_IMAGE
 
 
 def test_backup_puts_dump_manifest_and_audio_into_one_snapshot(edge_backup, machine, home):
@@ -171,7 +172,7 @@ def test_every_container_runs_a_digest_pinned_image(edge_backup, machine):
 
     images = {argument for _, argv in machine.calls for argument in argv if "@sha256:" in argument}
     docker_runs = [argv for _, argv in machine.calls if argv[:2] == ["docker", "run"]]
-    assert images == {RESTIC_IMAGE, *RESTORE_IMAGES.values()}
+    assert images == {RESTIC_IMAGE, SQLITE_IMAGE, *RESTORE_IMAGES.values()}
     assert all(any(image in argv for image in images) for argv in docker_runs)
 
 
@@ -1012,25 +1013,23 @@ def test_a_backup_run_saves_the_keycloak_dump_without_any_audio_volume(edge_back
     assert outcome.exit_code == 0, outcome.err
     keycloak = next(s for s in machine.snapshots if s["app"] == "keycloak")
     assert keycloak["db"].keys() == {"db.dump", "manifest.json"}
-    assert json.loads(keycloak["db"]["manifest.json"]) == {
-        "schema": 1,
-        "app": "keycloak",
-        "audio_files": None,
-    }
+    manifest = json.loads(keycloak["db"]["manifest.json"])
+    assert manifest == {"schema": 1, "app": "keycloak", "audio_files": None}
     assert keycloak["audio"] == {}
+    lookups = [argv for label, argv in machine.calls if label == "docker volume ls"]
+    assert all("label=com.docker.compose.project=keycloak" not in argv for argv in lookups)
     assert app_history(outcome.status, "keycloak")["last_snapshot_id"] == keycloak["id"]
     keycloak_backup = next(
         argv for label, argv in machine.calls if label == "restic backup" and "keycloak" in argv
     )
     assert not any("/audio" in argument for argument in keycloak_backup)
-    assert machine.labels().count("docker volume ls") == 1
 
 
 def test_the_restore_test_loads_keycloaks_dump_into_a_postgres_of_its_own_major(
     edge_backup, machine
 ):
     """#107 T4: keycloak's dump loads into a throwaway postgres of its own major."""
-    shipped_apps = parse_apps(cli.DEFAULT_APPS.read_text())
+    shipped_apps = [a for a in SHIPPED_APPS if isinstance(a.database, PostgresDatabase)]
     edge_backup(*declare_shipped_apps(), "backup")
 
     outcome = edge_backup(*declare_shipped_apps(), "restore", "--test")

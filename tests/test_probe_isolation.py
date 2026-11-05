@@ -3,8 +3,10 @@ probe's shipped script and teardown resolve."""
 
 import json
 import os
+import re
 import sys
 from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
 from textwrap import dedent
 from types import SimpleNamespace
@@ -20,6 +22,7 @@ import edge_copy  # noqa: E402
 from support.git_support import committed_main, plain_git  # noqa: E402
 from support.script_module import loaded_script  # noqa: E402
 
+from hal.backup.apps import parse_apps  # noqa: E402
 from hal.backup.docker import PROJECT_LABEL  # noqa: E402
 from hal.stack import catalog, checkout  # noqa: E402
 
@@ -665,3 +668,68 @@ def test_an_apps_run_with_a_scratch_that_is_no_directory_ends_with_usage_error_2
         apps_probe.main(["--scratch", str(tmp_path / "missing"), *flags])
 
     assert ended.value.code == 2
+
+
+SHIPPED_RECORDS = (ROOT / "backup" / "apps.toml").read_text()
+LIVE_PROJECT = edge_copy.compose_project_name((ROOT / "compose.yaml").read_text())
+
+
+def test_every_backup_record_moves_to_the_probes_project_and_nothing_else_changes():
+    moved = edge_copy.backup_records_at_project(SHIPPED_RECORDS, PROJECT, LIVE_PROJECT)
+
+    shipped, after = parse_apps(SHIPPED_RECORDS), parse_apps(moved)
+    assert len(after) == len(shipped) > 1
+    assert {app.compose_project for app in after} == {PROJECT}
+    assert [replace(app, compose_project="") for app in after] == [
+        replace(app, compose_project="") for app in shipped
+    ]
+
+
+@pytest.mark.parametrize(
+    "owner",
+    [LIVE_PROJECT, parse_apps(SHIPPED_RECORDS)[0].compose_project],
+    ids=["the live project", "a record's own project"],
+)
+def test_a_probe_project_that_is_a_live_backup_project_is_refused(owner):
+    with pytest.raises(edge_copy.ProbeFailed, match="is a live backup project"):
+        edge_copy.backup_records_at_project(SHIPPED_RECORDS, owner, LIVE_PROJECT)
+
+
+def test_a_rewrite_that_changes_more_than_the_project_is_refused(monkeypatch):
+    other_field = re.compile(r'^(db_user = )"[^"]*"$', re.MULTILINE)
+    monkeypatch.setattr(edge_copy, "BACKUP_PROJECT_LINE", other_field)
+
+    one_record = dedent(
+        """
+        [app.one]
+        compose_project = "one"
+        db_service = "one-db"
+        dump = "pg_dump_custom"
+        db_user = "one"
+        db_name = "one"
+        postgres_major = 17
+        [app.one.restore_test]
+        count_table = "realm"
+        require_rows = true
+        """
+    )
+
+    with pytest.raises(edge_copy.ProbeFailed, match="differs beyond compose_project"):
+        edge_copy.backup_records_at_project(one_record, PROJECT, LIVE_PROJECT)
+
+
+def test_the_copy_names_the_probes_project_in_every_backup_record_when_it_has_records(tmp_path):
+    repository = a_repository(tmp_path, MIXED_CATALOG, f"name: {LIVE_PROJECT}\n{MOVABLE_COMPOSE}")
+    (repository / "backup").mkdir()
+    (repository / "backup" / "apps.toml").write_text(SHIPPED_RECORDS)
+
+    copy, _ = a_copy(tmp_path, repository)
+
+    records = parse_apps((copy / "backup" / "apps.toml").read_text())
+    assert {app.compose_project for app in records} == {PROJECT}
+
+
+def test_the_copy_of_a_repository_with_no_backup_records_has_none(tmp_path):
+    copy, _ = a_copy(tmp_path, a_repository(tmp_path, MIXED_CATALOG))
+
+    assert not (copy / "backup").exists()

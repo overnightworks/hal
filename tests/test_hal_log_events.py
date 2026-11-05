@@ -37,7 +37,8 @@ from hal.output import (
     write_row,
     write_verdict,
 )
-from hal.stack.realm import reconcile
+from hal.stack import pre_apply
+from hal.stack.realm.reconcile import KEYCLOAK
 from hal.workstation.jobs import TIMER_JOBS
 from hal.workstation.user_units import service_text
 
@@ -487,13 +488,13 @@ def test_a_realm_step_asks_the_backup_child_for_text_under_an_exported_json(monk
         "write_error('the dump does not restore')\n"
         "raise SystemExit(3)\n"
     )
-    backup = reconcile.Backup(
+    backup = pre_apply.Backup(
         (sys.executable, "-c", child),
-        partial(reconcile.run_edge_backup, waiting=lambda _seconds: None),
+        partial(pre_apply.run_edge_backup, waiting=lambda _seconds: None),
     )
 
-    with pytest.raises(reconcile.RealmError) as raised:
-        backup.restore_test("ab12cd34")
+    with pytest.raises(pre_apply.PreApplyError) as raised:
+        backup.restore_test(KEYCLOAK, "ab12cd34")
 
     assert str(raised.value) == "the restore test failed (the dump does not restore)"
 

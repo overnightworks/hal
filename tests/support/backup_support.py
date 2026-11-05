@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from hal.backup import host, sqlite_copy
-from hal.backup.apps import PRE_APPLY_TAG, PostgresDatabase, parse_apps
+from hal.backup.apps import PRE_APPLY_TAG, PostgresDatabase, SqliteDatabase, parse_apps
 from hal.backup.cli import DEFAULT_APPS
 from hal.backup.docker import (
     DATABASE_START_LABEL,
@@ -139,7 +139,17 @@ class Machine:
     )
     volume_files: dict[str, dict[str, bytes]] = field(default_factory=dict)
     """The files of a kept volume by Docker volume name; songmaker's audio volume holds `audio`."""
-    volumes_by_label: dict[str, list[str]] = field(default_factory=dict)
+    volumes_by_label: dict[str, list[str]] = field(
+        default_factory=lambda: {
+            volume: [f"{app.compose_project}_{volume}"]
+            for app in SHIPPED_APPS
+            if isinstance(app.database, SqliteDatabase)
+            for volume in (
+                app.database.volume,
+                *([app.database.files.volume] if app.database.files else []),
+            )
+        }
+    )
     """What `docker volume ls` answers for a compose volume name, whatever the project."""
     unreadable_directories: set[str] = field(default_factory=set)
     """Directories of a kept volume the operator cannot traverse: a count entering one exits 1."""
@@ -414,13 +424,14 @@ class Machine:
         return b"" if self.live_code is None else f"{self.live_code}\n".encode()
 
     def _volumes(self, argv, **_) -> bytes:
-        if (
-            named := self.volumes_by_label.get(label_value(argv, "com.docker.compose.volume"))
-        ) is not None:
-            return "\n".join(named).encode()
         project = label_value(argv, "com.docker.compose.project")
-        found = self.volumes if project == "songmaker" else self.other_volumes[project]
-        return "\n".join(found).encode()
+        if project == "songmaker":
+            return "\n".join(self.volumes).encode()
+        if project in self.other_volumes:
+            return "\n".join(self.other_volumes[project]).encode()
+        return "\n".join(
+            self.volumes_by_label[label_value(argv, "com.docker.compose.volume")]
+        ).encode()
 
     def _pg_dump(self, argv, **_) -> bytes:
         return DUMP

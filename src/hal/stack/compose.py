@@ -2,8 +2,8 @@
 
 The pure part maps the profiles of a resolved or parsed compose file to their services. The
 `Compose` class runs the stack's `docker compose` calls but the one `down` of `hal migrate
-stack` (`project_move`); it never runs `down` and never names a volume, so a unit switched off
-loses containers and keeps its data.
+stack` (`project_move`); it never runs `down` and never removes a volume, it only asks whether one
+exists, so a unit switched off loses containers and keeps its data.
 """
 
 import json
@@ -93,6 +93,11 @@ def named_volumes(service: Mapping[str, Any]) -> tuple[str, ...]:
     return tuple(
         mount["source"] for mount in service.get("volumes", []) if mount.get("type") == "volume"
     )
+
+
+def volume_name(config: Mapping[str, Any], key: str) -> str:
+    """The Docker name of a compose volume key, as the resolved configuration names it."""
+    return config["volumes"][key]["name"]
 
 
 def run_docker(
@@ -221,6 +226,17 @@ class Compose:
         if len(ids) > 1:
             raise ComposeError(f"`docker image ls {reference}` names {len(ids)} images")
         return ids.pop() if ids else None
+
+    def volume_exists(self, name: str) -> bool:
+        """Docker holds a volume of exactly this name."""
+        listing = ["docker", "volume", "ls", "--quiet", "--filter", f"name={name}"]
+        result = self.run(listing, READ_SECONDS)
+        if result.returncode != 0:
+            raise ComposeError(
+                f"`docker volume ls {name}` exited {result.returncode}: "
+                f"{last_line(result.stderr + result.stdout)}"
+            )
+        return name in result.stdout.split()  # the filter matches a part of the name too
 
     def start(self, unit: str, services: tuple[str, ...]) -> None:
         self._call(unit, "up", ["-d", "--no-recreate", *services], CHANGE_SECONDS)

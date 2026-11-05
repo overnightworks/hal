@@ -3601,8 +3601,8 @@ def test_the_waiting_line_of_a_stopped_hal_is_told_as_the_step_runs(
     switch, repository, monkeypatch
 ):
     """Cell 7, through the wiring `apply` gives the installed backup."""
-    monkeypatch.setattr(reconcile, "BACKUP_SECONDS", 1)
-    monkeypatch.setattr(reconcile, "STOP_GRACE_SECONDS", 0.2)
+    monkeypatch.setattr("hal.stack.pre_apply.BACKUP_SECONDS", 1)
+    monkeypatch.setattr("hal.stack.pre_apply.STOP_GRACE_SECONDS", 0.2)
     hal = repository / ".venv/bin/hal"
     hal.parent.mkdir(parents=True)
     hal.write_text("#!/bin/sh\nexec sleep 30\n")

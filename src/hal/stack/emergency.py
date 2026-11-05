@@ -8,7 +8,7 @@ run it (R4, D12). Start is the operator's step: a terminal and the exact `yes`. 
 An app of the catalog is switched the same way under its key: the marker first, then the barrier
 over its catalog hosts, then the file-free `stop` of its Compose project; its start is the
 file-free `start` of the stopped containers, the health wait, then the barrier removed and the
-marker cleared.
+marker cleared. A start that would create Keycloak or LiteLLM over its data only ends the switch.
 """
 
 import os
@@ -33,7 +33,7 @@ from hal.stack import (
     tunnel,
     unit_plans,
 )
-from hal.stack.apply import ApplyExit
+from hal.stack.apply import DATABASE_UNITS, ApplyExit
 from hal.stack.switch_events import BarrierPart, CannotPlan, Closing, Interruption, StopPart
 
 STOP = command(Verb.STOP)
@@ -358,9 +358,14 @@ def start_unit(
     if not_set_up:
         _complain(START, f"refused, {not_set_up}")
         return ApplyExit.REFUSED
-    services = fleet.profile_services[key]
-    _say(START, f"{key}: start services {', '.join(services)}; {_ending(read)}")
-    if not confirmed(f"start {key}"):
+    try:
+        services, over = unit_plans.services_to_start(fleet, key, engine, DATABASE_UNITS)
+    except compose.ComposeError as error:
+        _complain(START, f"cannot plan, {error}")
+        return ApplyExit.CANNOT_PLAN
+    starts = f"nothing over {over.name}'s data" if over else f"services {', '.join(services)}"
+    _say(START, f"{key}: start {starts}; {_ending(read)}")
+    if not confirmed(f"start {key}" if services else f"end the switch of {key}"):
         _complain(START, ABORTED_UNCHANGED)
         return ApplyExit.REFUSED
     return _open(engine, marks, target.ingress, key, services, read, fleet.config, watch)
@@ -511,18 +516,21 @@ def _open(
     config: dict,
     watch: compose.Watch,
 ) -> int:
+    """Start `services`, then end the switch; with no service only the switch ends."""
     try:
         with marks.lock():
             if changed := marks.changed(key, read):
                 return _refused_before_up(key, changed.current)
-            engine.start(key, services)
-            if engine.down_while_watched(config, services, watch):
-                _complain(START, f"partial, {key} is not on after the start; its switch stays")
-                return ApplyExit.REFUSED
+            if services:
+                engine.start(key, services)
+                if engine.down_while_watched(config, services, watch):
+                    _complain(START, f"partial, {key} is not on after the start; its switch stays")
+                    return ApplyExit.REFUSED
             try:
                 ingress.open()
             except barrier.BarrierError as error:
-                _complain(START, f"partial, {key} is on but {error}; its switch stays")
+                lead = f"{key} is on but" if services else f"{key} started nothing and"
+                _complain(START, f"partial, {lead} {error}; its switch stays")
                 return ApplyExit.REFUSED
             if read and not marks.clear(key, read):
                 _complain(START, _switched_off_again_line(key, marks.mark(key)))
@@ -533,7 +541,8 @@ def _open(
     except KeyboardInterrupt:
         _complain(START, f"interrupted while starting {key}; its switch stays")
         return ApplyExit.REFUSED
-    _say(START, f"{key} is on")
+    ended = f"{key}'s switch is ended; `{command(Verb.APPLY)}` starts it after a snapshot"
+    _say(START, f"{key} is on" if services else ended)
     return ApplyExit.APPLIED_OR_NOTHING
 
 

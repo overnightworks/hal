@@ -1,6 +1,6 @@
-"""Probe of `hal apply`'s key step (#964 cells S1-S9, #965 cells A2-A8, #894 cell S0): the step's
-plan and run, through the one-off `litellm-keys`, against the LiteLLM of litellm.py in its
-throwaway project.
+"""Probe of `hal apply`'s key step (#964 cells S1-S9, HAL-2.6m's S10, #965 cells A2-A8, #894 cell
+S0): the step's plan and run, through the one-off `litellm-keys`, against the LiteLLM of
+litellm.py in its throwaway project.
 Nothing live and nothing paid: the probe refuses to start unless `internet` is internal and holds
 only the fakes. It runs in hal's environment, which holds the agent-runtime client:
 
@@ -109,9 +109,9 @@ class KeysProbe(KeyFiles):
     rescheduled = False
 
     # The cells' methods in the order they run, each on what the ones before left.
-    CELLS = ("cell_s1", "cell_s2", "cell_s3", "cell_s4", "cell_s5", "cell_s6", "cell_s7", "cell_s9",
-             "cell_a2", "cell_a5", "cell_a3", "cell_a7", "cell_a4", "cell_a8", "cell_a6",
-             "cell_s8")  # fmt: skip
+    CELLS = ("cell_s1", "cell_s2", "cell_s3", "cell_s4", "cell_s5", "cell_s10", "cell_s6",
+             "cell_s7", "cell_s9", "cell_a2", "cell_a5", "cell_a3", "cell_a7", "cell_a4", "cell_a8",
+             "cell_a6", "cell_s8")  # fmt: skip
 
     def __init__(self, scratch: Path) -> None:
         super().__init__(scratch)
@@ -344,7 +344,7 @@ class KeysProbe(KeyFiles):
                 litellm_keys.BUDGET_DURATION,
                 api_limits.MAX_PARALLEL_REQUESTS,
                 models,
-                [litellm_keys.ROUTE],
+                list(litellm_keys.ROUTES),
                 None,
                 None,
             )
@@ -467,6 +467,27 @@ class KeysProbe(KeyFiles):
             f"the plan names each key's models change; after the run each key holds "
             f"the {len(models)} names /v1/models lists",
         )
+
+    def cell_s10(self) -> None:
+        self.write_litellm_config(shipped_config())  # the mirror of S5: its name leaves again
+        self.earlier_logs.append(self.log_of(LITELLM))
+        self.recreate_litellm()
+        plan = self.read_plan("S10")
+        kept = {
+            change.subject: [f.new for f in change.fields if f.name == "models"]
+            for change in plan.changes
+        }
+        dropped = all(len(new) == 1 and FOURTH_MODEL not in new[0] for new in kept.values())
+        expect(set(kept) == set(APPS) and dropped, f"S10: {kept}")
+        expect(isinstance(self.run_step(plan), KeysDone), "S10: the run failed")
+        models = sorted(self.models())
+        expect(FOURTH_MODEL not in models, f"S10: /v1/models still lists {FOURTH_MODEL}")
+        for app in APPS:
+            row, listed = sorted(self.key_of(app)["models"]), self.listed(self.file_keys[app])
+            expect(row == listed == models, f"S10: {app}'s key holds {row} and lists {listed}")
+        self.hold("S10", f"{FOURTH_MODEL} dropped from config.yaml: the plan names each key's "
+                  "models change without it; after the run each key holds and lists through the "
+                  f"front the {len(models)} names /v1/models lists")  # fmt: skip
 
     def cell_s6(self) -> None:
         old_key = self.file_keys["hopin"]

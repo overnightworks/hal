@@ -244,10 +244,34 @@ Reihenfolge, und wie der Eintrag in `applied.json` gefuehrt wird:
 [architecture.md](architecture.md), Abschnitt 8, "The applied record".
 
 **Images.** Laeuft ein Dienst einer Einheit, die nicht ausgeschaltet wird, auf einem anderen Image, als
-`compose.yaml` jetzt nennt, nennt der Plan es und tauscht es nie; der Lauf bleibt `nothing to change`.
-Das Upgrade ist Sache des Betreibers (Keycloak erst mit Dump). Ausnahme ist der gebaute Dienst einer
-Einheit mit `run.build` (`agent-service`): `hal apply` erzeugt ihn nach dem Ja des Plans neu, wenn
-sein Image, seine Definition oder sein Tag-Inhalt abweicht; laufende Anfragen enden dabei.
+`compose.yaml` jetzt nennt, nennt der Plan es mit `!` und tauscht es nicht; der Lauf bleibt
+`nothing to change`. Das gilt fuer step-ca, legal und `litellm-front`. Zwei Ausnahmen:
+- Der gebaute Dienst einer Einheit mit `run.build` (`agent-service`): `hal apply` erzeugt ihn nach dem
+  Ja des Plans neu, wenn sein Image, seine Definition oder sein Tag-Inhalt abweicht; laufende Anfragen
+  enden dabei.
+- Keycloak und LiteLLM, jeweils der Dienst und seine Datenbank: der Plan nennt
+  `<dienst> recreate image X → Y · snapshot first`. Nach dem Ja nimmt `hal apply` vor dem ersten
+  Neuerstellen der Einheit `hal backup <einheit> --pre-apply` und beweist den Snapshot mit
+  `hal restore --test`; erst dann erzeugt es die Datenbank und dann den Dienst neu, und die
+  Ergebniszeile nennt den Snapshot. Scheitert Backup oder Test, laeuft der alte Container weiter, der
+  Lauf endet partial (Exit 3) und veroeffentlicht nichts. Wird die Einheit vor dem Neuerstellen
+  ausgeschaltet, nennt die Fehlerzeile nur den Snapshot. Laeuft ein neuer Container danach nicht oder
+  bricht Ctrl-C das Neuerstellen ab, nennt die Zeile den Snapshot und `hal restore <einheit> --live`. Eine ausgeschaltete Einheit
+  wird nicht angefasst, und `hal start` behaelt den alten Container. Ein nicht angepinntes,
+  neu gebautes Tag von Keycloak oder LiteLLM wird nur genannt, nicht getauscht; heute ist jedes ihrer
+  Images per Digest angepinnt.
+- Keycloak und LiteLLM beim Anschalten: fehlt dem Dienst oder seiner Datenbank der Container und
+  besteht das Volume der Datenbank, ist unbekannt, welches Image die Daten zuletzt las. Nach dem Ja
+  startet `hal apply` dann zuerst die Datenbank allein, nimmt und beweist den Snapshot wie oben und
+  startet erst danach den Rest. Scheitert Backup oder Test, wird der Dienst nicht erzeugt, der Lauf
+  endet partial (Exit 3), und die Zeile nennt keinen `hal restore`: die allein gestartete Datenbank
+  ist die, aus der der Snapshot kommt. Wird die Einheit danach ausgeschaltet oder bricht Ctrl-C vor
+  dem Start des Dienstes ab, nennt die Zeile nur den Snapshot; ab dem Start, der den Dienst erzeugt,
+  auch `hal restore <einheit> --live`. Besteht der Dienst und fehlt nur die Datenbank, erzeugt der
+  Start nichts, was ein Restore zuruecknaehme: die Zeile nennt dann nur den Snapshot. Eine
+  Teilzeile nennt Snapshot und Rueckweg jeder Einheit des Laufs, die einen hat; die Ergebniszeile
+  einer angeschalteten Einheit nennt ihren Snapshot (`snapshot <id> proven`). Ohne Volume, und wenn
+  jeder Container besteht, gibt es keinen Snapshot.
 
 **Setup.** Eine Einheit mit `setup` wird erst angeschaltet, wenn `<setup> --check` Exit 0 gibt. Der
 Vertrag von `<setup> --check`: fragt nichts, druckt kein Geheimnis, legt nichts an, braucht keinen
@@ -291,9 +315,17 @@ einmal und meldet "switched off" nur, wenn nichts mehr laeuft. Container und Vol
 kein `down`, nie `socket-proxy` oder `traefik`). Es braucht kein Terminal und kein `yes`; Agenten
 duerfen es aufrufen (R4, D12). `hal start <Einheit>` hebt den Schalter auf: nur an einem Terminal und
 nach dem exakten `yes` (der Betreiber; bis D14 eine Regel, keine Wand), loescht den Schalter erst, wenn
-die Einheit laeuft, und verweigert eine im Katalog abgeschaltete. Hat die Einheit ein `run.setup`,
+die Einheit laeuft (Ausnahme: Keycloak und LiteLLM ueber ein bestehendes Datenbank-Volume, s. u.),
+und verweigert eine im Katalog abgeschaltete. Hat die Einheit ein `run.setup`,
 fragt es dessen `--check` vor der Rueckfrage; nicht eingerichtet: Exit 3, Schalter und
-Sperre bleiben.
+Sperre bleiben. Wuerde der Start den Dienst oder die Datenbank von Keycloak oder LiteLLM ohne
+Container ueber ein bestehendes Datenbank-Volume erzeugen (auch wenn nur einer von beiden fehlt),
+startet `hal start` gar nichts: die Rueckfrage nennt das Beenden des Schalters, nach dem `yes` hebt
+es nur Schalter und Sperre auf, nennt `hal apply`, das zuerst den Snapshot nimmt ("Images"), und
+endet mit Exit 0. Eine Sperre, die sich nicht beweisbar entfernen laesst, endet wie bei jedem Start
+mit Exit 3 und laesst den Schalter stehen. Bis `hal apply` die Einheit startet, fehlt der Einheit
+ein Container und damit sein Router: ihr Host antwortet Traefiks einfaches 404 (ohne
+`X-Edge-Barrier`).
 
 **Der Schalter** ist eine Datei pro Einheit, `~/.local/state/edge/stopped/<Einheit>`, mit der Zeit des
 Ausschaltens (ISO 8601). `hal apply --local` startet eine ausgeschaltete Einheit nie und loescht
@@ -309,8 +341,8 @@ der Eingang `admin` auf `127.0.0.1:8090` bleibt offen; `hal stop` meldet Erfolg 
 Traefik fuer jeden Host innerhalb von 15 s 404 mit dem Header `X-Edge-Barrier: <Einheit>`
 antwortet, sonst Exit 3 (Schalter und Sperre bleiben); `hal start` prueft nach dem Entfernen,
 dass der Header weg ist. `hal apply` schreibt oder entfernt nie eine Sperre: eine Einheit, deren Sperre steht, bleibt
-aus, auch wenn kein Schalter notiert ist; `hal start` entfernt die Sperre erst, wenn die Einheit laeuft, und loescht den
-Schalter zuletzt. Der Beweis auf einem Wegwerf-Stack ist `probe/switches/probe.py`.
+aus, auch wenn kein Schalter notiert ist; `hal start` entfernt die Sperre erst, wenn die Einheit laeuft (ausser bei dem Start, der nichts startet,
+s. o.), und loescht den Schalter zuletzt. Der Beweis auf einem Wegwerf-Stack ist `probe/switches/probe.py`.
 
 **Neustart.** Jeder lang laufende Dienst hat `restart: unless-stopped`; Docker startet einen
 ausdruecklich gestoppten Container auch nach einem Neustart nicht, und der Schalter bleibt auf der

@@ -1,5 +1,5 @@
 """Probe of the API route's failures, keys and rotation (#807 S1b cells F6-F11, F13-F17, F19, D6,
-and K10): the stack of litellm.py (the service, the one-route front, LiteLLM and the
+and K10): the stack of litellm.py (the service, the front, LiteLLM and the
 gateway's second entrypoint, against a fake Anthropic) with the fake steered through its control
 file and the caller of litellm.py, a throwaway with an app key. Nothing live and nothing paid: the
 probe refuses to start unless `internet` is internal and holds only the fakes.
@@ -78,7 +78,7 @@ for entry in os.listdir("/proc"):
         }
 print(json.dumps({"processes": rows}))
 """
-SECRET_NAMES = ("ANTHROPIC_API_KEY", "LITELLM_MASTER_KEY", "DATABASE_URL")
+SECRET_NAMES = ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "LITELLM_MASTER_KEY", "DATABASE_URL")
 
 
 class FailureProbe(LitellmProbe):
@@ -92,6 +92,7 @@ class FailureProbe(LitellmProbe):
         self.key = ""
         self.every_value = [
             self.provider_key,
+            self.picture_key,
             self.master_key,
             self.database_password,
         ]

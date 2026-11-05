@@ -1,6 +1,8 @@
-"""Probe of what LiteLLM admits on the API route (cells K3, K5-K9, K11, M1, P1-P6, A1-A4, and #768
-S1a's G4): the stack of litellm.py against a fake Anthropic that reports the usage the probe
-steers or holds requests until the probe releases them. App keys, budgets and fingerprints are
+"""Probe of what LiteLLM admits on the API route (cells K3, K5-K9, K11, M1, P1-P6, A1-A4, #768
+S1a's G4, and HAL-2.11's picture cells I1-I6, P-slow and P-moderation): the stack of litellm.py
+against a fake Anthropic that reports the usage the probe steers or holds requests until the
+probe releases them, and a fake OpenAI that answers a picture with the usage the probe steers,
+holds it or refuses it. App keys, budgets and fingerprints are
 the scenario of litellm.py: each key with a money budget per month and a parallel bound, the
 person budget under the id config.yaml names, and the operator's fingerprint O linked to a budget
 with no `max_budget`.
@@ -10,9 +12,10 @@ only the fakes.
     flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \\
         python3 probe/agent-service/litellm_admission.py --scratch DIR
 
-Evidence: F is the fake provider's request log, A the callers' status, Retry-After and LiteLLM's
-error type, S the spend LiteLLM reports (`/key/info`, `/customer/info`) and D its database. The
-probe waits on observed events only: new request lines in F, the callers' lines, a spend in S.
+Evidence: F is the fake provider's request log (FP the fake OpenAI's), A the callers' status,
+Retry-After and LiteLLM's error type, S the spend LiteLLM reports (`/key/info`,
+`/customer/info`) and D its database. The probe waits on observed events only: new request lines
+in F, the callers' lines, a spend in S.
 A budget is moved due in D and reset by LiteLLM's own job, which the scratch config runs every few
 seconds. Exit 0: every cell held.
 """
@@ -31,17 +34,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "agent-service"))
 
 from litellm import (
     APP_BUDGET,
+    FAKE_PICTURES,
     FAKE_PROVIDER,
     LISTENING,
     LITELLM,
+    MODELS_ROUTE,
     OPERATOR_BUDGET,
     PARALLEL,
+    PERSON_BUDGET,
+    PICTURE_HOST,
+    PICTURE_ROUTE,
     PROJECT,
     REPO,
     ROUTE,
     SERVICE,
     TOO_MANY,
-    LitellmProbe,
     error_of,
     expect,
     hashed,
@@ -51,6 +58,7 @@ from litellm import (
     shipped_models,
     wire_body,
 )
+from litellm_pictures import PICTURE_MODEL, PictureCalls, picture_of, text_models
 
 WORKERS = "NUM_WORKERS"
 REQUEST_SECONDS = 60
@@ -59,6 +67,26 @@ CACHE_SECONDS = 180
 UPSTREAM_FAILURE = 529
 # A steered usage on text/opus past the app budget; litellm.py's PERSON_PUSH passes the person's.
 APP_PUSH = {"input_tokens": 3_000_000, "output_tokens": 1}
+# A steered picture usage past the person budget and one past the app budget, and a small one.
+PICTURE_PERSON_PUSH = {"input_tokens": 1, "output_tokens": 100_000}
+PICTURE_APP_PUSH = {"input_tokens": 1, "output_tokens": 500_000}
+PICTURE_USAGE = {"input_tokens": 1000, "output_tokens": 1000}
+# P-slow: the fake holds a picture longer than the maxDurationSeconds agent-runtime's client gives
+# songmaker's cover, which the route must carry.
+SLOW_PICTURE_SECONDS, MAX_PICTURE_SECONDS = 95, 88
+MODERATION_CODE = "moderation_blocked"  # OpenAI's code of a safety refusal; the fake sends it
+MODERATION_TYPE = "image_generation_user_error"  # and its type, which LiteLLM passes through
+
+
+def refused(answer: dict) -> str:
+    return f"{answer['status']} {error_of(answer)}, FP 0"
+
+
+def error_message(answer: dict) -> str | None:
+    """Only whether the answer carries a message is shown: the text may quote a request."""
+    document = answer["document"]
+    error = document.get("error") if isinstance(document, dict) else None
+    return error.get("message") if isinstance(error, dict) else None
 
 
 def first_of_next_month(now: datetime) -> datetime:
@@ -67,7 +95,7 @@ def first_of_next_month(now: datetime) -> datetime:
     return datetime(year, month, 1, tzinfo=UTC)
 
 
-class AdmissionProbe(LitellmProbe):
+class AdmissionProbe(PictureCalls):
     """litellm.py's stack with the scenario's keys, budgets and fingerprints."""
 
     def __init__(self, scratch: Path) -> None:
@@ -151,6 +179,7 @@ class AdmissionProbe(LitellmProbe):
         self.cells_p1_p2(key)
         self.cell_k6()
         self.cell_k11(key)
+        self.cells_pictures(key)
         person = self.cells_p3_p4(key, second)
         self.cells_a1_a3(key, operator)
         self.cell_a4()
@@ -244,7 +273,7 @@ class AdmissionProbe(LitellmProbe):
 
     def cell_m1(self, key: str) -> None:
         user, seen = self.fingerprint(), {}
-        for model, parameters in shipped_models().items():
+        for model, parameters in text_models().items():
             before = len(self.provider_requests())
             answer = self.complete(key, model, user)
             sent = self.provider_requests()[before:]
@@ -267,7 +296,7 @@ class AdmissionProbe(LitellmProbe):
     def cell_k6(self) -> None:
         key, spends = self.make_key(), [0.0]
         self.steer_fake(usage={"input_tokens": 1000, "output_tokens": 1000})
-        for model in shipped_models():
+        for model in text_models():
             answer = self.complete(key, model, self.fingerprint())
             expect(answer["status"] == 200, f"K6: {model}: {answer['status']}")
             self.wait_for("K6", f"the spend after {model}",
@@ -277,9 +306,16 @@ class AdmissionProbe(LitellmProbe):
         self.hold("K6", f"the key's spend in /key/info rose after each name: {spends[1:]}")
 
     def cell_k11(self, key: str) -> None:
+        narrow = self.make_key(models=[next(iter(shipped_models()))])
+        lists: dict[str, list[str]] = {}
+        for name, app_key in (("the key", key), ("a narrow key", narrow)):
+            lists[name] = self.listed(app_key)
+            own = sorted(self.key_info(app_key)["models"])
+            expect(lists[name] == own, f"K11: {name} lists {lists[name]}, its models are {own}")
+        expect(len(lists["a narrow key"]) < len(lists["the key"]), f"K11: the lists {lists}")
         results = []
         routes = (("GET", f"/key/info?key={hashed(key)}", None), ("POST", "/key/generate", {}),
-                  ("GET", "/v1/models", None))  # fmt: skip
+                  ("GET", "/model/info", None))  # fmt: skip
         for method, path, body in routes:
             refused = self.call(key, method, path, body, front=False)
             control = self.call(self.master_key, method, path, body, front=False)
@@ -297,8 +333,117 @@ class AdmissionProbe(LitellmProbe):
             refused = self.call(key, "POST", path, body, front=False)
             self.refused(f"K11: {path}", refused, before)
             results.append(f"{path} {refused['status']} {error_of(refused)}, F 0")
-        self.hold("K11", f"the app key at litellm:4000 refused: {results}; the master key 200 on "
-                  "the admin routes")  # fmt: skip
+        self.hold("K11", f"through the front each key lists exactly its models: {lists}; the app "
+                  f"key at litellm:4000 refused: {results}; the master key 200 on the admin "
+                  "routes")  # fmt: skip
+
+    # --- the picture route ---------------------------------------------------------------------
+
+    def picture_refused(self, cell: str, key: str, user: str | None) -> dict:
+        """Refused before either provider: a 4xx that is not 429, FP and F unchanged."""
+        before, pictures = len(self.provider_requests()), len(self.picture_requests())
+        answer = self.picture(key, user)
+        self.refused(cell, answer, before)
+        expect(len(self.picture_requests()) == pictures, f"{cell}: the fake OpenAI was reached")
+        return answer
+
+    def picture_served(self, cell: str, key: str, user: str, usage: dict | None = None) -> dict:
+        """Served by the fake OpenAI alone: 200, the marker as the picture, one FP record."""
+        self.steer_fake(PICTURE_HOST, **({"usage": usage} if usage else {}))
+        before, pictures = len(self.provider_requests()), len(self.picture_requests())
+        answer = self.picture(key, user)
+        self.steer_fake(PICTURE_HOST)
+        expect(answer["status"] == 200, f"{cell}: {answer['status']} {error_of(answer)}")
+        expect(picture_of(answer) == self.marker, f"{cell}: the marker is not the picture")
+        expect(len(self.provider_requests()) == before, f"{cell}: the fake Anthropic was reached")
+        (record,) = self.picture_requests()[pictures:]
+        return record
+
+    def cells_pictures(self, key: str) -> None:
+        user = self.fingerprint()
+        record = self.picture_served("I1", key, user)
+        wanted = shipped_models()[PICTURE_MODEL]["model"].split("/", 1)[1]
+        expect((record["path"], record["model"]) == (PICTURE_ROUTE, wanted), f"I1: FP saw {record}")
+        expect(record["user"] == user, f"I1: FP saw user {record['user']!r}, not the sent one")
+        expect(record["key_ok"] and record["secret_hits"] == 0, f"I1: FP saw {record}")
+        self.hold("I1", f"{PICTURE_MODEL} on {PICTURE_ROUTE} served with the marker as b64_json; "
+                  f"FP saw {wanted} with exactly the sent `user`, the OpenAI key and no app or "
+                  "master key; F 0")  # fmt: skip
+        self.hold("I2", f"no `user`: {refused(self.picture_refused('I2', key, None))}")
+        text_only = self.make_key(allowed_routes=[ROUTE])
+        refusal = refused(self.picture_refused("I3", text_only, self.fingerprint()))
+        self.expect_served("I3", text_only, self.fingerprint())
+        self.hold("I3", f"a key without {PICTURE_ROUTE}: {refusal}; its completion served")
+        narrow = self.make_key(models=list(text_models()))
+        refusal = refused(self.picture_refused("I4", narrow, self.fingerprint()))
+        self.hold("I4", f"a key without {PICTURE_MODEL} in its models: {refusal}")
+        over_budget = self.cell_i5()
+        self.cell_i6()
+        self.cell_p_moderation(key, over_budget)
+        self.cell_p_slow(key)
+
+    def cell_i5(self) -> dict:
+        key, person = self.make_key(), self.fingerprint()
+        self.picture_served("I5", key, person, PICTURE_PERSON_PUSH)
+        self.wait_for("I5", "the person's spend past the budget",
+                      lambda: self.customer_spend(person) > PERSON_BUDGET)  # fmt: skip
+        spend = self.customer_spend(person)
+        person_refusal = refused(self.picture_refused("I5", key, person))
+        self.picture_served("I5", key, self.fingerprint())
+        over = self.make_key()
+        self.picture_served("I5", over, self.fingerprint(), PICTURE_APP_PUSH)
+        self.wait_for("I5", "the key's spend past its budget",
+                      lambda: self.key_info(over)["spend"] > APP_BUDGET)  # fmt: skip
+        over_budget = self.picture_refused("I5", over, self.fingerprint())
+        self.hold("I5", f"a person at {spend:.2f} dollars after a picture: {person_refusal}, "
+                  f"another person served; a key at {self.key_info(over)['spend']:.2f} dollars: "
+                  f"{refused(over_budget)}")  # fmt: skip
+        return over_budget
+
+    def cell_i6(self) -> None:
+        key, person = self.make_key(), self.fingerprint()
+        self.picture_served("I6", key, person, PICTURE_USAGE)
+        self.wait_for("I6", "the key's spend", lambda: self.key_info(key)["spend"] > 0)
+        spent = self.key_info(key)["spend"]
+        self.wait_for("I6", "the person's spend",
+                      lambda: abs(self.customer_spend(person) - spent) < 1e-9)  # fmt: skip
+        self.hold("I6", f"one picture of usage {PICTURE_USAGE}: the key's spend {spent:.6f} "
+                  f"dollars and the person's {self.customer_spend(person):.6f}")  # fmt: skip
+
+    def cell_p_moderation(self, key: str, over_budget: dict) -> None:
+        """OpenAI's safety refusal reaches the client apart from LiteLLM's budget refusal."""
+        self.steer_fake(PICTURE_HOST, mode="moderation")
+        pictures = len(self.picture_requests())
+        answer = self.picture(key, self.fingerprint())
+        self.steer_fake(PICTURE_HOST)
+        seen = len(self.picture_requests()) - pictures
+        shown = (answer["status"], error_of(answer))
+        expect(
+            shown[0] == 400 and shown[1].split("/")[0] == MODERATION_TYPE and seen == 1,
+            f"P-moderation: {shown}, FP {seen}",
+        )
+        expect(shown != (over_budget["status"], error_of(over_budget)),
+               f"P-moderation: {shown} equals the over-budget refusal")  # fmt: skip
+        message = error_message(answer) or ""
+        named = "naming" if MODERATION_CODE in message else "not naming"
+        self.hold("P-moderation", f"the client sees {shown[0]} {shown[1]}, a message "
+                  f"{'present' if message else 'absent'} and {named} {MODERATION_CODE}, FP 1; "
+                  f"the over-budget refusal is {refused(over_budget)}")  # fmt: skip
+
+    def cell_p_slow(self, key: str) -> None:
+        """A picture the fake holds for SLOW_PICTURE_SECONDS passes the front, LiteLLM and the
+        egress, past the client's MAX_PICTURE_SECONDS."""
+        self.steer_fake(PICTURE_HOST, mode="hold", hold_seconds=SLOW_PICTURE_SECONDS)
+        answer = self.picture(key, self.fingerprint())
+        self.steer_fake(PICTURE_HOST)
+        held = [line for line in self.log_of(FAKE_PICTURES).splitlines() if line.startswith("held")]
+        expect(held == ["held timed out"], f"P-slow: the fake logged {held}")
+        took = f"{answer['status']} {error_of(answer)} after {answer['seconds']:.1f} s"
+        expect(answer["status"] == 200 and picture_of(answer) == self.marker, f"P-slow: {took}")
+        expect(answer["seconds"] >= MAX_PICTURE_SECONDS, f"P-slow: {answer['seconds']:.1f} s")
+        self.hold("P-slow", f"held {SLOW_PICTURE_SECONDS} s at the fake: the client got 200 with "
+                  f"the picture after {answer['seconds']:.1f} s, through the front and the "
+                  f"egress")  # fmt: skip
 
     def cells_p3_p4(self, key: str, second: str) -> str:
         person, other = self.fingerprint(), self.fingerprint()
@@ -344,10 +489,17 @@ class AdmissionProbe(LitellmProbe):
         self.push(key, self.fingerprint(), APP_PUSH)
         self.wait_for("K5", "the key's spend past its budget",
                       lambda: self.key_info(key)["spend"] > APP_BUDGET)  # fmt: skip
+        spend = self.key_info(key)["spend"]
+        listed = self.call(key, "GET", MODELS_ROUTE)
+        listed_as = f"{listed['status']} {error_of(listed)}"
+        expect(listed_as == "422 budget_exceeded/422", f"K5: the list past the budget: {listed_as}")
         refusal = self.expect_refused("K5", key, self.fingerprint())
         query = self.expect_query_refused("K5", key, self.fingerprint())
+        after = self.key_info(key)["spend"]
+        expect(after == spend, f"K5: the spend {spend} before the list, {after} after")
         self.hold("K5", f"past max_budget the next request is refused before the provider: "
-                  f"{refusal}, F 0, and {query}")  # fmt: skip
+                  f"{refusal}, F 0, and {query}; its list through the front: {listed_as}, its "
+                  f"spend {spend} before and after")  # fmt: skip
         return key
 
     def cells_k7_p5(self, over: str, key: str, person: str) -> None:

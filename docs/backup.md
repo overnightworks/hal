@@ -51,7 +51,7 @@ Allow by `owner` alone only when the service opens random ports.
 
 ## hal backup and hal restore
 
-A weekly encrypted backup of the declared apps (Songmaker, Keycloak and LiteLLM) into a local restic repository,
+A weekly encrypted backup of the declared apps (Songmaker, Keycloak, LiteLLM and presentator) into a local restic repository,
 and a monthly test that restores the last successful backup's snapshot and proves it is good.
 
 **What it protects against:** accidental deletion and corruption. The repository `~/backups/restic` sits
@@ -141,7 +141,9 @@ other apps' entries in the status file stay as they are, and a name `apps.toml` 
 `--read-data-subset`); the monthly run keeps that. Without a name both commands do what the timers do.
 `hal restore --test <app> --snapshot <ID>` restores and verifies that snapshot of the app instead of
 the one the status file names (it needs the app's name); `hal apply` uses it on the snapshot its own backup
-just made, so a timer backup in between cannot swap the snapshot under test.
+just made, so a timer backup in between cannot swap the snapshot under test. `hal apply` takes and proves
+such a snapshot of Keycloak before its realm step, and of Keycloak or LiteLLM before it recreates their
+service or database onto a new image ([stack.md](stack.md), „Images“).
 
 `hal backup <app> --pre-apply` additionally tags the snapshot `pre-apply`, and with
 `--json` prints nothing but one object, `{"snapshot": "<ID>"}`, which `hal apply` reads (a failure is then one
@@ -237,6 +239,19 @@ spend per key and per fingerprint, the daily rows and the tool names, and `key_n
 LiteLLM shows of each key; never a key in clear. In plain text it exists in the same three 0700
 places as Keycloak's. LiteLLM writes spend to its database in batches every 10 seconds
 (`PROXY_BATCH_WRITE_AT`), so a dump lacks at most that last batch.
+
+presentator's copy is its SQLite database and its built decks (`builds`, without the half-built
+`staged-*` directories). The database holds the people's sessions, their Keycloak `sub`s and the
+source secrets, which are encrypted with presentator's master key (the file
+`~/.secrets/presentator/secret-key`). The master key is not in the data backup, so a restored copy
+cannot read those secrets without it. Until the separate backups of secrets and data of #291 exist,
+the master key and the data backups sit on the same disk. The session ids (the signed session
+cookies carry them) and the Keycloak refresh and ID tokens are stored as plain text in the copy. The
+copy alone exposes the claims of the ID tokens and whatever an ID token allows as a logout hint at
+Keycloak. A takeover of a live session needs the master key as well, because presentator signs the
+cookies with it (`~/.secrets/presentator/secret-key`); renewing a token needs Keycloak's client secret
+(`~/.secrets/keycloak/clients/presentator`), which is not in the database either. In plain text the
+copy exists in the same three 0700 places as Keycloak's.
 
 A row that `hal expire` deletes ([agent-service.md](agent-service.md), „What expires“) stays in
 every snapshot taken before the delete, until retention forgets that snapshot:
@@ -435,8 +450,8 @@ holds the backup lock and removes the restored dump when it ends:
 2. `hal restore keycloak --live`, and check that its loaded row names the snapshot you meant
 3. `hal start keycloak`
 
-A failed realm step of `hal apply` names its pre-apply snapshot; load that one with
-`hal restore keycloak --live --snapshot <ID>`. A failed load's line names its own rerun (above).
+A failed realm step of `hal apply`, or a Keycloak that does not run after its recreate onto a new
+image, names its pre-apply snapshot; load that one with `hal restore keycloak --live --snapshot <ID>`. A failed load's line names its own rerun (above).
 
 A run killed outright (SIGKILL, the terminal closed) reports nothing: its load ends whole or not
 at all, nobody reports which, and Keycloak stays stopped. Run

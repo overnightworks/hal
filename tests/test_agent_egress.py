@@ -30,7 +30,7 @@ PROBE = ROOT / "probe" / "agent-service"
 GATEWAY = "agent-egress"
 SERVICE = "agent-service"
 STAND_IN = "agent-probe"
-LITELLM_API, LITELLM_EGRESS = "litellm-api", "litellm-egress"
+LITELLM_EGRESS = "litellm-egress"
 OBSERVER = "realm-observer"
 ISOLATED_MODE = {"com.docker.network.bridge.gateway_mode_ipv4": "isolated"}
 HOST_SNI = re.compile(r"HostSNI\(`([^`]+)`\)")
@@ -62,7 +62,12 @@ def attachments(compose) -> dict:
 
 @pytest.fixture(scope="module")
 def passed_names(routers) -> set[str]:
-    return {HOST_SNI.fullmatch(router["rule"]).group(1) for router in routers.values()}
+    """The names the gateway passes from the agent service's entrypoint `egress`."""
+    return {
+        HOST_SNI.fullmatch(router["rule"]).group(1)
+        for router in routers.values()
+        if "egress" in router["entryPoints"]
+    }
 
 
 def test_every_network_of_the_agent_attachments_is_internal_and_isolated(compose, attachments):
@@ -81,10 +86,7 @@ def test_a_member_carries_the_attachments_and_nothing_else_of_the_network(
     """E16: the stand-in and the service merge the one anchor; neither adds a port, a network
     mode or a network."""
     service = compose["services"][member]
-    # The service lists its networks itself, and adds the one to LiteLLM's front (#768).
-    extra_networks = [LITELLM_API] if member == SERVICE else []
-
-    assert service["networks"] == [*attachments["networks"], *extra_networks]
+    assert service["networks"] == attachments["networks"]
     assert service["extra_hosts"] == attachments["extra_hosts"]
     assert not {"ports", "network_mode", "expose"} & service.keys()
 
@@ -155,14 +157,17 @@ def test_the_gateways_addresses_stand_in_compose_and_in_its_static_file(compose)
     )
 
 
-def test_every_router_names_its_entrypoints_and_only_the_provider_is_open_to_litellm(routers):
-    """#768: the issuer is reachable from the agent service alone; the provider from LiteLLM too."""
+def test_every_router_names_its_entrypoints_and_only_the_providers_are_open_to_litellm(routers):
+    """#768: the issuer is reachable from the agent service alone; the provider from LiteLLM too,
+    and the picture provider from LiteLLM alone."""
     entrypoints = set(load("agent-service/egress/traefik.yml")["entryPoints"])
 
     assert all(set(router["entryPoints"]) <= entrypoints for router in routers.values())
-    assert [name for name, router in routers.items() if "litellm" in router["entryPoints"]] == [
-        "provider"
-    ]
+    assert {name: router["entryPoints"] for name, router in routers.items()} == {
+        "provider": ["egress", "litellm"],
+        "issuer": ["egress"],
+        "pictures": ["litellm"],
+    }
 
 
 def test_the_gateway_shares_the_public_traefiks_image_and_hardening(compose):
