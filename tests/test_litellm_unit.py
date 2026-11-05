@@ -566,6 +566,36 @@ def test_the_fake_quotes_the_canary_a_request_holds_and_nothing_else_of_it(
     assert (status, json.loads(reply)["error"]["message"]) == (400, expected)
 
 
+FIRST_ROUND = {"messages": [{"role": "user", "content": "probe"}]}
+AFTER_A_CALL = {"messages": [
+    {"role": "user", "content": "probe"},
+    {"role": "assistant", "content": [{"type": "tool_use", "id": "t", "name": "n", "input": {}}]},
+    {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t", "content": "r"}]},
+]}  # fmt: skip
+
+
+@pytest.mark.parametrize(
+    ("once", "request_body", "calls"),
+    [
+        pytest.param(True, FIRST_ROUND, True, id="once: the first round is called"),
+        pytest.param(True, AFTER_A_CALL, False, id="once: the round after a result is answered"),
+        pytest.param(False, AFTER_A_CALL, True, id="every round is called unless once"),
+    ],
+)
+def test_the_fake_calls_the_steered_tool_once_only_while_no_tool_result_came_back(
+    fake_provider, once, request_body, calls
+):
+    steering = {"marker": "m", "tool_use": {"name": "n", "input": {}}, "tool_use_once": once}
+
+    handler = fake_provider.handler("provider", {})
+
+    _, reply = handler.provider_answer(None, steering, json.dumps(request_body).encode())
+
+    answer = json.loads(reply)
+    called = [block["type"] for block in answer["content"]] == ["text", "tool_use"]
+    assert (called, answer["stop_reason"] == "tool_use") == (calls, calls)
+
+
 def test_the_fakes_stream_answers_with_one_delta_per_steered_text_and_no_byte_of_the_request(
     fake_provider,
 ):
