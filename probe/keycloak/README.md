@@ -165,6 +165,8 @@ Keycloak changes through hal itself.
     flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \
         uv run --frozen python3 probe/keycloak/in_copy.py --scratch DIR
 
+Measured: a run takes 143 s and its teardown 1.7 s (K 30 s, CAP 1800 s).
+
 It needs an existing, empty `--scratch` directory and leaves it empty, passed or failed, and `uv`:
 it runs `uv sync` in the copy. It prints one `H<n> held:` line per cell and ends with
 `PASSED: H1, ..., H6` (exit 0), or `PROBE FAILED: <what>` (exit 1).
