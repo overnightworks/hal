@@ -12,11 +12,13 @@ from urllib.parse import urlsplit
 
 import pytest
 import yaml
+from support.script_module import loaded_script
 
 from hal.stack import appkit_step, catalog, compose, legal_section, unit_plans
 from hal.stack.realm import reconcile
 
 REPOSITORY = Path(__file__).resolve().parents[1]
+CELLS = REPOSITORY / "probe" / "keycloak"
 KEYCLOAK_SERVICES = ("keycloak-db", "keycloak")
 CLIENT_SECRET_REFERENCE = re.compile(r"\$\(env:(\w+)\)")
 
@@ -415,11 +417,9 @@ def test_only_songmaker_allows_the_device_grant():
     ],
 )
 def test_the_device_grant_cell_accepts_only_songmaker_with_its_secret(
-    monkeypatch, client_id, answers
+    device_grant_cell, client_id, answers
 ):
     """#297: the cell reports a held cell for the ruled answers and no other."""
-    monkeypatch.syspath_prepend(str(REPOSITORY / "probe" / "keycloak"))
-    import device_grant_cell
 
     def answer(status):
         body = {"device_code": "d", "user_code": "u"} if status == 200 else {"error": "x"}
@@ -449,11 +449,10 @@ def test_the_device_grant_cell_accepts_only_songmaker_with_its_secret(
     assert failures
 
 
-def test_the_device_grant_cell_names_no_part_of_an_answer_that_lacks_the_user_code(monkeypatch):
+def test_the_device_grant_cell_names_no_part_of_an_answer_that_lacks_the_user_code(
+    device_grant_cell,
+):
     """#297: a device_code in a malformed answer must not reach the probe's output."""
-    monkeypatch.syspath_prepend(str(REPOSITORY / "probe" / "keycloak"))
-    import device_grant_cell
-
     body = {"device_code": "SECRET-DEVICE-CODE"}
     started = SimpleNamespace(status=200, text=json.dumps(body), json=lambda: body)
 
@@ -476,11 +475,8 @@ def test_the_device_grant_cell_names_no_part_of_an_answer_that_lacks_the_user_co
     assert "SECRET-DEVICE-CODE" not in "".join(messages)
 
 
-def test_the_back_channel_cell_keeps_the_client_secret_out_of_the_exec_arguments(monkeypatch):
+def test_the_back_channel_cell_keeps_the_client_secret_out_of_the_exec_arguments(backchannel_cell):
     """#293: process arguments are visible to the host; the secret goes through stdin."""
-    monkeypatch.syspath_prepend(str(REPOSITORY / "probe" / "keycloak"))
-    import backchannel_cell
-
     secret = "probe-client-secret-value"
     calls = []
 
@@ -564,12 +560,14 @@ def test_the_auth_host_opens_only_the_realm_paths_and_the_admin_console_only_on_
     }
 
 
-@pytest.fixture
-def backchannel_cell(monkeypatch):
-    monkeypatch.syspath_prepend(str(REPOSITORY / "probe" / "keycloak"))
-    import backchannel_cell
+@pytest.fixture(scope="module")
+def backchannel_cell():
+    yield from loaded_script("backchannel_cell", CELLS / "backchannel_cell.py", CELLS)
 
-    return backchannel_cell
+
+@pytest.fixture(scope="module")
+def device_grant_cell():
+    yield from loaded_script("device_grant_cell", CELLS / "device_grant_cell.py", CELLS)
 
 
 @pytest.mark.parametrize(

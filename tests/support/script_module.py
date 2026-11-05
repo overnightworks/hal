@@ -11,7 +11,7 @@ from pathlib import Path
 from types import ModuleType
 
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPT_DIRECTORIES = (ROOT / "probe", ROOT / "agent-service")
+SCRIPT_DIRECTORIES = (ROOT / "probe", ROOT / "agent-service", ROOT / "keycloak")
 
 
 def _lies_under_script_directories(module: ModuleType) -> bool:
@@ -21,11 +21,18 @@ def _lies_under_script_directories(module: ModuleType) -> bool:
     )
 
 
+def script_module_names() -> set[str]:
+    """The names under which a script of `probe/`, `agent-service/` or `keycloak/` is imported."""
+    return {
+        name for name, module in list(sys.modules.items()) if _lies_under_script_directories(module)
+    }
+
+
 @contextmanager
 def importing_from(*directories: Path) -> Iterator[None]:
     """`directories` first on `sys.path` for the length of the `with`; afterwards `sys.path` is as
-    it was, and the modules of `probe/` and `agent-service/` imported meanwhile are forgotten, so
-    the next import of one reads it afresh. Other modules (a library first imported here) stay."""
+    it was, and the script modules imported meanwhile are forgotten, so the next import of one
+    reads it afresh. Other modules (a library first imported here) stay."""
     path_before = list(sys.path)
     modules_before = set(sys.modules)
     sys.path[:0] = [str(directory) for directory in directories]
@@ -33,9 +40,8 @@ def importing_from(*directories: Path) -> Iterator[None]:
         yield
     finally:
         sys.path[:] = path_before
-        for name in set(sys.modules) - modules_before:
-            if _lies_under_script_directories(sys.modules[name]):
-                del sys.modules[name]
+        for name in script_module_names() - modules_before:
+            del sys.modules[name]
 
 
 def loaded_script(name: str, path: Path, *directories: Path) -> Iterator[ModuleType]:
