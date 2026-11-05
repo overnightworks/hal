@@ -176,7 +176,7 @@ def test_every_table_of_contents_entry_targets_an_id_of_the_page(name):
     ],
 )
 def test_the_shared_privacy_part_says_what_cloudflare_sees_and_who_hears_complaints(sentence):
-    assert sentence in read_page("datenschutz").split('<section class="app" id="songmaker">')[0]
+    assert sentence in read_page("datenschutz")
 
 
 @pytest.mark.parametrize(
@@ -186,12 +186,10 @@ def test_the_shared_privacy_part_says_what_cloudflare_sees_and_who_hears_complai
         ("pseudonym", "§ 19 Abs. 2 TDDDG"),
     ],
 )
-def test_a_shared_section_precedes_songmaker_and_is_in_the_table_of_contents(section, sentence):
+def test_a_shared_section_is_in_the_table_of_contents(section, sentence):
     page = read_page("datenschutz")
-    shared, songmaker = page.split('<section class="app" id="songmaker">')
-    assert f'<a href="#{section}">' in shared
-    assert sentence in shared.split(f'id="{section}"')[1]
-    assert f'id="{section}"' not in songmaker
+    assert f'<a href="#{section}">' in page
+    assert sentence in page.split(f'id="{section}"')[1]
 
 
 @pytest.mark.parametrize(
@@ -212,22 +210,13 @@ def test_a_shared_section_precedes_songmaker_and_is_in_the_table_of_contents(sec
 )
 def test_the_shared_sign_in_section_names_what_keycloak_keeps_and_for_how_long(sentence):
     page = read_page("datenschutz")
-    shared, songmaker = page.split('<section class="app" id="songmaker">')
-    assert '<a href="#anmeldung">Anmeldung (Keycloak)</a>' in shared
-    assert sentence in shared.split('id="anmeldung"')[1]
-    assert 'id="anmeldung"' not in songmaker
+    assert '<a href="#anmeldung">Anmeldung (Keycloak)</a>' in page
+    assert sentence in page.split('id="anmeldung"')[1]
 
 
 def test_the_sign_in_section_states_the_age_bound_of_the_snapshots_before_an_update():
     section = read_page("datenschutz").split('id="anmeldung"')[1].split("<h2")[0]
     assert f"auch sie löschen wir nach {PRE_APPLY_MAX_AGE.days} Tagen" in section
-
-
-@pytest.mark.parametrize("name", TEXT_PAGES)
-def test_the_songmaker_section_has_an_anchored_heading_and_subsection_ids(name):
-    page = read_page(name)
-    assert page.count('id="songmaker"') == 1
-    assert 'id="songmaker-' in page
 
 
 TEXT_SOURCES = [

@@ -12,6 +12,7 @@ import support.stack_apps as stack_apps_support
 from support.app_support import KEY
 from support.git_support import plain_git
 from support.stack_apply import (
+    REPOSITORY,
     at_terminal,  # noqa: F401 the fixture, requested by name below
     home,  # noqa: F401 the fixture, requested by name below
     ingress,  # noqa: F401 the fixture, requested by name below
@@ -26,12 +27,14 @@ from support.stack_apply import (
 )
 from support.stack_apps import (
     FIRST,
+    HOST_ONLY_KEY,
     PRIVACY_FILE,
     SECOND,
     LegalApps,
 )
 from support.stack_plan_rows import detail_lines, find_row, plain
 
+from hal.stack import catalog
 from hal.stack.legal_section import MAXIMUM_BYTES
 from hal.stack.plan_rows import LegalEvent
 
@@ -356,3 +359,129 @@ def test_every_block_of_an_apps_section_is_published_byte_for_byte(legal_apps):
     assert exit_code == 0, err
     built = legal_apps.page()
     assert [block for block in (*blocks, *inner) if block not in built] == []
+
+
+HOST_ONLY_WHERE = f"~/srv/{HOST_ONLY_KEY}"
+HOST_ONLY_HEADING = f'<h2 id="{HOST_ONLY_KEY}">Songmaker</h2>\n'
+HOST_ONLY_TEXT = "<p>Songmaker speichert deine Lieder.</p>\n<ul>\n  <li>Titel</li>\n</ul>\n"
+HOST_ONLY_CHANGED = "<p>Songmaker speichert keine Lieder mehr.</p>\n"
+HOST_ONLY_PRIVACY = HOST_ONLY_HEADING + HOST_ONLY_TEXT
+
+
+def host_only_lines(out: str) -> list[str]:
+    return [line for line in detail_lines(out) if f"#{HOST_ONLY_KEY} " in line]
+
+
+def test_a_first_build_names_the_host_only_block_with_its_short_sha_and_publishes_its_text(
+    legal_apps,
+):
+    """E1, L3, L14."""
+    songmaker = legal_apps.host_only_app()
+    songmaker.commit({PRIVACY_FILE: HOST_ONLY_PRIVACY})
+
+    exit_code, out, err = legal_apps.world.apply()
+
+    assert exit_code == 0, err
+    [line] = host_only_lines(out)
+    assert f"{HOST_ONLY_WHERE}/{PRIVACY_FILE}" in line
+    assert "new" in line
+    assert songmaker.short() in line
+    assert HOST_ONLY_TEXT in legal_apps.page()
+
+
+def test_a_new_commit_in_the_host_only_checkout_changes_the_text_and_is_named_with_its_sha(
+    legal_apps,
+):
+    """E2, L3."""
+    songmaker = legal_apps.host_only_app()
+    songmaker.commit({PRIVACY_FILE: HOST_ONLY_PRIVACY})
+    assert legal_apps.world.apply()[0] == 0
+    songmaker.commit({PRIVACY_FILE: HOST_ONLY_HEADING + HOST_ONLY_CHANGED})
+
+    exit_code, out, err = legal_apps.world.apply()
+
+    assert exit_code == 0, err
+    [line] = host_only_lines(out)
+    assert "changed" in line
+    assert songmaker.short() in line
+    assert HOST_ONLY_CHANGED in legal_apps.page()
+    assert HOST_ONLY_TEXT not in legal_apps.page()
+
+
+def test_the_same_head_of_the_host_only_checkout_names_no_block_and_keeps_the_text(legal_apps):
+    """E3, L3."""
+    songmaker = legal_apps.host_only_app()
+    songmaker.commit({PRIVACY_FILE: HOST_ONLY_PRIVACY})
+    assert legal_apps.world.apply()[0] == 0
+    songmaker.commit({"README": "a commit that leaves the text alone"})
+
+    exit_code, out, err = legal_apps.world.apply()
+
+    assert exit_code == 0, err
+    assert not find_row(out, "legal", LegalEvent.EDITED_PAGE)
+    assert host_only_lines(out) == []
+    assert HOST_ONLY_TEXT in legal_apps.page()
+
+
+def lose_the_host_only_checkout(songmaker) -> None:
+    shutil.rmtree(songmaker.tree)
+
+
+def invalidate_the_host_only_git_directory(songmaker) -> None:
+    shutil.rmtree(songmaker.tree / ".git")
+    (songmaker.tree / ".git").mkdir()
+
+
+@pytest.mark.parametrize(
+    "lose", [lose_the_host_only_checkout, invalidate_the_host_only_git_directory]
+)
+def test_a_host_only_checkout_that_cannot_be_read_refuses_before_the_question_naming_the_path(
+    legal_apps, lose
+):
+    """E4, M12."""
+    songmaker = legal_apps.host_only_app()
+    songmaker.commit({PRIVACY_FILE: HOST_ONLY_PRIVACY})
+    lose(songmaker)
+
+    exit_code, out, err = legal_apps.world.apply()
+
+    assert exit_code == 2
+    assert HOST_ONLY_WHERE in err
+    assert "Type yes" not in plain(out)
+
+
+def test_a_host_only_checkout_without_a_privacy_file_has_no_block_and_is_no_refusal(legal_apps):
+    """E5, head decision 4."""
+    legal_apps.host_only_app().commit({"README": "no legal text yet"})
+
+    exit_code, _, err = legal_apps.world.apply()
+
+    assert exit_code == 0, err
+    assert f'id="{HOST_ONLY_KEY}"' not in legal_apps.page()
+
+
+def test_edge_holds_no_section_of_its_own_for_any_host_only_app():
+    """E6, L8: the checkout is the one owner of a host-only block."""
+    sections = REPOSITORY / "legal/sections"
+
+    for key in catalog.host_only_keys(catalog.read(REPOSITORY / "fleet.yaml")):
+        assert not (sections / key).exists()
+
+
+def test_a_section_edge_still_holds_for_a_host_only_app_refuses_naming_both(legal_apps):
+    """E6, L8: the two owners hold different pages, so only the two-owner rule can refuse."""
+    held = "legal/sections/" + HOST_ONLY_KEY + "/nutzungsbedingungen.html"
+    edge = legal_apps.world.repository
+    (edge / held).parent.mkdir(parents=True)
+    (edge / held).write_text(HOST_ONLY_PRIVACY)
+    plain_git(edge, "add", held)
+    plain_git(edge, "-c", "core.hooksPath=/dev/null", "commit", "--quiet",
+              "--message", "held section", "--", held)  # fmt: skip
+    legal_apps.host_only_app().commit({PRIVACY_FILE: HOST_ONLY_PRIVACY})
+
+    exit_code, out, err = legal_apps.world.apply()
+
+    assert exit_code == 2
+    assert f"legal/sections/{HOST_ONLY_KEY}/" in err
+    assert f"~/srv/{HOST_ONLY_KEY}/legal/" in err
+    assert "Type yes" not in plain(out)
