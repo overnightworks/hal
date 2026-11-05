@@ -59,6 +59,7 @@ sys.path[:0] = [str(REPO / "src"), str(REPO / "probe/keycloak"), str(REPO / "pro
 import agents_client_cell  # noqa: E402
 import backchannel_cell  # noqa: E402
 import device_grant_cell  # noqa: E402
+import edge_copy  # noqa: E402
 import edge_subnets  # noqa: E402
 import litellm_admin_cell  # noqa: E402
 import logout_actions_cell  # noqa: E402
@@ -109,8 +110,7 @@ NETWORK_OVERLAY = "network.compose.yaml"
 # live provider refuses (compose.probe.yaml), so neither Traefik sees the other's containers.
 LIVE_CONSTRAINTS = "LabelRegex(`edge.name`, `^[a-z0-9-]{1,63}$`)"
 PROBE_CONSTRAINTS = f"Label(`com.docker.compose.project`, `{PROJECT}`)"
-# The /24s a probe's keycloak network may take, clear of the live one (172.31.253.0/24).
-SUBNET_CANDIDATES = tuple(f"172.31.{third}.0/24" for third in range(200, 250))
+MOVED_NETWORKS = ("keycloak", "keycloak-keys")  # compose.yaml's, each on a free /24 of its own
 TRAEFIK_NOT_FOUND = b"404 page not found\n"
 
 # `roles` carries the workload role, `service_account` the client_id and the audience is the
@@ -452,8 +452,7 @@ class Stack:
         self.edge_port, self.admin_port = free_loopback_ports(2)
         self.edge_url = f"http://127.0.0.1:{self.edge_port}"
         self.admin_url = self.admin_url or f"http://localhost:{self.admin_port}"
-        self.keycloak_subnet = free_subnet()
-        self.key_set_subnet = free_subnet(also_taken=[self.keycloak_subnet])
+        self.keycloak_subnet, self.key_set_subnet = free_subnets(MOVED_NETWORKS)
         self.network_overlay = self.scratch / NETWORK_OVERLAY
         self.write_network_overlay()
 
@@ -485,7 +484,7 @@ class Stack:
         """The keycloak and key-set networks on this stack's free subnets instead of the live
         ones, with what compose.yaml pins in them (edge_subnets.subnet_overlay)."""
         shipped = (REPO / deploy_checkout.COMPOSE_FILE).read_text()
-        moves = {"keycloak": self.keycloak_subnet, "keycloak-keys": self.key_set_subnet}
+        moves = dict(zip(MOVED_NETWORKS, (self.keycloak_subnet, self.key_set_subnet), strict=True))
         self.scratch.mkdir(parents=True, exist_ok=True)
         self.network_overlay.write_text(edge_subnets.subnet_overlay(shipped, moves))
 
@@ -752,26 +751,16 @@ def free_loopback_ports(count: int) -> list[int]:
             held.close()
 
 
-def free_subnet(also_taken: Sequence[str] = ()) -> str:
-    """The first of SUBNET_CANDIDATES that no Docker network here nor `also_taken` overlaps."""
-    listed = docker("network", "ls", "--quiet")
-    expect(listed.returncode == 0, f"docker network ls failed:\n{tail(listed.stderr)}")
-    ids = listed.stdout.split()
-    taken = [*map(ipaddress.ip_network, also_taken)]
-    if ids:
-        inspected = docker(
-            "network", "inspect", "--format", "{{range .IPAM.Config}}{{.Subnet}} {{end}}", *ids
-        )
-        expect(
-            inspected.returncode == 0, f"docker network inspect failed:\n{tail(inspected.stderr)}"
-        )
-        taken += [
-            net for net in map(ipaddress.ip_network, inspected.stdout.split()) if net.version == 4
-        ]
-    for candidate in SUBNET_CANDIDATES:
-        if not any(ipaddress.ip_network(candidate).overlaps(network) for network in taken):
-            return candidate
-    raise ProbeFailure(f"no free /24 among {SUBNET_CANDIDATES[0]} ... {SUBNET_CANDIDATES[-1]}")
+def free_subnets(networks: Sequence[str]) -> list[str]:
+    """The free /24 the probe takes for each of compose.yaml's `networks`: edge_copy.probe_prefixes,
+    which skips every shipped /24 and every one a network of another project here holds."""
+    shipped = (REPO / deploy_checkout.COMPOSE_FILE).read_text()
+    try:
+        moved = edge_copy.probe_prefixes(shipped, PROJECT)
+    except (subprocess.CalledProcessError, ValueError) as failure:
+        raise ProbeFailure(f"no free /24s for {list(networks)}: {failure}") from failure
+    pinned = edge_subnets.pinned_prefixes(shipped)
+    return [f"{moved[pinned[network]]}{edge_subnets.SUBNET_SUFFIX}" for network in networks]
 
 
 def wait_until_ready(admin_url: str) -> None:

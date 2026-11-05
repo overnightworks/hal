@@ -5,13 +5,13 @@ import json
 import os
 import re
 import sys
-from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
 from textwrap import dedent
 from types import SimpleNamespace
 
 import pytest
+import support.probe_modules as probe_modules
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -20,7 +20,6 @@ sys.path.insert(0, str(ROOT / "src"))
 
 import edge_copy  # noqa: E402
 from support.git_support import committed_main, plain_git  # noqa: E402
-from support.script_module import loaded_script  # noqa: E402
 
 from hal.backup.apps import parse_apps  # noqa: E402
 from hal.backup.docker import PROJECT_LABEL  # noqa: E402
@@ -527,16 +526,7 @@ def resolved_stack(project: str, step_ca_volume: str | None = None) -> dict:
     }
 
 
-@pytest.fixture(scope="module")
-def step_ca_probe() -> Iterator:
-    yield from loaded_script("step_ca_probe", ROOT / "probe" / "step-ca" / "probe.py")
-
-
-@pytest.fixture(scope="module")
-def apps_probe() -> Iterator:
-    with pytest.MonkeyPatch.context() as patch:
-        patch.syspath_prepend(str(ROOT / "probe" / "apps"))
-        yield from loaded_script("apps_probe", ROOT / "probe" / "apps" / "probe.py")
+step_ca_probe, apps_probe = probe_modules.step_ca_probe, probe_modules.apps_probe
 
 
 @pytest.mark.parametrize("flags", [(), ("--check",)], ids=["init", "init --check"])

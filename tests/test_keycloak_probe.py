@@ -4,7 +4,6 @@ import json
 import os
 import re
 import signal
-import subprocess
 import sys
 import threading
 from collections.abc import Callable, Iterator
@@ -20,6 +19,7 @@ from urllib.response import addinfourl
 
 import pytest
 import support.keycloak_probe as keycloak_support
+import support.probe_modules as probe_modules
 import yaml
 from support.fake_docker import DAEMON_GONE, LATE_APPLY, RUNNING_APPLY, SERVICE_CONTAINER
 from support.keycloak_probe import DockerHost
@@ -361,36 +361,6 @@ def test_proof_11_refuses_to_run_when_go_live_still_names_the_live_edge(
         probe_run.go_live_admin_step("first-password", typed_answers=True)
 
 
-def docker_answering(
-    monkeypatch: pytest.MonkeyPatch, probe: ModuleType, *, networks: list[str], subnets: str
-) -> None:
-    def answer(*arguments: str) -> subprocess.CompletedProcess[str]:
-        if arguments[:2] == ("network", "ls"):
-            return subprocess.CompletedProcess(arguments, 0, "\n".join(networks), "")
-        return subprocess.CompletedProcess(arguments, 0, subnets, "")
-
-    monkeypatch.setattr(probe, "docker", answer)
-
-
-def test_the_probe_skips_a_candidate_subnet_that_a_network_overlaps(
-    probe: ModuleType, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    docker_answering(
-        monkeypatch, probe, networks=["live"], subnets="172.31.253.0/24 172.31.200.128/25 "
-    )
-
-    assert probe.free_subnet() == "172.31.201.0/24"
-
-
-def test_the_probe_fails_when_every_candidate_subnet_is_taken(
-    probe: ModuleType, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    docker_answering(monkeypatch, probe, networks=["wide"], subnets="172.31.0.0/16")
-
-    with pytest.raises(probe.ProbeFailure, match="no free /24"):
-        probe.free_subnet()
-
-
 @pytest.mark.parametrize("fault", ["a docker failure", "every subnet taken"])
 def test_a_failure_while_building_the_stack_ends_with_one_failure_and_no_teardown(
     probe: ModuleType,
@@ -401,13 +371,9 @@ def test_a_failure_while_building_the_stack_ends_with_one_failure_and_no_teardow
     fault: str,
 ) -> None:
     if fault == "a docker failure":
-        monkeypatch.setattr(
-            probe,
-            "docker",
-            lambda *arguments: subprocess.CompletedProcess(arguments, 1, "", "daemon is gone"),
-        )
+        DockerHost(tmp_path, monkeypatch).configure(unlistable_kind="network")
     else:
-        docker_answering(monkeypatch, probe, networks=["wide"], subnets="172.31.0.0/16")
+        probe_modules.a_daemon(tmp_path / "daemon", monkeypatch, {"172.31.0.0/16": "wide"})
     monkeypatch.setattr(sys, "argv", ["probe.py", "--scratch", str(tmp_path / "s")])
     exit_code = probe.main()
 
