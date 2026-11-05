@@ -271,8 +271,8 @@ and the admin budget with its customer rows (the key step below).
   (`agent-service/litellm/front/`); every other method and path, `/v1/images/edits`,
   `/v1/images/variations` and `/v1/models/<name>` included, ends in the front itself, so
   LiteLLM's own unauthenticated routes are unreachable. An app key's `GET /v1/models` lists
-  exactly the key's `models`, past its budget too, at no spend. Behind it LiteLLM's own keys
-  decide, with no hal code in its process: a request needs an app key as bearer (401
+  exactly the key's `models`. Behind it LiteLLM's own keys decide, with no hal code in its
+  process: a request needs an app key as bearer (401
   otherwise), a model among the key's `models` (the three
   names `text/opus`, `text/sonnet`, `text/haiku` and the picture name `image/flare` of
   `config.yaml`, which maps to OpenAI's `gpt-image-2.5-flare` on the key `litellm/openai`; 403
