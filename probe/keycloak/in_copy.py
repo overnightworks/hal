@@ -302,6 +302,8 @@ class KeycloakCopy:
         """The teardown's path on a copy whose files are missing, with one volume carrying the
         project's label and nothing started: the real label sweep removes the volume, and the
         read's error still stops the teardown."""
+        if self.stand is None:
+            raise ProbeFailed("self-check: the teardown self-check ran before prepare")
         volume = f"{PROJECT}_teardown-self-check"
         label = f"{PROJECT_LABEL}={PROJECT}"
         run_checked(["docker", "volume", "create", "--label", label, volume], os.environ)
@@ -310,10 +312,9 @@ class KeycloakCopy:
             removed_whatever_fails(lambda: expect_isolated(missing), self.sweep)
         except FileNotFoundError as failure:
             expect(not project_resources("volume"), f"self-check: the sweep left {volume}")
-            return (
-                f"self-check: a missing copy file at the teardown: the label sweep removed the "
-                f"volume {volume}, then {type(failure).__name__} stopped the teardown"
-            )
+            swept = f"the label sweep removed the volume {volume}"
+            stopped = f"{type(failure).__name__} stopped the teardown"
+            return f"self-check: a missing copy file at the teardown: {swept}, then {stopped}"
         raise ProbeFailed("self-check: a missing copy file at the teardown raised nothing")
 
     def checked_down(self) -> None:

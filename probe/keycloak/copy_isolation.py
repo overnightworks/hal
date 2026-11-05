@@ -135,11 +135,11 @@ class Isolation:
 
     @property
     def edge_url(self) -> str:
-        return f"http://{self.edge_address}"
+        return f"http://{self.edge_address}"  # NOSONAR(S5332) loopback entrypoint, no TLS
 
     @property
     def admin_url(self) -> str:
-        return f"http://localhost:{self.admin_port}"  # the admin router's rule is Host(`localhost`)
+        return f"http://localhost:{self.admin_port}"  # NOSONAR(S5332) no TLS, Host(`localhost`)
 
     @property
     def master_token_url(self) -> str:
