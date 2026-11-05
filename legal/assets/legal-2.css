@@ -12,7 +12,7 @@ background-image:linear-gradient(var(--grid-line) 1px,transparent 1px),linear-gr
 body::after{content:"";position:fixed;z-index:-1;pointer-events:none;width:400px;height:400px;top:-100px;right:-100px;border-radius:50%;background:var(--primary);filter:blur(80px);opacity:.15}
 .glow2{position:fixed;z-index:-1;pointer-events:none;width:300px;height:300px;bottom:-50px;left:-50px;border-radius:50%;background:var(--accent);filter:blur(80px);opacity:.15}
 a{color:var(--text);text-decoration-color:var(--accent);text-underline-offset:3px}
-a:hover{color:var(--text)}
+a:hover:not(.legal a){color:var(--text)}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .wrap{max-width:980px;margin:0 auto;padding:28px 16px 32px}
 .mark{font:400 34px/1.1 var(--font-display);text-transform:uppercase;letter-spacing:.15em;text-align:center;margin:0 0 20px;
