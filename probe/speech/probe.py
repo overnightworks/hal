@@ -38,6 +38,7 @@ from copy_isolation import (  # noqa: E402
     COMPOSE_FILE,
     FLEET_FILE,
     REPO,
+    CopyStand,
     Fleet,
     install,
     keycloak,
@@ -59,7 +60,7 @@ from speech_docker import (  # noqa: E402
 
 from hal.backup.docker import PROJECT_LABEL  # noqa: E402
 from hal.output import write_line  # noqa: E402
-from hal.stack import releases  # noqa: E402
+from hal.stack import deploy_checkout, releases  # noqa: E402
 from hal.stack.plan_rows import PlanEvent  # noqa: E402
 from hal.stack.realm.reconcile import KEYCLOAK, KEYCLOAK_SERVICE, REALM_UNIT  # noqa: E402
 from hal.stack.result_rows import ResultEvent  # noqa: E402
@@ -94,6 +95,20 @@ def lane_files() -> tuple[dict[str, str | None], dict[str, str | None]]:
 def moment(stamp: str) -> datetime:
     """A Docker timestamp (nanoseconds, `Z` or an offset) as an aware datetime, for ordering."""
     return datetime.fromisoformat(re.sub(r"(\.\d{6})\d+", r"\1", stamp))
+
+
+def networks_named_by_create(stand: CopyStand, networks: list[str]) -> list[str]:
+    """Which of `networks` the app step's `docker compose create` names when run by hand in the
+    app's checkout, as hal's failure line asks, since hal withholds Compose's output. Only the
+    names are read from that output, which may echo interpolated values."""
+    checkout = stand.home / "srv" / APP_KEY
+    command = ["docker", "compose", "-p", APP_KEY, "--project-directory", str(checkout)]
+    command += ["--file", str(checkout / deploy_checkout.COMPOSE_FILE), "create", "--no-build"]
+    result = edge_copy.run_command(
+        [*command, "--pull", "never"], text=True, env=stand.environment, cwd=checkout, timeout=120
+    )
+    expect(result.returncode != 0, f"D4: the create of {APP_KEY} in its checkout succeeded")
+    return [name for name in networks if name in result.stdout + result.stderr]
 
 
 def row_pattern(subject: str, event: str, fact: str = "") -> str:
@@ -385,7 +400,7 @@ class SpeechProbe(in_copy.Probe, NetworkCells, AdmissionCells):
         )
         failed = re.search(row_pattern(APP_KEY, ResultEvent.APP_FAILED), out)
         expect(failed is not None, f"D4: no failed row of {APP_KEY} in {out[-600:]}")
-        named = self.app.networks_named_by_create(self.stand, speech_networks)
+        named = networks_named_by_create(self.stand, speech_networks)
         expect(bool(named), f"D4: the app's create in its checkout names none of {speech_networks}")
         expect(not self.speech_containers(), f"D4: the app has {self.speech_containers()}")
         left = set(speech_networks) & set(networks_of(PROJECT))

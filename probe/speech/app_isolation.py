@@ -11,12 +11,11 @@ that check over one resolved configuration.
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import edge_copy
 import yaml
 from copy_isolation import (
     COMPOSE_FILE,
@@ -145,20 +144,6 @@ class SpeechApp:
         return expect_app_config_isolated(
             self.resolved(stand, text), self.key, stand.isolation.project, stand.home
         )
-
-    def networks_named_by_create(self, stand: CopyStand, networks: Sequence[str]) -> list[str]:
-        """Which of `networks` the app step's `docker compose create` names when run by hand in
-        the app's checkout, as hal's failure line asks, since hal withholds Compose's output. Only
-        the names are read from that output, which may echo interpolated values."""
-        checkout = stand.home / "srv" / self.key
-        file = checkout / deploy_checkout.COMPOSE_FILE
-        command = ["docker", "compose", "-p", self.key, "--project-directory", str(checkout)]
-        command += ["--file", str(file), "create", "--no-build", "--pull", "never"]
-        result = edge_copy.run_command(
-            command, text=True, env=stand.environment, cwd=checkout, timeout=120
-        )
-        expect(result.returncode != 0, f"the create of {self.key} in its checkout succeeded")
-        return [name for name in networks if name in result.stdout + result.stderr]
 
     def with_entry(self, entry: str) -> SpeechApp:
         return SpeechApp(self.key, entry, self.release_compose, self.tag)
