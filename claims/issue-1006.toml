@@ -3,6 +3,6 @@ agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
 role = "builder"
 base = "d71b4fb66eee5d8b81d92639f0f2d32a80a38728"
 branch = "claude/issue-1006-switch-on-snapshot"
-scope = [".github/dependabot.yml", "docs/stack.md", "src/hal/stack/apply.py", "src/hal/stack/compose.py", "src/hal/stack/emergency.py", "src/hal/stack/service_recreate.py", "src/hal/stack/unit_plans.py", "tests/support/stack_apply_fakes.py", "tests/test_litellm_unit.py", "tests/test_stack_apply_image_move.py"]
+scope = [".github/dependabot.yml", "docs/stack.md", "probe/edge_copy.py", "src/hal/stack/apply.py", "src/hal/stack/compose.py", "src/hal/stack/emergency.py", "src/hal/stack/service_recreate.py", "src/hal/stack/unit_plans.py", "tests/support/stack_apply_fakes.py", "tests/test_litellm_unit.py", "tests/test_stack_apply_image_move.py"]
 opened_commit = "2cc430653604036274f90e7d949445df622a306e"
 whole_reason = "The switch-on path of hal apply and hal start's start path share the one snapshot owner from #995; split, the second would build a parallel snapshot path."
