@@ -76,7 +76,8 @@ SERVICE_REFERENCE = "service:"
 HOST_NAMESPACE = "host"
 FILE_SOURCES = ("secrets", "configs")
 DEFAULT_VOLUME_DRIVER = "local"
-BIND_OPTIONS = frozenset({"bind", "rbind"})
+BIND_OPTIONS, BIND_TYPE, TMPFS = frozenset({"bind", "rbind"}), "none", "tmpfs"
+TMPFS_OPTIONS = frozenset({"uid", "gid", "mode", "size"})  # tmpfs's own: none of them names a path
 # go-live's main() and compose.yaml's secrets: name this folder under HOME
 KEYCLOAK_SECRETS = Path(".secrets") / REALM_UNIT
 TRUSTED_ADDRESSES = "KC_PROXY_TRUSTED_ADDRESSES"  # Keycloak's setting, compose.yaml's anchor
@@ -535,29 +536,27 @@ def expect_sources_in_scratch(
     expect_volumes_in_scratch(resolved.get("volumes") or {}, root)
 
 
-def binds_host_path(options: Mapping[str, Any]) -> bool:
-    """Whether a local volume's `driver_opts` mount a host path: a bind or a device path."""
-    mount_options = set(str(options.get("o") or "").split(","))
-    device = str(options.get("device") or "")
-    return options.get("type") == "none" or bool(BIND_OPTIONS & mount_options) or device[:1] == "/"
+def backing_allowed(volume: Mapping[str, Any], root: Path) -> bool:
+    """Whether a top-level volume takes a form that mounts no host path outside the scratch HOME:
+    Docker's own with no options (an external one too), the shipped tmpfs or a bind inside it."""
+    driver, options = volume.get("driver", DEFAULT_VOLUME_DRIVER), volume.get("driver_opts") or {}
+    if driver != DEFAULT_VOLUME_DRIVER or options.keys() != {"type", "device", "o"}:
+        return driver == DEFAULT_VOLUME_DRIVER and not options
+    flags, device = set(str(options["o"]).split(",")), str(options["device"])
+    if options["type"] == TMPFS:
+        return device == TMPFS and {flag.partition("=")[0] for flag in flags} <= TMPFS_OPTIONS
+    inside = device.startswith("/") and not outside(device, root)
+    return options["type"] == BIND_TYPE and set() < flags - {"ro"} <= BIND_OPTIONS and inside
 
 
 def expect_volumes_in_scratch(volumes: Mapping[str, Any], root: Path) -> None:
-    """Refuses a volume on another driver than Docker's own, and one whose options mount a host
-    path outside the scratch HOME (a tmpfs volume mounts none)."""
-    drivers = sorted(
-        f"{key}: {volume['driver']}"
-        for key, volume in volumes.items()
-        if (volume or {}).get("driver", DEFAULT_VOLUME_DRIVER) != DEFAULT_VOLUME_DRIVER
+    """Refuses a volume `backing_allowed` refuses, with its form."""
+    refused = sorted(
+        f"{key}: {json.dumps(volume)}"
+        for key, volume in volumes.items()  # compose resolves each volume to a mapping
+        if not backing_allowed(volume, root)
     )
-    expect(not drivers, f"volume drivers not {DEFAULT_VOLUME_DRIVER}: {drivers}")
-    backed = sorted(
-        f"{key}: {options.get('device')}"
-        for key, volume in volumes.items()
-        if binds_host_path(options := (volume or {}).get("driver_opts") or {})
-        and outside(str(options.get("device") or ""), root)
-    )
-    expect(not backed, f"volume backings outside the scratch HOME: {backed}")
+    expect(not refused, f"volume backings not allowed: {refused}")
 
 
 def foreign_namespace(key: str, mode: str, services: Mapping[str, Any]) -> bool:
@@ -743,8 +742,14 @@ def start_cases(merged: Mapping[str, Any], project: str) -> dict[str, tuple[dict
     secret = next(iter(merged["secrets"]))
     live_secret = deepcopy(dict(merged))
     live_secret["secrets"][secret]["file"] = str(REPO / COMPOSE_FILE)
-    live_data = {"type": "none", "o": "bind", "device": "/srv/live-data"}
-    volume, plugin = f"{project}_live-data", "vieux/sshfs"
+    live, volume, refused = "/srv/live-data", f"{project}_live-data", "not allowed: ['live-data: {"
+    backings = {
+        f"bound to {live}": {"driver_opts": {"type": BIND_TYPE, "o": "bind", "device": live}},
+        "on the driver vieux/sshfs": {"driver": "vieux/sshfs"},
+        f"as an overlay of {live}": {"driver": DEFAULT_VOLUME_DRIVER, "driver_opts": {
+            "type": "overlay", "device": "overlay", "o": f"lowerdir={live}:/srv/live-other"}},
+        "on nfs": {"driver_opts": {"type": "nfs", "device": f":{live}", "o": "addr=127.0.0.1"}},
+    }  # fmt: skip
     in_keycloak = f"{KEYCLOAK_SERVICE}."
     return {
         f"an overlay setting keycloak's {EDGE_NAME_LABEL} {live_name}": (with_keycloak(merged,
@@ -767,10 +772,8 @@ def start_cases(merged: Mapping[str, Any], project: str) -> dict[str, tuple[dict
         f"the container_name {live_project}-{KEYCLOAK_SERVICE}": (with_keycloak(merged,
             container_name=f"{live_project}-{KEYCLOAK_SERVICE}"),
             f"{in_keycloak}container_name: {live_project}-{KEYCLOAK_SERVICE}"),
-        f"a volume {volume} bound to {live_data['device']}": (with_volume(merged, "live-data",
-            volume, {"driver_opts": live_data}), "backings outside the scratch HOME: ['live-data:"),
-        f"a volume {volume} on the driver {plugin}": (with_volume(merged, "live-data", volume,
-            {"driver": plugin}), f"volume drivers not {DEFAULT_VOLUME_DRIVER}: ['live-data:"),
+        **{f"a volume {volume} {how}": (with_volume(merged, "live-data", volume, backing), refused)
+            for how, backing in backings.items()},
     }  # fmt: skip
 
 

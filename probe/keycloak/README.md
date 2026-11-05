@@ -189,9 +189,12 @@ names; a case a check accepts or refuses for another reason stops the run. It th
   a port, joins the host network (but Traefik), binds a path or reads a secret or config file
   outside the scratch HOME (but the socket proxy's docker socket), joins the network, process or
   IPC namespace or takes the volumes of a container outside the copy, or has a fixed container
-  name outside the project. No volume of that configuration runs on another driver than `local`
-  or mounts a host path outside the scratch HOME through its options. Installing the shipped files
-  again leaves the copy byte-identical: the allocation is the same.
+  name outside the project. Every volume of that configuration takes one of three forms, and any
+  other is refused with its form: the `local` driver, named or by default, with no `driver_opts`
+  (an external volume too, whose name the project check holds); the shipped tmpfs (`type` and
+  `device` `tmpfs`, `o` only `uid`, `gid`, `mode` and `size`); or a bind (`type: none`, `o` `bind`
+  or `rbind`, optionally with `ro`, and an absolute `device` inside the scratch HOME). The shipped
+  files installed again leave the copy byte-identical: the allocation is the same.
 - H2, bootstrap as go-live's steps, never go-live itself: the copy's compose with
   `keycloak/bootstrap.compose.yaml` starts Keycloak, the copy's core (Traefik included) starts and
   its admin entrypoint answers, `admin-frontend.sh` moves master, one `keycloak-config-cli` run
