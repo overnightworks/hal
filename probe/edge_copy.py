@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
-import ipaddress
 import json
 import os
 import re
@@ -34,6 +33,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import edge_subnets
 import yaml
 
 from hal.backup.apps import parse_apps
@@ -66,14 +66,6 @@ FIXED_NAME_SECTIONS = ("networks", "volumes")
 NAME_LINE = re.compile(r"^(\s+name:\s+)(\S+)\s*$", re.MULTILINE)
 GUARDED_COMPOSE_VERBS = {"up", "run", "down"}  # what creates or removes networks
 BACKUP_PROJECT_LINE = re.compile(r'^(compose_project = )"[^"]*"$', re.MULTILINE)
-# The networks of compose.yaml that pin a /24: so agent-egress has one address on each of its two,
-# so LiteLLM has one on litellm-backend and Keycloak one on keycloak-keys. A probe moves each to a
-# free /24 of its own, so it never collides with the live stack's.
-GATEWAY_NETWORKS = ("egress", "litellm-egress")
-KEY_SET_NETWORK = "keycloak-keys"
-PINNED_NETWORKS = (*GATEWAY_NETWORKS, "litellm-backend", KEY_SET_NETWORK)
-NETWORK_BLOCK = re.compile(r"^ {2}(?P<network>[\w-]+):\n(?P<block>(?: {4}.*\n)+)", re.MULTILINE)
-PINNED_PREFIX = re.compile(r"subnet:\s+(\d+\.\d+\.\d+\.)0/24")
 # The loopback address a probe's Traefik listens on beside the live one: `lo` routes all of
 # 127.0.0.0/8, and the live listeners are bound to 127.0.0.1 only.
 PROBE_HOST = "127.0.0.2"
@@ -121,11 +113,23 @@ def namespaced_compose(text: str, project: str) -> str:
     return namespaced
 
 
+def compose_beside_the_live_stack(text: str, project: str, moved: Mapping[str, str]) -> str:
+    """`text` of compose.yaml with its names moved into `project` (namespaced_compose) and each
+    pinned /24 to the probe's of `moved` (probe_prefixes), its addresses with it. Refuses a text
+    that would still pin a /24 not among the probe's."""
+    beside = namespaced_compose(edge_subnets.moved_to_probe_subnets(text, moved), project)
+    unmoved = set(edge_subnets.pinned_prefixes(beside).values()) - set(moved.values())
+    expect(not unmoved, f"compose.yaml pins /24s the probe does not hold: {sorted(unmoved)}")
+    return beside
+
+
 def write_namespaced_compose(repository: Path, directory: Path, project: str) -> Path:
-    """The path of `repository`'s compose.yaml written into `directory` with its names moved
-    (namespaced_compose). The text is moved before anything is written: a compose.yaml a probe owns
-    never holds a live name, however early its setup is cut."""
-    moved = namespaced_compose((repository / deploy_checkout.COMPOSE_FILE).read_text(), project)
+    """The path of `repository`'s compose.yaml written into `directory` beside the live stack
+    (compose_beside_the_live_stack, on the probe_prefixes of `project`). The text is moved before
+    anything is written: a compose.yaml a probe owns never holds a live name or /24, however early
+    its setup is cut."""
+    shipped = (repository / deploy_checkout.COMPOSE_FILE).read_text()
+    moved = compose_beside_the_live_stack(shipped, project, probe_prefixes(shipped, project))
     target = directory / deploy_checkout.COMPOSE_FILE
     target.write_text(moved)
     return target
@@ -167,76 +171,6 @@ def beside_the_live_edge(text: str, project: str) -> str:
         expect(text.count(live) == 1, f"traefik.yml holds {live!r} {text.count(live)} times")
         text = text.replace(live, replacement)
     return text
-
-
-def live_pinned_prefixes(text: str) -> dict[str, str]:
-    """The first three octets (with the trailing dot) of the /24 each of `PINNED_NETWORKS` pins in
-    `text` of compose.yaml. Refuses a text in which one pins none."""
-    blocks = {m["network"]: m["block"] for m in NETWORK_BLOCK.finditer(text)}
-    prefixes = {
-        network: found[1]
-        for network in PINNED_NETWORKS
-        if (found := PINNED_PREFIX.search(blocks.get(network, "")))
-    }
-    expect(set(prefixes) == set(PINNED_NETWORKS), f"compose.yaml pins no /24 on {PINNED_NETWORKS}")
-    return prefixes
-
-
-def free_probe_prefixes(
-    live: Mapping[str, str], candidates: Sequence[str], occupied: Sequence[str]
-) -> dict[str, str]:
-    """For each live prefix of `live` a free /24 of `candidates`, none of them twice."""
-    taken, moved = list(occupied), {}
-    for prefix in live.values():
-        subnet = free_subnet(candidates, taken)
-        taken.append(str(subnet))
-        moved[prefix] = str(subnet.network_address).removesuffix("0")
-    return moved
-
-
-def moved_to_probe_subnets(text: str, moved: Mapping[str, str]) -> str:
-    """`text` with every live prefix of `moved` replaced by its probe prefix, in one pass; refuses a
-    text that names one of them nowhere."""
-    for live in moved:
-        expect(live in text, f"the file does not name {live}")
-    return re.sub("|".join(map(re.escape, moved)), lambda found: moved[found[0]], text)
-
-
-def subnet_overlay(text: str, subnets: Mapping[str, str]) -> str:
-    """A compose overlay over `text` of compose.yaml that moves each network of `subnets` off its
-    one /24 onto the given one, with every service's attachment to it and every extra_hosts mapping
-    that name an address there (moved_to_probe_subnets). A compose file cannot replace the base
-    file's lists, so the overlay drops each with compose's own `!override` tag."""
-    shipped = yaml.safe_load(text)
-    configs = {network: shipped["networks"][network]["ipam"]["config"] for network in subnets}
-    moves = {subnet_prefix(c["subnet"]): subnet_prefix(subnets[n]) for n, (c,) in configs.items()}
-
-    def pinned(value: object) -> bool:
-        return any(live in json.dumps(value) for live in moves)
-
-    def moved(value: object) -> str:
-        found = json.dumps(value)
-        return moved_to_probe_subnets(
-            found, {old: new for old, new in moves.items() if old in found}
-        )
-
-    lines = ["networks:"]
-    lines += [f"  {n}:\n    ipam:\n      config: !override {moved(c)}" for n, c in configs.items()]
-    lines.append("services:")
-    for name, service in shipped["services"].items():
-        joined = service.get("networks") if isinstance(service.get("networks"), dict) else {}
-        attached = [f"      {n}: {moved(joined[n])}" for n in subnets if pinned(joined.get(n))]
-        hosts = service.get("extra_hosts")
-        entry = ["    networks:", *attached] if attached else []
-        entry += [f"    extra_hosts: !override {moved(hosts)}"] if pinned(hosts) else []
-        lines += [f"  {name}:", *entry] if entry else []
-    return "\n".join(lines) + "\n"
-
-
-def subnet_prefix(subnet: str) -> str:
-    """The first three octets, with the trailing dot, of the /24 `subnet`."""
-    expect(subnet.endswith(".0/24"), f"{subnet} is no /24")
-    return subnet.removesuffix("0/24")
 
 
 def without_inherited_apps(text: str) -> str:
@@ -360,8 +294,8 @@ def copy_compose_command(copy: Path) -> list[str]:
     return [*copy_compose_prefix(copy), "--profile", "*"]
 
 
-def daemon_subnets() -> list[str]:
-    """The subnets of every network the daemon has."""
+def daemon_subnets(project: str) -> list[str]:
+    """The subnets of every network the daemon has outside the compose `project`."""
     listing = run_command(["docker", "network", "ls", "-q"], text=True, check=True).stdout.split()
     if not listing:
         return []
@@ -371,18 +305,18 @@ def daemon_subnets() -> list[str]:
     return [
         config["Subnet"]
         for network in json.loads(inspected)
+        if (network.get("Labels") or {}).get(PROJECT_LABEL) != project
         for config in (network.get("IPAM") or {}).get("Config") or []
         if config.get("Subnet")
     ]
 
 
-def free_subnet(candidates: Sequence[str], occupied: Sequence[str]) -> ipaddress.IPv4Network:
-    """The first candidate /24 that overlaps none of the `occupied` subnets (`daemon_subnets()`)."""
-    used = [ipaddress.ip_network(subnet) for subnet in occupied]
-    for candidate in map(ipaddress.IPv4Network, candidates):
-        if not any(candidate.overlaps(other) for other in used if other.version == 4):
-            return candidate
-    raise ProbeFailed(f"no free /24 among {candidates[0]} ... {candidates[-1]}")
+def probe_prefixes(text: str, project: str) -> dict[str, str]:
+    """Each /24 prefix compose.yaml `text` pins, mapped to the free one (edge_subnets) the probe
+    `project` takes for it. Its own networks do not count as taken, so every copy of one probe
+    gets the same /24s while no other network appears; a text that pins none asks no daemon."""
+    live = edge_subnets.pinned_prefixes(text)
+    return edge_subnets.free_probe_prefixes(live, daemon_subnets(project)) if live else {}
 
 
 class NetworkGuard:
@@ -525,11 +459,12 @@ def repository_copy(repository: Path, home: Path, scratch: Path, project: str) -
     """The files of `repository` that git tracks or would track, as the live checkout of `home`: a
     `main` pushed to the bare remote `<scratch>/origin.git`, with its ignored `.env` written by the
     first `hal apply --local` and its own venv from `uv sync`. The copy's compose.yaml is never the
-    original: it is written with every fixed network and volume name moved to `<project>_...`
-    (write_namespaced_compose), so neither the copy's `hal apply` nor a teardown after a cut setup
-    reaches a live one. Its backup/apps.toml names the probe's project in every record
-    (backup_records_at_project). Its fleet.yaml has no app entry (without_inherited_apps): a probe
-    adds its own fixture apps. Copying again over an existing copy publishes what differs."""
+    original: it is written with every fixed network and volume name moved to `<project>_...` and
+    every pinned /24 to a free one (write_namespaced_compose), so neither the copy's `hal apply` nor
+    a teardown after a cut setup reaches a live one. Its backup/apps.toml names the probe's project
+    in every record (backup_records_at_project). Its fleet.yaml has no app entry
+    (without_inherited_apps): a probe adds its own fixture apps. Copying again over an existing
+    copy publishes what differs."""
     copy = checkout.live_checkout(home)
     listing = run_command(
         ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],

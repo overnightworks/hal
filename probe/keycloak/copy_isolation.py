@@ -24,6 +24,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import edge_copy
+import edge_subnets
 import yaml
 from edge_copy import ProbeFailed, expect
 
@@ -83,7 +84,6 @@ KEYCLOAK_SECRETS = Path(".secrets") / REALM_UNIT
 TRUSTED_ADDRESSES = "KC_PROXY_TRUSTED_ADDRESSES"  # Keycloak's setting, compose.yaml's anchor
 ADMIN_HOSTNAME = "KC_HOSTNAME_ADMIN"
 TOP_LEVEL_NAME = re.compile(r"^(name: )(\S+)$", re.M)
-KEYCLOAK_SUBNET_ANCHOR = re.compile(r"(&keycloak-subnet )(\S+)")
 ADMIN_HOSTNAME_ANCHOR = re.compile(r"(&admin-hostname )(\S+)")
 GO_LIVE_ADDRESS = re.compile(r'^(?P<constant>ADMIN_URL|EDGE_URL) = "(?P<value>[^"]*)"$', re.M)
 UNIT_SWITCH = re.compile(r"^( {2}(?P<unit>[\w-]+):\n {4}run:\n {6}enabled: )(?:true|false)$", re.M)
@@ -102,27 +102,19 @@ class Isolation:
     project: str
     edge_port: int
     admin_port: int
-    keycloak_subnet: str
+    keycloak_subnet: str  # the keycloak network's, one of `pinned`
     pinned: Mapping[str, str]  # the live /24 prefix of each pinned network -> the copy's
 
     @classmethod
     def allocate(cls, project: str, shipped_compose: str) -> Isolation:
-        """Two free loopback ports and free /24s, none of them the shipped compose.yaml's own, so
-        the copy keeps clear of the live stack even while it is down."""
+        """Two free loopback ports and the probe's /24s (edge_copy.probe_prefixes), none of them
+        the shipped compose.yaml's own, so the copy keeps clear of the live stack even while it is
+        down."""
         edge_port, admin_port = keycloak.free_loopback_ports(2)
         expect(not {edge_port, admin_port} & LIVE_PORTS, "a free port is a live entrypoint's")
-        live_pinned = edge_copy.live_pinned_prefixes(shipped_compose)
-        live_keycloak = KEYCLOAK_SUBNET_ANCHOR.search(shipped_compose)
-        expect(live_keycloak is not None, f"{COMPOSE_FILE} has no &keycloak-subnet anchor")
-        occupied = [
-            *edge_copy.daemon_subnets(),
-            live_keycloak[2],
-            *(f"{prefix}0/24" for prefix in live_pinned.values()),
-        ]
-        candidates = keycloak.SUBNET_CANDIDATES
-        pinned = edge_copy.free_probe_prefixes(live_pinned, candidates, occupied)
-        occupied += [f"{prefix}0/24" for prefix in pinned.values()]
-        subnet = str(edge_copy.free_subnet(candidates, occupied))
+        pinned = edge_copy.probe_prefixes(shipped_compose, project)
+        live_keycloak = edge_subnets.pinned_prefixes(shipped_compose)[REALM_UNIT]
+        subnet = f"{pinned[live_keycloak]}{edge_subnets.SUBNET_SUFFIX}"
         return cls(project, edge_port, admin_port, subnet, pinned)
 
     @property
@@ -155,7 +147,7 @@ class Isolation:
 
     @property
     def subnets(self) -> frozenset[str]:
-        return frozenset({self.keycloak_subnet, *(f"{p}0/24" for p in self.pinned.values())})
+        return frozenset(f"{p}{edge_subnets.SUBNET_SUFFIX}" for p in self.pinned.values())
 
 
 @dataclass(frozen=True)
@@ -224,9 +216,7 @@ def isolated_compose(text: str, stand: CopyStand) -> str:
     project, even one without the project in its environment."""
     isolation = stand.isolation
     text = replaced_once(text, TOP_LEVEL_NAME, isolation.project, COMPOSE_FILE)
-    text = edge_copy.namespaced_compose(text, isolation.project)
-    text = edge_copy.moved_to_probe_subnets(text, isolation.pinned)
-    text = replaced_once(text, KEYCLOAK_SUBNET_ANCHOR, isolation.keycloak_subnet, COMPOSE_FILE)
+    text = edge_copy.compose_beside_the_live_stack(text, isolation.project, isolation.pinned)
     text = replaced_once(text, ADMIN_HOSTNAME_ANCHOR, isolation.admin_url, COMPOSE_FILE)
     live_name = yaml.safe_load(text)["services"][KEYCLOAK_SERVICE]["labels"][EDGE_NAME_LABEL]
     return literal_replaced_once(

@@ -53,13 +53,13 @@ from urllib.request import (
 )
 
 REPO = Path(__file__).resolve().parents[2]
-# The probe runs from a bare checkout with system python; hal.stack.realm and edge_copy need only
-# the standard library and PyYAML.
+# The probe runs from a bare checkout with system python; hal.stack.realm and edge_subnets need
+# only the standard library and PyYAML.
 sys.path[:0] = [str(REPO / "src"), str(REPO / "probe/keycloak"), str(REPO / "probe")]
 import agents_client_cell  # noqa: E402
 import backchannel_cell  # noqa: E402
 import device_grant_cell  # noqa: E402
-import edge_copy  # noqa: E402
+import edge_subnets  # noqa: E402
 import litellm_admin_cell  # noqa: E402
 import logout_actions_cell  # noqa: E402
 import service_audience_cell  # noqa: E402
@@ -483,11 +483,11 @@ class Stack:
 
     def write_network_overlay(self) -> None:
         """The keycloak and key-set networks on this stack's free subnets instead of the live
-        ones, with what compose.yaml pins in them (edge_copy.subnet_overlay)."""
+        ones, with what compose.yaml pins in them (edge_subnets.subnet_overlay)."""
         shipped = (REPO / deploy_checkout.COMPOSE_FILE).read_text()
-        moves = {"keycloak": self.keycloak_subnet, edge_copy.KEY_SET_NETWORK: self.key_set_subnet}
+        moves = {"keycloak": self.keycloak_subnet, "keycloak-keys": self.key_set_subnet}
         self.scratch.mkdir(parents=True, exist_ok=True)
-        self.network_overlay.write_text(edge_copy.subnet_overlay(shipped, moves))
+        self.network_overlay.write_text(edge_subnets.subnet_overlay(shipped, moves))
 
     def write_traefik_config(self) -> None:
         """The repository's traefik.yml with the entrypoints on the probe's free ports and the

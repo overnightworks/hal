@@ -8,9 +8,9 @@ the real `agent-service` of compose.yaml, in a throwaway compose project of thei
 Measured teardown: 2 s (K 50 s, CAP 1780 s).
 
 The stack runs from a copy of compose.yaml and of the gateway's static file with each network that
-pins an address (edge_copy.PINNED_NETWORKS, `egress` and `litellm-egress` among them) moved to
-a free /24 of its own (the addresses and the `extra_hosts` follow through the anchors), so it
-never collides with the live stack's. E3-E5 and E10 are observed through the packet windows of
+pins a /24 (edge_subnets, `egress` and `litellm-egress` among them) moved to a free /24 of its own
+(the addresses and the `extra_hosts` follow through the anchors), so it never collides with the
+live stack's. E3-E5 and E10 are observed through the packet windows of
 capture.py, each with a control; a window that dropped a frame, held a frame it could not decode,
 or in which the control did not show, is NOT DRIVEN and fails the run. The service target runs the
 image of the pull request's compose.yaml with a dummy login in the scratch HOME (never a real
@@ -56,6 +56,7 @@ sys.path.insert(0, str(REPO / "src"))  # edge's own facts; its modules need only
 sys.path.insert(0, str(REPO / "agent-service"))  # the observations shared with live_smoke.py
 
 import edge_copy  # noqa: E402
+import edge_subnets  # noqa: E402
 import egress_observe  # noqa: E402
 from agent_networks import cell_p36, gateway_listeners, service_networks  # noqa: E402
 from edge_copy import GUARDED_COMPOSE_VERBS, ProbeFailed, expect, scratch_directory  # noqa: E402
@@ -80,7 +81,7 @@ LABEL = f"edge.probe={PROJECT}"
 COMPOSE_FILE = REPO / "compose.yaml"
 OVERLAY = REPO / "probe" / "agent-service" / "compose.probe.yaml"
 GATEWAY_STATIC = REPO / "agent-service" / "egress" / "traefik.yml"
-NAMED_PINS = {COMPOSE_FILE: edge_copy.PINNED_NETWORKS, GATEWAY_STATIC: edge_copy.GATEWAY_NETWORKS}
+GATEWAY_NETWORKS = ("egress", "litellm-egress")  # the networks of the static file's addresses
 SERVICE_CONFIGURATION = REPO / "agent-service" / "service.toml"
 PROVIDER = "api.anthropic.com"
 GATEWAY_PORT = 443
@@ -89,7 +90,6 @@ CLI_BINARY = "/opt/claude/claude"
 CLI_SECONDS = 120
 UPSTREAM_REJECTION = re.compile(r"API Error: 401\b")  # the API's answer, not a local startup error
 UPSTREAM_PORT = 443  # the allowed hosts' port, which allowed.yml passes the connection to
-SUBNET_CANDIDATES = [f"172.31.{third}.0/24" for third in range(251, 239, -1)]
 GATEWAY_HOST_NUMBER = 10
 READY_SECONDS = 90
 WINDOW_READY_SECONDS = 180  # the first run pulls the capture image
@@ -288,10 +288,8 @@ class Probe:
         home.mkdir()
         write_login_folders(home)
         self.scratch_secrets = write_scratch_secrets(home, scratch / "ca")
-        self.live = edge_copy.live_pinned_prefixes(COMPOSE_FILE.read_text())
-        self.moved = edge_copy.free_probe_prefixes(
-            self.live, SUBNET_CANDIDATES, edge_copy.daemon_subnets()
-        )
+        self.live = edge_subnets.pinned_prefixes(COMPOSE_FILE.read_text())
+        self.moved = edge_copy.probe_prefixes(COMPOSE_FILE.read_text(), PROJECT)
         self.address = f"{self.moved[self.live['egress']]}{GATEWAY_HOST_NUMBER}"
         self.compose_file = scratch / "compose.yaml"
         self.static_file = scratch / "traefik.yml"
@@ -400,18 +398,18 @@ class Probe:
         return self
 
     def write_on_probe_subnet(self, source: Path, copy: Path) -> None:
-        """A copy of the file with the live subnets it pins (NAMED_PINS) replaced by the probe's:
-        the live stack's networks own their /24s, and Docker refuses a second network on one."""
-        text = source.read_text()
+        """A copy of compose.yaml beside the live stack (edge_copy.compose_beside_the_live_stack),
+        or of the static file with its gateway /24s moved alike, off the live stack's."""
+        text, gateway = source.read_text(), {self.live[network] for network in GATEWAY_NETWORKS}
+        if source == COMPOSE_FILE:
+            moved = edge_copy.compose_beside_the_live_stack(text, PROJECT, self.moved)
+        else:
+            moved = edge_subnets.moved_to_probe_subnets(text, {p: self.moved[p] for p in gateway})
         # The copy lies in the scratch directory that scratch_directory() made absolute and
         # required at the command line, and the text comes from the repository's own files; the
         # route tried was checking the path once at that boundary, which Sonar does not follow
         # across calls.
-        named = {self.live[network] for network in NAMED_PINS[source]}
-        moved = edge_copy.moved_to_probe_subnets(text, {live: self.moved[live] for live in named})
-        copy.write_text(  # NOSONAR(S2083)
-            edge_copy.namespaced_compose(moved, PROJECT) if source == COMPOSE_FILE else moved
-        )
+        copy.write_text(moved)  # NOSONAR(S2083)
         copy.chmod(0o644)
 
     def __exit__(self, *_: object) -> None:

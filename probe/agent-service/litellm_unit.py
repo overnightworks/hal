@@ -9,8 +9,8 @@ database. Nothing live and nothing paid: no provider key, no egress, no app.
 Measured: a run takes about three minutes and its teardown 1 s (K 50 s, CAP 1780 s).
 
 The copy is edge_copy's: a scratch HOME whose live checkout runs the lane's files with every fixed
-name moved into the probe's project, and every network of edge_copy.PINNED_NETWORKS moved to a free
-/24 (the live project owns the shipped ones). Its catalog is the shipped one with the entry
+name moved into the probe's project, and every network that pins a /24 moved to a free one (the
+live project owns the shipped ones). Its catalog is the shipped one with the entry
 `litellm` as shipped and Keycloak switched off, so no setup asks and the key step holds the admin
 rows. Its `backup/apps.toml` names the probe's project (edge_copy), and its restic repository and
 password are the scratch HOME's: U12's switch-on over the kept volume takes LiteLLM's pre-apply
@@ -69,7 +69,6 @@ PLAN_END = "to apply"
 LITELLM_ON = "litellm is on"
 LIVE_RESTORE = re.compile(r"pre-apply snapshot [0-9a-f]+, `hal restore litellm --live --snapshot")
 CELL_U14C = "U14 (c)"
-SUBNET_CANDIDATES = [f"172.31.{third}.0/24" for third in range(230, 210, -1)]
 ENTRY = re.compile(r"^ {2}litellm:\n(?: {4}.*\n)+", re.MULTILINE)
 KEYCLOAK_OFF = "  keycloak:\n    run:\n      enabled: false\n"
 DOCKER_STAND_IN = """\
@@ -299,17 +298,13 @@ class Probe:
     # --- the stack ----------------------------------------------------------------------------
 
     def prepare(self) -> tuple[str, str]:
-        """The copy with its pinned networks moved and the scratch secrets; the catalog texts
-        without and with the shipped entry."""
+        """The copy (its pinned networks moved by edge_copy) and the scratch secrets; the catalog
+        texts without and with the shipped entry."""
         self.copy = edge_copy.repository_copy(REPO, self.home, self.scratch, PROJECT)
-        compose_file = self.copy / COMPOSE_FILE
-        live = edge_copy.live_pinned_prefixes(compose_file.read_text())
-        moved = edge_copy.free_probe_prefixes(live, SUBNET_CANDIDATES, edge_copy.daemon_subnets())
-        compose_file.write_text(edge_copy.moved_to_probe_subnets(compose_file.read_text(), moved))
         shipped = (REPO / catalog.FLEET_FILE).read_text()
         without = shipped[: shipped.index("\nservices:\n")] + "\nservices:\n" + KEYCLOAK_OFF
         (self.copy / catalog.FLEET_FILE).write_text(without)
-        publish(self.copy, "probe: the pinned networks moved, the catalog without litellm")
+        publish(self.copy, "probe: the catalog without litellm")
         self.expect_no_egress()
         for relative in (PROVIDER, MASTER, PICTURES):
             self.write_secret(relative, f"sk-{secrets.token_hex(32)}")
