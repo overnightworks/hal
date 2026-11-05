@@ -150,8 +150,7 @@ class Isolation:
 
 
 class FleetApp(Protocol):
-    """An app the copy's fleet runs through hal's app compose, which no check of the copy resolves:
-    its fleet.yaml lines, and the check of what hal would start it from, run with the copy's."""
+    """An app the copy's fleet runs through hal's app compose: its lines and its own start check."""
 
     entry: str
 
@@ -222,10 +221,11 @@ def live_project_name() -> str:
 
 def isolated_compose(text: str, stand: CopyStand) -> str:
     """compose.yaml under the copy's project, so no compose call in the copy resolves to the live
-    project, even one without the project in its environment."""
-    isolation = stand.isolation
+    project, even one without the project in its environment; a set (a base) may pin fewer /24s."""
+    isolation, named = stand.isolation, set(edge_subnets.pinned_prefixes(text).values())
     text = replaced_once(text, TOP_LEVEL_NAME, isolation.project, COMPOSE_FILE)
-    text = edge_copy.compose_beside_the_live_stack(text, isolation.project, isolation.pinned)
+    moved = {live: probe for live, probe in isolation.pinned.items() if live in named}
+    text = edge_copy.compose_beside_the_live_stack(text, isolation.project, moved)
     text = replaced_once(text, ADMIN_HOSTNAME_ANCHOR, isolation.admin_url, COMPOSE_FILE)
     live_name = yaml.safe_load(text)["services"][KEYCLOAK_SERVICE]["labels"][EDGE_NAME_LABEL]
     return literal_replaced_once(
