@@ -27,5 +27,7 @@ host address for its own length, under `timeout 600`, its pid in the scratch. Wh
 drops container-to-host traffic for every bridge, its control (a container on the default
 bridge) cannot reach the listener either: E2 then prints `E2 limit: ...` instead of holding,
 the speech service's attempts must still all fail, and `gateway_mode_ipv4: isolated` is
-proven by C1 (tests/test_traefik_mcp.py). The first image
-build of the release takes about 12 minutes without a build cache.
+proven by C1 (tests/test_traefik_mcp.py). hal withholds Compose's output, so D4 runs the app's
+`docker compose create` by hand in its checkout, as hal's failure line asks, and reads only which
+missing network it names. The first image build of the release takes about 12 minutes without a
+build cache.
