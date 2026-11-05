@@ -13,7 +13,7 @@ that owner on the pinned sqlite image. Logical contents are compared by the sha2
 `iterdump`, read by a container; no row value is printed. `hal start` is never run: the stand-in's
 reader is started by the probe. The restic password is a scratch value it generates and never
 prints. No live container, volume, repository or HOME is named. It leaves --scratch empty,
-passed or failed (`edge_copy`). Exit 0: every cell held.
+passed or failed (`edge_copy`). Exit 0: every cell held as far as it drives it.
 """
 
 from __future__ import annotations
@@ -261,8 +261,8 @@ class SqliteLiveProbe:
             expect(time.monotonic() < deadline, "a container stayed on the volume")
             time.sleep(0.2)
 
-    def held(self, cell: str, what: str) -> None:
-        write_line(f"#1026 {cell} held: {what}")
+    def held(self, cell: str, what: str, verdict: str = "held") -> None:
+        write_line(f"#1026 {cell} {verdict}: {what}")
 
     # --- the stand ----------------------------------------------------------------------------
 
@@ -514,6 +514,7 @@ class SqliteLiveProbe:
             f"SIGKILL of hal mid-write: {state}, the file held the {which} content; the rerun "
             "with the question's snapshot loaded it; not driven: a rerun refused while the "
             "orphaned loader still runs",
+            verdict="partly held",
         )
 
     def failure_of_the_cells(self) -> str | None:
@@ -582,7 +583,7 @@ def prove(probe: SqliteLiveProbe) -> int:
 
 
 def verdict(_probe: SqliteLiveProbe) -> int:
-    return edge_copy.passed_line("PROBE PASSED: #1026 M2 M3 M9 M11 M13-M19 M21 M22")
+    return edge_copy.passed_line("PROBE PASSED: #1026 M2 M3 M9 M11 M13-M18 M21 M22, M19 partly")
 
 
 def main(argv: list[str] | None = None) -> int:
