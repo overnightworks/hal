@@ -44,10 +44,9 @@ http.server.HTTPServer((bind, port), Fixed).serve_forever()
 """
 
 
-# Every probe URL is plain HTTP inside the copy: the speech service and Keycloak on the copy's
-# internal networks (no TLS by design; admission sends the copy's scratch tokens), and E2's
-# credential-free probes of a fixed listener at the host's own addresses and the bridge gateway.
-PLAIN_HTTP = "http://"  # NOSONAR(S5332) the copy's internal HTTP and E2's fixed-listener probes
+# Plain HTTP is deliberate: speech and Keycloak serve no TLS on the copy's internal networks, and
+# the reachability cells probe listeners, gateways and addresses that must answer or refuse.
+PLAIN_HTTP = "http://"  # NOSONAR(S5332) the speech probe's deliberate plain HTTP, reason above
 
 
 def plain_http(host: str, port: int, path: str = "/") -> str:
