@@ -267,7 +267,7 @@ enabled. The pages are not files in git: `legal/frame/` holds the markup (one sk
 template per block kind), `legal/sections/<unit>/<page>.html` holds the texts, and `legal/built/` (git-ignored)
 holds the result, which the legal unit serves. The pages take their tokens and fonts from the installed appkit: the appkit step of `hal apply` writes its static files to `appkit-<version>/` (git-ignored; the version is the lock's) in `legal/assets/`, served at `/_rechtliches/appkit-<version>/` whether or not the legal unit is enabled, and in the `resources/` of both Keycloak themes, which Keycloak serves under `/resources/<id>/`. A unit's text is a **section**; the imprint is one whole page
 with no sections. A page's blocks stand as the general part (`allgemein`, edge's own), then the services
-(`agent-service` under `#agent-dienst`, `keycloak` under `#anmeldung`), then the apps (their catalog key
+(`agent-service` under `#agent-dienst`, `keycloak` under `#anmeldung`, `speech-runtime` under `#sprachdienst`), then the apps (their catalog key
 is the anchor), each group sorted by anchor. A section directory with no catalog entry builds no block. Edge's
 services are built while their entry is in the catalog, enabled or not. An app (an entry with `repo`) brings its own text: `legal/datenschutz.html` and,
 optionally, `legal/nutzungsbedingungen.html` of a release, read from `~/srv/<key>/.git` at the release's commit, never
@@ -275,7 +275,9 @@ from the working tree. That release is the planned one of an enabled app, the on
 stopped (`hal stop`) or disabled app last deployed, from its record; a stopped or disabled app never deployed has none (an enabled one gets its block at its planned tag), and a
 release without the privacy file has no block at all, its terms file included, yet; a terms file that is present is
 still validated. A symlink at either path refuses the run. An app's key that also has
-`legal/sections/<key>/` refuses the run, naming both, since one block has one owner; so does a stopped or disabled app
+`legal/sections/<key>/` refuses the run, naming both, since one block has one owner; for an app that is one of edge's
+services (`speech-runtime`), edge's section is its text while the release brings no block, and the run is refused only
+when the release brings one. So does a stopped or disabled app
 whose checkout or recorded commit is gone, or whose `.git` is a symlink or no repository, naming the path.
 
 A **host-only app** (an entry with neither `repo` nor `run`: songmaker, which its own watcher deploys) brings the same
@@ -338,7 +340,7 @@ edge never rewrites a text to drop the link.
 
 | Page | Stable ids |
 |---|---|
-| /datenschutz | `verantwortlicher`, `cloudflare`, `rechte`, `widerspruch`, `kein-tracking`, `automatisierte-entscheidungen`, `pseudonym`, `anmeldung`, `agent-dienst` |
+| /datenschutz | `verantwortlicher`, `cloudflare`, `rechte`, `widerspruch`, `kein-tracking`, `automatisierte-entscheidungen`, `pseudonym`, `anmeldung`, `agent-dienst`, `sprachdienst` |
 | /nutzungsbedingungen | `haftung`, `recht` |
 | /impressum | `verantwortlich`, `kontakt` |
 
