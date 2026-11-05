@@ -30,7 +30,7 @@ PROBE = ROOT / "probe" / "agent-service"
 GATEWAY = "agent-egress"
 SERVICE = "agent-service"
 STAND_IN = "agent-probe"
-LITELLM_API, LITELLM_EGRESS = "litellm-api", "litellm-egress"
+LITELLM_EGRESS = "litellm-egress"
 OBSERVER = "realm-observer"
 ISOLATED_MODE = {"com.docker.network.bridge.gateway_mode_ipv4": "isolated"}
 HOST_SNI = re.compile(r"HostSNI\(`([^`]+)`\)")
@@ -86,10 +86,7 @@ def test_a_member_carries_the_attachments_and_nothing_else_of_the_network(
     """E16: the stand-in and the service merge the one anchor; neither adds a port, a network
     mode or a network."""
     service = compose["services"][member]
-    # The service lists its networks itself, and adds the one to LiteLLM's front (#768).
-    extra_networks = [LITELLM_API] if member == SERVICE else []
-
-    assert service["networks"] == [*attachments["networks"], *extra_networks]
+    assert service["networks"] == attachments["networks"]
     assert service["extra_hosts"] == attachments["extra_hosts"]
     assert not {"ports", "network_mode", "expose"} & service.keys()
 

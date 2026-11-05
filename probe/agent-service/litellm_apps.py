@@ -51,7 +51,7 @@ from litellm import (  # noqa: E402
 )
 
 SONGMAKER, _, HOPIN = AGENT_NETWORKS
-FRONT_NETWORKS = (*AGENT_NETWORKS, "litellm-api", "litellm-backend")
+FRONT_NETWORKS = (*AGENT_NETWORKS, "litellm-backend")
 HOLDER = f"{PROJECT}-holder"
 HOLDER_SECONDS = 60
 # A listener that prints one line per connection it accepts. argv: port.

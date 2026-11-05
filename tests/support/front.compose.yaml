@@ -1,8 +1,9 @@
 # The overlay of the CI job `front` (tests/test_litellm_front.py), laid over compose.yaml: the
-# shipped litellm-front with a stand-in for LiteLLM on its backend network and a client on its api
-# network. Both images are read from compose.yaml's pins by the test. Never used live. The front
-# keeps only its own two networks, so a local run never joins the fixed-name app networks, and finds
-# the stand-in by its alias: no extra_hosts, and no pinned subnet that a live network could hold.
+# shipped litellm-front with a stand-in for LiteLLM on its backend network and a client on a
+# network of its own, standing for an app's agent network. Both images are read from compose.yaml's
+# pins by the test. Never used live. The front keeps only the client's network and its backend, so a
+# local run never joins the fixed-name app networks, and finds the stand-in by its alias: no
+# extra_hosts, and no pinned subnet that a live network could hold.
 # Those three replacements need compose's `!override` and `!reset` tags, which the repository's YAML
 # checks cannot read: the test writes them into a third overlay at run time.
 services:
@@ -19,5 +20,9 @@ services:
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
-    networks: [litellm-api]
+    networks: [clients]
     command: ["sleep", "infinity"]
+
+networks:
+  clients:
+    internal: true

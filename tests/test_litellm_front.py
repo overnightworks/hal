@@ -27,7 +27,7 @@ COMPOSE_FILES = [ROOT / "compose.yaml", ROOT / "tests" / "support" / "front.comp
 TAGGED_OVERLAY = """\
 services:
   litellm-front:
-    networks: !override [litellm-api, litellm-backend]
+    networks: !override [clients, litellm-backend]
     extra_hosts: !reset []
 networks:
   litellm-backend:

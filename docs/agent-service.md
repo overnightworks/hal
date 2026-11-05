@@ -395,8 +395,9 @@ and the admin budget with its customer rows (the key step below).
   LiteLLM bump, since a schema change shows in production only as a failed unit.
 - **What stays reachable.** The front sees every message and every app key in memory; a
   compromised front could spend credit through LiteLLM, bounded by each key's budget and parallel
-  bound. The front is a member of every app's agent network beside the service's `litellm-api`,
-  so an app could give itself the alias `litellm` there; the front therefore finds LiteLLM through
+  bound. The front is a member of every app's agent network, so an app could give itself the alias
+  `litellm` there; the service sends nothing to the front or LiteLLM and has no network of the
+  route besides the app networks it shares with every app; the front therefore finds LiteLLM through
   `extra_hosts` at its fixed address on `litellm-backend` (`compose.yaml` pins the subnet, and its
   `ip_range` keeps that address from any other container), never by Docker's DNS. LiteLLM reaches
   only the front, its database and, through the gateway's `litellm` entrypoint, the providers'

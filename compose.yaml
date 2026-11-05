@@ -446,7 +446,7 @@ services:
     <<: *traefik
     profiles: [litellm]
     restart: unless-stopped
-    networks: [agent-songmaker, agent-presentator, agent-hopin, litellm-api, litellm-backend]
+    networks: [agent-songmaker, agent-presentator, agent-hopin, litellm-backend]
     extra_hosts:
       litellm: *litellm-backend-address
     volumes:
@@ -526,7 +526,6 @@ services:
   # (docs/agent-service.md, "The login"). The unit `agent-service` of fleet.yaml starts it.
   agent-service:
     <<: *agent-attachments
-    networks: [agent-songmaker, agent-presentator, agent-hopin, egress, mcp, litellm-api]
     image: &agent-service-image edge-agent-service:0.12.0-claude-2.1.302-codex-0.163.0
     pull_policy: never
     profiles: [agent-service]
@@ -762,10 +761,6 @@ networks:
       config:
         # Pinned so agent-egress has one address; the probe overlay takes its own free subnet.
         - subnet: 172.31.252.0/24
-  # The agent service and the front of LiteLLM, which is its only member besides the service.
-  litellm-api:
-    internal: true
-    driver_opts: *isolated-bridge
   # The front, LiteLLM and hal apply's key step. Pinned so LiteLLM has one address, which no app
   # network can claim; the dynamic range keeps it from the others, the key step included. The probe
   # moves it to a free /24.
