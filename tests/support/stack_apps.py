@@ -16,7 +16,7 @@ from support.app_support import (
     origin_at,
     runtime_of,
 )
-from support.git_support import committed_main
+from support.git_support import committed_main, head_of, plain_git
 from support.stack_apply import REPOSITORY, ZONE, write_fleet
 from support.stack_apply_apps import AppWorld
 
@@ -109,6 +109,37 @@ def deploy(world: World, origin: Origin, tag: str, files: dict[str, str] | None 
 
 
 PRIVACY_FILE = "legal/datenschutz.html"
+HOST_ONLY_KEY = "songmaker"
+HOST_ONLY_ENTRY = (
+    f"  {HOST_ONLY_KEY}:\n"
+    f"    hosts: [{{name: {HOST_ONLY_KEY}, exposure: public, reason: a page, ready: /}}]\n"
+)
+
+
+@dataclasses.dataclass
+class HostOnlyCheckout:
+    """The checkout `~/srv/<key>` of an app with no origin in the catalog: a plain repository."""
+
+    tree: Path
+
+    def commit(self, files: dict[str, str]) -> str:
+        """A commit on HEAD carrying `files`; its full sha."""
+        if not (self.tree / ".git").exists():
+            plain_git(
+                self.tree.parent, "init", "--quiet", "--initial-branch", "main", str(self.tree)
+            )
+            for key, value in (("user.name", "edge test"), ("user.email", "test@edge.invalid")):
+                plain_git(self.tree, "config", key, value)
+        for name, content in files.items():
+            (self.tree / name).parent.mkdir(parents=True, exist_ok=True)
+            (self.tree / name).write_text(content)
+        plain_git(self.tree, "add", "--all")
+        plain_git(self.tree, "-c", "core.hooksPath=/dev/null", "commit", "--quiet",
+                  "--allow-empty", "-m", "change")  # fmt: skip
+        return head_of(self.tree)
+
+    def short(self) -> str:
+        return plain_git(self.tree, "rev-parse", "--short", "HEAD").stdout.strip()
 
 
 @dataclasses.dataclass
@@ -117,6 +148,13 @@ class LegalApps:
     repository's own frame and general part, and how its releases carry the app's own text."""
 
     world: AppWorld
+    host_only: bool = False
+
+    def host_only_app(self) -> HostOnlyCheckout:
+        """The checkout of the host-only app, which the catalog names from now on."""
+        self.host_only = True
+        self.catalog(enabled=False)
+        return HostOnlyCheckout(self.world.srv.parent / HOST_ONLY_KEY)
 
     @property
     def origin(self) -> Origin:
@@ -125,7 +163,8 @@ class LegalApps:
     def catalog(self, *, enabled: bool) -> None:
         app = FLEET.replace("run: {enabled: true}", f"run: {{enabled: {str(enabled).lower()}}}")
         legal = "  legal:\n    run: {enabled: true}\n"
-        write_fleet(self.world.repository, f"cloudflare:\n  zone: {ZONE}\n{app}{legal}")
+        host_only = HOST_ONLY_ENTRY if self.host_only else ""
+        write_fleet(self.world.repository, f"cloudflare:\n  zone: {ZONE}\n{app}{host_only}{legal}")
 
     def release(self, tag: str, privacy: str | None = None) -> str:
         """A release `tag`, its privacy file `privacy` or the previous release's; its sha."""

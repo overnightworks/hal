@@ -84,10 +84,10 @@ class World:
 @pytest.fixture
 def world(repository: Path, scripted: ScriptedCompose, switch, state: Path) -> World:  # noqa: F811
     """The repository's own frame, general part and agent service block (a catalog entry,
-    disabled) and its Songmaker text (no catalog entry), committed, with an empty `legal/built`."""
+    disabled) committed, with an empty `legal/built`."""
     legal = repository / "legal"
     shutil.copytree(REPOSITORY / "legal/frame", legal / "frame")
-    for unit in ("allgemein", "agent-service", "songmaker"):
+    for unit in ("allgemein", "agent-service"):
         shutil.copytree(REPOSITORY / "legal/sections" / unit, legal / "sections" / unit)
     (legal / "built").mkdir()
     (legal / "built/.gitkeep").touch()
@@ -134,7 +134,6 @@ def test_the_first_apply_names_and_writes_the_three_pages_readable_by_the_unit(w
         assert stat.S_IMODE((world.built / name).stat().st_mode) == 0o644
     privacy = world.built_page("datenschutz")
     assert 'id="agent-dienst"' in privacy
-    assert 'id="songmaker"' not in privacy
     assert re.search(r'<p class="stand">Stand: \d{1,2}\. [A-Za-zä]+ 20\d\d</p>', privacy)
 
 

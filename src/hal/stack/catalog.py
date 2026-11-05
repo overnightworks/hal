@@ -4,8 +4,9 @@
 repository. A unit's key is a compose profile (docs/naming.md). An entry with `repo` and `run` is
 an app: its key is its repository's name under `github.org`, its compose project and its checkout
 `~/srv/<key>`; `apps()` reads them. Entries without `run` are no units and no apps, and `units()`
-and `apps()` ignore them. `hosts()` is the separate reader of every entry's `hosts` list (an entry
-without `run` is enabled). `units()` also reads each unit's hosts, enabled or not, and needs a valid
+and `apps()` ignore them; `host_only_keys()` reads those with no `repo` either, the apps edge only
+fronts. `hosts()` is the separate reader of every entry's `hosts` list (an entry without `run` is
+enabled). `units()` also reads each unit's hosts, enabled or not, and needs a valid
 `cloudflare.zone` once a unit declares one. The top-level `cloudflare:` and `github:` keys belong
 to OpenTofu, which reads the same file and must agree with these readers.
 """
@@ -150,6 +151,16 @@ def _is_unit(entry: Any) -> bool:
 
 def is_app(entry: object) -> bool:
     return isinstance(entry, dict) and "run" in entry and "repo" in entry
+
+
+def host_only_keys(document: Any) -> tuple[str, ...]:
+    """The entries with neither `repo` nor `run`: apps edge only fronts, whose checkout
+    `~/srv/<key>` is somebody else's to deploy."""
+    return tuple(
+        key
+        for key, entry in _entries(document).items()
+        if isinstance(entry, dict) and "run" not in entry and "repo" not in entry
+    )
 
 
 def apps(
