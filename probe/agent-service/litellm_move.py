@@ -59,7 +59,7 @@ from litellm_unit import (  # noqa: E402
     SECRETS,
     YES_PROMPT,
     Probe,
-    prove,
+    run,
 )
 from scratch_secrets import write_new, write_scratch_secrets  # noqa: E402
 
@@ -455,13 +455,7 @@ class MoveProbe(Probe):
 
 
 def main(argv: list[str] | None = None) -> int:
-    return edge_copy.run_main(
-        __doc__.splitlines()[0],
-        argv,
-        MoveProbe,
-        prove,
-        lambda probe: edge_copy.passed_line(f"PASSED: {', '.join(probe.held)}"),
-    )
+    return run(MoveProbe, argv)
 
 
 if __name__ == "__main__":

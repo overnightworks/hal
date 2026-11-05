@@ -154,33 +154,6 @@ def test_a_moved_app_is_recreated_after_its_proven_snapshot_under_one_yes_and_th
     assert steps(scripted) == []
 
 
-@pytest.mark.parametrize(
-    ("failing", "names_the_snapshot"),
-    [("backup", False), ("restore test", True)],
-    ids=["C3 the backup fails", "C3 the restore test fails"],
-)
-@pytest.mark.usefixtures("database_units")
-def test_a_failed_snapshot_keeps_the_old_container_and_ends_partial(
-    failing,
-    names_the_snapshot,
-    switch,  # noqa: F811
-    scripted,  # noqa: F811
-    realm_backup,
-):
-    scripted.change_image(KEYCLOAK.service, KEYCLOAK_BUMP)
-    realm_backup.failing = failing
-    ids = dict(scripted.container_ids)
-
-    exit_code, _, err = switch()
-
-    assert exit_code == apply.ApplyExit.REFUSED
-    assert f"{failing} broke" in err
-    assert "keycloak is not recreated" in err
-    assert ("pre-apply snapshot ab12cd34" in err) == names_the_snapshot
-    assert scripted.container_ids == ids
-    assert [step for step in steps(scripted) if step[0] == "up"] == []
-
-
 @pytest.fixture
 def plain_apply(
     database_units, repository, scripted, setup_check, setup_run, ingress, scripted_git,  # noqa: F811
@@ -216,6 +189,33 @@ def plain_apply(
         return exit_code, capsys.readouterr().err, published
 
     return run
+
+
+@pytest.mark.parametrize(
+    ("failing", "names_the_snapshot"),
+    [("backup", False), ("restore test", True)],
+    ids=["C3 the backup fails", "C3 the restore test fails"],
+)
+def test_a_failed_snapshot_keeps_the_old_container_and_ends_partial(
+    failing,
+    names_the_snapshot,
+    plain_apply,
+    scripted,  # noqa: F811
+    realm_backup,
+):
+    scripted.change_image(KEYCLOAK.service, KEYCLOAK_BUMP)
+    realm_backup.failing = failing
+    ids = dict(scripted.container_ids)
+
+    exit_code, err, published = plain_apply()
+
+    assert exit_code == ExitCode.FAILURE
+    assert f"{failing} broke" in err
+    assert "keycloak is not recreated" in err
+    assert ("pre-apply snapshot ab12cd34" in err) == names_the_snapshot
+    assert scripted.container_ids == ids
+    assert [step for step in steps(scripted) if step[0] == "up"] == []
+    assert published == []
 
 
 def test_plain_hal_apply_publishes_nothing_after_a_failed_snapshot(

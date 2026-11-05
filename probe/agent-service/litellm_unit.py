@@ -34,6 +34,7 @@ import stat
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import NamedTuple
 
@@ -617,11 +618,17 @@ def prove(probe: Probe) -> int:
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
+def run(probe_class: Callable[[Path], Probe], argv: list[str] | None) -> int:
+    """A probe program's command line and run, described by its module's first docstring line."""
+    description = sys.modules[probe_class.__module__].__doc__.splitlines()[0]
     return edge_copy.run_main(
-        __doc__.splitlines()[0], argv, Probe, prove,
+        description, argv, probe_class, prove,
         lambda probe: edge_copy.passed_line(f"PASSED: {', '.join(probe.held)}"),
     )  # fmt: skip
+
+
+def main(argv: list[str] | None = None) -> int:
+    return run(Probe, argv)
 
 
 if __name__ == "__main__":
