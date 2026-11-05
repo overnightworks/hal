@@ -1,8 +1,0 @@
-claim_id = "60911271901b436b9bb37cda5e8d91ce"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "aa1b1737112db36f491117bcd2ce804295fd942e"
-branch = "claude/issue-1027-shared-legal-gaps"
-scope = ["docs/architecture.md", "legal/sections/agent-service/datenschutz.html", "legal/sections/allgemein/datenschutz.html", "legal/sections/allgemein/nutzungsbedingungen.html", "src/hal/stack/legal_pages.py"]
-opened_commit = "4ab621bd7292a150acd6c715a65722b52c43e192"
-whole_reason = "One legal-text landing: the shared privacy and terms sections, the agent service's section that loses its basis when the shared list goes, and the stable anchor the apps link to; split, the page would publish a processing without its basis."
