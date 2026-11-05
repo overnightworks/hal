@@ -4,7 +4,6 @@ hold what the recipe says; the build and the start of the image are the probe's
 
 import argparse
 import hashlib
-import importlib.util
 import re
 import subprocess
 from pathlib import Path
@@ -13,6 +12,7 @@ from types import ModuleType
 import agent_service_lock
 import pytest
 import yaml
+from support.script_module import script_module
 
 REPOSITORY = Path(__file__).resolve().parents[1]
 PROBE = REPOSITORY / "probe" / "agent-service" / "image.py"
@@ -34,12 +34,8 @@ RUN_STEP = re.compile(r"^RUN [^\n]*(?:\n(?!\S)[^\n]*)*", re.MULTILINE)
 
 
 def load_probe() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("agent_service_image_probe", PROBE)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    with script_module("agent_service_image_probe", PROBE) as module:
+        return module
 
 
 PROBE_MODULE = load_probe()

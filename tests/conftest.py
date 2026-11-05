@@ -6,6 +6,7 @@ import os
 import shutil
 import signal
 import socket
+import sys
 import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -51,6 +52,19 @@ from hal.workstation import check, jobs, secrets_view, setup, system_step, tunne
 from hal.workstation import ports as home_ports
 
 LOOPBACK_ADDRESSES = {"127.0.0.1", "::1"}
+IMPORT_PATH_OF_THE_SESSION = list(sys.path)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def module_leaves_import_path_unchanged(request: pytest.FixtureRequest) -> Iterator[None]:
+    """Fails the module that leaves `sys.path` other than the session began with, as a probe
+    script puts its directories on it when it loads: a later module's imports would depend on
+    the order. Restores it afterwards, so one leak fails one module."""
+    yield
+    leaked = [entry for entry in sys.path if entry not in IMPORT_PATH_OF_THE_SESSION]
+    changed = sys.path != IMPORT_PATH_OF_THE_SESSION
+    sys.path[:] = IMPORT_PATH_OF_THE_SESSION
+    assert not changed, f"{request.module.__name__} left sys.path changed; added {leaked}"
 
 
 @pytest.fixture

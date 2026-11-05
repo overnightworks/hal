@@ -7,21 +7,15 @@ import hashlib
 import http.client
 import io
 import json
-import sys
 import threading
 import urllib.error
 import urllib.parse
 import urllib.request
 import webbrowser
-from pathlib import Path
 
+import device_sign_in
 import pytest
-
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "agent-service"))
-
-import device_sign_in  # noqa: E402
-from smoke import Tokens  # noqa: E402
+from smoke import Tokens
 
 
 class FakeKeycloak:
