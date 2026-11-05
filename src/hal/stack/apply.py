@@ -766,6 +766,8 @@ def _report_switched(
     for plan in mismatched:
         failure = f"{plan.unit.key} is not {plan.action} after the change"
         write_error(f"partial, {_with_way_back(failure, snapshots)}")
+    if later_steps_failed and not (mismatched or withheld) and snapshots.way_back():
+        write_error(f"partial, {snapshots.way_back()}")  # the later steps' lines name no snapshot
     if mismatched or withheld or later_steps_failed:
         return ApplyExit.REFUSED
     for plan in changes:

@@ -208,6 +208,6 @@ def _way_back(unit: str, snapshot: str | None, recreating: bool) -> str | None:
         return None
     short = short_snapshot(snapshot)
     if not recreating:
-        return f"pre-apply snapshot {short} taken"
+        return f"{unit}: pre-apply snapshot {short} taken"
     restore = f"{command(Verb.RESTORE)} {unit} --live --snapshot {short}"
     return f"pre-apply snapshot {short}, `{restore}` loads it"

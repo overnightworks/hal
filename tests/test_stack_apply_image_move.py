@@ -678,15 +678,32 @@ def test_a_switch_on_that_creates_only_the_database_names_its_snapshot_and_no_re
     assert "hal restore" not in err
 
 
+@pytest.mark.parametrize(
+    ("keycloak_gone", "keycloak_fragment"),
+    [
+        pytest.param(
+            KEYCLOAK_SERVICES,
+            "hal restore keycloak --live --snapshot ab12cd34",
+            id="the app was created over its data",
+        ),
+        pytest.param(
+            (KEYCLOAK.database,),
+            "keycloak: pre-apply snapshot ab12cd34 taken",
+            id="only the database was created",
+        ),
+    ],
+)
 def test_a_partial_switch_on_names_the_way_back_of_every_unit_that_holds_a_snapshot(
+    keycloak_gone,
+    keycloak_fragment,
     plain_apply,
     scripted,  # noqa: F811
     realm_backup,
 ):
-    """F1: Keycloak was created over its data and proven; LiteLLM's backup then fails."""
+    """F1: Keycloak was started over its data and proven; LiteLLM's backup then fails."""
     for unit in (KEYCLOAK, LITELLM):
         scripted.volumes[unit.database] = "its data"
-    removed(scripted, *KEYCLOAK_SERVICES, *LITELLM_SERVICES)
+    removed(scripted, *keycloak_gone, *LITELLM_SERVICES)
     realm_backup.failing, realm_backup.failing_unit = "backup", LITELLM.key
 
     exit_code, err, _ = plain_apply()
@@ -694,5 +711,23 @@ def test_a_partial_switch_on_names_the_way_back_of_every_unit_that_holds_a_snaps
     assert exit_code == ExitCode.FAILURE
     assert "backup broke" in err
     assert "litellm is not started" in err
-    assert "hal restore keycloak --live --snapshot ab12cd34" in err
+    assert keycloak_fragment in err
     assert "hal restore litellm" not in err
+
+
+@pytest.mark.usefixtures("database_units")
+def test_a_switch_on_whose_later_key_step_fails_still_names_its_snapshot(
+    plain_apply,
+    scripted,  # noqa: F811
+):
+    """F1: Keycloak started over its data and proven; the key step of the running LiteLLM then
+    cannot write."""
+    scripted.volumes[KEYCLOAK.database] = "its data"
+    removed(scripted, *KEYCLOAK_SERVICES)
+    scripted.keys.fail_at = 0
+
+    exit_code, err, _ = plain_apply()
+
+    assert exit_code == ExitCode.FAILURE
+    assert "pre-apply snapshot ab12cd34" in err
+    assert "hal restore keycloak --live --snapshot ab12cd34" in err
