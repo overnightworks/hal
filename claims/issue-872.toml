@@ -3,6 +3,6 @@ agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
 role = "builder"
 base = "d9748991012b7a2ac90685c47663a9ab1f5d5277"
 branch = "claude/issue-872-n6-of-the-speech-cut-hal-runs-speech-ser"
-scope = ["compose.yaml", "docs/architecture.md", "docs/internal-ca.md", "docs/naming.md", "fleet.yaml", "mcp/dynamic/keycloak.yml", "probe/keycloak/README.md", "probe/keycloak/compose.probe.yaml", "probe/keycloak/copy_isolation.py", "probe/keycloak/in_copy.py", "probe/keycloak/probe.py", "probe/speech", "src/hal/workstation/secrets_manifest.toml", "tests/test_traefik_mcp.py"]
+scope = ["compose.yaml", "docs/architecture.md", "docs/internal-ca.md", "docs/naming.md", "fleet.yaml", "mcp/dynamic/keycloak.yml", "probe/edge_copy.py", "probe/keycloak/README.md", "probe/keycloak/compose.probe.yaml", "probe/keycloak/copy_isolation.py", "probe/keycloak/in_copy.py", "probe/keycloak/probe.py", "probe/speech", "src/hal/workstation/secrets_manifest.toml", "tests/test_traefik_mcp.py"]
 opened_commit = "7b5e5aa95fc45b2733bf31cd57a6e4f855c50d0b"
 whole_reason = "One lane: the networks and the key-set route in compose.yaml and mcp/dynamic, the app entry in fleet.yaml, the CA root's reader in the manifest, the docs, and the new probe directory probe/speech that drives a hal apply of the hostless app with real realm tokens, plus the app hooks it needs in H's probe/keycloak harness (install mode, the app's pre-start check)."
