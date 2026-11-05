@@ -163,7 +163,8 @@ pages. The tokens and the fonts (Oswald and Open Sans,
 with their licences, so no page asks a third party) come from the installed
 appkit: the appkit step of `hal apply` writes `appkit-<version>/` (git-ignored)
 into each theme's `resources/`, and `styles=` lists its `appkit.css` first, then
-the theme's own `css/edge-3.css` with the app colour and the shapes. The theme
+the theme's own file with the app colour and the shapes (`css/edge-3.css` for
+login, `css/edge-2.css` for account). The theme
 files reach Keycloak on `hal update` of the live checkout, the appkit
 directory on `hal apply`, so a restart between the two serves pages without
 tokens. They are CSS, `footer.ftl` and message texts on top of `keycloak.v2` and
