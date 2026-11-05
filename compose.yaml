@@ -10,7 +10,9 @@ x-traefik: &traefik
 
 # The MCP origins' names: traefik-mcp answers to them on mcp-ca (step-ca validates the ACME
 # challenge there) and on mcp (the clients). step-ca/ca.json's policy allows exactly this suffix.
-x-mcp-origins: &mcp-origins [hello.mcp.internal, songmaker.mcp.internal]
+# keycloak.mcp.internal is no MCP server but Keycloak's key set for the speech service
+# (mcp/dynamic/keycloak.yml), which needs a certificate of the same CA.
+x-mcp-origins: &mcp-origins [hello.mcp.internal, songmaker.mcp.internal, keycloak.mcp.internal]
 
 # The agent service's egress (agent-service/egress/): the gateway's one address on the egress
 # network, and what a member of the agent networks carries. The service finds the gateway through
@@ -26,6 +28,10 @@ x-litellm-egress-address: &litellm-egress-address 172.31.239.10
 # LiteLLM's address on litellm-backend, where the front finds it through extra_hosts: the front
 # shares the app networks, where an app could claim the name `litellm` in Docker's DNS.
 x-litellm-backend-address: &litellm-backend-address 172.31.199.10
+# Keycloak's address on keycloak-keys, where traefik-mcp finds it through extra_hosts: traefik-mcp
+# shares hal_mcp_songmaker with an app, which could claim the name `keycloak` in Docker's DNS and
+# serve a forged key set to the speech service.
+x-keycloak-keys-address: &keycloak-keys-address 172.31.198.10
 # What both Postgres databases share: one image digest and one hardening. The alpine image's
 # postgres user owns the data directory a named volume inherits.
 x-postgres: &postgres
@@ -126,7 +132,12 @@ services:
       - /opt/keycloak/data/tmp:uid=1000,gid=0,mode=0700,size=64m,nosuid,nodev,noexec
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
-    networks: [keycloak, backchannel-songmaker, backchannel-hopin, backchannel-presentator]
+    networks:
+      keycloak: {}
+      backchannel-songmaker: {}
+      backchannel-hopin: {}
+      backchannel-presentator: {}
+      keycloak-keys: {ipv4_address: *keycloak-keys-address}
     # Secrets reach the process from /run/secrets, never through the container's Config.Env.
     entrypoint: ["/opt/hal/entrypoint.sh", "/opt/keycloak/bin/kc.sh"]
     command: ["start"]
@@ -377,8 +388,19 @@ services:
     volumes:
       - traefik-mcp-acme:/acme
 
-  # The second Traefik: the one gateway between the agent service and the MCP servers. No host
-  # networking, no Docker API; the only container on all MCP networks.
+  # Makes Compose create the speech service's two app networks (networks below), which no other
+  # service joins: Compose creates only the networks of the services it starts. It exits at once,
+  # and traefik-mcp waits for it, so the networks exist whenever step-ca is on.
+  speech-networks:
+    <<: *traefik
+    profiles: [step-ca]
+    restart: "no"
+    entrypoint: ["true"]
+    networks: [speech-hopin, speech-presentator]
+
+  # The second Traefik: the one gateway between the agent service and the MCP servers, and the
+  # speech service's one way to Keycloak's key set. No host networking, no Docker API; the only
+  # container on all MCP networks.
   traefik-mcp:
     <<: *traefik
     profiles: [step-ca]
@@ -400,6 +422,7 @@ services:
     depends_on:
       step-ca: {condition: service_started}
       traefik-mcp-acme-owner: {condition: service_completed_successfully}
+      speech-networks: {condition: service_completed_successfully}
     # The entrypoint listens on 443 as uid 65534.
     sysctls:
       net.ipv4.ip_unprivileged_port_start: 0
@@ -408,6 +431,11 @@ services:
       mcp: {aliases: *mcp-origins}
       mcp-backends: {}
       mcp-songmaker: {}
+      # The speech service finds traefik-mcp here by this one name.
+      speech-issuer: {aliases: [keycloak.mcp.internal]}
+      keycloak-keys: {}
+    extra_hosts:
+      keycloak: *keycloak-keys-address
     secrets: [step_ca_root_certificate]
     volumes:
       - ./traefik-mcp.yml:/etc/traefik/traefik.yml:ro
@@ -781,6 +809,32 @@ networks:
         - subnet: 172.31.239.0/24
   # LiteLLM and its database, nothing else.
   litellm-db:
+    internal: true
+    driver_opts: *isolated-bridge
+  # Keycloak and traefik-mcp alone: the route to Keycloak's key set (mcp/dynamic/keycloak.yml), so
+  # no MCP backend reaches Keycloak's port. Pinned so Keycloak has one address; the dynamic range
+  # keeps it from traefik-mcp.
+  keycloak-keys:
+    internal: true
+    driver_opts: *isolated-bridge
+    ipam:
+      config:
+        - subnet: 172.31.198.0/24
+          ip_range: 172.31.198.128/25
+  # The speech service (fleet.yaml's app speech-runtime) and traefik-mcp, the service's way to
+  # Keycloak's key set. The service joins it and the app networks below as external networks.
+  speech-issuer:
+    name: hal_speech_issuer
+    internal: true
+    driver_opts: *isolated-bridge
+  # One calling app and the speech service each, so no app sees another's; speech-networks makes
+  # Compose create them.
+  speech-hopin:
+    name: hal_speech_hopin
+    internal: true
+    driver_opts: *isolated-bridge
+  speech-presentator:
+    name: hal_speech_presentator
     internal: true
     driver_opts: *isolated-bridge
   # agent-egress alone: a plain NAT bridge, the one route to the internet.

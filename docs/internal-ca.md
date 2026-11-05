@@ -29,19 +29,20 @@ the `step-ca` volume. The root certificate is what other services trust.
 
 **Switching off.** `enabled: false` through a pull request, `hal update`, then `hal apply`; the CA and the
 gateway go together, the volumes `step-ca` and `traefik-mcp-acme` stay, and switching on again serves the
-same intermediate. `step-ca`, `traefik-mcp` and its helper `traefik-mcp-acme-owner` sit behind the
-compose profile `step-ca`, so a plain `docker compose up -d` starts none of them. Removing the volumes or
+same intermediate. `step-ca`, `traefik-mcp` and its helpers `traefik-mcp-acme-owner` and
+`speech-networks` sit behind the compose profile `step-ca`, so a plain `docker compose up -d` starts none of them. Removing the volumes or
 `~/.secrets/step-ca/` throws the CA away; that stays a manual command, and the gateway must be off first,
 since it holds certificates from this CA.
 
 ## traefik-mcp
 
-A second Traefik, the gateway to the MCP origins. It has no host networking and no Docker API, and
+A second Traefik, the gateway to the MCP origins and the speech service's one way to Keycloak's key
+set. It has no host networking and no Docker API, and
 listens on 443 inside internal networks, none with a route out: `mcp-ca` (step-ca and
 `traefik-mcp`), `mcp` (`traefik-mcp` and the agent service), `mcp-backends` (`traefik-mcp` and the
 probe's MCP server) and one network per app that serves an MCP origin, `hal_mcp_songmaker` for
 songmaker (`traefik-mcp` and the app's web service, which joins it as an external network). It is the
-only container on all of them. It answers to `<app>.mcp.internal` on `mcp-ca`
+only container on all of them. Two more internal, isolated networks carry the key set (next section). It answers to `<app>.mcp.internal` on `mcp-ca`
 and `mcp`, gets a 24-hour certificate per name from step-ca over TLS-ALPN-01 (trusting only the CA's root,
 `~/.secrets/step-ca/root_ca.crt`) and renews it by itself. `traefik-mcp.yml` is its static configuration;
 `mcp/dynamic/` holds one router file per app (`hello.yml` is the probe's; `songmaker.yml` routes
@@ -51,6 +52,29 @@ certificates live in the volume `traefik-mcp-acme`, which is not backed up becau
 Traefik reads `traefik-mcp.yml` only when it starts, so `hal apply` recreates `traefik-mcp` alone when
 that file or its compose definition changed (rules in [stack.md](stack.md)). `traefik-mcp` waits for the
 CA to listen, so the start order does not matter, also after a restart of the Docker daemon.
+
+### Keycloak's key set for the speech service
+
+The speech service (`fleet.yaml`'s app `speech-runtime`) has no route out, so it fetches Keycloak's
+key set from `https://keycloak.mcp.internal/realms/hallucinai/protocol/openid-connect/certs` and
+trusts the CA's root, which reaches it as a compose secret. `traefik-mcp` answers to that name on
+`hal_speech_issuer` (the speech service and `traefik-mcp` alone; the name is its only alias there)
+and, through `x-mcp-origins`, on `mcp-ca` and `mcp`. `mcp/dynamic/keycloak.yml` routes exactly that
+path, and nothing else of Keycloak, to `keycloak:8080` on `keycloak-keys`, a network of Keycloak and
+`traefik-mcp` alone, so no MCP backend reaches Keycloak's port. Keycloak's address on `keycloak-keys`
+is pinned and `traefik-mcp` finds it through `extra_hosts`, so an app on another of its networks
+cannot answer as `keycloak` with a forged key set. Traefik routes by Host and SNI, not by network, so
+the speech service reaches every router of `mcp/dynamic/`: `hello` (whose backend runs only in the
+probe), `songmaker` (whose `/mcp` demands the agent service's capability) and `keycloak`; none routes
+to the speech service.
+
+The speech service's networks to its callers, `hal_speech_hopin` and `hal_speech_presentator`, are
+internal and isolated, each joined by its app and the service alone. No running service of hal joins
+them, and Compose creates only the networks of the services it starts, so the one-shot
+`speech-networks` joins both and exits; `traefik-mcp` waits for it to complete, so the networks exist
+whenever `step-ca` is on. The speech service's compose file declares all three as external, so it
+does not start before they exist. A rollback leaves the exited `speech-networks` container behind as
+an orphan (`docker rm` it) and the networks in place.
 
 A new app adds its name to the `x-mcp-origins` list in `compose.yaml`, a router file under
 `mcp/dynamic/` and a network of its own (`hal_mcp_<app>`, internal and isolated, joined by
