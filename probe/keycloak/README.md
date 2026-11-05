@@ -170,9 +170,10 @@ Measured: a run takes 143 s and its teardown 1.7 s (K 30 s, CAP 1800 s).
 
 It needs an existing, empty `--scratch` directory and leaves it empty, passed or failed, and `uv`:
 it runs `uv sync` in the copy. Before anything of the copy starts it prints one `self-check:`
-line per negative case, each refused by the check that guards it (below); a case a check accepts
-stops the run. It then prints one `H<n> held:` line per cell and ends with `PASSED: H1, ..., H6`
-(exit 0), or `PROBE FAILED: <what>` (exit 1).
+line per negative case, each refused by the check that guards it (below) for the reason the case
+names; a case a check accepts or refuses for another reason stops the run. It then prints one
+`H<n> held:` line per cell and ends with `PASSED: H1, ..., H6` (exit 0), or `PROBE FAILED: <what>`
+(exit 1).
 
 - H1, copy isolation: the copy's compose.yaml names the project at its top and has every fixed
   name in it, the pinned /24s and the `&keycloak-subnet` anchor on free /24s (the IPAM pool and
@@ -180,15 +181,17 @@ stops the run. It then prints one `H<n> held:` line per cell and ends with `PASS
   port, and Keycloak's `edge.name` `PROBE`, which the live `LabelRegex` refuses; its traefik.yml
   listens on two free ports of 127.0.0.1 and routes the project label only; go-live's two
   addresses are the copy's; its fleet, read as hal reads it, switches on keycloak and step-ca
-  alone and has exactly the caller's apps, each under a project `edge-kc-in-copy-...`; its backup
-  records name the project.
+  alone and has no app (an app runs through hal's app compose, which no check of the copy
+  resolves); its backup records name the project.
   No service hal or a compose call of the probe starts, in the configuration that call's files
-  merge to (the bootstrap overlay included), carries an `edge.name` the live constraint accepts,
-  publishes a port, joins the host network (but Traefik), binds a path or reads a secret or config
-  file outside the scratch HOME (but the socket proxy's docker socket), joins the network, process
-  or IPC namespace or takes the volumes of a container outside the copy, or has a fixed container
-  name outside the project. Installing the shipped files again leaves the copy byte-identical: the
-  allocation is the same.
+  merge to (the bootstrap overlay included, and while `bootstrap-admin-password` exists also for
+  the start go-live makes with it), carries an `edge.name` the live constraint accepts, publishes
+  a port, joins the host network (but Traefik), binds a path or reads a secret or config file
+  outside the scratch HOME (but the socket proxy's docker socket), joins the network, process or
+  IPC namespace or takes the volumes of a container outside the copy, or has a fixed container
+  name outside the project. No volume of that configuration runs on another driver than `local`
+  or mounts a host path outside the scratch HOME through its options. Installing the shipped files
+  again leaves the copy byte-identical: the allocation is the same.
 - H2, bootstrap as go-live's steps, never go-live itself: the copy's compose with
   `keycloak/bootstrap.compose.yaml` starts Keycloak, the copy's core (Traefik included) starts and
   its admin entrypoint answers, `admin-frontend.sh` moves master, one `keycloak-config-cli` run
@@ -213,9 +216,9 @@ set lacks, refuses a path that is absolute or leaves the copy and finds a rewrit
 writes (`./fleet.yaml` is `fleet.yaml`), applies the same allocation to every file it rewrites,
 publishes the copy and checks its isolation again. `apply(stand)` checks it again before each
 `hal apply`, `KeycloakCopy.compose` before each call that starts something, and the teardown
-before its `compose down`; a teardown whose check or down fails still removes the copy's projects
-by their labels and then fails with that error. `KeycloakCopy` carries the steps:
-`prepare(Fleet(units_on, app_entries))`, `bootstrap()` and `gate()`.
+before its `compose down`; a teardown whose check or down fails still removes the copy's project
+by its label and then fails with that error, naming both when the removal fails too.
+`KeycloakCopy` carries the steps: `prepare(Fleet(units_on))`, `bootstrap()` and `gate()`.
 
 It never touches the live project `hal`, its containers or volumes, and never creates or removes a
 `hal_*` network: every compose call goes through edge_copy's `NetworkGuard`. It never sends a
@@ -231,5 +234,4 @@ without a compose file:
         env -u COMPOSE_FILE -u COMPOSE_PROJECT_NAME \
         docker compose --project-name edge-kc-in-copy down --volumes --remove-orphans
 
-and the same for each app project a caller added. `env -u` keeps an exported `COMPOSE_FILE` from
-pointing the call at the live compose.yaml.
+`env -u` keeps an exported `COMPOSE_FILE` from pointing the call at the live compose.yaml.

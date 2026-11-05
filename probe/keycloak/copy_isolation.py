@@ -15,9 +15,9 @@ import json
 import re
 import shlex
 import sys
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from types import ModuleType
 from typing import Any
@@ -75,6 +75,10 @@ FOREIGN_CONTAINER = "container:"
 SERVICE_REFERENCE = "service:"
 HOST_NAMESPACE = "host"
 FILE_SOURCES = ("secrets", "configs")
+DEFAULT_VOLUME_DRIVER = "local"
+BIND_OPTIONS = frozenset({"bind", "rbind"})
+# go-live's main() and compose.yaml's secrets: name this folder under HOME
+KEYCLOAK_SECRETS = Path(".secrets") / REALM_UNIT
 TRUSTED_ADDRESSES = "KC_PROXY_TRUSTED_ADDRESSES"  # Keycloak's setting, compose.yaml's anchor
 ADMIN_HOSTNAME = "KC_HOSTNAME_ADMIN"
 TOP_LEVEL_NAME = re.compile(r"^(name: )(\S+)$", re.M)
@@ -155,18 +159,9 @@ class Isolation:
 
 @dataclass(frozen=True)
 class Fleet:
-    """The copy's fleet.yaml: the units of `units_on` on, every other unit off, no app the shipped
-    file names, and the caller's `app_entries` appended under `services` as written. An app's key
-    is its compose project, so each one starts with the copy's project and a dash."""
+    """The copy's fleet.yaml: the units of `units_on` on, every other unit off, and no app."""
 
     units_on: frozenset[str]
-    app_entries: str = ""
-
-    def apps(self) -> dict[str, object]:
-        """The caller's entries as hal's catalog reads them, by key."""
-        if not self.app_entries:
-            return {}
-        return fleet_services(f"services:\n{self.app_entries}", "the caller's app entries")
 
 
 @dataclass(frozen=True)
@@ -184,11 +179,6 @@ class CopyStand:
     def home(self) -> Path:
         """The scratch HOME: the copy and every scratch secret lie under it."""
         return Path(self.environment["HOME"])
-
-    @property
-    def projects(self) -> frozenset[str]:
-        """The copy's compose project and each app's."""
-        return frozenset({self.isolation.project, *self.fleet.apps()})
 
 
 def run_checked(
@@ -278,9 +268,8 @@ def probe_fleet(text: str, stand: CopyStand) -> str:
     switched = UNIT_SWITCH.sub(
         lambda switch: f"{switch[1]}{str(switch['unit'] in fleet.units_on).lower()}", without
     )
-    result = switched + fleet.app_entries
-    expect_fleet_isolated(result, stand)
-    return result
+    expect_fleet_isolated(switched, stand)
+    return switched
 
 
 def backup_records(text: str, stand: CopyStand) -> str:
@@ -354,15 +343,29 @@ def expect_isolated(stand: CopyStand) -> str:
     that says what holds."""
     units = expect_files_isolated(stand)
     started = expect_resolved_isolated(stand, units)
+    bootstrapping = (stand.home / KEYCLOAK_SECRETS / go_live.BOOTSTRAP_SECRET).exists()
+    if bootstrapping:
+        command = go_live_bootstrap_start(stand)
+        stand.guard.expect_call(command)
+        expect_call_isolated(stand, command)
     isolation = stand.isolation
+    overlay = " and those of go-live's start with the bootstrap overlay" if bootstrapping else ""
     return (
         f"copy isolated: project {isolation.project}, edge {isolation.edge_address}, admin "
         f"{isolation.admin_url}, keycloak subnet {isolation.keycloak_subnet}, pinned "
-        f"{sorted(isolation.pinned.values())}; {started} started services, none routable by the "
-        "live edge, none publishing a port, only traefik on the host network, no bind or secret "
-        "file outside the scratch HOME but the socket proxy's docker socket, no namespace of a "
-        "container outside the copy; every fixed name and the backup records in the project"
+        f"{sorted(isolation.pinned.values())}; {started} started services{overlay}, none "
+        "routable by the live edge, none publishing a port, only traefik on the host network, no "
+        "bind, volume backing or secret file outside the scratch HOME but the socket proxy's "
+        "docker socket, no namespace of a container outside the copy; no app; every fixed name "
+        "and the backup records in the project"
     )
+
+
+def go_live_bootstrap_start(stand: CopyStand) -> list[str]:
+    """What go-live's Keycloak start and realm step start while bootstrap-admin-password exists:
+    keycloak and keycloak-config-cli of its profile, with the bootstrap overlay."""
+    prefix = compose_prefix(stand, bootstrap=True)
+    return [*prefix, "--profile", go_live.KEYCLOAK_PROFILE, "up", KEYCLOAK_SERVICE, CONFIG_CLI]
 
 
 def copy_texts(stand: CopyStand) -> dict[str, str]:
@@ -401,28 +404,20 @@ def expect_traefik_isolated(text: str, isolation: Isolation) -> None:
     expect(constraint == isolation.constraint, f"the copy's Traefik routes {constraint!r}")
 
 
-def expect_apps_in_project(keys: Iterable[str], project: str) -> None:
-    """An app's key is its compose project: refuses one outside the copy's (a live app's)."""
-    foreign = sorted(key for key in keys if not key.startswith(f"{project}-"))
-    expect(not foreign, f"apps outside the project {project}: {foreign}")
-
-
 def expect_fleet_isolated(text: str, stand: CopyStand) -> frozenset[str]:
     """The units fleet.yaml `text` switches on, read as hal reads it, once they are the stand's and
-    its apps are exactly the caller's, each under the copy's project."""
-    fleet, what = stand.fleet, f"the copy's {FLEET_FILE}"
-    supplied = fleet.apps()
-    expect_apps_in_project(supplied, stand.isolation.project)
+    it has no app: an app runs through hal's app compose, which no check of the copy resolves."""
+    what = f"the copy's {FLEET_FILE}"
     services = fleet_services(text, what)
+    apps = sorted(key for key, entry in services.items() if catalog.is_app(entry))
+    expect(not apps, f"{what} has the apps {apps}")
     enabled = frozenset(
         key
         for key, entry in services.items()
         if isinstance(entry, dict) and not catalog.is_app(entry)
         and (entry.get("run") or {}).get("enabled")
     )  # fmt: skip
-    expect(enabled == fleet.units_on, f"{what} switches on {sorted(enabled)}")
-    apps = {key: entry for key, entry in services.items() if catalog.is_app(entry)}
-    expect(apps == supplied, f"{what} has the apps {sorted(apps)}, not {sorted(supplied)}")
+    expect(enabled == stand.fleet.units_on, f"{what} switches on {sorted(enabled)}")
     return enabled
 
 
@@ -537,6 +532,32 @@ def expect_sources_in_scratch(
         if "file" in entry and outside(entry["file"], root)
     )
     expect(not files, f"files outside the scratch HOME: {files}")
+    expect_volumes_in_scratch(resolved.get("volumes") or {}, root)
+
+
+def binds_host_path(options: Mapping[str, Any]) -> bool:
+    """Whether a local volume's `driver_opts` mount a host path: a bind or a device path."""
+    mount_options = set(str(options.get("o") or "").split(","))
+    device = str(options.get("device") or "")
+    return options.get("type") == "none" or bool(BIND_OPTIONS & mount_options) or device[:1] == "/"
+
+
+def expect_volumes_in_scratch(volumes: Mapping[str, Any], root: Path) -> None:
+    """Refuses a volume on another driver than Docker's own, and one whose options mount a host
+    path outside the scratch HOME (a tmpfs volume mounts none)."""
+    drivers = sorted(
+        f"{key}: {volume['driver']}"
+        for key, volume in volumes.items()
+        if (volume or {}).get("driver", DEFAULT_VOLUME_DRIVER) != DEFAULT_VOLUME_DRIVER
+    )
+    expect(not drivers, f"volume drivers not {DEFAULT_VOLUME_DRIVER}: {drivers}")
+    backed = sorted(
+        f"{key}: {options.get('device')}"
+        for key, volume in volumes.items()
+        if binds_host_path(options := (volume or {}).get("driver_opts") or {})
+        and outside(str(options.get("device") or ""), root)
+    )
+    expect(not backed, f"volume backings outside the scratch HOME: {backed}")
 
 
 def foreign_namespace(key: str, mode: str, services: Mapping[str, Any]) -> bool:
@@ -595,69 +616,82 @@ def compose_prefix(stand: CopyStand, *, bootstrap: bool = False) -> list[str]:
 def removed_whatever_fails(down: Callable[[], object], sweep: Callable[[], object]) -> None:
     """`down`, then `sweep` even when `down` raised, whose error then propagates: a copy whose files
     cannot be read or are no longer isolated is still removed by its labels, before the scratch
-    that holds them is emptied."""
+    that holds them is emptied. A sweep that fails too names both errors."""
     try:
         down()
-    finally:
-        sweep()
+    except BaseException as failure:
+        try:
+            sweep()
+        except Exception as sweep_failure:
+            raise ProbeFailed(
+                f"{sweep_failure}, after {type(failure).__name__}: {failure}"
+            ) from failure
+        raise
+    sweep()
 
 
 @dataclass(frozen=True)
 class Refusal:
-    """A negative case: `check` raises ProbeFailed while the guard it names holds."""
+    """A negative case: `check` raises ProbeFailed with `reason` in its message, from the guard the
+    case names."""
 
     case: str
     check: Callable[[], object]
+    reason: str
 
 
 def expect_guards_refuse(stand: CopyStand, bootstrap_start: Sequence[str]) -> int:
-    """Every negative case refused, before anything of the copy starts, one line each; a case a
-    guard accepts stops the probe. `bootstrap_start` is the compose call that starts Keycloak with
-    go-live's overlay. The number of cases."""
+    """Every negative case refused for its reason, before anything of the copy starts, one line
+    each; a case a guard accepts or refuses for another reason stops the probe. `bootstrap_start`
+    is the compose call that starts Keycloak with go-live's overlay. The number of checks."""
     refusals = [*file_refusals(stand), *start_refusals(stand, bootstrap_start)]
     for refusal in refusals:
         try:
             refusal.check()
         except ProbeFailed as failure:
+            expect(
+                refusal.reason in str(failure),
+                f"self-check: {refusal.case} refused for another reason: {failure}",
+            )
             write_line(f"self-check: {refusal.case} refused: {failure}", flush=True)
         else:
             raise ProbeFailed(f"self-check: {refusal.case} was accepted")
-    for line in (canonical_install_line(stand), teardown_sweep_line(stand)):
-        write_line(line, flush=True)
-    return len(refusals) + 2
+    write_line(canonical_install_line(stand), flush=True)
+    return len(refusals) + 1
 
 
 def file_refusals(stand: CopyStand) -> list[Refusal]:
-    """The copy's files, changed in memory to name the live project, enable a unit the stand has
-    off or add a live app, each refused by the recheck; a fleet entry of a live app and an install
-    path that leaves the copy, each refused by the install. The unchanged files pass first, so
-    each refusal is the change's."""
-    texts, units_on, other = copy_texts(stand), stand.fleet.units_on, "legal"
+    """The copy's files, changed in memory to name the live project, enable a unit of the shipped
+    fleet the stand has off or add an app, each refused by the recheck; an install path that leaves
+    the copy, refused by the install. The unchanged files pass first, so each refusal is the
+    change's."""
+    texts, units_on = copy_texts(stand), stand.fleet.units_on
     expect_texts_isolated(texts, stand)
-    expect(other not in units_on, f"self-check: {other} is a unit the stand has on")
+    off = sorted({found["unit"] for found in UNIT_SWITCH.finditer(texts[FLEET_FILE])} - units_on)
+    expect(bool(off), f"self-check: the copy's {FLEET_FILE} switches no unit off")
+    other, live_project, app = off[0], live_project_name(), keycloak.HOPIN.client_id
     switched = UNIT_SWITCH.sub(
         lambda found: f"{found[1]}{str(found['unit'] in {*units_on, other}).lower()}",
         texts[FLEET_FILE],
     )
-    live_app = keycloak.HOPIN.client_id
-    entry = f"  {live_app}:\n    repo: {{}}\n    run:\n      enabled: true\n"
-    with_live_app = replace(stand, fleet=replace(stand.fleet, app_entries=entry))
+    entry = f"  {app}:\n    repo: {{}}\n    run:\n      enabled: true\n"
     changed = {
-        f"a {COMPOSE_FILE} naming the live project": {
-            COMPOSE_FILE: TOP_LEVEL_NAME.sub(rf"\g<1>{live_project_name()}", texts[COMPOSE_FILE])
-        },
-        f"a raw {FLEET_FILE} enabling {other}": {FLEET_FILE: switched},
-        f"a raw {FLEET_FILE} with the app {live_app}": {FLEET_FILE: texts[FLEET_FILE] + entry},
-    }
+        f"a {COMPOSE_FILE} naming the live project": ({COMPOSE_FILE: TOP_LEVEL_NAME.sub(
+            rf"\g<1>{live_project}", texts[COMPOSE_FILE])}, f"names project {live_project!r}"),
+        f"a raw {FLEET_FILE} enabling {other}":
+            ({FLEET_FILE: switched}, f"switches on {sorted({*units_on, other})}"),
+        f"a raw {FLEET_FILE} with the app {app}":
+            ({FLEET_FILE: texts[FLEET_FILE] + entry}, f"has the apps {[app]}"),
+    }  # fmt: skip
+    paths = {"/etc/hal.yaml": "is absolute", f"../{FLEET_FILE}": "leaves the copy"}
     return [
         *(
-            Refusal(case, functools.partial(expect_texts_isolated, {**texts, **change}, stand))
-            for case, change in changed.items()
+            Refusal(case, functools.partial(expect_texts_isolated, {**texts, **change}, stand), why)
+            for case, (change, why) in changed.items()
         ),
-        Refusal(f"the app key {live_app}", lambda: probe_fleet(texts[FLEET_FILE], with_live_app)),
         *(
-            Refusal(f"the install path {path}", functools.partial(installed_name, stand, path))
-            for path in ("/etc/hal.yaml", f"../{FLEET_FILE}")
+            Refusal(f"the install path {path}", functools.partial(installed_name, stand, path), why)
+            for path, why in paths.items()
         ),
     ]
 
@@ -669,74 +703,94 @@ def with_keycloak(resolved: Mapping[str, Any], **changes: object) -> dict[str, A
     return changed
 
 
+def with_volume(
+    resolved: Mapping[str, Any], key: str, name: str, backing: Mapping[str, object]
+) -> dict[str, Any]:
+    """A deep copy of `resolved` with the volume `key`, named `name` and backed by `backing`,
+    mounted into keycloak."""
+    mounts = resolved["services"][KEYCLOAK_SERVICE].get("volumes", [])
+    mount = {"type": "volume", "source": key, "target": f"/{key}"}
+    changed = with_keycloak(resolved, volumes=[*mounts, mount])
+    changed.setdefault("volumes", {})[key] = {"name": name, **backing}
+    return changed
+
+
 def start_refusals(stand: CopyStand, bootstrap_start: Sequence[str]) -> list[Refusal]:
     """The bootstrap start's real merged configuration, changed in memory as an overlay or a raw
-    file could change it, each refused by the check the start runs."""
+    file could change it, each refused by the check the start runs. The unchanged configuration
+    passes first, so each refusal is the change's."""
     verb = starting_verb(bootstrap_start)
     expect(verb is not None, f"self-check: {bootstrap_start} starts nothing")
     merged = resolution(stand, bootstrap_start[:verb])
-    expect_command_isolated(merged, stand, bootstrap_start, verb)  # the change is what is refused
+    expect_command_isolated(merged, stand, bootstrap_start, verb)
+    check = functools.partial(expect_command_isolated, stand=stand, command=bootstrap_start)
+    return [
+        Refusal(case, functools.partial(check, changed, verb=verb), reason)
+        for case, (changed, reason) in start_cases(merged, stand.isolation.project).items()
+    ]
+
+
+def start_cases(merged: Mapping[str, Any], project: str) -> dict[str, tuple[dict[str, Any], str]]:
+    """Each change of the merged configuration `merged` by its case, with the reason its refusal
+    names."""
     keycloak_service = merged["services"][KEYCLOAK_SERVICE]
     labels = keycloak_service.get("labels") or {}
     live_name = yaml.safe_load((REPO / COMPOSE_FILE).read_text())["services"][KEYCLOAK_SERVICE]
     live_name = live_name["labels"][EDGE_NAME_LABEL]
-    live_container = f"{FOREIGN_CONTAINER}{live_project_name()}-{TRAEFIK_SERVICE}-1"
+    live_project = live_project_name()
+    live_container = f"{FOREIGN_CONTAINER}{live_project}-{TRAEFIK_SERVICE}-1"
     live_bind = {"type": "bind", "source": str(REPO), "target": "/opt/live"}
     secret = next(iter(merged["secrets"]))
     live_secret = deepcopy(dict(merged))
     live_secret["secrets"][secret]["file"] = str(REPO / COMPOSE_FILE)
-    cases = {
-        f"an overlay setting keycloak's {EDGE_NAME_LABEL} {live_name}":
-            with_keycloak(merged, labels={**labels, EDGE_NAME_LABEL: live_name}),
-        "an overlay publishing a keycloak port":
-            with_keycloak(merged, ports=[{"target": 8080, "published": "8080"}]),
+    live_data = {"type": "none", "o": "bind", "device": "/srv/live-data"}
+    volume, plugin = f"{project}_live-data", "vieux/sshfs"
+    in_keycloak = f"{KEYCLOAK_SERVICE}."
+    return {
+        f"an overlay setting keycloak's {EDGE_NAME_LABEL} {live_name}": (with_keycloak(merged,
+            labels={**labels, EDGE_NAME_LABEL: live_name}), f"would route {[KEYCLOAK_SERVICE]}"),
+        "an overlay publishing a keycloak port": (with_keycloak(merged, ports=[{"target": 8080,
+            "published": "8080"}]), f"{[KEYCLOAK_SERVICE]} publish a host port"),
         "an overlay putting keycloak on the host network":
-            with_keycloak(merged, network_mode=HOST_NAMESPACE),
-        f"a bind of {REPO} outside the scratch HOME":
-            with_keycloak(merged, volumes=[*keycloak_service.get("volumes", []), live_bind]),
-        f"the secret file {REPO / COMPOSE_FILE}": live_secret,
-        f"network_mode {live_container}": with_keycloak(merged, network_mode=live_container),
-        f"pid {live_container}": with_keycloak(merged, pid=live_container),
-        "ipc host": with_keycloak(merged, ipc=HOST_NAMESPACE),
-        f"volumes_from {live_container}": with_keycloak(merged, volumes_from=[live_container]),
-        f"the container_name {live_project_name()}-{KEYCLOAK_SERVICE}":
-            with_keycloak(merged, container_name=f"{live_project_name()}-{KEYCLOAK_SERVICE}"),
+            (with_keycloak(merged, network_mode=HOST_NAMESPACE), "run on the host network"),
+        f"a bind of {REPO} outside the scratch HOME": (with_keycloak(merged, volumes=[
+            *keycloak_service.get("volumes", []), live_bind]), f"['{KEYCLOAK_SERVICE}: {REPO}']"),
+        f"the secret file {REPO / COMPOSE_FILE}":
+            (live_secret, f"secrets.{secret}: {REPO / COMPOSE_FILE}"),
+        f"network_mode {live_container}": (with_keycloak(merged, network_mode=live_container),
+            f"{in_keycloak}network_mode: {live_container}"),
+        f"pid {live_container}":
+            (with_keycloak(merged, pid=live_container), f"{in_keycloak}pid: {live_container}"),
+        "ipc host": (with_keycloak(merged, ipc=HOST_NAMESPACE), f"{in_keycloak}ipc: host"),
+        f"volumes_from {live_container}": (with_keycloak(merged, volumes_from=[live_container]),
+            f"{in_keycloak}volumes_from: {live_container}"),
+        f"the container_name {live_project}-{KEYCLOAK_SERVICE}": (with_keycloak(merged,
+            container_name=f"{live_project}-{KEYCLOAK_SERVICE}"),
+            f"{in_keycloak}container_name: {live_project}-{KEYCLOAK_SERVICE}"),
+        f"a volume {volume} bound to {live_data['device']}": (with_volume(merged, "live-data",
+            volume, {"driver_opts": live_data}), "backings outside the scratch HOME: ['live-data:"),
+        f"a volume {volume} on the driver {plugin}": (with_volume(merged, "live-data", volume,
+            {"driver": plugin}), f"volume drivers not {DEFAULT_VOLUME_DRIVER}: ['live-data:"),
     }  # fmt: skip
-    check = functools.partial(expect_command_isolated, stand=stand, command=bootstrap_start)
-    return [
-        Refusal(case, functools.partial(check, changed, verb=verb))
-        for case, changed in cases.items()
-    ]
 
 
 def canonical_install_line(stand: CopyStand) -> str:
-    """`./fleet.yaml` and `a/../fleet.yaml` install as fleet.yaml, through its rewrite: the shipped
-    fleet, which switches on more units, is written with the stand's alone."""
-    aliases = (f"./{FLEET_FILE}", f"a/../{FLEET_FILE}")
-    names = {installed_name(stand, alias) for alias in aliases}
-    expect(names == {FLEET_FILE}, f"self-check: {aliases} install as {sorted(names)}")
+    """The shipped fleet.yaml installed as `./fleet.yaml` and as `a/../fleet.yaml`: each install
+    rewrites fleet.yaml, which reads back with the stand's units on alone, so it took fleet.yaml's
+    rewrite."""
     shipped = (REPO / FLEET_FILE).read_text()
     shipped_on = {
         found["unit"] for found in UNIT_SWITCH.finditer(shipped) if found[0].endswith("true")
     }
-    written = expect_fleet_isolated(REWRITES[names.pop()](shipped, stand), stand)
+    expect(bool(shipped_on - stand.fleet.units_on), f"self-check: {sorted(shipped_on)} are on")
+    aliases, target = (f"./{FLEET_FILE}", f"a/../{FLEET_FILE}"), stand.copy / FLEET_FILE
+    read: frozenset[str] = frozenset()
+    for alias in aliases:
+        before = target.stat().st_mtime_ns
+        install(stand, {alias: shipped}, f"probe: self-check, the shipped {FLEET_FILE} as {alias}")
+        expect(target.stat().st_mtime_ns != before, f"self-check: {alias} left {FLEET_FILE}")
+        read = expect_fleet_isolated(target.read_text(), stand)
     return (
-        f"self-check: {' and '.join(aliases)} install as {FLEET_FILE}, through its rewrite: the "
-        f"shipped fleet with {sorted(shipped_on)} on is written with {sorted(written)} on"
+        f"self-check: the shipped {FLEET_FILE} with {sorted(shipped_on)} on, installed as "
+        f"{' and as '.join(aliases)}, rewrote {FLEET_FILE}, which reads back with {sorted(read)} on"
     )
-
-
-def teardown_sweep_line(stand: CopyStand) -> str:
-    """A copy whose files are missing at the teardown: the label sweep runs, and the read's error
-    still stops the teardown."""
-    swept: list[bool] = []
-    missing = replace(stand, copy=stand.copy / "missing")
-    try:
-        removed_whatever_fails(lambda: expect_isolated(missing), lambda: swept.append(True))
-    except OSError as failure:
-        expect(bool(swept), "self-check: a missing copy file skipped the label sweep")
-        return (
-            f"self-check: a missing copy file at the teardown: the label sweep ran, then "
-            f"{type(failure).__name__} stopped the teardown"
-        )
-    raise ProbeFailed("self-check: a missing copy file at the teardown raised nothing")

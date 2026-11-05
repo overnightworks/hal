@@ -29,6 +29,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -41,9 +42,11 @@ import edge_copy  # noqa: E402
 from copy_isolation import (  # noqa: E402
     COMPOSE_FILE,
     GO_LIVE_FILE,
+    KEYCLOAK_SECRETS,
     REPO,
     REWRITES,
     SHIPPED_FLEET,
+    SOCKET_PROXY,
     TRAEFIK_SERVICE,
     CopyStand,
     Fleet,
@@ -72,9 +75,7 @@ from hal.stack.result_rows import ResultEvent  # noqa: E402
 PROJECT = "edge-kc-in-copy"
 STEP_CA_UNIT = "step-ca"
 STEP_CA_SETUP = SHIPPED_FLEET[STEP_CA_UNIT]["run"]["setup"]
-CORE_SERVICES = ("socket-proxy", TRAEFIK_SERVICE)
-# go-live's main() and compose.yaml's secrets: name this folder under HOME
-KEYCLOAK_SECRETS = Path(".secrets") / REALM_UNIT
+CORE_SERVICES = (SOCKET_PROXY, TRAEFIK_SERVICE)
 KEYCLOAK_PROFILE = ("--profile", go_live.KEYCLOAK_PROFILE)
 BOOTSTRAP_START = (*KEYCLOAK_PROFILE, "up", "--detach", "--wait", KEYCLOAK_SERVICE)
 REALM_APPLIED = re.compile(
@@ -145,15 +146,13 @@ def key_id(token: str) -> str:
     return json.loads(base64.urlsafe_b64decode(header + "=" * (-len(header) % 4)))["kid"]
 
 
-def project_resources(kind: str, projects: frozenset[str]) -> list[str]:
-    """The containers (any state), networks or volumes that carry the label of one of `projects`."""
+def project_resources(kind: str) -> list[str]:
+    """The containers (any state), networks or volumes that carry the project's label."""
     every = ["--all"] if kind == "container" else []
-    found: list[str] = []
-    for project in sorted(projects):
-        label = f"label={PROJECT_LABEL}={project}"
-        found += run_checked(["docker", kind, "ls", *every, "--quiet", "--filter", label],
-                             os.environ).split()  # fmt: skip
-    return found
+    label = f"label={PROJECT_LABEL}={PROJECT}"
+    return run_checked(
+        ["docker", kind, "ls", *every, "--quiet", "--filter", label], os.environ
+    ).split()
 
 
 class KeycloakCopy:
@@ -174,8 +173,6 @@ class KeycloakCopy:
         self.kc: Any = None
         self.inspected: list[str] = []  # the moments every container was looked at
         self.self_checks = 0
-        # what the label sweeps remove: the copy's project, and its apps' once their entries passed
-        self.projects = frozenset({PROJECT})
 
     @property
     def secrets_dir(self) -> Path:
@@ -184,19 +181,19 @@ class KeycloakCopy:
     def secret(self, name: str) -> str:
         return (self.secrets_dir / name).read_text()
 
-    def prepare(self, fleet: Fleet) -> str:
-        """The copy, its allocation, its first install and its scratch secrets; the install's
-        line."""
+    def prepare(self, fleet: Fleet) -> None:
+        """The copy, its allocation, its first install, the self-checks and its scratch secrets."""
         copy = edge_copy.repository_copy(REPO, self.home, self.scratch, PROJECT)
         isolation = Isolation.allocate(PROJECT, (REPO / COMPOSE_FILE).read_text())
         self.stand = CopyStand(copy, isolation, fleet, self.guard, self.environment)
         keycloak.http = self.http = ScratchOnlyHttp(keycloak.http, isolation.netlocs)
         # probe.py's helpers read edge_url, admin_url and master_token_url of their stack
         self.kc = keycloak.Probe(isolation)
-        line = install(self.stand, shipped_files(REPO), "probe: Keycloak isolated in the copy")
-        self.projects = self.stand.projects
+        install(self.stand, shipped_files(REPO), "probe: Keycloak isolated in the copy")
         bootstrap_start = [*compose_prefix(self.stand, bootstrap=True), *BOOTSTRAP_START]
         self.self_checks = expect_guards_refuse(self.stand, bootstrap_start)
+        write_line(self.teardown_sweep_line(), flush=True)
+        self.self_checks += 1
         self.write_keycloak_secrets()
         step_ca = [*edge_copy.copy_compose_prefix(copy), "--profile", STEP_CA_UNIT]
         self.guard.expect(step_ca, once=False)
@@ -205,7 +202,6 @@ class KeycloakCopy:
         password = settings.password_file.relative_to(self.home)
         write_secret(self.home, password, secrets.token_urlsafe(32), mode=0o600)
         edge_copy.run_hal(copy, self.environment, "backup", "--init", terminal=True)
-        return line
 
     def compose(
         self, *arguments: str, bootstrap: bool = False, timeout: int = SHORT_SECONDS
@@ -279,9 +275,9 @@ class KeycloakCopy:
         return set(listed.split())
 
     def expect_hidden_from_live_edge(self, moment: str) -> None:
-        """Every container of the copy's projects, in any state, carries no `edge.name` the live
+        """Every container of the copy's project, in any state, carries no `edge.name` the live
         constraint accepts, so the live Traefik never takes one as a server."""
-        containers = project_resources("container", self.projects)
+        containers = project_resources("container")
         if containers:
             inspected = run_checked(
                 ["docker", "container", "inspect", "--format", "{{json .Config.Labels}}",
@@ -293,15 +289,32 @@ class KeycloakCopy:
         self.inspected.append(f"{moment} ({len(containers)})")
 
     def tear_down(self) -> float:
-        """Removes everything of the copy's projects, the copy rechecked before its compose down;
+        """Removes everything of the copy's project, the copy rechecked before its compose down;
         the seconds it took. A copy whose files cannot be read or are not isolated any more is
-        removed by its project labels alone, and its error then stops the teardown."""
+        removed by its project label alone, and its error then stops the teardown."""
         started = time.monotonic()
-        projects = self.projects
-        if stray := project_resources("container", projects):
+        if stray := project_resources("container"):
             run_checked(["docker", "rm", "--force", *stray], os.environ, timeout=SHORT_SECONDS)
-        removed_whatever_fails(self.checked_down, lambda: self.sweep(projects))
+        removed_whatever_fails(self.checked_down, self.sweep)
         return time.monotonic() - started
+
+    def teardown_sweep_line(self) -> str:
+        """The teardown's path on a copy whose files are missing, with one volume carrying the
+        project's label and nothing started: the real label sweep removes the volume, and the
+        read's error still stops the teardown."""
+        volume = f"{PROJECT}_teardown-self-check"
+        label = f"{PROJECT_LABEL}={PROJECT}"
+        run_checked(["docker", "volume", "create", "--label", label, volume], os.environ)
+        missing = replace(self.stand, copy=self.stand.copy / "missing")
+        try:
+            removed_whatever_fails(lambda: expect_isolated(missing), self.sweep)
+        except FileNotFoundError as failure:
+            expect(not project_resources("volume"), f"self-check: the sweep left {volume}")
+            return (
+                f"self-check: a missing copy file at the teardown: the label sweep removed the "
+                f"volume {volume}, then {type(failure).__name__} stopped the teardown"
+            )
+        raise ProbeFailed("self-check: a missing copy file at the teardown raised nothing")
 
     def checked_down(self) -> None:
         if self.stand is not None:
@@ -309,22 +322,18 @@ class KeycloakCopy:
             self.compose("--profile", "*", "down", "--volumes", "--remove-orphans",
                          "--timeout", "10", timeout=COMPOSE_SECONDS)  # fmt: skip
 
-    def sweep(self, projects: frozenset[str]) -> None:
-        """Removes the networks and volumes labelled with one of `projects` and checks that nothing
-        of them is left and the live networks kept their ids."""
+    def sweep(self) -> None:
+        """Removes the networks and volumes labelled with the project and checks that nothing of it
+        is left and the live networks kept their ids."""
         for kind in ("network", "volume"):
-            if found := project_resources(kind, projects):
+            if found := project_resources(kind):
                 run_checked(["docker", kind, "rm", *found], os.environ, timeout=SHORT_SECONDS)
-        named = [
-            volume
-            for project in sorted(projects)
-            for volume in run_checked(
-                ["docker", "volume", "ls", "--quiet", "--filter", f"name={project}_"], os.environ
-            ).split()
-        ]
+        named = run_checked(
+            ["docker", "volume", "ls", "--quiet", "--filter", f"name={PROJECT}_"], os.environ
+        ).split()
         left = [
             *(found for kind in ("container", "network", "volume")
-              for found in project_resources(kind, projects)),
+              for found in project_resources(kind)),
             *named,
         ]  # fmt: skip
         expect(not left, f"the teardown left {left}")
@@ -349,9 +358,9 @@ class Probe(KeycloakCopy):
         self.cell_h5()
 
     def cell_h1(self) -> None:
-        line = self.prepare(Fleet(frozenset({REALM_UNIT, STEP_CA_UNIT})))
+        self.prepare(Fleet(frozenset({REALM_UNIT, STEP_CA_UNIT})))
         first = self.rewritten_digests()
-        install(self.stand, shipped_files(REPO), "probe: the shipped files installed again")
+        line = install(self.stand, shipped_files(REPO), "probe: the shipped files installed again")
         again = self.rewritten_digests()
         changed = sorted(name for name in REWRITES if first[name] != again[name])
         expect(not changed, f"H1: a reinstall changed {changed}")
