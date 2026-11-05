@@ -224,7 +224,7 @@ class ScriptedCompose:
     image_ids: dict[str, str | None] = field(default_factory=dict)
     hash_answer: str | None = None  # what `config --hash` answers instead of the hashes
     containers_created: int = 0
-    volumes: dict[str, str] = field(default_factory=dict)  # volume key -> what it holds
+    volumes: dict[str, str] = field(default_factory=dict)  # volume key -> what it holds; it exists
     failing_verb: str | None = None
     failure_line: str = "last line"  # the last line a failing verb writes
     # `up` creates a new container of these but cannot start it: it stays created, `up` exits 1
@@ -248,9 +248,8 @@ class ScriptedCompose:
     def run(
         self, command: list[str], _timeout: int, stdin: str | None = None
     ) -> subprocess.CompletedProcess[str]:
-        if command[:2] == ["docker", "image"]:
-            image_id = self.image_ids.get(command[-1].removeprefix("reference="), LABELLED_IMAGE_ID)
-            return subprocess.CompletedProcess(command, int(image_id is None), image_id or "", "")
+        if command[1] != "compose":
+            return self.docker(command)
         self.calls.append(command[PROJECT_PREFIX:])
         _, profile, verb, *arguments = command[PROJECT_PREFIX:]
         refused = NEVER_RUN & {verb, *arguments}
@@ -270,6 +269,16 @@ class ScriptedCompose:
             return subprocess.CompletedProcess(command, 1, output, "up broke\ncannot start")
         return subprocess.CompletedProcess(command, 0, output, "")
 
+    def docker(self, command: list[str]) -> subprocess.CompletedProcess[str]:
+        """Docker's own answers: the id of an image, and the volumes that exist."""
+        if command[1] == "image":
+            image_id = self.image_ids.get(command[-1].removeprefix("reference="), LABELLED_IMAGE_ID)
+            return subprocess.CompletedProcess(command, int(image_id is None), image_id or "", "")
+        assert command[1:3] == ["volume", "ls"], f"edge ran docker {' '.join(command[1:3])}"
+        declared = self.resolved()["volumes"]
+        names = "".join(f"{declared[key]['name']}\n" for key in self.volumes if key in declared)
+        return subprocess.CompletedProcess(command, 0, names, "")
+
     def members(self, command: list[str], group: str) -> subprocess.CompletedProcess[str]:
         if self.realm_members is None:
             failure = f"realm-observer: hallucinai has no group {group}\n"
@@ -277,9 +286,19 @@ class ScriptedCompose:
         answer = {"issuer": self.realm_issuer, "members": self.realm_members}
         return subprocess.CompletedProcess(command, 0, json.dumps(answer), "")
 
+    def resolved(self) -> dict:
+        """The configuration as Compose resolves it: every volume a service mounts is declared,
+        named `<project>_<key>` unless the file names it."""
+        mounted = {
+            key: {"name": f"{self.config['name']}_{key}"}
+            for service in self.config["services"].values()
+            for key in compose.named_volumes(service)
+        }
+        return {**self.config, "volumes": mounted | self.config.get("volumes", {})}
+
     def verb_config(self, _profile: str, arguments: list[str]) -> str:
         if arguments[0] != "--hash":
-            return json.dumps(self.config)
+            return json.dumps(self.resolved())
         if self.hash_answer is not None:
             return self.hash_answer
         return "".join(

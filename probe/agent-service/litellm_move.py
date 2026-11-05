@@ -5,29 +5,28 @@ paid: no provider key, no egress, no app.
     flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \\
         uv run --frozen python3 probe/agent-service/litellm_move.py --scratch DIR
 
-The copy, its secrets and its `hal apply` are litellm_unit.py's. Before any `hal apply` the copy's
-`backup/apps.toml` gets litellm_backup.py's change: the shipped `litellm` record with only
-`compose_project` replaced by the probe's project; the probe refuses to start unless it parses so,
-since the shipped record would point the pre-apply backup at the live `litellm-db`. The restic
-repository and its password are the scratch HOME's. The copy starts LiteLLM, and its database
+The copy, its secrets and its `hal apply` are litellm_unit.py's; `edge_copy` points every record
+of the copy's `backup/apps.toml` at the probe's project and refuses any other change, since the
+shipped record would point the pre-apply backup at the live `litellm-db`. The restic repository and
+its password are the scratch HOME's. The copy starts LiteLLM, and its database
 where a local image of the pinned major exists, on an image `docker image ls` shows locally with
 another digest than the pin; publishing the shipped pin is then the move. The fake provider is
 litellm.py's `fake_anthropic.py` at the address compose.yaml gives api.anthropic.com, on the
 internal `litellm-egress`, with a certificate of a scratch CA that the copy's LiteLLM trusts through
 SSL_CERT_FILE. C is every docker call, behind its caller's command line (litellm_unit.py's stand-in
 writes it): the order of the backup's dump, the restore test's server and the recreate, and the
-proof that no call of `hal backup` or `hal restore` names the live project. Exit 0: every cell held.
+proof that no call of `hal backup` or `hal restore` names the live project. M7 (#1006) switches
+LiteLLM off, re-pins it to its local image and switches it on over the kept volume: the database
+starts alone and the snapshot is taken and proven before the unit starts. Exit 0: every cell held.
 """
 
 from __future__ import annotations
 
 import dataclasses
 import json
-import os
 import re
 import secrets
 import sys
-import tomllib
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
@@ -62,12 +61,9 @@ from litellm_unit import (  # noqa: E402
     Probe,
     run,
 )
-from scratch_secrets import write_new, write_scratch_secrets  # noqa: E402
+from scratch_secrets import write_scratch_secrets  # noqa: E402
 
-from hal.backup.apps import parse_apps  # noqa: E402
-from hal.backup.cli import DEFAULT_APPS  # noqa: E402
 from hal.backup.docker import RESTORE_SERVER_PREFIX  # noqa: E402
-from hal.backup.settings import Settings  # noqa: E402
 from hal.output import write_line  # noqa: E402
 from hal.stack import catalog, litellm_keys  # noqa: E402
 
@@ -106,39 +102,12 @@ class MoveProbe(Probe):
         self.calls = scratch / "docker-calls"
         self.calls.touch()
         self.environment["DOCKER_CALLS"] = str(self.calls)
-        self.settings = Settings.for_home(self.home, os.getuid(), os.getgid())
-        (self.home / ".secrets").mkdir(mode=0o700)
-        self.settings.password_file.parent.mkdir(mode=0o700)
-        write_new(self.settings.password_file, secrets.token_urlsafe(32).encode(), 0o600)
         self.marker = secrets.token_hex(8)
         self.moves: list[Move] = []
         self.proven = ""  # the short ID of the snapshot the move's result row names
         self.live_name = edge_copy.compose_project_name((REPO / COMPOSE_FILE).read_text())
 
     # --- the copy -----------------------------------------------------------------------------
-
-    def point_backup_at_probe(self) -> None:
-        """The copy's `litellm` record with the probe's project; refuses to go on unless it parses
-        to the shipped records with only that one field changed and names no live project."""
-        apps_file = self.copy / DEFAULT_APPS.relative_to(REPO)
-        shipped_text = apps_file.read_text()
-        live = tomllib.loads(shipped_text)["app"][APP]["compose_project"]
-        section = re.compile(
-            rf'(^\[app\.{APP}\]\n(?:[^\[\n].*\n|\n)*?compose_project = )"[^"]*"', re.MULTILINE
-        )
-        text, count = section.subn(rf'\g<1>"{PROJECT}"', shipped_text)
-        expect(count == 1, f"the copy's apps.toml has no {APP} record with a compose_project")
-        apps_file.write_text(text)
-        declared = parse_apps(apps_file.read_text())
-        wanted = tuple(
-            dataclasses.replace(app, compose_project=PROJECT) if app.name == APP else app
-            for app in parse_apps(shipped_text)
-        )
-        expect(declared == wanted, "the copy's apps.toml differs beyond litellm's project")
-        named = next(app.compose_project for app in declared if app.name == APP)
-        expect(
-            named not in {live, self.live_name}, f"the copy's {APP} record names the live project"
-        )
 
     def edit_service(self, service: str, edit: Callable[[str], str]) -> None:
         """The copy's compose.yaml with `service`'s block replaced by `edit(block)`."""
@@ -320,7 +289,6 @@ class MoveProbe(Probe):
 
     def drive(self) -> None:
         _, with_entry = self.prepare()
-        self.point_backup_at_probe()
         self.trust_the_fake()
         self.start_on_local_images()
         (self.copy / catalog.FLEET_FILE).write_text(with_entry)
@@ -331,10 +299,10 @@ class MoveProbe(Probe):
         self.cell_m3(before)
         self.cell_m4()
         self.cell_m5()
+        self.cell_m7()
+        self.expect_no_live_call("M6")
 
     def cell_m0(self) -> None:
-        code, said, _ = self.hal("backup", "--init")
-        expect(code == HAL_OK, f"M0: hal backup --init exited {code}: {said[-200:]}")
         self.apply("M0", HAL_OK)
         self.wait_until_listening("M0")
         self.start_fake()
@@ -432,7 +400,48 @@ class MoveProbe(Probe):
             f"M5: {output[-300:]}",
         )
         self.hold("M5", "the next hal apply: nothing to change, no question, exit 0")
-        self.expect_no_live_call("M6")
+
+    def cell_m7(self) -> None:
+        """Switched off, re-pinned to its local image and switched on over the kept volume:
+        `up` of the database alone, the dump, the restore test's server, then `up` of the unit,
+        whose LiteLLM runs the new pin; exit 0, and the next apply has nothing to change."""
+        (litellm,) = (move for move in self.moves if move.service == LITELLM)
+        self.set_enabled(False)
+        self.apply("M7", HAL_OK)
+        expect(not self.running(), f"M7: running after the switch-off {self.running()}")
+        self.pin(litellm, litellm.local)
+        self.set_enabled(True)
+        since = len(self.call_lines())
+        output, _ = self.apply("M7", HAL_OK)
+        argvs = [argv for _, argv in self.call_lines(since)]
+        ups = [argv.partition(" up -d --no-recreate ")[2].split() for argv in argvs]
+
+        def first(what: str, matches: Callable[[int, str], bool]) -> int:
+            found = next((i for i, argv in enumerate(argvs) if matches(i, argv)), None)
+            expect(found is not None, f"M7: C holds no {what}: {output[-300:]}")
+            return found
+
+        alone = first("up of the database alone", lambda i, _: ups[i] == [DATABASE])
+        dump = first("dump", lambda _, argv: argv.startswith("exec ") and " pg_dump " in argv)
+        server = first("restore test", lambda _, argv: f"--name {RESTORE_SERVER_PREFIX}-" in argv)
+        unit = first("up of the unit", lambda i, _: LITELLM in ups[i])
+        expect(
+            alone < dump < server < unit,
+            f"M7: alone {alone}, dump {dump}, restore test {server}, unit {unit}",
+        )
+        running = self.container_of(LITELLM)["Image"]
+        expect(running == self.image_identity(litellm.local), f"M7: {LITELLM} runs {running}")
+        self.wait_until_listening("M7")
+        quiet, _ = self.apply("M7", HAL_OK)
+        expect(
+            edge_copy.NOTHING_TO_CHANGE in quiet and YES_PROMPT not in quiet, f"M7: {quiet[-300:]}"
+        )
+        self.hold(
+            "M7",
+            f"switched off and on over the kept volume on {digest_of(litellm.local)[:19]}: C "
+            f"`up {DATABASE}` alone at call {alone}, pg_dump at {dump}, the restore test's server "
+            f"at {server}, `up` of the unit at {unit}; exit 0, the next apply nothing to change",
+        )
 
     def expect_no_live_call(self, cell: str) -> None:
         """No call of hal backup or hal restore names the live project: by its Compose label or

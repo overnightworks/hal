@@ -5,7 +5,7 @@ from collections.abc import Callable, Collection, Iterable, Iterator, Mapping, S
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, Protocol
 
 from hal.stack import barrier, built_image, catalog, compose, core, switches
 
@@ -24,6 +24,7 @@ class UnitPlan:
     volumes: tuple[str, ...]
     switched_off_since: str | None = None
     running: bool = False
+    snapshot: DatabaseUnit | None = None  # a switch-on that takes this unit's snapshot first
 
 
 @dataclass(frozen=True)
@@ -65,12 +66,57 @@ def plan_switches(
             action = Action.OFF
         else:
             continue
-        volumes = sorted(
-            {v for name in services for v in compose.named_volumes(config["services"][name])}
-        )
+        volumes = unit_volumes(config, services)
         running = compose.has_running_container(states, services)
-        plans.append(UnitPlan(unit, action, services, tuple(volumes), since, running))
+        plans.append(UnitPlan(unit, action, services, volumes, since, running))
     return plans
+
+
+def unit_volumes(config: Mapping[str, Any], services: Sequence[str]) -> tuple[str, ...]:
+    """The compose volume keys the unit's services mount, sorted."""
+    return tuple(
+        sorted({v for name in services for v in compose.named_volumes(config["services"][name])})
+    )
+
+
+def plan_switch_on_snapshots(
+    plans: Sequence[UnitPlan],
+    fleet: Fleet,
+    states: Mapping[str, set[str]],
+    engine: compose.Compose,
+    database_units: Collection[DatabaseUnit],
+) -> list[UnitPlan]:
+    """The plans, each switch-on that starts a database unit over its data with the unit's
+    snapshot first (`snapshot_before_start`)."""
+    return [
+        dataclasses.replace(
+            plan,
+            snapshot=snapshot_before_start(fleet, plan.unit.key, states, engine, database_units),
+        )
+        if plan.action is Action.ON
+        else plan
+        for plan in plans
+    ]
+
+
+def snapshot_before_start(
+    fleet: Fleet,
+    key: str,
+    states: Mapping[str, set[str]],
+    engine: compose.Compose,
+    database_units: Collection[DatabaseUnit],
+) -> DatabaseUnit | None:
+    """The database unit `key` when its start would create its app or database service, which
+    has no container, while a volume of the unit (for Keycloak and LiteLLM their database's)
+    exists: the image that last read that data is unknown then, so the unit's pre-apply snapshot
+    comes before the app starts. A unit with all its containers, or with no volume yet, has
+    nothing to protect from a new image."""
+    unit = next((unit for unit in database_units if unit.key == key), None)
+    if unit is None or {unit.service, unit.database} <= states.keys():
+        return None
+    volumes = unit_volumes(fleet.config, fleet.profile_services[key])
+    names = (compose.volume_name(fleet.config, volume) for volume in volumes)
+    return unit if any(map(engine.volume_exists, names)) else None
 
 
 DIGEST_SEPARATOR = "@"
@@ -434,27 +480,64 @@ class NotWritten:
         return f"could not write {self.path} ({self.reason})"
 
 
+type Begin = Callable[[], None]  # told under the switch lock, right before the start
+
+
+class SnapshotFirst(Protocol):
+    """Takes and proves `unit`'s pre-apply snapshot, then runs `start` with what it is told
+    when the start over the data begins; what `start` returns."""
+
+    def __call__(self, unit: DatabaseUnit, start: Callable[[Begin], str | None]) -> str | None: ...
+
+
 def switch(
     engine: compose.Compose,
     plan: UnitPlan,
     progress: Progress,
     marks: switches.Switches,
     read: Mapping[str, switches.Mark | None],
+    snapshot_first: SnapshotFirst,
 ) -> str | None:
-    """Switch one unit; the time of a switch that appeared meanwhile when the unit stays down."""
+    """Switch one unit; the time of a switch that appeared meanwhile when the unit stays down. A
+    switch-on with a snapshot starts the unit's database alone for it, then the rest."""
     progress.unit = plan.unit.key
     if plan.action is Action.ON:
-        progress.step = "start"
-        with marks.lock():
-            if changed := marks.changed(plan.unit.key, read[plan.unit.key]):
-                return since_of(changed)
-            engine.start(plan.unit.key, plan.services)
-        return None
+        starter = _Starter(engine, plan, progress, marks, read[plan.unit.key])
+        if plan.snapshot is None:
+            return starter.start(plan.services, "start")
+        database = plan.snapshot.database
+        if since := starter.start((database,), f"start {database} alone"):
+            return since
+        return snapshot_first(
+            plan.snapshot, lambda begin: starter.start(plan.services, "start", begin)
+        )
     progress.step = "stop"
     engine.stop(plan.unit.key, plan.services)
     progress.step = "remove the containers"
     engine.remove_containers(plan.unit.key, plan.services)
     return None
+
+
+@dataclass(frozen=True)
+class _Starter:
+    engine: compose.Compose
+    plan: UnitPlan
+    progress: Progress
+    marks: switches.Switches
+    read: switches.Mark | None
+
+    def start(
+        self, services: tuple[str, ...], step: str, begin: Begin = lambda: None
+    ) -> str | None:
+        """Start `services` of the unit under the switch lock; the time of a switch that
+        appeared since the plan read its mark, and nothing started then."""
+        self.progress.step = step
+        with self.marks.lock():
+            if changed := self.marks.changed(self.plan.unit.key, self.read):
+                return since_of(changed)
+            begin()
+            self.engine.start(self.plan.unit.key, services)
+        return None
 
 
 def since_of(changed: switches.Changed) -> str:

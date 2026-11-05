@@ -22,14 +22,18 @@ from support.hal_stack_commands import (
     ctrl_c,
 )
 from support.stack_apply import (
+    ENABLED,
+    LITELLM_ON,
     SWITCHED_OFF_AT,
     at_terminal,  # noqa: F401 the fixture, requested by name below
     ingress,  # noqa: F401 the fixture, requested by name below
+    marker,
     scripted,  # noqa: F401 the fixture, requested by name below
     scripted_git,  # noqa: F401 the fixture, requested by name below
     setup_check,  # noqa: F401 the fixture, requested by name below
     setup_run,  # noqa: F401 the fixture, requested by name below
     state,  # noqa: F401 the fixture, requested by name below
+    switch_off,
     write_fleet,
 )
 from support.stack_apply_publish import (
@@ -54,6 +58,7 @@ from hal import cli, stack_commands
 from hal.grammar import ExitCode
 from hal.stack import apply, checkout, emergency, switches, tunnel
 from hal.stack import cli as stack
+from hal.stack.litellm_keys import LITELLM
 from hal.stack.update import UpdateEnd
 
 (
@@ -458,6 +463,58 @@ def test_start_whose_compose_up_fails_is_partial_and_keeps_the_switch(hal, fakes
     assert f"partial, could not start {UNIT}" in result.err
     assert "its switch stays" in result.err
     assert fakes.marker() == SWITCHED_OFF_AT
+
+
+@pytest.fixture
+def litellm_off(fakes):
+    """LiteLLM enabled and switched off: its database mounts its volume, its app and database
+    stopped; a case removes what it needs gone."""
+    services = fakes.scripted.config["services"]
+    mount = {"type": "volume", "source": LITELLM.database, "target": "/data"}
+    services[LITELLM.database] = {"profiles": [LITELLM.key], "volumes": [mount]}
+    services[LITELLM.service] = {"profiles": [LITELLM.key]}
+    write_fleet(fakes.repository, ENABLED + LITELLM_ON)
+    fakes.scripted.put_containers(dict.fromkeys((LITELLM.database, LITELLM.service), "exited"))
+    switch_off(fakes.state, unit=LITELLM.key)
+    return fakes
+
+
+@pytest.mark.parametrize("gone", [LITELLM.service, LITELLM.database])
+def test_start_over_a_database_volume_creates_nothing_ends_the_switch_and_names_apply(
+    hal, litellm_off, gone
+):
+    """S6: exit 0, since what the prompt said was done; `hal apply` takes the snapshot first."""
+    litellm_off.scripted.verb_rm("", ["-f", gone])
+    litellm_off.scripted.volumes[LITELLM.database] = "LiteLLM's keys"
+
+    result = hal("start", LITELLM.key, answers=("yes",))
+
+    assert result.exit_code == ExitCode.OK
+    assert "litellm: start nothing over LiteLLM's data" in result.out
+    assert "`hal apply` starts it after a snapshot" in result.out
+    assert litellm_off.scripted.changing_verbs() == []
+    assert marker(litellm_off.state, LITELLM.key) is None
+
+
+@pytest.mark.parametrize(
+    ("gone", "volume"),
+    [((), True), ((LITELLM.service, LITELLM.database), False)],
+    ids=["S7 its containers exist", "S7 no volume yet"],
+)
+def test_start_with_its_containers_or_without_a_volume_starts_the_unit(
+    hal, litellm_off, gone, volume
+):
+    if gone:
+        litellm_off.scripted.verb_rm("", ["-f", *gone])
+    if volume:
+        litellm_off.scripted.volumes[LITELLM.database] = "LiteLLM's keys"
+
+    result = hal("start", LITELLM.key, answers=("yes",))
+
+    assert result.exit_code == ExitCode.OK
+    assert "litellm is on" in result.out
+    assert litellm_off.scripted.changing_verbs() == ["up"]
+    assert marker(litellm_off.state, LITELLM.key) is None
 
 
 def test_start_without_a_terminal_is_refused_with_3_and_touches_nothing(

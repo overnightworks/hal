@@ -20,6 +20,7 @@ the directory itself, a parent or a path a symlink names. A failed removal exits
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import ipaddress
 import json
 import os
@@ -35,6 +36,8 @@ from typing import Any
 
 import yaml
 
+from hal.backup.apps import parse_apps
+from hal.backup.cli import DEFAULT_APPS
 from hal.backup.docker import PROJECT_LABEL
 from hal.grammar import ExitCode
 from hal.output import write_line
@@ -62,6 +65,7 @@ LIVE_NETWORK_PREFIX = "hal_"
 FIXED_NAME_SECTIONS = ("networks", "volumes")
 NAME_LINE = re.compile(r"^(\s+name:\s+)(\S+)\s*$", re.MULTILINE)
 GUARDED_COMPOSE_VERBS = {"up", "run", "down"}  # what creates or removes networks
+BACKUP_PROJECT_LINE = re.compile(r'^(compose_project = )"[^"]*"$', re.MULTILINE)
 # The networks of compose.yaml that pin a /24: so agent-egress has one address on each of its two,
 # and so LiteLLM has one on litellm-backend. A probe moves each to a free /24 of its own, so it
 # never collides with the live stack's.
@@ -419,6 +423,21 @@ def compose_project_name(text: str) -> str:
     return yaml.safe_load(text)["name"]
 
 
+def backup_records_at_project(text: str, project: str, live: str) -> str:
+    """`text` of backup/apps.toml with every record's `compose_project` moved to `project`, so a
+    backup or restore test run from the copy (a pre-apply snapshot included) dumps the probe's
+    database, never a live one. Refuses unless the result parses to the shipped records with only
+    that field changed, and a `project` that is the live one or a record's own."""
+    shipped = parse_apps(text)
+    owners = {live, *(app.compose_project for app in shipped)}
+    expect(project not in owners, f"the probe project {project} is a live backup project")
+    moved, count = BACKUP_PROJECT_LINE.subn(rf'\g<1>"{project}"', text)
+    expect(count == len(shipped), "apps.toml has a record whose compose_project the probe misses")
+    wanted = tuple(dataclasses.replace(app, compose_project=project) for app in shipped)
+    expect(parse_apps(moved) == wanted, "the copy's apps.toml differs beyond compose_project")
+    return moved
+
+
 def resolved_volumes(text: str, project: str) -> set[str]:
     """Every volume name compose.yaml `text` resolves under `project`: the fixed `name:` of a
     volume, else `<project>_<key>`."""
@@ -470,8 +489,9 @@ def repository_copy(repository: Path, home: Path, scratch: Path, project: str) -
     first `hal apply --local` and its own venv from `uv sync`. The copy's compose.yaml is never the
     original: it is written with every fixed network and volume name moved to `<project>_...`
     (write_namespaced_compose), so neither the copy's `hal apply` nor a teardown after a cut setup
-    reaches a live one. Its fleet.yaml has no app entry (without_inherited_apps): a probe adds its
-    own fixture apps. Copying again over an existing copy publishes what differs."""
+    reaches a live one. Its backup/apps.toml names the probe's project in every record
+    (backup_records_at_project). Its fleet.yaml has no app entry (without_inherited_apps): a probe
+    adds its own fixture apps. Copying again over an existing copy publishes what differs."""
     copy = checkout.live_checkout(home)
     listing = run_command(
         ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
@@ -484,6 +504,10 @@ def repository_copy(repository: Path, home: Path, scratch: Path, project: str) -
     fleet_file = copy / catalog.FLEET_FILE
     fleet_file.write_text(without_inherited_apps(fleet_file.read_text()))
     write_namespaced_compose(repository, copy, project)
+    apps_file = copy / DEFAULT_APPS.relative_to(compose.REPOSITORY)
+    if apps_file.is_file():  # a fixture repository may have no backup record
+        live = compose_project_name((repository / deploy_checkout.COMPOSE_FILE).read_text())
+        apps_file.write_text(backup_records_at_project(apps_file.read_text(), project, live))
     if not (copy / ".git").is_dir():
         remote = scratch / REMOTE
         git(scratch, "init", "--quiet", "--bare", "--initial-branch", checkout.MAIN, str(remote))

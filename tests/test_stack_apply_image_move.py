@@ -2,6 +2,7 @@
 compose.yaml pins under the plan's one `yes`, after the unit's proven pre-apply snapshot (#995),
 on the scripted boundaries of `tests/support/stack_apply.py`."""
 
+import sys
 from functools import partial
 
 import pytest
@@ -455,3 +456,183 @@ def test_a_unit_switched_off_after_its_snapshot_names_the_snapshot_and_no_restor
     assert "keycloak was switched off meanwhile" in err
     assert "pre-apply snapshot ab12cd34" in err
     assert "hal restore" not in err
+
+
+# --- a switch-on over the data of a removed unit (#1006) ---------------------------------------
+
+LITELLM_SERVICES = (LITELLM.database, LITELLM.service, "litellm-front")
+ALONE = ("up", (LITELLM.database,))
+LITELLM_UP = ("up", LITELLM_SERVICES)
+LITELLM_SNAPSHOT = [(step, (LITELLM.key,)) for step in SNAPSHOT_STEPS]
+
+
+def removed(scripted, *services: str) -> None:  # noqa: F811
+    scripted.verb_rm("", ["-f", *services])
+
+
+def switch_on_steps(scripted) -> list[tuple[str, tuple[str, ...]]]:  # noqa: F811
+    """The snapshot steps and the `up` calls in the order they ran, each with all it names."""
+    return [
+        (call[2], tuple(argument for argument in call[3:] if not argument.startswith("-")))
+        for call in scripted.calls
+        if call[2] in {"up", *SNAPSHOT_STEPS}
+    ]
+
+
+@pytest.fixture
+def litellm_data(database_units, scripted):  # noqa: F811
+    """LiteLLM's database volume holds its data."""
+    scripted.volumes[LITELLM.database] = "LiteLLM's keys"
+
+
+@pytest.mark.parametrize(
+    "gone",
+    [
+        pytest.param(LITELLM_SERVICES, id="S1 every container removed, the app re-pinned"),
+        pytest.param((LITELLM.service, "litellm-front"), id="S2 the database live"),
+    ],
+)
+@pytest.mark.usefixtures("litellm_data")
+def test_a_switch_on_over_data_starts_the_database_alone_and_the_app_after_the_proven_snapshot(
+    gone,
+    plain_apply,
+    scripted,  # noqa: F811
+):
+    removed(scripted, *gone)
+    scripted.change_image(LITELLM.service, LITELLM_BUMP)
+    database = scripted.container_ids.get(LITELLM.database)
+
+    exit_code, _, _ = plain_apply()
+
+    assert exit_code == ExitCode.OK
+    assert switch_on_steps(scripted) == [ALONE, *LITELLM_SNAPSHOT, LITELLM_UP]
+    assert scripted.images[LITELLM.service] == LITELLM_BUMP
+    if database is not None:
+        assert scripted.container_ids[LITELLM.database] == database
+    scripted.calls.clear()
+
+    exit_code, _, _ = plain_apply()
+
+    assert exit_code == ExitCode.OK
+    assert "nothing to change" in plain(sys.stdout.getvalue())
+    assert switch_on_steps(scripted) == []
+
+
+@pytest.mark.parametrize(
+    ("failing", "names_the_snapshot"),
+    [("backup", False), ("restore test", True)],
+    ids=["S3 the backup fails", "S3 the restore test fails"],
+)
+@pytest.mark.usefixtures("litellm_data")
+def test_a_failed_switch_on_snapshot_creates_no_app_and_names_no_restore(
+    failing,
+    names_the_snapshot,
+    plain_apply,
+    scripted,  # noqa: F811
+    realm_backup,
+):
+    """The database started alone is not counted as created over the data: the snapshot is taken
+    from it, so loading it would undo nothing of that start."""
+    removed(scripted, *LITELLM_SERVICES)
+    realm_backup.failing = failing
+
+    exit_code, err, published = plain_apply()
+
+    assert exit_code == ExitCode.FAILURE
+    assert f"{failing} broke" in err
+    assert "litellm is not started" in err
+    assert ("pre-apply snapshot ab12cd34" in err) == names_the_snapshot
+    assert "hal restore" not in err
+    assert switch_on_steps(scripted)[-1] != LITELLM_UP
+    assert LITELLM.service not in scripted.containers
+    assert published == []
+
+
+@pytest.mark.usefixtures("database_units")
+def test_a_fresh_switch_on_with_no_volume_takes_no_snapshot(
+    plain_apply,
+    scripted,  # noqa: F811
+    realm_backup,
+):
+    """S4."""
+    removed(scripted, *LITELLM_SERVICES)
+
+    exit_code, _, _ = plain_apply()
+
+    assert exit_code == ExitCode.OK
+    assert switch_on_steps(scripted) == [LITELLM_UP]
+    assert realm_backup.asked == []
+
+
+def _ctrl_c_before_the_apps_start(state, monkeypatch) -> None:  # noqa: F811
+    _ctrl_c_at_the_lock(state, monkeypatch)
+
+
+def _switched_off_before_the_apps_start(state, monkeypatch) -> None:  # noqa: F811
+    switch_off(state, unit=LITELLM.key)
+
+
+def _ctrl_c_in_the_apps_start(scripted) -> None:  # noqa: F811
+    def interrupted() -> None:
+        if len(switch_on_steps(scripted)) > len(SNAPSHOT_STEPS) + 1:
+            raise KeyboardInterrupt
+
+    scripted.after_up = interrupted
+
+
+def _app_does_not_run(scripted) -> None:  # noqa: F811
+    scripted.crash_loops = {LITELLM.service}
+
+
+@pytest.mark.parametrize(
+    ("after_the_proof", "in_the_start", "line", "restores"),
+    [
+        pytest.param(
+            _ctrl_c_before_the_apps_start, None, "interrupted while changing litellm", False,
+            id="S5 Ctrl-C before the app is created",
+        ),
+        pytest.param(
+            _switched_off_before_the_apps_start, None, "litellm was switched off meanwhile", False,
+            id="switched off before the app is created",
+        ),
+        pytest.param(
+            None, _ctrl_c_in_the_apps_start, "interrupted while changing litellm", True,
+            id="Ctrl-C while the app is created",
+        ),
+        pytest.param(
+            None, _app_does_not_run, "litellm is not on after the change", True,
+            id="the app does not run",
+        ),
+    ],
+)  # fmt: skip
+@pytest.mark.usefixtures("litellm_data")
+def test_a_switch_on_stopped_after_its_snapshot_names_it_and_the_restore_once_the_app_began(
+    after_the_proof,
+    in_the_start,
+    line,
+    restores,
+    plain_apply,
+    scripted,  # noqa: F811
+    realm_backup,
+    state,  # noqa: F811
+    monkeypatch,
+):
+    removed(scripted, *LITELLM_SERVICES)
+    if after_the_proof:
+        proven = realm_backup.restore_test
+
+        def disturbed(unit, snapshot) -> None:
+            proven(unit, snapshot)
+            after_the_proof(state, monkeypatch)
+
+        monkeypatch.setattr(realm_backup, "restore_test", disturbed)
+    if in_the_start:
+        in_the_start(scripted)
+
+    exit_code, err, _ = plain_apply()
+
+    assert exit_code == ExitCode.FAILURE
+    assert line in err
+    assert "pre-apply snapshot ab12cd34" in err
+    assert ("hal restore litellm --live --snapshot ab12cd34" in err) == restores
+    assert (LITELLM.service in scripted.containers) == restores

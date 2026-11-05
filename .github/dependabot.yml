@@ -22,9 +22,6 @@ updates:
     ignore:
       # A local tag built on the PC, never on a registry.
       - dependency-name: edge-agent-service
-      # LiteLLM migrates its database at start and hal apply takes no backup before an image
-      # move, so a LiteLLM bump is a pull request opened by hand.
-      - dependency-name: "*berriai/litellm"
       # A major or minor move of an image (postgres 17 to 18) is a data migration, its own item.
       - dependency-name: "*"
         update-types:

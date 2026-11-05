@@ -260,6 +260,15 @@ Reihenfolge, und wie der Eintrag in `applied.json` gefuehrt wird:
   wird nicht angefasst, und `hal start` behaelt den alten Container. Ein nicht angepinntes,
   neu gebautes Tag von Keycloak oder LiteLLM wird nur genannt, nicht getauscht; heute ist jedes ihrer
   Images per Digest angepinnt.
+- Keycloak und LiteLLM beim Anschalten: fehlt dem Dienst oder seiner Datenbank der Container und
+  besteht das Volume der Datenbank, ist unbekannt, welches Image die Daten zuletzt las. Nach dem Ja
+  startet `hal apply` dann zuerst die Datenbank allein, nimmt und beweist den Snapshot wie oben und
+  startet erst danach den Rest. Scheitert Backup oder Test, wird der Dienst nicht erzeugt, der Lauf
+  endet partial (Exit 3), und die Zeile nennt keinen `hal restore`: die allein gestartete Datenbank
+  ist die, aus der der Snapshot kommt. Wird die Einheit danach ausgeschaltet oder bricht Ctrl-C vor
+  dem Start des Dienstes ab, nennt die Zeile nur den Snapshot; ab dem Start des Dienstes auch
+  `hal restore <einheit> --live`. Ohne Volume, und wenn jeder Container besteht, gibt es keinen
+  Snapshot.
 
 **Setup.** Eine Einheit mit `setup` wird erst angeschaltet, wenn `<setup> --check` Exit 0 gibt. Der
 Vertrag von `<setup> --check`: fragt nichts, druckt kein Geheimnis, legt nichts an, braucht keinen
@@ -305,7 +314,10 @@ duerfen es aufrufen (R4, D12). `hal start <Einheit>` hebt den Schalter auf: nur 
 nach dem exakten `yes` (der Betreiber; bis D14 eine Regel, keine Wand), loescht den Schalter erst, wenn
 die Einheit laeuft, und verweigert eine im Katalog abgeschaltete. Hat die Einheit ein `run.setup`,
 fragt es dessen `--check` vor der Rueckfrage; nicht eingerichtet: Exit 3, Schalter und
-Sperre bleiben.
+Sperre bleiben. Wuerde der Start einen Dienst oder die Datenbank von Keycloak oder LiteLLM ohne
+Container ueber ein bestehendes Datenbank-Volume erzeugen, erzeugt `hal start` nichts: nach dem
+`yes` hebt es nur Schalter und Sperre auf, nennt `hal apply`, das zuerst den Snapshot nimmt
+("Images"), und endet mit Exit 0; bis dahin antwortet der Host der Einheit 502.
 
 **Der Schalter** ist eine Datei pro Einheit, `~/.local/state/edge/stopped/<Einheit>`, mit der Zeit des
 Ausschaltens (ISO 8601). `hal apply --local` startet eine ausgeschaltete Einheit nie und loescht
