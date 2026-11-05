@@ -268,8 +268,7 @@ holds the result, which the legal unit serves. The pages take their tokens and f
 with no sections. A page's blocks stand as the general part (`allgemein`, edge's own), then the services
 (`agent-service` under `#agent-dienst`, `keycloak` under `#anmeldung`), then the apps (their catalog key
 is the anchor), each group sorted by anchor. A section directory with no catalog entry builds no block. Edge's
-services and songmaker's text, which edge holds until songmaker ships its own, are built while their entry is in
-the catalog, enabled or not. An app (an entry with `repo`) brings its own text: `legal/datenschutz.html` and,
+services are built while their entry is in the catalog, enabled or not. An app (an entry with `repo`) brings its own text: `legal/datenschutz.html` and,
 optionally, `legal/nutzungsbedingungen.html` of a release, read from `~/srv/<key>/.git` at the release's commit, never
 from the working tree. That release is the planned one of an enabled app, the one a settled app runs, or the one a
 stopped (`hal stop`) or disabled app last deployed, from its record; a stopped or disabled app never deployed has none (an enabled one gets its block at its planned tag), and a
@@ -278,8 +277,15 @@ still validated. A symlink at either path refuses the run. An app's key that als
 `legal/sections/<key>/` refuses the run, naming both, since one block has one owner; so does a stopped or disabled app
 whose checkout or recorded commit is gone, or whose `.git` is a symlink or no repository, naming the path.
 
+A **host-only app** (an entry with neither `repo` nor `run`: songmaker, which its own watcher deploys) brings the same
+two files, read through the same reader from its checkout `~/srv/<key>` at `git rev-parse HEAD`, taken at plan time. The
+plan names the block with the short sha where a tagged app names its tag, and a missing checkout or an invalid `.git`
+refuses before the question, naming the path. A text that reaches that checkout's HEAD goes live only at the next `hal apply`
+whose plan names it. songmaker#1880's D3 (a tag that fails `compose up --wait` stays checked out) means HEAD can be a
+release that does not run, and its text is published all the same.
+
 What `hal apply` does: it validates every section, builds the pages and compares them with `legal/built/`. The
-plan prints one row per kind, without a heading, above `core`: `+ legal  2 new pages`, `~ legal  1 edited page` and `~ legal  3 new records` (a page that matches while its record is missing, unreadable or stale), each with the page names. Under an edited page, from a record of what the last write was made of, each block stands as a dim line, new, changed or left (`legal/sections/songmaker/datenschutz.html#songmaker changed`; an app's block with the tag it is read at, `~/srv/hopin/legal/datenschutz.html#hopin changed at v2026.11.04.1`, and a new tag with the same bytes changes no block; a new page lists the app blocks it first publishes, each with its tag), and a changed page frame (its skeleton or a table-of-contents template) as its own line; a missing or stale record makes every block new. It prints no legal row when nothing changes. The record is `legal-built.json` in the apply state beside `applied.json` (not beside `legal/built/`, which nginx serves), written after the pages; a page whose bytes already match is still planned (and the record written) while its entry is missing, unreadable or stale. After
+plan prints one row per kind, without a heading, above `core`: `+ legal  2 new pages`, `~ legal  1 edited page` and `~ legal  3 new records` (a page that matches while its record is missing, unreadable or stale), each with the page names. Under an edited page, from a record of what the last write was made of, each block stands as a dim line, new, changed or left (`legal/sections/agent-service/datenschutz.html#agent-dienst changed`; an app's block with the tag it is read at, `~/srv/hopin/legal/datenschutz.html#hopin changed at v2026.11.04.1`, and a host-only app's with its short sha, `~/srv/songmaker/legal/datenschutz.html#songmaker changed at d66c72a6`; a new tag with the same bytes changes no block; a new page lists the app blocks it first publishes, each with its tag), and a changed page frame (its skeleton or a table-of-contents template) as its own line; a missing or stale record makes every block new. It prints no legal row when nothing changes. The record is `legal-built.json` in the apply state beside `applied.json` (not beside `legal/built/`, which nginx serves), written after the pages; a page whose bytes already match is still planned (and the record written) while its entry is missing, unreadable or stale. After
 `yes`, before any unit switches, the core phase or an app, it writes each changed page (a temporary file, mode 0644, renamed over the page), so a new tag that then fails leaves the app's new text live while its old version runs,
 and prints `✓ legal  pages written` naming the pages whose bytes were written, `✓ legal  record written` for pages
 that gained only their record. Without an enabled `legal` unit there is no step and no line. A refusal comes before
@@ -338,7 +344,7 @@ edge never rewrites a text to drop the link.
 **Stand** is the newest commit date of the page's section files (`git log -1 --format=%cs`), an app's file dated at the release it is read at; a commit that
 changes only the frame does not move it. The imprint has none.
 
-**Refusal line**, never quoting the text: `error: cannot plan, legal: legal/sections/songmaker/datenschutz.html: line 14: <img> is not allowed (allowed: h2 h3 section p ul ol li strong em code br a)`.
+**Refusal line**, never quoting the text: `error: cannot plan, legal: ~/srv/songmaker/legal/datenschutz.html: line 14: <img> is not allowed (allowed: h2 h3 section p ul ol li strong em code br a)`.
 A change that would refuse a file valid under v1 is asked of every producing repository first; one that only
 accepts more is announced.
 
