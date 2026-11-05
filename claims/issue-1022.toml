@@ -1,7 +1,0 @@
-claim_id = "489b23f060544353b16cc3ef620f15aa"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "1e001eacfa55c004154f0b1d5add65db893b5324"
-branch = "claude/issue-1022-songmaker-secret-entries"
-scope = ["docs/architecture.md", "src/hal/workstation/secrets_manifest.toml", "tests/test_workstation_app_secrets.py"]
-opened_commit = "716cb172b0054a9c10ece9bdd1b01c3ff51b37e1"
