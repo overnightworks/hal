@@ -38,6 +38,7 @@ from litellm import (
     FAKE_PROVIDER,
     LISTENING,
     LITELLM,
+    MODELS_ROUTE,
     OPERATOR_BUDGET,
     PARALLEL,
     PERSON_BUDGET,
@@ -489,18 +490,16 @@ class AdmissionProbe(PictureCalls):
         self.wait_for("K5", "the key's spend past its budget",
                       lambda: self.key_info(key)["spend"] > APP_BUDGET)  # fmt: skip
         spend = self.key_info(key)["spend"]
-        listed = self.listed(key)
-        expect(
-            listed == sorted(self.key_info(key)["models"]),
-            f"K5: the key over budget lists {listed}",
-        )
+        listed = self.call(key, "GET", MODELS_ROUTE)
+        listed_as = f"{listed['status']} {error_of(listed)}"
+        expect(listed_as == "422 budget_exceeded/422", f"K5: the list past the budget: {listed_as}")
         refusal = self.expect_refused("K5", key, self.fingerprint())
         query = self.expect_query_refused("K5", key, self.fingerprint())
         after = self.key_info(key)["spend"]
         expect(after == spend, f"K5: the spend {spend} before the list, {after} after")
         self.hold("K5", f"past max_budget the next request is refused before the provider: "
-                  f"{refusal}, F 0, and {query}; the key still lists its {len(listed)} models "
-                  f"through the front, its spend {spend} before and after")  # fmt: skip
+                  f"{refusal}, F 0, and {query}; its list through the front: {listed_as}, its "
+                  f"spend {spend} before and after")  # fmt: skip
         return key
 
     def cells_k7_p5(self, over: str, key: str, person: str) -> None:

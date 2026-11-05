@@ -252,13 +252,21 @@ def test_the_fronts_http_block_global_and_log_are_those_of_the_public_traefik(fr
     assert set(front_static["providers"]) == {"file"}
 
 
-def test_each_router_of_the_front_posts_one_exact_path_to_litellm_and_nothing_else_is_declared():
+def test_each_router_of_the_front_passes_its_one_method_on_one_exact_path_and_nothing_else():
     dynamic = load(ROUTE_FILE)
     port = START_LISTENER.search(START_SCRIPT).group("port")
+    # The calls write and the list reads: a POST list or a GET call is refused in the front.
+    methods = {
+        litellm_keys.COMPLETION_ROUTE: "POST",
+        litellm_keys.PICTURE_ROUTE: "POST",
+        litellm_keys.MODELS_ROUTE: "GET",
+    }
 
     assert set(dynamic) == {"http"}
     for router in dynamic["http"]["routers"].values():
-        assert re.fullmatch(r"Method\(`POST`\) && Path\(`[^`]+`\)", router["rule"])
+        rule = re.fullmatch(r"Method\(`(?P<method>[A-Z]+)`\) && Path\(`(?P<path>[^`]+)`\)",
+                            router["rule"])  # fmt: skip
+        assert rule and methods[rule["path"]] == rule["method"]
         assert router["entryPoints"] == ["api"]
         (server,) = dynamic["http"]["services"][router["service"]]["loadBalancer"]["servers"]
         assert server["url"] == f"http://{LITELLM}:{port}"
