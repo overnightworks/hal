@@ -114,7 +114,7 @@ print(json.dumps({"bytes": len(received), **record}))
 """
 SERVICE_NETWORKS = {
     "X2a": "agent-songmaker", "X2b": "agent-presentator", "X2c": "agent-hopin",
-    "X2d": "egress", "X2e": "mcp", "X2f": "litellm-api",
+    "X2d": "egress", "X2e": "mcp",
 }  # fmt: skip
 
 
@@ -367,9 +367,6 @@ class NetworkProbe(LitellmProbe):
         expect(found == [f"0.0.0.0:{SERVICE_PORT}"], f"X2L: the service listens on {found}")
         self.hold("X2L", f"the service has exactly one TCP listener, {found[0]}")
         for step in (
-            Reach(
-                "X2g", front, "service litellm-api", service_addresses["X2f"], SERVICE_PORT, True
-            ),
             Reach("X3a", litellm, "agent-egress entrypoint 1", first, GATEWAY_PORT, False),
             Reach("X3b", SERVICE, "agent-egress entrypoint 1", first, GATEWAY_PORT, True),
             Reach("X4a", litellm, "stand-in issuer", issuer, ISSUER_PORT, False),

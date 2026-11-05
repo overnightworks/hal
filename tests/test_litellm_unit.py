@@ -27,7 +27,7 @@ LITELLM_DIRECTORY = ROOT / "agent-service" / "litellm"
 LITELLM, FRONT, SERVICE, GATEWAY = "litellm", "litellm-front", "agent-service", "agent-egress"
 DATABASE = "litellm-db"
 KEYS = litellm_keys.KEYS_SERVICE
-NEW_NETWORKS = ("litellm-api", "litellm-backend", "litellm-egress", "litellm-db")
+NEW_NETWORKS = ("litellm-backend", "litellm-egress", "litellm-db")
 ISOLATED_MODE = {"com.docker.network.bridge.gateway_mode_ipv4": "isolated"}
 DIGEST_PINNED = re.compile(r"^[^@\s]+:[^@\s]+@sha256:[0-9a-f]{64}$")
 KEY_SECRETS = ("litellm_anthropic_key", "litellm_openai_key")
@@ -62,7 +62,17 @@ def front_static() -> dict:
     return load(LITELLM_DIRECTORY / "front" / "traefik.yml")
 
 
-def test_the_four_new_networks_are_internal_and_isolated(
+def test_every_declared_network_has_a_member(compose):
+    joined = {
+        network
+        for service in compose["services"].values()
+        for network in service.get("networks", [])
+    }
+
+    assert set(compose["networks"]) == joined
+
+
+def test_the_networks_of_the_route_are_internal_and_isolated(
     compose,
 ):
     for name in NEW_NETWORKS:
@@ -97,17 +107,17 @@ def test_each_member_joins_exactly_the_networks_the_boundary_declares(compose):
     services = compose["services"]
 
     assert app_networks(compose)
-    assert set(services[FRONT]["networks"]) == {"litellm-api", "litellm-backend"} | app_networks(
-        compose
-    )
+    assert set(services[FRONT]["networks"]) == {"litellm-backend"} | app_networks(compose)
     assert set(services[LITELLM]["networks"]) == {"litellm-backend", "litellm-egress", "litellm-db"}
     assert services[DATABASE]["networks"] == ["litellm-db"]
     assert {n for n, s in services.items() if "litellm-db" in s.get("networks", [])} == {
         LITELLM,
         DATABASE,
     }
-    assert "litellm-api" in services[SERVICE]["networks"]
-    assert "litellm-backend" not in services[SERVICE]["networks"]
+    assert not set(services[SERVICE]["networks"]) & set(NEW_NETWORKS)
+    assert set(services[SERVICE]["networks"]) & set(services[FRONT]["networks"]) == app_networks(
+        compose
+    )
     assert "egress" not in services[LITELLM]["networks"]
     assert "litellm-egress" in services[GATEWAY]["networks"]
 
