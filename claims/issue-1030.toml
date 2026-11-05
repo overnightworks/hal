@@ -1,7 +1,0 @@
-claim_id = "62f32e3378cc40c8b20ea214a4739d2e"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "aa1b1737112db36f491117bcd2ce804295fd942e"
-branch = "claude/issue-1030-keycloak-in-copy"
-scope = ["probe/keycloak/README.md", "probe/keycloak/copy_isolation.py", "probe/keycloak/in_copy.py"]
-opened_commit = "5cb51ccab9e7e95c6fc828d0a72548ca1bf0e13a"
