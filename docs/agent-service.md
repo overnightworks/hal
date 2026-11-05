@@ -254,7 +254,7 @@ An app that calls LiteLLM directly holds only its own key, the file `~/.secrets/
 `hopin`, `presentator`). `hal setup` creates a missing one with the prefix `sk-` that LiteLLM requires of a custom
 key, mode 0644 in a 0700 folder so the app's container reads it as its own user. `hal apply`'s key step reads it to
 make the app's key in LiteLLM (see "The API route"); hopin's file is also read by `agent-canary`, the live canary's one-off. On the same agent network the app posts to
-`http://litellm-front:4000/v1/chat/completions`, a picture to `http://litellm-front:4000/v1/images/generations`, with that key as bearer; the unit `litellm` starts the front.
+`http://litellm-front:4000/v1/chat/completions`, a picture to `http://litellm-front:4000/v1/images/generations`, and lists its models with `GET http://litellm-front:4000/v1/models`, with that key as bearer; the unit `litellm` starts the front.
 
 ## The API route
 
@@ -266,11 +266,14 @@ over the internal, isolated networks `litellm-backend` and `litellm-egress`; `li
 LiteLLM and its database. While the unit is on, `hal apply` makes each app's key, the person budget
 and the admin budget with its customer rows (the key step below).
 
-- **The boundary.** `litellm-front` is the same pinned Traefik as the gateway with two routers,
-  `POST /v1/chat/completions` and `POST /v1/images/generations` (`agent-service/litellm/front/`);
-  every other method and path, `/v1/images/edits` and `/v1/images/variations` included, ends in
-  the front itself, so LiteLLM's own unauthenticated routes are unreachable. Behind it LiteLLM's
-  own keys decide, with no hal code in its process: a request needs an app key as bearer (401
+- **The boundary.** `litellm-front` is the same pinned Traefik as the gateway with three routers,
+  `POST /v1/chat/completions`, `POST /v1/images/generations` and `GET /v1/models`
+  (`agent-service/litellm/front/`); every other method and path, `/v1/images/edits`,
+  `/v1/images/variations` and `/v1/models/<name>` included, ends in the front itself, so
+  LiteLLM's own unauthenticated routes are unreachable. An app key's `GET /v1/models` lists
+  exactly the key's `models`; past its budget it is refused with 422, at no spend. Behind it
+  LiteLLM's own keys decide, with no hal code in its process: a request needs an app key as
+  bearer (401
   otherwise), a model among the key's `models` (the three
   names `text/opus`, `text/sonnet`, `text/haiku` and the picture name `image/flare` of
   `config.yaml`, which maps to OpenAI's `gpt-image-2.5-flare` on the key `litellm/openai`; 403
@@ -281,7 +284,7 @@ and the admin budget with its customer rows (the key step below).
   by a `model` in the query string, which the key's `models` do not bind: one unknown to
   `config.yaml` is refused with 400, but a configured name outside the key's `models` is served by that model and its spend counts on the key, and a key or person
   past its budget is refused (measured). The front therefore answers any query string on its
-  route itself with 400 and no `Location`, so nothing of such a request reaches LiteLLM. It sets
+  routes itself with 400 and no `Location`, so nothing of such a request reaches LiteLLM. It sets
   `User-Agent` to one constant, `litellm-front`, and removes `x-litellm-tags`, which LiteLLM would
   turn into request tags; the bearer and `Content-Type` pass unchanged.
   LiteLLM's ban list refuses `api_base` in the body with 401, and a fallback naming a URL with 401
@@ -310,7 +313,7 @@ and the admin budget with its customer rows (the key step below).
   `[api]` and `[api.<app>]` in `~/.config/hal/config.toml` (`docs/home.md`, „Konfiguration“): per
   number an app's own table, else `[api]`, else the code default in `src/hal/stack/api_limits.py`.
   The defaults are per app 10 dollars and 5 parallel, and 2 dollars per person; every key carries
-  `1mo`, the two routes, `models` as LiteLLM's `/v1/models` lists them and no rpm or tpm, and the
+  `1mo`, the three routes, `models` as LiteLLM's `/v1/models` lists them and no rpm or tpm, and the
   app's name as `key_alias`; the person budget carries `1mo` under the id `max_end_user_budget_id`
   names. `hal apply`'s door reads the file before any guard and ends 2 on a malformed one; the
   step plans only what the file and LiteLLM's rows disagree on, so a changed number is a change
@@ -441,8 +444,8 @@ and the admin budget with its customer rows (the key step below).
   `hal apply`'s own plan and run, and that LiteLLM calls no provider from its start to the first app
   call (S0), `litellm_limits.py` the operator's numbers from `config.toml` through that step, and
   `litellm_backup.py` the backup, its restore test and a lost volume, on the same
-  stack and with the same caller; `litellm_wheel.py` runs one tool turn of hal's own client
-  wheel through the route on that stack. `litellm_unit.py` drives the copy's real `hal apply` with the
+  stack and with the same caller; `litellm_wheel.py` runs the model list and one tool turn of hal's
+  own client wheel through the route on that stack. `litellm_unit.py` drives the copy's real `hal apply` with the
   shipped unit `litellm`: its first start and the second apply, the refusals of a missing file, the
   switch-off and the stop that hold the key step, the recreates that make it wait, a start after a
   failed one and the way on after a new master key. Re-run them for every LiteLLM,

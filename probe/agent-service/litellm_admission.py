@@ -38,6 +38,7 @@ from litellm import (
     FAKE_PROVIDER,
     LISTENING,
     LITELLM,
+    MODELS_ROUTE,
     OPERATOR_BUDGET,
     PARALLEL,
     PERSON_BUDGET,
@@ -305,9 +306,16 @@ class AdmissionProbe(PictureCalls):
         self.hold("K6", f"the key's spend in /key/info rose after each name: {spends[1:]}")
 
     def cell_k11(self, key: str) -> None:
+        narrow = self.make_key(models=[next(iter(shipped_models()))])
+        lists: dict[str, list[str]] = {}
+        for name, app_key in (("the key", key), ("a narrow key", narrow)):
+            lists[name] = self.listed(app_key)
+            own = sorted(self.key_info(app_key)["models"])
+            expect(lists[name] == own, f"K11: {name} lists {lists[name]}, its models are {own}")
+        expect(len(lists["a narrow key"]) < len(lists["the key"]), f"K11: the lists {lists}")
         results = []
         routes = (("GET", f"/key/info?key={hashed(key)}", None), ("POST", "/key/generate", {}),
-                  ("GET", "/v1/models", None))  # fmt: skip
+                  ("GET", "/model/info", None))  # fmt: skip
         for method, path, body in routes:
             refused = self.call(key, method, path, body, front=False)
             control = self.call(self.master_key, method, path, body, front=False)
@@ -325,8 +333,9 @@ class AdmissionProbe(PictureCalls):
             refused = self.call(key, "POST", path, body, front=False)
             self.refused(f"K11: {path}", refused, before)
             results.append(f"{path} {refused['status']} {error_of(refused)}, F 0")
-        self.hold("K11", f"the app key at litellm:4000 refused: {results}; the master key 200 on "
-                  "the admin routes")  # fmt: skip
+        self.hold("K11", f"through the front each key lists exactly its models: {lists}; the app "
+                  f"key at litellm:4000 refused: {results}; the master key 200 on the admin "
+                  "routes")  # fmt: skip
 
     # --- the picture route ---------------------------------------------------------------------
 
@@ -480,10 +489,17 @@ class AdmissionProbe(PictureCalls):
         self.push(key, self.fingerprint(), APP_PUSH)
         self.wait_for("K5", "the key's spend past its budget",
                       lambda: self.key_info(key)["spend"] > APP_BUDGET)  # fmt: skip
+        spend = self.key_info(key)["spend"]
+        listed = self.call(key, "GET", MODELS_ROUTE)
+        listed_as = f"{listed['status']} {error_of(listed)}"
+        expect(listed_as == "422 budget_exceeded/422", f"K5: the list past the budget: {listed_as}")
         refusal = self.expect_refused("K5", key, self.fingerprint())
         query = self.expect_query_refused("K5", key, self.fingerprint())
+        after = self.key_info(key)["spend"]
+        expect(after == spend, f"K5: the spend {spend} before the list, {after} after")
         self.hold("K5", f"past max_budget the next request is refused before the provider: "
-                  f"{refusal}, F 0, and {query}")  # fmt: skip
+                  f"{refusal}, F 0, and {query}; its list through the front: {listed_as}, its "
+                  f"spend {spend} before and after")  # fmt: skip
         return key
 
     def cells_k7_p5(self, over: str, key: str, person: str) -> None:

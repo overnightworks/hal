@@ -1,7 +1,8 @@
 """Probe of the wheel cell (HAL-2.8w): `GatewayBackend` from hal's own pin of the agent-runtime
 client runs one tool turn from a throwaway on hopin's network, with hopin's key as a file, through
 the real front and LiteLLM to the fake Anthropic; 2.8's census (litellm_retention.py) then
-searches the route for the turn's canaries.
+searches the route for the turn's canaries. Before the turn, the same throwaway runner
+calls the wheel's `list_gateway_models` through the front (HAL-2.6m's W models).
 
     flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \\
         uv run --frozen python3 probe/agent-service/litellm_wheel.py --scratch DIR
@@ -17,8 +18,8 @@ Its program builds the turn from the wheel's own types; the tool's handler answe
 canary. The fake calls the steered tool only while no tool result came back, so the turn ends with
 the answer canary.
 
-Evidence: W the throwaway's turn events, F the fake's request log, C the census with its planted
-row, Q an SQL count. Exit 0: K0 and W held.
+Evidence: W the throwaway's model list and turn events, F the fake's request log, C the census with
+its planted row, Q an SQL count. Exit 0: K0, W models and W held.
 """
 
 from __future__ import annotations
@@ -60,31 +61,54 @@ KEY_FILE = "/run/secrets/hopin-key"
 ISSUER = "https://probe.invalid/issuer"
 API_GROUP = "probe-api"
 TURN_SECONDS = 120
-# Run as `python -I -B -`: isolated, so the path holds the mounted site-packages alone. Its
-# standard input starts with `SCENARIO = {...}` and `HIDDEN = [...]`; it prints one JSON line per
-# turn event, or the stop, with every value of HIDDEN shown as `<hidden>`.
-TURN_PROGRAM = f"""\
+ORIGIN = f"http://{FRONT}:{FRONT_PORT}"  # NOSONAR(S5332) plain HTTP front, as apps reach it
+# Each program runs as `python -I -B -`: isolated, so the path holds the mounted site-packages
+# alone. Its standard input starts with `SCENARIO = {...}` and `HIDDEN = [...]`; it prints JSON
+# lines with every value of HIDDEN shown as `<hidden>`.
+WHEEL_PREAMBLE = f"""\
 import asyncio, json, sys
 sys.path.insert(0, {WHEEL!r})
+def show(record):
+    shown = json.dumps(record)
+    for value in HIDDEN:
+        shown = shown.replace(value, "<hidden>")
+    print(shown, flush=True)
+"""
+# One line: the names by kind, or the closed label of the list's failure.
+LIST_PROGRAM = (
+    WHEEL_PREAMBLE
+    + """\
+from agent_runtime_client.backend.gateway import ModelListUnavailable, list_gateway_models
+from agent_runtime_client.config import ChatGateway
+async def main():
+    gateway = ChatGateway(origin=SCENARIO["origin"], key_file=SCENARIO["key_file"])
+    try:
+        models = await list_gateway_models(gateway)
+    except ModelListUnavailable as unavailable:
+        show({"unavailable": unavailable.detail.value})
+        return
+    show({"text": list(models.text), "image": list(models.image)})
+asyncio.run(main())
+"""
+)
+# One line per turn event, or the stop.
+TURN_PROGRAM = (
+    WHEEL_PREAMBLE
+    + """\
 from agent_runtime_client.agents import TurnRequest
 from agent_runtime_client.backend import TurnPerson, TurnStopped
 from agent_runtime_client.backend.gateway import GatewayBackend
 from agent_runtime_client.config import AgentConfig, ChatGateway
 from agent_runtime_client.tools import HandTool, ToolDeclaration, ToolEffect, ToolOutcome
 from agent_runtime_client.turn import Principal, Turn, TurnMessage
-def show(record):
-    shown = json.dumps(record)
-    for value in HIDDEN:
-        shown = shown.replace(value, "<hidden>")
-    print(shown, flush=True)
 async def answer(principal, arguments):
     return ToolOutcome(content=SCENARIO["result"], is_error=False)
 async def groups():
-    return frozenset({{SCENARIO["api_group"]}})
+    return frozenset({SCENARIO["api_group"]})
 async def main():
     declaration = ToolDeclaration(
         name=SCENARIO["tool"], description=SCENARIO["description"], effect=ToolEffect.READ_ONLY,
-        parameters={{"type": "object", "properties": {{"q": {{"type": "string"}}}}}},
+        parameters={"type": "object", "properties": {"q": {"type": "string"}}},
     )
     config = AgentConfig(
         backend="litellm", api_group=SCENARIO["api_group"],
@@ -101,10 +125,11 @@ async def main():
         async for event in backend.run(request, person):
             show(event.model_dump(mode="json"))
     except TurnStopped as stopped:
-        stop = {{"kind": stopped.kind, "code": stopped.code, "detail": stopped.detail}}
-        show({{"type": "stopped", **stop}})
+        stop = {"kind": stopped.kind, "code": stopped.code, "detail": stopped.detail}
+        show({"type": "stopped", **stop})
 asyncio.run(main())
 """
+)
 
 
 def base_image() -> str:
@@ -121,6 +146,7 @@ class WheelProbe(RetentionProbe):
     def drive(self) -> None:
         self.wait_until_listening()
         self.cell_k0()
+        self.cell_w_models()
         self.steer()
         self.cell_w()
 
@@ -140,11 +166,19 @@ class WheelProbe(RetentionProbe):
             base_image(), "python", "-I", "-B", "-",
         ]  # fmt: skip
 
-    def turn(self, scenario: dict) -> list[dict]:
-        """W: the turn's events, as the throwaway printed them."""
-        program = f"SCENARIO = {scenario!r}\nHIDDEN = {self.hidden_keys()!r}\n"
-        result = self.run(self.wheel_command(), stdin=program + TURN_PROGRAM, timeout=240)
+    def in_throwaway(self, program: str, scenario: dict) -> list[dict]:
+        """W: the lines one of the wheel's programs printed in the throwaway."""
+        preamble = f"SCENARIO = {scenario!r}\nHIDDEN = {self.hidden_keys()!r}\n"
+        result = self.run(self.wheel_command(), stdin=preamble + program, timeout=240)
         return [json.loads(line) for line in result.stdout.splitlines()]
+
+    def cell_w_models(self) -> None:
+        (listed,) = self.in_throwaway(LIST_PROGRAM, {"origin": ORIGIN, "key_file": KEY_FILE})
+        names = sorted([*listed.get("text", ()), *listed.get("image", ())])
+        own = sorted(self.key_info(self.key)["models"])
+        expect(names == own, f"W models: the wheel listed {listed}, hopin's key holds {own}")
+        self.hold("W models", f"list_gateway_models through the front with hopin's key file: "
+                  f"{listed}, exactly the key's models")  # fmt: skip
 
     def cell_w(self) -> None:
         canaries = {
@@ -159,12 +193,10 @@ class WheelProbe(RetentionProbe):
                    tool_use_once=True, declares=tool,
                    arrivals={k: canaries[k] for k in ("message", "description")})  # fmt: skip
         before = len(self.provider_requests())
-        events = self.turn({
+        events = self.in_throwaway(TURN_PROGRAM, {
             "tool": tool, "description": canaries["description"], "message": canaries["message"],
             "result": canaries["result"], "principal": principal, "api_group": API_GROUP,
-            "origin": (
-                f"http://{FRONT}:{FRONT_PORT}"  # NOSONAR(S5332) plain HTTP front, as apps reach it
-            ),
+            "origin": ORIGIN,
             "key_file": KEY_FILE,
             "model": DEFAULT_MODEL, "seconds": TURN_SECONDS,
         })  # fmt: skip

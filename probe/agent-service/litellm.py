@@ -1,5 +1,5 @@
 """Probe of LiteLLM's own keys on the API route (cells K1, K2, K4, and #768 S1a's G6-G9, N1, L1-L3,
-R1, R2, D1): the service, the one-route front, LiteLLM and the gateway's
+R1, R2, D1): the service, the front, LiteLLM and the gateway's
 second entrypoint, in a throwaway compose project, against a fake Anthropic. The caller is a
 throwaway on HopIn's network that posts agent-runtime's wire body (`model`, `messages`, `user`,
 `tools`) through the front with an app key the probe made through the master key from a throwaway
@@ -69,7 +69,8 @@ LISTEN_SECONDS = 60
 FAKE_DIRECTORY = "/fake"
 ACCESS_LINE = re.compile(r'"(?:GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS) \S+ HTTP/\d(?:\.\d)?"')
 ADMITTED_LINE = re.compile(r'"POST /v1/chat/completions HTTP/\d(?:\.\d)?" 200')
-ROUTE, PICTURE_ROUTE = litellm_keys.ROUTES
+ROUTE, PICTURE_ROUTE = litellm_keys.COMPLETION_ROUTE, litellm_keys.PICTURE_ROUTE
+MODELS_ROUTE = litellm_keys.MODELS_ROUTE
 LISTENING = "Uvicorn running"  # the service's line; LiteLLM's listening is ProxySnapshot's
 FRONT_PORT = 4000
 # The scenario of an app key and a person (docs/agent-service.md, "The API route"): each app key
@@ -483,6 +484,12 @@ class LitellmProbe(IssuerProbe):
         return json.loads(
             self.run(argv, stdin=program, timeout=240).stdout.strip().splitlines()[-1]
         )
+
+    def listed(self, key: str) -> list[str]:
+        """The names `key` lists on the model list through the front, sorted."""
+        answer = self.call(key, "GET", MODELS_ROUTE)
+        expect(answer["status"] == 200, f"the list: {answer['status']} {error_of(answer)}")
+        return sorted(entry["id"] for entry in answer["document"]["data"])
 
     def admin(self, method: str, path: str, body: dict | None = None) -> dict:
         """The answer document of one admin request with the master key, straight at LiteLLM."""

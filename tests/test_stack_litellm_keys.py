@@ -96,6 +96,11 @@ def test_the_person_budget_holds_its_dollars_for_the_period() -> None:
             {"allowed_routes": litellm_keys.ROUTES},
             id="a key without its routes gets them",
         ),
+        pytest.param(
+            {"allowed_routes": [litellm_keys.COMPLETION_ROUTE, litellm_keys.PICTURE_ROUTE]},
+            {"allowed_routes": litellm_keys.ROUTES},
+            id="a key without the model list gets every route",
+        ),
     ],
 )
 def test_a_found_key_is_changed_in_exactly_the_fields_that_differ(

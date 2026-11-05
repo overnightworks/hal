@@ -1,8 +1,8 @@
 """The CI job `front` (#768): litellm-front, as shipped, against a stand-in for LiteLLM, driven by
-a table of raw requests. Only the completion route and the picture route without a query string
-reach the backend, with one constant `User-Agent` and no tag header; every other method, path
-form, encoded character and query string, the other picture paths included, stops in the front
-itself. The job re-runs on every Traefik bump.
+a table of raw requests. Only the completion route, the picture route and the model list without a
+query string reach the backend, with one constant `User-Agent` and no tag header; every other
+method, path form, encoded character and query string, the other picture paths and the model
+list's sub-paths included, stops in the front itself. The job re-runs on every Traefik bump.
 
 It starts containers, so it runs only where EDGE_FRONT_CASES is set (the job `front`; locally under
 the probe lock). The stand-in and client images are compose.yaml's pins.
@@ -20,6 +20,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from hal.stack import litellm_keys
+
 ROOT = Path(__file__).resolve().parents[1]
 PROJECT = "edge-litellm-front-ci"
 COMPOSE_FILES = [ROOT / "compose.yaml", ROOT / "tests" / "support" / "front.compose.yaml"]
@@ -34,8 +36,8 @@ networks:
     ipam: !reset {}
 """
 FRONT, STAND_IN, CLIENT = "litellm-front", "stand-in", "client"
-ROUTE = "/v1/chat/completions"
-PICTURE_ROUTE = "/v1/images/generations"
+ROUTE, PICTURE_ROUTE = litellm_keys.COMPLETION_ROUTE, litellm_keys.PICTURE_ROUTE
+MODELS_ROUTE = litellm_keys.MODELS_ROUTE
 ROUTE_FILE = ROOT / "agent-service" / "litellm" / "front" / "dynamic" / "route.yml"
 TAG_HEADER = "x-litellm-tags"  # lower case, `-` for `_`: every spelling LiteLLM could read
 FRONT_ORIGIN = "litellm-front:4000"
@@ -49,7 +51,8 @@ pytestmark = pytest.mark.skipif(
 # The program the client container runs with `python -I -`: standard library only. It sends the
 # raw bytes of one case and prints the status and the body's first line. `h2c` sends HTTP/2 with
 # prior knowledge: the preface, empty settings and one HEADERS frame with HPACK indexed or
-# literal fields, and prints the :status of the reply (the static-table index 8 to 14).
+# literal fields (the method as its static-table index), and prints the :status of the reply (the
+# static-table index 8 to 14).
 CLIENT_PROGRAM = """
 import json, socket, sys
 
@@ -67,9 +70,10 @@ def exchange(payload, wait=3.0):
 def literal(name, value):
     return b"\\x00" + bytes([len(name)]) + name + bytes([len(value)]) + value
 
-def h2c(path):
+def h2c(method, path):
     authority = literal(b":authority", b"litellm-front:4000")
-    block = b"\\x83\\x86" + literal(b":path", path.encode()) + authority
+    indexed_method = {"GET": b"\\x82", "POST": b"\\x83"}[method]
+    block = indexed_method + b"\\x86" + literal(b":path", path.encode()) + authority
     frame = len(block).to_bytes(3, "big") + b"\\x01\\x05" + (1).to_bytes(4, "big") + block
     settings = b"\\x00\\x00\\x00\\x04\\x00\\x00\\x00\\x00\\x00"
     reply = exchange(b"PRI * HTTP/2.0\\r\\n\\r\\nSM\\r\\n\\r\\n" + settings + frame)
@@ -92,8 +96,8 @@ def http(raw_hex):
     return {"status": int(first.split()[1]) if first else None,
             "location": "location" in names, "body": body.decode("latin-1")[:2000]}
 
-kind, argument = sys.argv[1], sys.argv[2]
-print(json.dumps(h2c(argument) if kind == "h2c" else http(argument)))
+kind, method, argument = sys.argv[1], sys.argv[2], sys.argv[3]
+print(json.dumps(h2c(method, argument) if kind == "h2c" else http(argument)))
 """
 
 
@@ -204,6 +208,19 @@ CASES = [
     stops("C46 picture query", 400, target=PICTURE_ROUTE + "?model=x"),
     stops("C47 picture GET", 404, method="GET", target=PICTURE_ROUTE),
     stops("C48 h2c picture query", 400, target=PICTURE_ROUTE + "?model=x", kind="h2c"),
+    reaches("C49 model list", MODELS_ROUTE, f"GET {MODELS_ROUTE} HTTP/1.1", method="GET"),
+    reaches(
+        "C50 model list headers",
+        MODELS_ROUTE,
+        f"GET {MODELS_ROUTE} HTTP/1.1",
+        method="GET",
+        headers=("User-Agent: probe/1.0", "x-litellm-tags: a", "x_litellm_tags: c"),
+    ),
+    stops("C51 model list POST", 404, target=MODELS_ROUTE),
+    stops("C52 model list trailing slash", 404, method="GET", target=MODELS_ROUTE + "/"),
+    stops("C53 model list sub-path", 404, method="GET", target=MODELS_ROUTE + "/x"),
+    stops("C54 model list query", 400, method="GET", target=MODELS_ROUTE + "?model=x"),
+    stops("C55 h2c model list query", 400, method="GET", target=MODELS_ROUTE + "?x", kind="h2c"),
 ]
 
 
@@ -255,8 +272,8 @@ class Stack:
 
     def drive(self, case: Case) -> dict:
         argument = case.target if case.kind == "h2c" else raw_request(case).hex()
-        result = self.compose("exec", "-T", CLIENT, "python", "-I", "-", case.kind, argument,
-                              stdin=CLIENT_PROGRAM)  # fmt: skip
+        result = self.compose("exec", "-T", CLIENT, "python", "-I", "-", case.kind, case.method,
+                              argument, stdin=CLIENT_PROGRAM)  # fmt: skip
         return json.loads(result.stdout.strip().splitlines()[-1])
 
 
@@ -277,7 +294,7 @@ def stack(tmp_path_factory) -> Iterator[Stack]:
 
 
 @pytest.mark.parametrize("case", CASES, ids=[case.name for case in CASES])
-def test_the_front_forwards_only_its_two_routes_and_answers_the_rest_itself(stack, case):
+def test_the_front_forwards_only_its_routes_and_answers_the_rest_itself(stack, case):
     answer = stack.drive(case)
     assert answer["status"] == case.status
     assert not answer.get("location")  # the front never sends a client elsewhere

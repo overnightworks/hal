@@ -1,6 +1,6 @@
-# The two routes litellm-front serves, to LiteLLM: the completion call and the picture call. Every
-# other method and path, the other picture paths included, matches no router and Traefik answers
-# 404 itself.
+# The three routes litellm-front serves, to LiteLLM: the completion call, the picture call and the
+# model list. Every other method and path, the other picture paths and the model list's sub-paths
+# included, matches no router and Traefik answers 404 itself.
 http:
   routers:
     completions:
@@ -13,16 +13,23 @@ http:
       rule: Method(`POST`) && Path(`/v1/images/generations`)
       middlewares: [query-refused, query-caught, request-headers]
       service: litellm
+    models:
+      entryPoints: [api]
+      rule: Method(`GET`) && Path(`/v1/models`)
+      middlewares: [query-refused, query-caught, request-headers]
+      service: litellm
   middlewares:
     # LiteLLM routes by `?model=` past a key's `models` and copies other query values into the
     # request it builds, and Traefik has no matcher for "any query". So query-caught answers every
-    # request URI with a `?` (the absolute form too) with a redirect, and query-refused turns that
-    # 307 into a 400 without the redirect's headers: no `Location` leaves the front, so a client
-    # that follows redirects re-sends neither the body nor the key, and LiteLLM sees nothing.
+    # request URI with a `?` (the absolute form too) with a redirect, 302 to a GET and 307 to any
+    # other method, and query-refused turns either into a 400 without the redirect's headers: no
+    # `Location` leaves the front, so a client that follows redirects re-sends neither the body
+    # nor the key, and LiteLLM sees nothing.
     query-refused:
       errors:
-        status: ["307"]
+        status: ["302", "307"]
         statusRewrites:
+          "302": 400
           "307": 400
         service: noop@internal
         errorRequestHeaders: []
