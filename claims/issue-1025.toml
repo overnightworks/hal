@@ -3,6 +3,6 @@ agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
 role = "builder"
 base = "b7171e49055a51095742cdbbdc043e07bd145a1e"
 branch = "claude/issue-1025-speech-privacy-section"
-scope = ["docs/architecture.md", "legal/sections/speech-runtime/datenschutz.html", "legal/sections/speech-service/datenschutz.html", "src/hal/stack/legal_pages.py", "src/hal/stack/legal_step.py", "tests/test_stack_apply_legal.py"]
+scope = ["docs/architecture.md", "legal/sections/keycloak/datenschutz.html", "legal/sections/speech-runtime/datenschutz.html", "legal/sections/speech-service/datenschutz.html", "src/hal/stack/legal_pages.py", "src/hal/stack/legal_step.py", "tests/test_stack_apply_legal.py"]
 opened_commit = "891df05282aa06086e7f4593a77d1fe378196466"
 whole_reason = "One central section that composes: its text under the unit's own key, the service anchor, the two-owner rule's exception for a hal-owned service section, its stable id, the shared sign-in section it makes true again, the docs and the tests, which only together put #sprachdienst on the page."
