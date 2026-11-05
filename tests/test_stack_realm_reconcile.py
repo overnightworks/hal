@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 from support.stack_core import tracked
 
-from hal.stack import compose, core, switches, unit_plans
+from hal.stack import compose, core, pre_apply, switches, unit_plans
 from hal.stack import realm as realm_lines
 from hal.stack.realm import observe, reconcile
 from hal.stack.realm.reconcile import RealmAction, RealmPlan, Stage
@@ -127,12 +127,13 @@ class World:
         if name in self.failing:
             raise reconcile.RealmError(f"{name} broke")
 
-    def pre_apply(self) -> str:
+    def pre_apply(self, unit: unit_plans.DatabaseUnit) -> str:
+        assert unit == reconcile.KEYCLOAK
         self.act("backup")
         return SNAPSHOT
 
-    def restore_test(self, snapshot: str) -> None:
-        assert snapshot == SNAPSHOT
+    def restore_test(self, unit: unit_plans.DatabaseUnit, snapshot: str) -> None:
+        assert (unit, snapshot) == (reconcile.KEYCLOAK, SNAPSHOT)
         self.act("restore test")
 
     def inventory(self) -> dict:
@@ -511,54 +512,8 @@ def test_an_observer_that_fails_or_answers_nonsense_is_one_line(
     assert str(raised.value) == message
 
 
-@dataclass
-class Commands:
-    """hal as a fake process: the commands asked, and what it answers."""
-
-    stdout: str = f'{{"snapshot": "{SNAPSHOT}"}}\n'
-    stderr: str = ""
-    code: int = 0
-    asked: list[list[str]] = field(default_factory=list)
-
-    def __call__(
-        self, command: list[str], _timeout: int, _stdin: str | None = None
-    ) -> subprocess.CompletedProcess[str]:
-        self.asked.append(command)
-        return subprocess.CompletedProcess(command, self.code, self.stdout, self.stderr)
-
-
-def test_the_backup_asks_for_keycloak_alone_and_reads_the_snapshot_id() -> None:
-    commands = Commands()
-    backup = reconcile.Backup(("hal",), commands)
-
-    snapshot = backup.pre_apply()
-    backup.restore_test(snapshot)
-
-    assert snapshot == SNAPSHOT
-    assert commands.asked == [
-        ["hal", "backup", "keycloak", "--pre-apply", "--json"],
-        ["hal", "restore", "--test", "keycloak", "--snapshot", SNAPSHOT],
-    ]
-
-
-def test_a_failing_backup_says_the_error_line_hal_wrote() -> None:
-    failing = Commands(stdout="", stderr="error: hal backup: kein Passwort\n", code=3)
-    backup = reconcile.Backup(("hal",), failing)
-
-    with pytest.raises(reconcile.RealmError) as raised:
-        backup.pre_apply()
-    assert str(raised.value) == "the Keycloak backup failed (hal backup: kein Passwort)"
-
-
-def test_a_backup_that_names_no_snapshot_is_a_failure() -> None:
-    backup = reconcile.Backup(("hal",), Commands(stdout="hal backup: fertig\n"))
-
-    with pytest.raises(reconcile.RealmError, match="named no pre-apply snapshot"):
-        backup.pre_apply()
-
-
 def test_the_installed_backup_is_the_checkouts_own_hal(tmp_path: Path) -> None:
-    backup = reconcile.Backup.installed(tmp_path, lambda _grace: None)
+    backup = pre_apply.Backup.installed(tmp_path, lambda _grace: None)
 
     assert backup.command == (str(tmp_path / ".venv" / "bin" / "hal"),)
 
@@ -567,9 +522,9 @@ def test_the_installed_backup_says_its_grace_to_the_callback_while_it_waits(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Cell 7: the callback is given the grace the stopped step waits for."""
-    monkeypatch.setattr(reconcile, "STOP_GRACE_SECONDS", 0.2)
+    monkeypatch.setattr(pre_apply, "STOP_GRACE_SECONDS", 0.2)
     said: list[float] = []
-    backup = reconcile.Backup.installed(tmp_path, said.append)
+    backup = pre_apply.Backup.installed(tmp_path, said.append)
 
     with pytest.raises(compose.ComposeError, match="took longer than 1s"):
         backup.run(["sh", "-c", WAITS], 1)
@@ -852,9 +807,9 @@ def interrupted(*_):
         file.write("interrupted\\n")
     raise KeyboardInterrupt
 signal.signal(signal.SIGINT, interrupted)
-from hal.stack.realm import observe, reconcile
+from hal.stack import pre_apply
 try:
-    reconcile.run_edge_backup(sys.argv[2:], 600, waiting=print)
+    pre_apply.run_edge_backup(sys.argv[2:], 600, waiting=print)
 except KeyboardInterrupt:
     print("KeyboardInterrupt reached the step")
 """
@@ -868,7 +823,7 @@ def test_a_backup_that_runs_past_its_timeout_gets_sigterm_and_time_to_clean_up(
     release.touch()
 
     with pytest.raises(compose.ComposeError, match="took longer than 3s"):
-        reconcile.run_edge_backup(
+        pre_apply.run_edge_backup(
             [sys.executable, "-c", CLEANS_UP_ON_SIGTERM, str(marker), str(release)],
             3,
             waiting=lambda _grace: None,
@@ -880,10 +835,10 @@ def test_a_backup_that_runs_past_its_timeout_gets_sigterm_and_time_to_clean_up(
 def test_a_backup_that_ignores_sigterm_still_ends_in_the_timeout_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(reconcile, "STOP_GRACE_SECONDS", 0.3)
+    monkeypatch.setattr(pre_apply, "STOP_GRACE_SECONDS", 0.3)
 
     with pytest.raises(compose.ComposeError, match="took longer than 3s"):
-        reconcile.run_edge_backup(
+        pre_apply.run_edge_backup(
             [sys.executable, "-c", IGNORES_SIGTERM], 3, waiting=lambda _grace: None
         )
 
@@ -891,15 +846,15 @@ def test_a_backup_that_ignores_sigterm_still_ends_in_the_timeout_failure(
 def test_a_grandchild_that_holds_the_output_open_cannot_hang_the_step(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(reconcile, "STOP_GRACE_SECONDS", 0.2)
-    monkeypatch.setattr(reconcile, "COLLECT_SECONDS", 0.5)
+    monkeypatch.setattr(pre_apply, "STOP_GRACE_SECONDS", 0.2)
+    monkeypatch.setattr(pre_apply, "COLLECT_SECONDS", 0.5)
     escaped = tmp_path / "escaped.pid"
     leaves_a_grandchild = f"setsid sh -c 'echo $$ > {escaped}; exec sleep 60' & {WAITS}"
 
     try:
         started = time.monotonic()
         with pytest.raises(compose.ComposeError, match="took longer than 1s"):
-            reconcile.run_edge_backup(
+            pre_apply.run_edge_backup(
                 ["sh", "-c", leaves_a_grandchild], 1, waiting=lambda _grace: None
             )
         assert time.monotonic() - started < 10
@@ -967,7 +922,7 @@ def test_ctrl_c_during_the_grace_does_not_cut_the_clean_up_short(tmp_path: Path)
 
 
 def test_a_finished_backup_returns_its_exit_code_and_output() -> None:
-    result = reconcile.run_edge_backup(
+    result = pre_apply.run_edge_backup(
         ["sh", "-c", "echo out; echo err >&2; exit 3"], 30, waiting=lambda _grace: None
     )
 

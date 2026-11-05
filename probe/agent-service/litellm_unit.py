@@ -34,6 +34,7 @@ import stat
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import NamedTuple
 
@@ -69,7 +70,11 @@ ENTRY = re.compile(r"^ {2}litellm:\n(?: {4}.*\n)+", re.MULTILINE)
 KEYCLOAK_OFF = "  keycloak:\n    run:\n      enabled: false\n"
 DOCKER_STAND_IN = """\
 #!/bin/sh
-# The mode of each litellm-keys one-off, after the service name; nothing else is written.
+# The mode of each litellm-keys one-off, after the service name; and, when DOCKER_CALLS names a
+# file, each call behind its caller's command line.
+if [ -n "$DOCKER_CALLS" ]; then
+  printf '%s\\t%s\\n' "$(tr '\\0' ' ' < /proc/$PPID/cmdline)" "$*" >> "$DOCKER_CALLS"
+fi
 named=
 for argument in "$@"; do
   if [ -n "$named" ]; then
@@ -214,9 +219,7 @@ class Probe:
 
     def wait_until_listening(self, cell: str) -> None:
         """Until LiteLLM answers on litellm-backend, from a throwaway beside the key step."""
-        image = json.loads(self.compose("config", "--format", "json"))["services"][
-            litellm_keys.KEYS_SERVICE
-        ]["image"]
+        image = self.keys_image()
         program = (
             "import urllib.request; "
             "urllib.request.urlopen('http://litellm:4000/health/liveliness', timeout=3)"
@@ -232,6 +235,11 @@ class Probe:
                 time.monotonic() < deadline, f"{cell}: LiteLLM did not listen in {LISTEN_SECONDS} s"
             )
             time.sleep(3)
+
+    def keys_image(self) -> str:
+        """The key step's image: plain Python, which the probe's throwaways run."""
+        resolved = json.loads(self.compose("config", "--format", "json"))
+        return resolved["services"][litellm_keys.KEYS_SERVICE]["image"]
 
     def write_secret(self, relative: Path, value: str) -> None:
         """A new file at `relative`, as `hal setup` writes one: 0644 in 0700 folders."""
@@ -612,11 +620,17 @@ def prove(probe: Probe) -> int:
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
+def run(probe_class: Callable[[Path], Probe], argv: list[str] | None) -> int:
+    """A probe program's command line and run, described by its module's first docstring line."""
+    description = sys.modules[probe_class.__module__].__doc__.splitlines()[0]
     return edge_copy.run_main(
-        __doc__.splitlines()[0], argv, Probe, prove,
+        description, argv, probe_class, prove,
         lambda probe: edge_copy.passed_line(f"PASSED: {', '.join(probe.held)}"),
     )  # fmt: skip
+
+
+def main(argv: list[str] | None = None) -> int:
+    return run(Probe, argv)
 
 
 if __name__ == "__main__":

@@ -45,6 +45,7 @@ from hal.stack.plan_rows import (
     name_taken_row,
     shown_subject,
 )
+from hal.stack.pre_apply import SNAPSHOT_SHORT_ID
 from hal.stack.realm import Kind
 from hal.stack.realm.reconcile import (
     REALM_UNIT,
@@ -60,9 +61,6 @@ from hal.stack.realm.reconcile import (
 from hal.stack.service_recreate import Recreated
 from hal.stack.unit_plans import NotWritten
 
-# restic's short ID, which `hal restore --snapshot` takes as a prefix (`hal.backup.runner`'s
-# MIN_SNAPSHOT_PREFIX); `hal.stack` may not import `hal.backup`, so the length is repeated.
-SNAPSHOT_SHORT_ID = 8
 _SEPARATOR = " · "
 _ONLY_IN_KEYCLOAK = "only in Keycloak: "
 RESTORE_GUIDE = 'docs/backup.md "Restore Keycloak"'
@@ -262,10 +260,18 @@ def _failed_event(subject: AppPlan | OffPlan) -> ResultEvent:
 
 def recreated_row(recreated: Recreated) -> Row:
     """A service recreated and observed running, with the time it took; a core service whose
-    barriers were proven says so."""
-    took = format_duration(recreated.seconds)
-    fact = _SEPARATOR.join(("barriers proven", took)) if recreated.barriers_proven else took
-    return Row(Glyph.DONE, recreated.service, ResultEvent.RECREATED, fact)
+    barriers were proven says so, and a database unit's first recreate names the snapshot it
+    proved before."""
+    facts = (
+        *(("barriers proven",) if recreated.barriers_proven else ()),
+        *((f"snapshot {_short(recreated.snapshot)} proven",) if recreated.snapshot else ()),
+        format_duration(recreated.seconds),
+    )
+    return Row(Glyph.DONE, recreated.service, ResultEvent.RECREATED, _SEPARATOR.join(facts))
+
+
+def _short(snapshot: str) -> str:
+    return printable(snapshot[:SNAPSHOT_SHORT_ID])
 
 
 def unproven_row(failure: BarriersUnproven) -> Row:

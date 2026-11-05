@@ -339,9 +339,11 @@ and the admin budget with its customer rows (the key step below).
   writes a new master key, the running LiteLLM still holds the old one and the step's read ends
   `keys not read`: `hal stop litellm`, then `hal start litellm`, and the next apply reads.
 - **A start of LiteLLM.** It migrates its database before it listens; meanwhile the front answers
-  502 and the key step reads nothing. A changed LiteLLM image is named `!` and not swapped, as
-  `docs/stack.md` "Images" says; Dependabot proposes no LiteLLM image, so a bump is a pull request
-  opened by hand. A change of `config.yaml` or `start.sh` alone does not recreate it.
+  502 and the key step reads nothing. A changed image of `litellm` or `litellm-db` is recreated
+  after LiteLLM's proven pre-apply snapshot, as `docs/stack.md` "Images" says; the snapshot's restore
+  test refuses a store with no key, and then nothing is recreated. `litellm-front` keeps its old
+  image and is named `!`. Dependabot proposes no LiteLLM image, so a bump is a pull request opened
+  by hand. A change of `config.yaml` or `start.sh` alone does not recreate it.
 - **The admin group's rows.** After the apps the step makes `litellm-admin` and links to it exactly
   the customer rows of the direct members of `/services/litellm/admin`, read at each plan through
   the realm observer's members mode; each fingerprint is `person_fingerprint` of agent-runtime's
@@ -355,7 +357,7 @@ and the admin budget with its customer rows (the key step below).
   rows linked and unlinked, never which. With Keycloak's unit off or switched off the rows are
   held, a row says so, and the run ends as it would. With the members not read (Keycloak not running
   at plan time, started by this run, the read failing, or the group absent) the rows stay and the run
-  ends `partial` naming Keycloak with `next: hal apply`, exit 1, also when nothing else changes; an
+  ends `partial` naming Keycloak with `next: hal apply`, exit 3, also when nothing else changes; an
   apply whose realm step makes the group, or which starts Keycloak, ends so. The members'
   fingerprints pass through hal's memory and the one-off's standard input and output; no printed
   line carries a fingerprint or a member, failures included.

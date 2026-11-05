@@ -244,10 +244,22 @@ Reihenfolge, und wie der Eintrag in `applied.json` gefuehrt wird:
 [architecture.md](architecture.md), Abschnitt 8, "The applied record".
 
 **Images.** Laeuft ein Dienst einer Einheit, die nicht ausgeschaltet wird, auf einem anderen Image, als
-`compose.yaml` jetzt nennt, nennt der Plan es und tauscht es nie; der Lauf bleibt `nothing to change`.
-Das Upgrade ist Sache des Betreibers (Keycloak erst mit Dump). Ausnahme ist der gebaute Dienst einer
-Einheit mit `run.build` (`agent-service`): `hal apply` erzeugt ihn nach dem Ja des Plans neu, wenn
-sein Image, seine Definition oder sein Tag-Inhalt abweicht; laufende Anfragen enden dabei.
+`compose.yaml` jetzt nennt, nennt der Plan es mit `!` und tauscht es nicht; der Lauf bleibt
+`nothing to change`. Das gilt fuer step-ca, legal und `litellm-front`. Zwei Ausnahmen:
+- Der gebaute Dienst einer Einheit mit `run.build` (`agent-service`): `hal apply` erzeugt ihn nach dem
+  Ja des Plans neu, wenn sein Image, seine Definition oder sein Tag-Inhalt abweicht; laufende Anfragen
+  enden dabei.
+- Keycloak und LiteLLM, jeweils der Dienst und seine Datenbank: der Plan nennt
+  `<dienst> recreate image X → Y · snapshot first`. Nach dem Ja nimmt `hal apply` vor dem ersten
+  Neuerstellen der Einheit `hal backup <einheit> --pre-apply` und beweist den Snapshot mit
+  `hal restore --test`; erst dann erzeugt es die Datenbank und dann den Dienst neu, und die
+  Ergebniszeile nennt den Snapshot. Scheitert Backup oder Test, laeuft der alte Container weiter, der
+  Lauf endet partial (Exit 3) und veroeffentlicht nichts. Wird die Einheit vor dem Neuerstellen
+  ausgeschaltet, nennt die Fehlerzeile nur den Snapshot. Laeuft ein neuer Container danach nicht oder
+  bricht Ctrl-C das Neuerstellen ab, nennt die Zeile den Snapshot und `hal restore <einheit> --live`. Eine ausgeschaltete Einheit
+  wird nicht angefasst, und `hal start` behaelt den alten Container. Ein nicht angepinntes,
+  neu gebautes Tag von Keycloak oder LiteLLM wird nur genannt, nicht getauscht; heute ist jedes ihrer
+  Images per Digest angepinnt.
 
 **Setup.** Eine Einheit mit `setup` wird erst angeschaltet, wenn `<setup> --check` Exit 0 gibt. Der
 Vertrag von `<setup> --check`: fragt nichts, druckt kein Geheimnis, legt nichts an, braucht keinen

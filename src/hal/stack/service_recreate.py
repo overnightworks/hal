@@ -1,25 +1,31 @@
 """The recreate of a service that is not a core service, alone and under the switch lock:
 a follower whose file or definition changed, a live service of a unit that runs on whose
 definition changed, the built service whose image or definition changed in whatever state its
-container is (#89, #376)."""
+container is, and a database unit's service whose image moved, after the unit's proven pre-apply
+snapshot (#89, #376, #995)."""
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from hal.output import printable
+from hal.output.command import Verb, command
 from hal.stack import built_image, compose, core, switches
-from hal.stack.unit_plans import Progress, Recreate, since_of
+from hal.stack.pre_apply import SNAPSHOT_SHORT_ID, Backup, PreApplyError
+from hal.stack.unit_plans import DatabaseUnit, Progress, Recreate, since_of
 
 
 @dataclass(frozen=True)
 class Recreated:
     """A service recreated and observed running, after `seconds` of the recreate and the watch
     (for a core service also the proof and the record); `barriers_proven` says a core recreate
-    proved at least one barrier and none failed."""
+    proved at least one barrier and none failed, `snapshot` names the pre-apply snapshot proven
+    before it."""
 
     service: str
     seconds: float
     barriers_proven: bool = False
+    snapshot: str | None = None
 
 
 @dataclass(frozen=True)
@@ -35,6 +41,7 @@ class ServiceRecreator:
     watch: compose.Watch
     progress: Progress
     tell: Callable[[Recreated], None]
+    backup: Backup
 
     def followers(
         self,
@@ -75,24 +82,69 @@ class ServiceRecreator:
         self, recreates: Sequence[Recreate | built_image.BuiltRecreate]
     ) -> str | None:
         """Recreate each live service of a unit that runs on whose definition changed, and each
-        built service, in the order planned. A volume is kept; the image is the container's own
-        except for the built service, which runs the image its tag names (#376)."""
-        try:
-            for plan in recreates:
-                self.progress.unit = plan.service
-                started = self.watch.clock()
-                if failure := self.alone(plan.unit, plan.service):
-                    return failure
-                self.tell(Recreated(plan.service, self.watch.clock() - started))
-        except (compose.ComposeError, switches.SwitchError) as error:
-            return f"could not {self.progress.step}, {error}"
+        built service, in the order planned; the failure line of the first that fails. A volume
+        is kept; the image is the container's own except for the built service, which runs the
+        image its tag names (#376), and a database unit's moved service, which runs the image
+        compose.yaml names (#995)."""
+        snapshots: dict[str, str] = {}  # unit -> its pre-apply snapshot of this run
+        began: set[str] = set()  # the units one of whose services is being or was recreated
+        for plan in recreates:
+            if failure := self._unit_service(plan, snapshots, began):
+                return failure
         return None
+
+    def _unit_service(
+        self,
+        plan: Recreate | built_image.BuiltRecreate,
+        snapshots: dict[str, str],
+        began: set[str],
+    ) -> str | None:
+        """Recreate one, after its unit's proven snapshot when it is the unit's first; a snapshot
+        that fails leaves the unit as it runs, and a failure after it names the snapshot, and the
+        way back once the unit's recreate has begun."""
+        self.progress.unit = plan.service
+        started = self.watch.clock()
+        taken = None
+
+        def begin() -> None:
+            began.add(plan.unit)
+
+        try:
+            if isinstance(plan, Recreate) and plan.snapshot:
+                taken = snapshots[plan.unit] = self._proven_snapshot(plan.snapshot)
+            failure = self.alone(plan.unit, plan.service, begin)
+        except PreApplyError as error:
+            return f"{error}; {plan.unit} is not recreated"
+        except (compose.ComposeError, switches.SwitchError) as error:
+            failure = f"could not {self.progress.step}, {error}"
+        except KeyboardInterrupt as interruption:
+            if way_back := _way_back(plan.unit, snapshots.get(plan.unit), plan.unit in began):
+                interruption.add_note(way_back)
+            raise
+        if failure:
+            way_back = _way_back(plan.unit, snapshots.get(plan.unit), plan.unit in began)
+            return f"{failure}; {way_back}" if way_back else failure
+        self.tell(Recreated(plan.service, self.watch.clock() - started, snapshot=taken))
+        return None
+
+    def _proven_snapshot(self, unit: DatabaseUnit) -> str:
+        """The unit's new pre-apply snapshot, once its restore test passed."""
+        self.progress.step = f"take the {unit.key} pre-apply snapshot"
+        snapshot = self.backup.pre_apply(unit)
+        short = printable(snapshot[:SNAPSHOT_SHORT_ID])
+        self.progress.step = f"prove pre-apply snapshot {short}"
+        try:
+            self.backup.restore_test(unit, snapshot)
+        except PreApplyError as error:
+            raise PreApplyError(f"{error}, pre-apply snapshot {short} not proven") from error
+        return snapshot
 
     def alone(
         self, unit: str, service: str, before: Callable[[], None] = lambda: None
     ) -> str | None:
         """Recreate one service of `unit` under the switch lock and observe it running; the
         failure line of the first step that fails."""
+        self.progress.step = f"lock the {unit} switch"
         with self.marks.lock():
             if changed := self.marks.changed(unit, self.read[unit]):
                 since = switches.describe_since(since_of(changed))
@@ -106,3 +158,16 @@ class ServiceRecreator:
         if self.engine.down_while_watched(self.config, (service,), self.watch):
             return f"{service} is not running after the {service} recreate"
         return None
+
+
+def _way_back(unit: str, snapshot: str | None, recreating: bool) -> str | None:
+    """Once the unit's snapshot was proven, it by name; once its recreate has begun, also how its
+    database goes back to it. Before that nothing was changed, and loading it would lose what the
+    database took since."""
+    if snapshot is None:
+        return None
+    short = printable(snapshot[:SNAPSHOT_SHORT_ID])
+    if not recreating:
+        return f"pre-apply snapshot {short} taken"
+    restore = f"{command(Verb.RESTORE)} {unit} --live --snapshot {short}"
+    return f"pre-apply snapshot {short}, `{restore}` loads it"

@@ -17,10 +17,13 @@ a unit that is enabled and not switched off or on whose compose definition chang
 alone after the followers, under the switch lock, one plan line each (#376). Volumes are never
 touched. The built service of a unit with `run.build` (agent-service) whose container, in any
 state, runs another image or definition than compose.yaml and its tag name now is recreated alone
-after the followers, one plan line, and its running requests end (#482). A live service of any
-other unit not planned off whose container runs another image than compose.yaml now names is named
-after the unit lines and keeps running: its image is never swapped here, and the line alone asks
-nothing (#91). A unit that would be switched on, or is enabled and
+after the followers, one plan line, and its running requests end (#482). The app or database
+service of Keycloak or LiteLLM whose live container runs another image than compose.yaml pins is
+recreated onto it the same way, its unit's first recreate after the unit's pre-apply snapshot is
+taken and proven (`pre_apply.py`); a snapshot that fails leaves the old container and the run ends
+partial (#995). A live service of any other unit not planned off whose container runs another
+image is named after the unit lines and keeps running: its image is never swapped here, and the
+line alone asks nothing (#91). A unit that would be switched on, or is enabled and
 already runs, and is not set up is asked about separately; on `yes` its own setup command runs in
 the operator's terminal (key material is made there, never here) and `--check` must then pass
 before a fresh plan is shown. A unit with an emergency switch (`hal stop`) or a barrier a stop
@@ -91,6 +94,7 @@ from hal.stack import (
     core,
     environment,
     litellm_keys,
+    pre_apply,
     setup,
     switches,
 )
@@ -182,6 +186,9 @@ class MissingSetup:
     kept_stopped: bool = False
 
 
+DATABASE_UNITS = (reconcile.KEYCLOAK, litellm_keys.LITELLM)  # moved only after a snapshot
+
+
 def _plan(
     engine: compose.Compose,
     marks: switches.Switches,
@@ -212,15 +219,15 @@ def _plan(
     plans = plan_switches(fleet.units, fleet.profile_services, fleet.config, states, switched_off)
     core_plans = core.plan_core(fleet.config, containers, hashes, tracked, record)
     follower_plans = core.plan_followers(fleet.config, containers, hashes, tracked, record, gates)
-    unit_services = plan_unit_services(fleet, containers, hashes, plans, followers, gates, engine)
+    services = plan_unit_services(
+        fleet, containers, hashes, plans, followers, gates, engine, DATABASE_UNITS
+    )
     keycloak_gate = gates.get(reconcile.REALM_UNIT)
-    keycloak_restart = restart_of(plans, unit_services.recreates, reconcile.KEYCLOAK)
+    keycloak_restart = restart_of(plans, services.recreates, reconcile.KEYCLOAK)
     realm = reconcile.plan_realm(
         reconcile.Observer(engine), record, fleet.config, tracked, keycloak_gate, keycloak_restart
     )
-    keys = litellm_keys.plan_keys(
-        engine, states, repository, api, gates, plans, unit_services.recreates
-    )
+    keys = litellm_keys.plan_keys(engine, states, repository, api, gates, plans, services.recreates)
     app_plans = plan_apps(repository, fleet, app_runtime, marks)
     appkit = plan_appkit(repository, rename=rename)
     legal = plan_legal(repository, record.directory / RECORD_FILE, fleet, app_plans)
@@ -230,10 +237,10 @@ def _plan(
         read,
         core_plans,
         follower_plans,
-        unit_services.built,
-        unit_services.recreates,
+        services.built,
+        services.recreates,
         plans,
-        unit_services.images,
+        services.images,
         realm,
         keys,
         app_plans,
@@ -255,7 +262,7 @@ class Collaborators:
     watch: compose.Watch = compose.SETTLED
     git: checkout.Runner = checkout.run_git
     ensure_environment: EnsureEnvironment = environment.ensure
-    realm_backup: reconcile.Backup | None = None
+    realm_backup: pre_apply.Backup | None = None
     app_runtime: AppRuntime | None = None
     rename: Rename = os.rename
 
@@ -386,7 +393,7 @@ def _plan_and_apply(
     repository = live.tree
     engine = collaborators.engine or compose.Compose(repository=repository)
     app_runtime = collaborators.app_runtime or AppRuntime.of(home, state_directory)
-    realm_backup = collaborators.realm_backup or reconcile.Backup.installed(
+    realm_backup = collaborators.realm_backup or pre_apply.Backup.installed(
         repository, _say_waiting
     )
     marks = switches.Switches(state_directory)
@@ -427,9 +434,8 @@ def _plan_and_apply(
         engine,
         planned,
         marks,
-        CorePhase(record, repository, collaborators.verifier, collaborators.watch),
+        CorePhase(record, repository, collaborators.verifier, collaborators.watch, realm_backup),
         completed,
-        realm_backup,
     )
 
 
@@ -581,16 +587,12 @@ def _observe_and_record(
 
 
 def _realm_step(
-    engine: compose.Compose,
-    planned: Plan,
-    marks: switches.Switches,
-    core_phase: CorePhase,
-    backup: reconcile.Backup,
+    engine: compose.Compose, planned: Plan, marks: switches.Switches, core_phase: CorePhase
 ) -> reconcile.Realm:
     return reconcile.Realm(
         engine,
         reconcile.Observer(engine),
-        backup,
+        core_phase.backup,
         core_phase.record,
         planned.fleet.config,
         planned.checkout,
@@ -601,14 +603,10 @@ def _realm_step(
 
 
 def _apply_realm(
-    engine: compose.Compose,
-    planned: Plan,
-    marks: switches.Switches,
-    core_phase: CorePhase,
-    backup: reconcile.Backup,
+    engine: compose.Compose, planned: Plan, marks: switches.Switches, core_phase: CorePhase
 ) -> bool:
     """The realm step after the unit switches; says its lines and whether it ended partial."""
-    result = _realm_step(engine, planned, marks, core_phase, backup).run(planned.realm)
+    result = _realm_step(engine, planned, marks, core_phase).run(planned.realm)
     for row in result_rows(result):
         write_row(row)
     error = partial_error(result)
@@ -701,7 +699,6 @@ def _confirm_and_switch(
     marks: switches.Switches,
     core_phase: CorePhase,
     completed_setups: Sequence[str],
-    realm_backup: reconcile.Backup,
 ) -> int:
     _write_plan(planned)
     if not confirmed(f"apply {counted(changes_in(planned), ChangeNoun.CHANGE)}"):
@@ -722,7 +719,7 @@ def _confirm_and_switch(
         started = [plan for plan in changes if plan.unit.key not in withheld]
         mismatched = _observe_and_record(engine, planned, core_phase, started, progress)
         progress.unit, progress.step = reconcile.REALM_UNIT, "apply the realm step"
-        realm_failed = _apply_realm(engine, planned, marks, core_phase, realm_backup)
+        realm_failed = _apply_realm(engine, planned, marks, core_phase)
         progress.unit, progress.step = litellm_keys.LITELLM_SERVICE, "apply the key step"
         keys_failed = _apply_keys(engine, planned)
         apps_failed = _apply_apps(planned, marks, progress)

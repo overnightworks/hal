@@ -1,5 +1,6 @@
 """What each unit needs to become what the catalog says, and how one unit is switched."""
 
+import dataclasses
 from collections.abc import Callable, Collection, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
@@ -145,7 +146,7 @@ def plan_kept_images(
     profile, the services in `planned_elsewhere` (the followers and the built services) have their
     own plan, a unit planned off loses its containers, a built unit that stays stopped is edge's to
     build and only shown as stopped, and a service whose definition names no image has no pin to
-    compare."""
+    compare. `plan_recreates` moves those of a database unit's app or database service (#995)."""
     planned_off = {plan.unit.key for plan in plans if plan.action is Action.OFF}
     built_and_stopped = {
         plan.unit.key
@@ -196,10 +197,15 @@ def _running_images(service: str, live: Sequence[compose.Container]) -> list[str
 
 @dataclass(frozen=True)
 class Recreate:
-    """A live service of a unit that runs on whose compose definition changed."""
+    """A live service of a unit that runs on whose compose definition changed, or the app or
+    database service of a database unit whose container runs another image than compose.yaml
+    names (`moved`). `snapshot` is set on the first recreate of a unit with a move: the unit's
+    pre-apply snapshot is taken and proven before it."""
 
     unit: str
     service: str
+    moved: KeptImage | None = None
+    snapshot: DatabaseUnit | None = None
 
 
 @dataclass(frozen=True)
@@ -248,6 +254,7 @@ def plan_recreates(
     planned_elsewhere: Collection[str],
     kept: Sequence[KeptImage],
     image_id: Callable[[str], str],
+    database_units: Collection[DatabaseUnit],
 ) -> RecreatePlans:
     """Each live service of an enabled unit that is not switched on, off or kept stopped by a
     plan, whose container is labelled with another definition hash than `hashes` (from
@@ -255,30 +262,76 @@ def plan_recreates(
     depends on. The services in `planned_elsewhere` have their own plan, a service whose image
     differs is only named (#91), and a container without the label cannot be planned (#376). A
     reference that is not pinned by digest may name another image than the container runs (a
-    rebuilt local tag), which a recreate would swap in: that service is named, not recreated."""
+    rebuilt local tag), which a recreate would swap in: that service is named, not recreated.
+    The app or database service of one of `database_units` whose image differs is recreated onto
+    it instead, after the unit's pre-apply snapshot (#995)."""
     planned = {plan.unit.key for plan in plans}
-    kept_services = {image.service for image in kept}
+    databases = {unit.key: unit for unit in database_units}
     live = [container for container in containers if container.live]
     recreates: list[Recreate] = []
     moved: list[KeptImage] = []
     for unit in units:
-        if not unit.enabled or unit.key in planned:
-            continue
+        if unit.enabled and unit.key not in planned:
+            planner = _UnitRecreates(config, live, hashes, image_id, databases.get(unit.key))
+            recreates.extend(
+                planner.of(unit.key, profile_services[unit.key], planned_elsewhere, kept, moved)
+            )
+    return RecreatePlans(recreates, moved)
+
+
+@dataclass(frozen=True)
+class _UnitRecreates:
+    """The recreates of one unit; `database` is the unit when it is a database unit."""
+
+    config: Mapping[str, Any]
+    live: Sequence[compose.Container]
+    hashes: Mapping[str, str]
+    image_id: Callable[[str], str]
+    database: DatabaseUnit | None
+
+    def of(
+        self,
+        unit: str,
+        profile: Sequence[str],
+        planned_elsewhere: Collection[str],
+        kept: Sequence[KeptImage],
+        moved: list[KeptImage],
+    ) -> list[Recreate]:
+        """Its recreates in dependency order, the first after its snapshot when an image moves;
+        each named image swap of an unpinned tag joins `moved`."""
+        moves = self._moves(kept)
+        kept_services = {image.service for image in kept}
         services = [
             service
-            for service in profile_services[unit.key]
-            if service not in planned_elsewhere and service not in kept_services
+            for service in profile
+            if service not in planned_elsewhere
+            and (service in moves or service not in kept_services)
         ]
-        changed = core.changed_definitions(live, services, hashes)
-        for service in core.dependency_order(config, services):
-            if service not in changed:
-                continue
-            swapped = _swapped_image(service, config, live, image_id)
-            if swapped is None:
-                recreates.append(Recreate(unit.key, service))
-            elif swapped not in moved:
-                moved.append(swapped)
-    return RecreatePlans(recreates, moved)
+        changed = core.changed_definitions(self.live, services, self.hashes)
+        recreates: list[Recreate] = []
+        for service in core.dependency_order(self.config, services):
+            if service in moves:
+                recreates.append(Recreate(unit, service, moves[service]))
+            elif service in changed:
+                swapped = _swapped_image(service, self.config, self.live, self.image_id)
+                if swapped is None:
+                    recreates.append(Recreate(unit, service))
+                elif swapped not in moved:
+                    moved.append(swapped)
+        if moves:
+            recreates[0] = dataclasses.replace(recreates[0], snapshot=self.database)
+        return recreates
+
+    def _moves(self, kept: Sequence[KeptImage]) -> dict[str, KeptImage]:
+        """The app and database service whose image differs, each with its first kept image."""
+        if self.database is None:
+            return {}
+        movable = (self.database.service, self.database.database)
+        moves: dict[str, KeptImage] = {}
+        for image in kept:
+            if image.service in movable:
+                moves.setdefault(image.service, image)
+        return moves
 
 
 def _swapped_image(
@@ -324,10 +377,12 @@ def plan_unit_services(
     followers: Collection[str],
     gates: Mapping[str, core.Gate],
     engine: compose.Compose,
+    database_units: Collection[DatabaseUnit],
 ) -> UnitServicePlans:
     """What the services of the units need besides their switch: the built service is recreated
-    onto its image, every other live service whose definition changed is recreated, and every
-    other whose image differs is named (#91)."""
+    onto its image, every other live service whose definition changed is recreated, the app or
+    database service of a database unit whose image differs is recreated onto it after the
+    unit's snapshot, and every other whose image differs is named (#91, #995)."""
     built_services = built_image.built_services(
         fleet.units, fleet.profile_services, fleet.config, gates
     )
@@ -348,8 +403,11 @@ def plan_unit_services(
         planned_elsewhere,
         images,
         engine.image_id,
+        database_units,
     )
-    return UnitServicePlans(built, recreates, [*images, *moved])
+    moving = {recreate.service for recreate in recreates if recreate.moved}
+    named = [image for image in images if image.service not in moving]
+    return UnitServicePlans(built, recreates, [*named, *moved])
 
 
 @dataclass

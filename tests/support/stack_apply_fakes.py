@@ -17,7 +17,8 @@ from hal.stack import (
     switches,
 )
 from hal.stack.litellm_keys import ADMIN_BUDGET_ID, KEYS_SERVICE
-from hal.stack.realm import reconcile
+from hal.stack.pre_apply import PreApplyError
+from hal.stack.unit_plans import DatabaseUnit
 
 PROJECT_PREFIX = 6  # docker compose --project-directory D --file F
 
@@ -395,22 +396,27 @@ class ScriptedCompose:
 
 @dataclass
 class RealmBackup:
-    """hal as the realm step calls it: what it was asked, and the part that fails."""
+    """hal as `hal apply` calls it for a pre-apply snapshot: what it was asked, the part that
+    fails, and each ask as `["hal", "-", part, unit]` on `timeline` when one is given, so a test
+    can put it beside Compose's calls."""
 
     asked: list[str] = field(default_factory=list)
     failing: str | None = None
+    timeline: list[list[str]] | None = None
 
-    def pre_apply(self) -> str:
-        return self._ask("backup")
+    def pre_apply(self, unit: DatabaseUnit) -> str:
+        return self._ask("backup", unit)
 
-    def restore_test(self, snapshot: str) -> None:
+    def restore_test(self, unit: DatabaseUnit, snapshot: str) -> None:
         assert snapshot == "ab12cd34"
-        self._ask("restore test")
+        self._ask("restore test", unit)
 
-    def _ask(self, part: str) -> str:
+    def _ask(self, part: str, unit: DatabaseUnit) -> str:
         self.asked.append(part)
+        if self.timeline is not None:
+            self.timeline.append(["hal", "-", part, unit.key])
         if part == self.failing:
-            raise reconcile.RealmError(f"{part} broke")
+            raise PreApplyError(f"{part} broke")
         return "ab12cd34"
 
 

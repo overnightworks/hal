@@ -141,7 +141,9 @@ other apps' entries in the status file stay as they are, and a name `apps.toml` 
 `--read-data-subset`); the monthly run keeps that. Without a name both commands do what the timers do.
 `hal restore --test <app> --snapshot <ID>` restores and verifies that snapshot of the app instead of
 the one the status file names (it needs the app's name); `hal apply` uses it on the snapshot its own backup
-just made, so a timer backup in between cannot swap the snapshot under test.
+just made, so a timer backup in between cannot swap the snapshot under test. `hal apply` takes and proves
+such a snapshot of Keycloak before its realm step, and of Keycloak or LiteLLM before it recreates their
+service or database onto a new image ([stack.md](stack.md), „Images“).
 
 `hal backup <app> --pre-apply` additionally tags the snapshot `pre-apply`, and with
 `--json` prints nothing but one object, `{"snapshot": "<ID>"}`, which `hal apply` reads (a failure is then one
@@ -448,8 +450,8 @@ holds the backup lock and removes the restored dump when it ends:
 2. `hal restore keycloak --live`, and check that its loaded row names the snapshot you meant
 3. `hal start keycloak`
 
-A failed realm step of `hal apply` names its pre-apply snapshot; load that one with
-`hal restore keycloak --live --snapshot <ID>`. A failed load's line names its own rerun (above).
+A failed realm step of `hal apply`, or a Keycloak that does not run after its recreate onto a new
+image, names its pre-apply snapshot; load that one with `hal restore keycloak --live --snapshot <ID>`. A failed load's line names its own rerun (above).
 
 A run killed outright (SIGKILL, the terminal closed) reports nothing: its load ends whole or not
 at all, nobody reports which, and Keycloak stays stopped. Run
