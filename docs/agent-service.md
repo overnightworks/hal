@@ -254,26 +254,30 @@ An app that calls LiteLLM directly holds only its own key, the file `~/.secrets/
 `hopin`, `presentator`). `hal setup` creates a missing one with the prefix `sk-` that LiteLLM requires of a custom
 key, mode 0644 in a 0700 folder so the app's container reads it as its own user. `hal apply`'s key step reads it to
 make the app's key in LiteLLM (see "The API route"); hopin's file is also read by `agent-canary`, the live canary's one-off. On the same agent network the app posts to
-`http://litellm-front:4000/v1/chat/completions` with that key as bearer; the unit `litellm` starts the front.
+`http://litellm-front:4000/v1/chat/completions`, a picture to `http://litellm-front:4000/v1/images/generations`, with that key as bearer; the unit `litellm` starts the front.
 
 ## The API route
 
-An app reaches the provider through LiteLLM with its own key. The path starts on the app's own
+An app reaches the providers through LiteLLM with its own key: Anthropic for text, OpenAI for
+pictures. The path starts on the app's own
 agent network, `hal_agent_<app>`, and is `litellm-front`, `litellm`, `agent-egress`, the provider,
 over the internal, isolated networks `litellm-backend` and `litellm-egress`; `litellm` also reaches its own Postgres, `litellm-db`, over
 `litellm-db`, a network with those two members. The unit `litellm` of `fleet.yaml` runs the front,
 LiteLLM and its database. While the unit is on, `hal apply` makes each app's key, the person budget
 and the admin budget with its customer rows (the key step below).
 
-- **The boundary.** `litellm-front` is the same pinned Traefik as the gateway with one router,
-  `POST /v1/chat/completions` (`agent-service/litellm/front/`); every other method and path ends in
+- **The boundary.** `litellm-front` is the same pinned Traefik as the gateway with two routers,
+  `POST /v1/chat/completions` and `POST /v1/images/generations` (`agent-service/litellm/front/`);
+  every other method and path, `/v1/images/edits` and `/v1/images/variations` included, ends in
   the front itself, so LiteLLM's own unauthenticated routes are unreachable. Behind it LiteLLM's
   own keys decide, with no hal code in its process: a request needs an app key as bearer (401
   otherwise), a model among the key's `models` (the three
-  names `text/opus`, `text/sonnet`, `text/haiku` of `config.yaml`; 403 otherwise), a path among
+  names `text/opus`, `text/sonnet`, `text/haiku` and the picture name `image/flare` of
+  `config.yaml`, which maps to OpenAI's `gpt-image-2.5-flare` on the key `litellm/openai`; 403
+  otherwise), a path among
   the key's `allowed_routes` (403 otherwise, the provider routes `/v1/messages` and
   `/v1/completions` included), and a `user`, the person's fingerprint (`enforce_user_param`; 401
-  without one), which LiteLLM sends on to the provider as `metadata.user_id`. The privacy text rests on the client wheel v0.20.0 (`pyproject.toml`): the fingerprint is `person_fingerprint`, a SHA-256 of issuer and subject, the same in every app, and the gateway backend sends the app's key as the only bearer, the fingerprint in the body's `user`. LiteLLM also routes
+  without one), which LiteLLM sends on to Anthropic as `metadata.user_id` and to OpenAI as `user`. The privacy text rests on the client wheel v0.20.0 (`pyproject.toml`): the fingerprint is `person_fingerprint`, a SHA-256 of issuer and subject, the same in every app, and the gateway backend sends the app's key as the only bearer, the fingerprint in the body's `user`. LiteLLM also routes
   by a `model` in the query string, which the key's `models` do not bind: one unknown to
   `config.yaml` is refused with 400, but a configured name outside the key's `models` is served by that model and its spend counts on the key, and a key or person
   past its budget is refused (measured). The front therefore answers any query string on its
@@ -306,7 +310,7 @@ and the admin budget with its customer rows (the key step below).
   `[api]` and `[api.<app>]` in `~/.config/hal/config.toml` (`docs/home.md`, „Konfiguration“): per
   number an app's own table, else `[api]`, else the code default in `src/hal/stack/api_limits.py`.
   The defaults are per app 10 dollars and 5 parallel, and 2 dollars per person; every key carries
-  `1mo`, the one route, `models` as LiteLLM's `/v1/models` lists them and no rpm or tpm, and the
+  `1mo`, the two routes, `models` as LiteLLM's `/v1/models` lists them and no rpm or tpm, and the
   app's name as `key_alias`; the person budget carries `1mo` under the id `max_end_user_budget_id`
   names. `hal apply`'s door reads the file before any guard and ends 2 on a malformed one; the
   step plans only what the file and LiteLLM's rows disagree on, so a changed number is a change
@@ -355,9 +359,12 @@ and the admin budget with its customer rows (the key step below).
   apply whose realm step makes the group, or which starts Keycloak, ends so. The members'
   fingerprints pass through hal's memory and the one-off's standard input and output; no printed
   line carries a fingerprint or a member, failures included.
-- **The output default.** Each name sets `max_tokens` 16384 in `config.yaml`: what a request that
+- **The output default.** Each text name sets `max_tokens` 16384 in `config.yaml`: what a request that
   names none gets, and the output LiteLLM reserves against a budget, so the ceiling of a conforming
-  app. An app that names more is bound by the budgets alone.
+  app. An app that names more is bound by the budgets alone. The picture name sets none and sends
+  no `quality`, so OpenAI's default holds; nothing is reserved, and LiteLLM books a picture's cost
+  from the answer's `usage`, so one picture can pass a budget and an answer without `usage` books
+  nothing.
 - **The database.** `litellm-db` is Postgres 17 at the image and hardening of `keycloak-db` (one
   `x-postgres` anchor in `compose.yaml`), with its own volume and the file secret `litellm/db-password`,
   which `start.sh` turns into `DATABASE_URL`. It holds the keys (their hashes only), the budgets, and
@@ -369,7 +376,7 @@ and the admin budget with its customer rows (the key step below).
   `allowed_ips`, global `allowed_routes`, key `tags`, `model_max_budget`, `/key/regenerate`). It
   waits for the database to be healthy at the start only; with the database gone or the password
   wrong it ends non-zero after Prisma's retries. The database password is an environment value
-  of the proxy and its Prisma processes, the same holders as the provider key.
+  of the proxy and its Prisma processes, the same holders as the provider keys.
 - **What expires.** `hal expire`, run daily at 04:00 by `hal-expire.timer` (`Persistent=true`
   catches up a missed run), deletes in one statement, all or nothing, the daily person and tool rows
   (`LiteLLM_DailyEndUserSpend`, `LiteLLM_DailyToolSpend`) dated more than 90 UTC days back, the tool
@@ -390,7 +397,8 @@ and the admin budget with its customer rows (the key step below).
   so an app could give itself the alias `litellm` there; the front therefore finds LiteLLM through
   `extra_hosts` at its fixed address on `litellm-backend` (`compose.yaml` pins the subnet, and its
   `ip_range` keeps that address from any other container), never by Docker's DNS. LiteLLM reaches
-  only the front, its database and, through the gateway's `litellm` entrypoint, the provider's name.
+  only the front, its database and, through the gateway's `litellm` entrypoint, the providers'
+  names; `api.openai.com` is open to that entrypoint alone, so the agent service cannot reach it.
 - **The bound.** Each app key's `max_parallel_requests` bounds its requests in flight; LiteLLM
   refuses the next one at once with 429 and `Retry-After`, before the provider, and another key's
   requests are not counted against it. The operator sets it per app through `config.toml` (the key
@@ -400,8 +408,8 @@ and the admin budget with its customer rows (the key step below).
   (`cancel_on_disconnect` is off and `config.yaml` sets no `request_timeout`), so stalled calls can
   refuse a key for up to an hour.
 - **A change reaches LiteLLM only through a recreate** of its container: `config.yaml` (model
-  remapping included) and `start.sh` are read once at start, and the three secrets (provider key,
-  master key, database password) are files mounted at create time. Keys and budgets live in the
+  remapping included) and `start.sh` are read once at start, and the four secrets (the two provider
+  keys, master key, database password) are files mounted at create time. Keys and budgets live in the
   database and change without a recreate.
 - **A provider failure reaches the caller.** An upstream reset, a broken answer and Anthropic's
   refusal of a used-up balance (a 402 `billing_error`, or a 400 saying the credit balance is too
@@ -409,9 +417,9 @@ and the admin budget with its customer rows (the key step below).
   `CRITICAL`,
   so no log tells them apart, and the operator checks his credit and his key. A caller that leaves
   does not end the request in flight, which may finish and is billed.
-- **Rotating the provider key is a recreate.** A replaced provider key file reaches LiteLLM only
+- **Rotating a provider key is a recreate.** A replaced provider key file reaches LiteLLM only
   through its recreate, until then it keeps sending the old key. Compose refuses to create LiteLLM's
-  container when the provider key file is missing; an empty one makes the container exit non-zero
+  container when a provider key file is missing; an empty one makes the container exit non-zero
   with a line that names the path only.
 - **What `hal setup` makes.** The master key `~/.secrets/litellm/master-key` and the database
   password `~/.secrets/litellm/db-password` come from `hal setup` alone: it generates each (a

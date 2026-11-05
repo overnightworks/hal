@@ -1,7 +1,8 @@
 """The CI job `front` (#768): litellm-front, as shipped, against a stand-in for LiteLLM, driven by
-a table of raw requests. Only the one completion route without a query string reaches the
-backend, with one constant `User-Agent` and no tag header; every other method, path form, encoded
-character and query string stops in the front itself. The job re-runs on every Traefik bump.
+a table of raw requests. Only the completion route and the picture route without a query string
+reach the backend, with one constant `User-Agent` and no tag header; every other method, path
+form, encoded character and query string, the other picture paths included, stops in the front
+itself. The job re-runs on every Traefik bump.
 
 It starts containers, so it runs only where EDGE_FRONT_CASES is set (the job `front`; locally under
 the probe lock). The stand-in and client images are compose.yaml's pins.
@@ -34,6 +35,7 @@ networks:
 """
 FRONT, STAND_IN, CLIENT = "litellm-front", "stand-in", "client"
 ROUTE = "/v1/chat/completions"
+PICTURE_ROUTE = "/v1/images/generations"
 ROUTE_FILE = ROOT / "agent-service" / "litellm" / "front" / "dynamic" / "route.yml"
 TAG_HEADER = "x-litellm-tags"  # lower case, `-` for `_`: every spelling LiteLLM could read
 FRONT_ORIGIN = "litellm-front:4000"
@@ -196,6 +198,12 @@ CASES = [
         forwarded=("Authorization: Bearer probe-token", "Content-Type: application/json"),
     ),
     stops("C42 path parameter", 404, target=ROUTE + ";model=x"),
+    reaches("C43 picture route", PICTURE_ROUTE, f"POST {PICTURE_ROUTE} HTTP/1.1"),
+    stops("C44 picture edits", 404, target="/v1/images/edits"),
+    stops("C45 picture variations", 404, target="/v1/images/variations"),
+    stops("C46 picture query", 400, target=PICTURE_ROUTE + "?model=x"),
+    stops("C47 picture GET", 404, method="GET", target=PICTURE_ROUTE),
+    stops("C48 h2c picture query", 400, target=PICTURE_ROUTE + "?model=x", kind="h2c"),
 ]
 
 
@@ -269,7 +277,7 @@ def stack(tmp_path_factory) -> Iterator[Stack]:
 
 
 @pytest.mark.parametrize("case", CASES, ids=[case.name for case in CASES])
-def test_the_front_forwards_only_the_one_route_and_answers_the_rest_itself(stack, case):
+def test_the_front_forwards_only_its_two_routes_and_answers_the_rest_itself(stack, case):
     answer = stack.drive(case)
     assert answer["status"] == case.status
     assert not answer.get("location")  # the front never sends a client elsewhere

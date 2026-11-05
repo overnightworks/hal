@@ -50,7 +50,8 @@ LITELLM = DatabaseUnit(UNIT, LITELLM_SERVICE, "litellm-db", "LiteLLM")
 CONFIG_FILE = Path("agent-service") / "litellm" / "config.yaml"
 BUDGET_ID_SETTING = "max_end_user_budget_id"
 BUDGET_DURATION = "1mo"
-ROUTE = "/v1/chat/completions"  # the one path litellm-front serves
+# The paths litellm-front serves: the completion call and the picture call.
+ROUTES = ("/v1/chat/completions", "/v1/images/generations")
 ADMIN_GROUP = "/services/litellm/admin"
 ADMIN_BUDGET_ID = "litellm-admin"  # hal's own; LiteLLM never reads it by name
 FINGERPRINT = re.compile(r"fp-[0-9a-f]{64}")
@@ -228,7 +229,7 @@ def desired_key(app: str, models: tuple[str, ...], limits: api_limits.AppLimits)
         "max_budget": limits.budget_dollars,
         "budget_duration": BUDGET_DURATION,
         "models": models,
-        "allowed_routes": (ROUTE,),
+        "allowed_routes": ROUTES,
         "max_parallel_requests": limits.max_parallel_requests,
         "rpm_limit": None,
         "tpm_limit": None,

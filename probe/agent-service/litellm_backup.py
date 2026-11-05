@@ -272,9 +272,9 @@ class BackupProbe(KeysProbe, AdmissionProbe):
 
     def secret_values(self) -> list[str]:
         """What must never appear in a dump or in hal's output: every key in clear, the master
-        key and its hash, the provider key and the database password."""
+        key and its hash, the provider keys and the database password."""
         return [*self.written, self.master_key, hashed(self.master_key), self.provider_key,
-                self.database_password]  # fmt: skip
+                self.picture_key, self.database_password]  # fmt: skip
 
     def hal(self, *arguments: str) -> subprocess.CompletedProcess:
         result = self.run(

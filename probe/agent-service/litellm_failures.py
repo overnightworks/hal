@@ -78,7 +78,7 @@ for entry in os.listdir("/proc"):
         }
 print(json.dumps({"processes": rows}))
 """
-SECRET_NAMES = ("ANTHROPIC_API_KEY", "LITELLM_MASTER_KEY", "DATABASE_URL")
+SECRET_NAMES = ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "LITELLM_MASTER_KEY", "DATABASE_URL")
 
 
 class FailureProbe(LitellmProbe):
@@ -92,6 +92,7 @@ class FailureProbe(LitellmProbe):
         self.key = ""
         self.every_value = [
             self.provider_key,
+            self.picture_key,
             self.master_key,
             self.database_password,
         ]

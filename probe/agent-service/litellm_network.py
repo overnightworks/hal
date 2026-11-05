@@ -1,11 +1,13 @@
 """Probe of the isolation between the API-route networks (#808 S1d cells X1-X12, R3, S1, S2, G20;
-D3, S1 and S2 with the database of #937): LiteLLM, its front, its database and the agent service
-reach each other and the outside only along the
-declared topology, each exclusion with the control that proves the same observer connects when a
-path exists. It runs on the stack of litellm.py: the real service, the front, LiteLLM and the
-gateway's second entrypoint against a fake Anthropic. Nothing live and nothing paid: the probe
-refuses to start unless the resolved copy marks `internet` internal and holds only the two fake
-hosts, and it never calls `egress.py`'s live cells.
+D3, S1 and S2 with the database of #937; HAL-2.11's X13 and the picture host in R3, X7 and X11):
+LiteLLM, its front, its database and the agent service reach each other and the outside only
+along the declared topology, each exclusion with the control that proves the same observer
+connects when a path exists. It runs on the stack of litellm.py: the real service, the front,
+LiteLLM and the gateway's second entrypoint against a fake Anthropic and a fake OpenAI. Nothing
+live and nothing paid: the probe refuses to start unless the resolved copy marks `internet`
+internal and holds only the fake hosts, and it never calls `egress.py`'s live cells. X13 is the
+egress cell of the picture host on the fake stack: the agent service resolves api.openai.com to
+nothing, and its SNI on entrypoint 1 ends in the gateway without a dial, as E3 to E5 judge.
 
     flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \\
         python3 probe/agent-service/litellm_network.py --scratch DIR
@@ -64,12 +66,14 @@ from litellm import (  # noqa: E402
     CA_IN_CLIENT,
     ENTRYPOINT_ADDRESS,
     FAKE_ISSUER,
+    FAKE_PICTURES,
     FAKE_PROVIDER,
     FRONT,
     GATEWAY,
     ISSUER_HOST,
     LISTENING,
     LITELLM,
+    PICTURE_HOST,
     PROVIDER_HOST,
     START_DATABASE,
     TLS_PROGRAM,
@@ -87,6 +91,7 @@ SESSION_SECONDS = 300  # the gateway window over the start and every driving cel
 WINDOW_MARGIN_SECONDS = 3
 LOOPBACK = "lo"
 PROVIDER_ON_INTERNET = "fake provider on internet"
+PICTURES_ON_INTERNET = "fake OpenAI on internet"
 TLS_HANDSHAKE, TLS_ALERT, SERVER_HELLO = 22, 21, 2  # record content types, handshake type
 FIRST_RECORD_PROGRAM = """\
 import json, socket, ssl, sys
@@ -260,9 +265,10 @@ class NetworkProbe(LitellmProbe):
             )
             expect(answer["addresses"] == [], f"S1: the control resolved: {answer}")
             times["dns"] = time.time()
-            seen = self.handshake(PROVIDER_HOST)
-            expect(seen == {"handshake": True, "subject": PROVIDER_HOST, "issuer": "probe-ca"},
-                   f"R3: {seen}")  # fmt: skip
+            for host in (PROVIDER_HOST, PICTURE_HOST):
+                seen = self.handshake(host)
+                expect(seen == {"handshake": True, "subject": host, "issuer": "probe-ca"},
+                       f"R3: {seen}")  # fmt: skip
             times["syn"] = time.time()
 
         def inside_syn_window() -> None:
@@ -275,8 +281,8 @@ class NetworkProbe(LitellmProbe):
         )
         self.cell_s1(observed["s1"], asked, times["dns"])
         self.cell_s2(observed["s2"], times["syn"])
-        self.hold("R3", f"LiteLLM's handshake on entrypoint 2 for {PROVIDER_HOST} shows the fake's "
-                  "certificate of the scratch CA")  # fmt: skip
+        self.hold("R3", f"LiteLLM's handshakes on entrypoint 2 for {PROVIDER_HOST} and "
+                  f"{PICTURE_HOST} show each fake's certificate of the scratch CA")  # fmt: skip
 
     def cell_s1(self, result: dict, asked: str, control_ended: float) -> None:
         """The window must show the control's own query, not only its reply: a window that
@@ -382,7 +388,7 @@ class NetworkProbe(LitellmProbe):
             Reach("X12c", SERVICE, "litellm-db", database, self.database_port, False),
         ):
             self.reach(step, intervals)
-        self.cells_x8_to_x11(second)
+        self.cells_x8_to_x11(second, intervals)
         observed["cells_ended"] = {"at": time.time()}
         observed["x1d"] = {"started": intervals["X1d"][0], "ended": intervals["X1d"][1]}
 
@@ -392,13 +398,18 @@ class NetworkProbe(LitellmProbe):
         expect(name.startswith(prefix), f"{network} is named {name}, outside {prefix}*")
         return name.removeprefix(prefix)
 
-    def cells_x8_to_x11(self, entrypoint: str) -> None:
+    def sni_ended(self, source: str, address: str, where: str, name: str) -> str:
+        """An SNI of `name` from the namespace of `source` to the gateway at `address`, which must
+        end in an alert."""
+        result = self.client_in_namespace_of(
+            self.container(source), "tls", address, name, str(GATEWAY_PORT), "noverify"
+        )
+        alerted(result, name)
+        return f"SNI {name!r} on {where}: the handshake ended ({result['error']})"
+
+    def cells_x8_to_x11(self, entrypoint: str, intervals: dict[str, tuple[float, float]]) -> None:
         def ended(name: str) -> str:
-            result = self.client_in_namespace_of(
-                self.container(LITELLM), "tls", entrypoint, name, str(GATEWAY_PORT), "noverify"
-            )
-            alerted(result, name)
-            return f"SNI {name!r} on entrypoint 2: the handshake ended ({result['error']})"
+            return self.sni_ended(LITELLM, entrypoint, "entrypoint 2", name)
 
         def no_server_hello() -> str:
             record = self.first_record(ISSUER_HOST)
@@ -420,9 +431,31 @@ class NetworkProbe(LitellmProbe):
         outside = self.client_in_namespace_of(container, "resolve", "example.com")["addresses"]
         expect(outside == [], f"X10: example.com resolves to {outside}")
         self.hold("X10", "LiteLLM resolves example.com to no address")
-        provider = self.client_in_namespace_of(container, "resolve", PROVIDER_HOST)["addresses"]
-        expect(provider == [entrypoint], f"X11: {PROVIDER_HOST} resolves to {provider}")
-        self.hold("X11", f"LiteLLM resolves {PROVIDER_HOST} to {entrypoint}, entrypoint 2")
+        for host in (PROVIDER_HOST, PICTURE_HOST):
+            found = self.client_in_namespace_of(container, "resolve", host)["addresses"]
+            expect(found == [entrypoint], f"X11: {host} resolves to {found}")
+        self.hold("X11", f"LiteLLM resolves {PROVIDER_HOST} and {PICTURE_HOST} to {entrypoint}, "
+                  "entrypoint 2")  # fmt: skip
+        self.cells_picture_host(intervals)
+
+    def cells_picture_host(self, intervals: dict[str, tuple[float, float]]) -> None:
+        """X7e-g: only the gateway reaches the fake OpenAI. X13: the agent service cannot reach the
+        picture host: no name, and the gateway's entrypoint 1 ends its SNI without a dial."""
+        pictures = self.address_of(FAKE_PICTURES, "internet")
+        for step in (
+            Reach("X7e", LITELLM, PICTURES_ON_INTERNET, pictures, GATEWAY_PORT, False),
+            Reach("X7f", SERVICE, PICTURES_ON_INTERNET, pictures, GATEWAY_PORT, False),
+            Reach("X7g", GATEWAY, PICTURES_ON_INTERNET, pictures, GATEWAY_PORT, True),
+        ):
+            self.reach(step, intervals)
+        found = self.client("resolve", PICTURE_HOST)["addresses"]
+        expect(found == [], f"X13: the service resolves {PICTURE_HOST} to {found}")
+
+        def ended() -> str:
+            refused = self.sni_ended(SERVICE, self.address, "entrypoint 1", PICTURE_HOST)
+            return f"the service resolves {PICTURE_HOST} to nothing; its {refused}"
+
+        self.refused_without_a_dial("X13", ended)
 
     def cell_g20(self, observed: dict[str, dict]) -> None:
         """The gateway dials only the fake hosts; X1d's own connect from its namespace to LiteLLM
@@ -430,6 +463,7 @@ class NetworkProbe(LitellmProbe):
         result = observed["g20"]
         self.complete(result, "G20", observed["cells_ended"]["at"])
         provider = (self.address_of(FAKE_PROVIDER, "internet"), GATEWAY_PORT)
+        pictures = (self.address_of(FAKE_PICTURES, "internet"), GATEWAY_PORT)
         issuer = (self.address_of(FAKE_ISSUER, "internet"), GATEWAY_PORT)
         x1d = (self.address_of(LITELLM, "litellm-egress"), self.litellm_port)
         interval = observed["x1d"]
@@ -440,9 +474,9 @@ class NetworkProbe(LitellmProbe):
 
         controls = [syn for syn in result["syns"] if of_x1d(syn)]
         seen = {(syn["destination"], syn["port"]) for syn in result["syns"] if not of_x1d(syn)}
-        stray = seen - {provider, issuer}
+        stray = seen - {provider, pictures, issuer}
         expect(not stray, f"G20: the gateway sent SYNs to {sorted(stray)}")
-        if provider not in seen or not controls:
+        if provider not in seen or pictures not in seen or not controls:
             raise NotDriven("G20: not driven: the controls' SYNs are not in the gateway's window")
         self.hold(
             "G20",
