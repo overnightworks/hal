@@ -8,8 +8,9 @@ path the lane changes, through H's `install`), run H's cells on it, then install
 (every changed path at HEAD) with the speech app in the copy's fleet under a probe key, from a
 scratch origin of speech-runtime (release_origin), and `hal apply` it (D5a/b). `transition` then
 drives D2, D3, N1-N5, E1-E3, K1-K6, A1-A10, A12, S1 and M1; `lifecycle` drives R1, R2 and D4. The
-app's compose configuration is checked before each apply (app_isolation, through H's fleet), and
-its project is in every label sweep and check of the live edge's view. Exit 0: every cell held.
+app's compose configuration is checked before each apply (release_origin's SpeechApp with
+app_isolation's rule, through H's fleet), and its project is in every label sweep and check of the
+live edge's view. Exit 0: every cell held.
 """
 
 from __future__ import annotations
@@ -33,7 +34,7 @@ import edge_copy  # noqa: E402
 import in_copy  # noqa: E402
 import yaml  # noqa: E402
 from admission_cells import AdmissionCells, error_code  # noqa: E402
-from app_isolation import SpeechApp, expect_app_guards_refuse  # noqa: E402
+from app_isolation import speech_prefix  # noqa: E402
 from copy_isolation import (  # noqa: E402
     COMPOSE_FILE,
     FLEET_FILE,
@@ -42,11 +43,12 @@ from copy_isolation import (  # noqa: E402
     Fleet,
     install,
     keycloak,
+    live_project_name,
     resolution,
 )
 from edge_copy import HAL_FAILURE, HAL_OK, NOTHING_TO_CHANGE, expect  # noqa: E402
 from network_cells import HostListener, NetworkCells, Topology  # noqa: E402
-from release_origin import app_entry, build_origin  # noqa: E402
+from release_origin import SpeechApp, app_entry, build_origin, expect_app_guards_refuse  # noqa: E402
 from speech_docker import (  # noqa: E402
     Curl,
     addresses_of,
@@ -59,7 +61,7 @@ from speech_docker import (  # noqa: E402
 )
 
 from hal.backup.docker import PROJECT_LABEL  # noqa: E402
-from hal.output import write_line  # noqa: E402
+from hal.output import Glyph, write_line  # noqa: E402
 from hal.stack import deploy_checkout, releases  # noqa: E402
 from hal.stack.plan_rows import PlanEvent  # noqa: E402
 from hal.stack.realm.reconcile import KEYCLOAK, KEYCLOAK_SERVICE, REALM_UNIT  # noqa: E402
@@ -72,6 +74,9 @@ UNITS = frozenset({REALM_UNIT, STEP_CA_UNIT})
 MODES = ("transition", "lifecycle")
 LISTENER_PORT = 18972
 ADMITTED_SECONDS = 90
+# A row of hal's plan that changes something, by its subject: no other row starts with these glyphs.
+CHANGE_GLYPHS = "|".join(re.escape(g.value) for g in (Glyph.CHANGE, Glyph.ADD, Glyph.REMOVE))
+CHANGE_ROW = re.compile(rf"(?<!\S)(?:{CHANGE_GLYPHS}) (?P<subject>\S+)")
 
 
 def git_text(*arguments: str) -> str:
@@ -157,7 +162,7 @@ class SpeechProbe(in_copy.Probe, NetworkCells, AdmissionCells):
         self.cell_e3()
         for cell in (self.cell_k1, self.cell_k2, self.cell_k3, self.cell_k4, self.cell_k5):
             cell()
-        self.cell_k6(self.app_image)
+        self.cell_k6()
         self.drive_admission()
         self.cell_s1()
         self.cell_m1()
@@ -221,7 +226,10 @@ class SpeechProbe(in_copy.Probe, NetworkCells, AdmissionCells):
         self.release_compose = release.compose
         (self.speech_service,) = yaml.safe_load(release.compose)["services"]
         shipped = yaml.safe_load((REPO / COMPOSE_FILE).read_text())["networks"]
-        live = next(n["name"] for n in shipped.values() if "_speech_" in n.get("name", ""))
+        live_prefix = speech_prefix(live_project_name())
+        live = next(
+            n["name"] for n in shipped.values() if n.get("name", "").startswith(live_prefix)
+        )
         for line in expect_app_guards_refuse(self.app, self.stand, live):
             write_line(line, flush=True)
         self.projects.append(APP_KEY)
@@ -249,7 +257,14 @@ class SpeechProbe(in_copy.Probe, NetworkCells, AdmissionCells):
         ]
         missing = [" ".join(row) for row in rows if not re.search(row_pattern(*row), out)]
         expect(not missing, f"D5a: no {missing} in {out[-1500:]}")
-        self.hold("D5a", f"rows {[' '.join(row) for row in rows]}; the plan: {out[:900]}")
+        changes = sorted(CHANGE_ROW.findall(out))
+        wanted = sorted({subject for subject, event, _ in rows if event != PlanEvent.TAG_SKIPPED})
+        expect(changes == wanted, f"D5a: the plan changes {changes}, not exactly {wanted}")
+        self.hold(
+            "D5a",
+            f"the plan changes exactly {changes}; rows {[' '.join(row) for row in rows]}; "
+            f"the plan: {out[:900]}",
+        )
         self.cell_d5b(before, kept)
 
     def cell_d5b(self, before: dict[str, str], kept: tuple[str, ...]) -> None:

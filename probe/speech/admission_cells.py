@@ -16,7 +16,7 @@ from typing import Any
 
 from edge_copy import ProbeFailed, expect
 from service_audience_cell import SPEECH_GROUP, SPEECH_SCOPE
-from speech_docker import Answer, container_log
+from speech_docker import Answer, container_log, plain_http
 
 # speech-runtime's wire (docs/wire.md, Headers and Request): its contract, not hal's
 WORKLOAD_HEADER = "Speech-Workload-Token"
@@ -108,7 +108,7 @@ class AdmissionCells:
         return tokens["access_token"]
 
     def speech_url(self, path: str) -> str:
-        return f"http://{self.speech_service}:{self.port}{path}"
+        return plain_http(self.speech_service, self.port, path)
 
     def speak(self, app: str, tokens: Tokens, words: str) -> Answer:
         body = json.dumps(

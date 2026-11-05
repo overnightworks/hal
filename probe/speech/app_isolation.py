@@ -1,43 +1,35 @@
-"""The check of the speech app's compose configuration before hal creates or starts it in H's copy.
+"""The rule of the speech app's compose configuration before hal creates or starts it in H's copy.
 
 An app runs through hal's app compose (`docker compose -p <key>` over its checkout's compose.yaml),
-not through the copy's compose file, so copy_isolation's checks never see it. `SpeechApp` is the
-copy fleet's app (copy_isolation's `FleetApp`): `expect_isolated` resolves what hal would start it
-from, the release's compose.yaml at its tag and the checkout's once it exists, with the copy's
-environment, and refuses it when it could reach the live stack. `expect_app_config_isolated` is
-that check over one resolved configuration.
+not through the copy's compose file, so copy_isolation's checks never see it.
+`expect_app_config_isolated` refuses one resolved configuration of the app when it could reach the
+live stack or the host; release_origin's `SpeechApp` resolves what hal would start the app from and
+runs it. Pure: the caller passes what Compose resolved.
 """
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import yaml
 from copy_isolation import (
-    COMPOSE_FILE,
     DOCKER_SOCKET_BIND,
     HOST_NAMESPACE,
-    REPO,
-    CopyStand,
     expect_namespaces_in_project,
     expect_sources_in_scratch,
     routable_by_live_edge,
-    run_checked,
 )
-from edge_copy import ProbeFailed, expect
+from edge_copy import expect
 
-from hal.exposure.docker import EDGE_NAME_LABEL
-from hal.stack import deploy_checkout
-from hal.stack.realm.reconcile import KEYCLOAK_SERVICE
-
-SPEECH_NETWORK = "_speech_"  # `<project>_speech_<caller>`: the speech networks the copy creates
+SPEECH_NETWORK = "speech_"  # `<project>_speech_<caller>`: the speech networks a project names
 HOST_MODES = ("uts", "userns_mode", "cgroup")
 DEVICE_KEYS = ("privileged", "devices", "cap_add")
-CHECK_DIRECTORY = ".probe-app-check"  # under the scratch HOME, beside the app's checkout
+
+
+def speech_prefix(project: str) -> str:
+    """The start of every speech network name of the compose `project`."""
+    return f"{project}_{SPEECH_NETWORK}"
 
 
 def expect_exposure_refused(services: Mapping[str, Any]) -> None:
@@ -67,137 +59,63 @@ def expect_widening_refused(services: Mapping[str, Any]) -> None:
     expect(not widened, f"{widened} widen the container")
 
 
+def expect_networks_in_copy(
+    resolved: Mapping[str, Any], services: Mapping[str, Any], prefix: str
+) -> None:
+    """Refuses a network but an external one named `prefix*`, a `network_mode` (bridge, host,
+    none, `container:`, `service:` or a network's name) that names none of them, and a service
+    that joins no network, which Docker puts on the default bridge."""
+    foreign = sorted(
+        f"{key}: {network.get('name')}"
+        for key, network in (resolved.get("networks") or {}).items()
+        if not network.get("external") or not str(network.get("name")).startswith(prefix)
+    )
+    expect(not foreign, f"networks not the copy's external {prefix}*: {foreign}")
+    modes = sorted(
+        f"{name}: {service['network_mode']}"
+        for name, service in services.items()
+        if "network_mode" in service and not str(service["network_mode"]).startswith(prefix)
+    )
+    expect(not modes, f"{modes} take a network_mode outside the copy's {prefix}* networks")
+    unattached = sorted(
+        name for name, service in services.items()
+        if "network_mode" not in service and not service.get("networks")
+    )  # fmt: skip
+    expect(not unattached, f"{unattached} join no network and would land on the default bridge")
+
+
+def volume_named_in_app(volume: Mapping[str, Any], key: str, prefix: str) -> bool:
+    """Whether a resolved volume's name is in the app's project `key`, or is an external one of
+    the copy's `prefix*` names."""
+    name = str(volume.get("name"))
+    return name.startswith(f"{key}_") or (bool(volume.get("external")) and name.startswith(prefix))
+
+
+def expect_volume_names_in_app(volumes: Mapping[str, Any], key: str, prefix: str) -> None:
+    """Refuses a volume `volume_named_in_app` refuses, so no volume of the live stack is mounted."""
+    outside = sorted(
+        f"{volume_key}: {volume.get('name')}"
+        for volume_key, volume in volumes.items()
+        if not volume_named_in_app(volume, key, prefix)
+    )
+    expect(not outside, f"volumes outside {key}_* and the external {prefix}*: {outside}")
+
+
 def expect_app_config_isolated(
     resolved: Mapping[str, Any], key: str, copy_project: str, home: Path
 ) -> int:
     """Refuses the app's resolved configuration when a service could reach the live stack or the
     host: a label the live Traefik routes, a published port, a namespace of the host or of a
-    container outside the app, a bind, secret file or volume backing outside the scratch HOME, the
-    docker socket, a device or a privilege; or when it joins any network but an external one the
-    copy names `<copy project>_speech_*`. The number of services."""
+    container outside the app, a bind, secret file or volume backing outside the scratch HOME, a
+    volume named outside the app, the docker socket, a device or a privilege; or when it reaches
+    any network but an external one the copy names `<copy project>_speech_*`. The number of
+    services."""
     services = resolved["services"]
     expect_exposure_refused(services)
     expect_widening_refused(services)  # before the source check, which spares the socket proxy's
     expect_sources_in_scratch(resolved, services, home)
     expect_namespaces_in_project(services, services, key)
-    prefix = f"{copy_project}{SPEECH_NETWORK}"
-    networks = resolved.get("networks") or {}
-    foreign = sorted(
-        f"{key}: {network.get('name')}"
-        for key, network in networks.items()
-        if not network.get("external") or not str(network.get("name")).startswith(prefix)
-    )
-    expect(not foreign, f"networks not the copy's external {prefix}*: {foreign}")
+    prefix = speech_prefix(copy_project)
+    expect_networks_in_copy(resolved, services, prefix)
+    expect_volume_names_in_app(resolved.get("volumes") or {}, key, prefix)
     return len(services)
-
-
-@dataclass(frozen=True)
-class SpeechApp:
-    """The speech app in the copy's fleet: its key (its compose project), its fleet.yaml entry and
-    the compose.yaml of the release hal deploys, as the probe's origin carries it at its tag."""
-
-    key: str
-    entry: str
-    release_compose: str
-    tag: str
-
-    def expect_isolated(self, stand: CopyStand) -> str:
-        """Every compose.yaml hal would create or start the app from, resolved as hal resolves it
-        and checked; the line that says what holds."""
-        checkout = stand.home / "srv" / self.key / deploy_checkout.COMPOSE_FILE
-        texts = {f"the release at {self.tag}": self.release_compose}
-        if checkout.is_file():
-            texts[f"~/srv/{self.key}"] = checkout.read_text()
-        counted = [
-            f"{where}: {self.services_checked(stand, text)} service"
-            for where, text in texts.items()
-        ]
-        return (
-            f"app {self.key} ({', '.join(counted)}): no route of the live edge, port, host "
-            "namespace, socket, device or privilege, no source outside the scratch HOME, only the "
-            f"copy's external {stand.isolation.project}{SPEECH_NETWORK}* networks"
-        )
-
-    def resolved(self, stand: CopyStand, text: str) -> dict[str, Any]:
-        """`text` resolved under the app's project, from the app's checkout directory, with the
-        environment hal's apply in the copy runs with."""
-        directory = stand.home / CHECK_DIRECTORY / self.key
-        directory.mkdir(parents=True, exist_ok=True)
-        file = directory / deploy_checkout.COMPOSE_FILE
-        file.write_text(text)
-        command = [
-            "docker",
-            "compose",
-            "-p",
-            self.key,
-            "--project-directory",
-            str(stand.home / "srv" / self.key),
-            "--file",
-            str(file),
-            "config",
-            "--format",
-            "json",
-        ]
-        return json.loads(run_checked(command, stand.environment))
-
-    def services_checked(self, stand: CopyStand, text: str) -> int:
-        return expect_app_config_isolated(
-            self.resolved(stand, text), self.key, stand.isolation.project, stand.home
-        )
-
-    def with_entry(self, entry: str) -> SpeechApp:
-        return SpeechApp(self.key, entry, self.release_compose, self.tag)
-
-
-def with_service(resolved: Mapping[str, Any], **changes: object) -> dict[str, Any]:
-    """A deep copy of `resolved` whose every service takes `changes`."""
-    changed = json.loads(json.dumps(resolved))
-    for service in changed["services"].values():
-        service.update(changes)
-    return changed
-
-
-def refusal_cases(resolved: Mapping[str, Any], live_network: str) -> dict[str, tuple[dict, str]]:
-    """The release's resolved configuration changed as a compose.yaml at another tag could change
-    it, by case, with the reason its refusal names."""
-    on_live = json.loads(json.dumps(resolved))
-    first = next(iter(on_live["networks"].values()))
-    first["name"] = live_network
-    with_default = json.loads(json.dumps(resolved))
-    with_default["networks"]["default"] = {"name": "speech_default"}
-    socket = {"type": "bind", "source": DOCKER_SOCKET_BIND[1], "target": DOCKER_SOCKET_BIND[1]}
-    shipped = yaml.safe_load((REPO / COMPOSE_FILE).read_text())["services"][KEYCLOAK_SERVICE]
-    live_name = shipped["labels"][EDGE_NAME_LABEL]  # a name the live constraint routes
-    return {
-        "a label the live Traefik routes": (
-            with_service(resolved, labels={EDGE_NAME_LABEL: live_name}),
-            "would route",
-        ),
-        "a published port": (
-            with_service(resolved, ports=[{"target": 8080}]),
-            "publish a host port",
-        ),
-        "the host network": (with_service(resolved, network_mode=HOST_NAMESPACE), "host network"),
-        "the docker socket": (with_service(resolved, volumes=[socket]), "mount the docker socket"),
-        "privileged": (with_service(resolved, privileged=True), "widen the container"),
-        f"the live network {live_network}": (on_live, "networks not the copy's"),
-        "a network compose would create": (with_default, "networks not the copy's"),
-    }
-
-
-def expect_app_guards_refuse(app: SpeechApp, stand: CopyStand, live_network: str) -> list[str]:
-    """Each refusal case of the release's configuration refused for its reason, once the release
-    itself passes: one `self-check:` line each."""
-    resolved = app.resolved(stand, app.release_compose)
-    project, home = stand.isolation.project, stand.home
-    expect_app_config_isolated(resolved, app.key, project, home)
-    lines = []
-    for case, (changed, reason) in refusal_cases(resolved, live_network).items():
-        try:
-            expect_app_config_isolated(changed, app.key, project, home)
-        except ProbeFailed as failure:
-            expect(reason in str(failure), f"self-check: {case} refused for another reason")
-            lines.append(f"self-check: the app's {case} refused: {failure}")
-        else:
-            raise ProbeFailed(f"self-check: the app's {case} was accepted")
-    return lines

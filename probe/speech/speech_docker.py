@@ -11,7 +11,8 @@ from __future__ import annotations
 import json
 import os
 import time
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -25,6 +26,30 @@ SHORT_SECONDS = 120
 CURL_SECONDS = "4"
 ROOT_IN_CLIENT = "/run/probe/root_ca.crt"
 STATUS_MARK = b"\n#status "  # what --write-out appends after the body
+# A server answering every GET and POST with the fixed body argv[2] on argv[1]:argv[3]; it serves no
+# file. Run by the host's and by a container's python.
+FIXED_RESPONSE_SERVER = """\
+import http.server, sys
+bind, body, port = sys.argv[1], sys.argv[2].encode(), int(sys.argv[3])
+class Fixed(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+    do_POST = do_GET
+    def log_message(self, *_):
+        pass
+http.server.HTTPServer((bind, port), Fixed).serve_forever()
+"""
+
+
+PLAIN_HTTP = "http://"  # NOSONAR(S5332) the copy's internal networks; speech has no TLS by design
+
+
+def plain_http(host: str, port: int, path: str = "/") -> str:
+    """The URL of `path` at `host`:`port` over plain HTTP: every one the probe sends."""
+    return f"{PLAIN_HTTP}{host}:{port}{path}"
 
 
 def docker(*arguments: str, check: bool = True, stdin: bytes | None = None) -> bytes:
@@ -65,7 +90,7 @@ def networks_of(project: str) -> dict[str, str]:
         "--format",
         "{{.Name}} {{.ID}}",
     )
-    return dict(line.split() for line in listed.decode().splitlines())
+    return {name: network_id for name, network_id in map(str.split, listed.decode().splitlines())}
 
 
 def addresses_of(container: str) -> dict[str, str]:
@@ -154,3 +179,26 @@ def wait_healthy(container: str, seconds: int) -> None:
             return
         time.sleep(2)
     raise edge_copy.ProbeFailed(f"{container[:12]} is not healthy after {seconds} s")
+
+
+@contextmanager
+def fixed_server(
+    image: str, project: str, networks: Sequence[str], body: str, *, port: int, alias: str = ""
+) -> Iterator[str]:
+    """A container of `image` (its `python`) on `networks`, as `alias` too when given, answering
+    every request on `port` with `body`, read-only, as nobody, labelled with `project`: its id,
+    removed on leaving."""
+    first, *more = networks
+    aliased = ["--network-alias", alias] if alias else []
+    started = docker(
+        "run", "--detach", "--rm", "--network", first, *aliased,
+        "--label", f"{PROJECT_LABEL}={project}", "--read-only", "--user", "65534",
+        "--entrypoint", "python", image, "-c", FIXED_RESPONSE_SERVER, "", body, str(port),
+    )  # fmt: skip
+    container = started.decode().strip()
+    try:
+        for network in more:
+            docker("network", "connect", *(["--alias", alias] if alias else []), network, container)
+        yield container
+    finally:
+        docker("rm", "--force", container, check=False)

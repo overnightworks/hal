@@ -13,15 +13,30 @@ import json
 import re
 import socket
 import subprocess
+import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import yaml
+from app_isolation import speech_prefix
 from copy_isolation import routable_by_live_edge
 from edge_copy import ProbeFailed, expect
-from speech_docker import Answer, Curl, addresses_of, docker, inspected, networks_of, wait_healthy
+from speech_docker import (
+    FIXED_RESPONSE_SERVER,
+    Answer,
+    Curl,
+    addresses_of,
+    docker,
+    fixed_server,
+    inspected,
+    networks_of,
+    plain_http,
+    wait_healthy,
+)
 
 from hal.output import write_line
 from hal.stack.realm.reconcile import KEYCLOAK, KEYCLOAK_SERVICE
@@ -31,11 +46,17 @@ TRAEFIK_404 = b"404 page not found\n"
 NO_TCP = {7, 28}  # curl: connection refused or unreachable, or timed out
 NOT_RESOLVED = 6
 TLS_UNTRUSTED = 60
+KEY_SET = b'"keys"'  # a body that carries it is a key set
 LEAKS = (b'"issuer"', b"access_token", b"<html", b"<!DOCTYPE")
 HEALTH_PORT = re.compile(r"127\.0\.0\.1:(?P<port>\d+)/health")
 ROUTER_HOST = re.compile(r"Host\(`(?P<host>[^`]+)`\)")
-PUBLIC_ADDRESS, PUBLIC_NAME = "1.1.1.1", "example.org"
+PUBLIC_ADDRESS = "1.1.1.1"  # NOSONAR(S1313) a public address the speech service must not reach
+PUBLIC_NAME = "example.org"
 HEALTHY_SECONDS = 300
+SERVER_SECONDS = 30  # until a probe's fixed-response container answers
+RESTARTED_SECONDS = 90  # until a restarted traefik-mcp serves the key set again
+PEER_PORT = 8080
+FORGED_KID = "forged"
 E2_LIMIT = (
     "E2 limit: the host drops container-to-host traffic for every bridge, so isolation is not "
     "separately provable here; gateway_mode_ipv4 isolated is proven by C1"
@@ -57,7 +78,8 @@ class Topology:
     @classmethod
     def of(cls, resolved: dict[str, Any], project: str) -> Topology:
         names = {key: network["name"] for key, network in resolved["networks"].items()}
-        speech = {key for key, name in names.items() if name.startswith(f"{project}_speech_")}
+        prefix = speech_prefix(project)
+        speech = {key for key, name in names.items() if name.startswith(prefix)}
         services = resolved["services"]
 
         def joins(service: str) -> set[str]:
@@ -70,7 +92,7 @@ class Topology:
         (issuer,) = joins(gateway) & speech
         shared = joins(gateway) & joins(KEYCLOAK_SERVICE)
         expect(len(shared) == 1, f"{gateway} and keycloak share {sorted(shared)}")
-        callers = {names[k].removeprefix(f"{project}_speech_"): names[k] for k in speech - {issuer}}
+        callers = {names[k].removeprefix(prefix): names[k] for k in speech - {issuer}}
         return cls(project, gateway, helper, names[issuer], callers, names[shared.pop()])
 
 
@@ -86,6 +108,7 @@ class NetworkCells:
     copy: Path
     copy_kids: Any
     gateway_id: str
+    app_image: str
     project_container: Any
 
     @property
@@ -95,7 +118,7 @@ class NetworkCells:
         return int(found["port"])
 
     def health_url(self, host: str) -> str:
-        return f"http://{host}:{self.port}/health"
+        return plain_http(host, self.port, "/health")
 
     def in_speech(self, *arguments: str, **options: Any) -> Answer:
         return self.curl.at(f"container:{self.speech_id}", arguments, **options)
@@ -116,6 +139,22 @@ class NetworkCells:
     @property
     def certs_path(self) -> str:
         return re.search(r"Path\(`(?P<path>[^`]+)`\)", self.key_set_router["rule"])["path"]
+
+    @property
+    def key_set_upstream(self) -> tuple[str, int]:
+        """The host and port traefik-mcp sends the key-set route to."""
+        routers = yaml.safe_load((self.copy / "mcp" / "dynamic" / "keycloak.yml").read_text())
+        service = routers["http"]["services"][self.key_set_router["service"]]
+        (server,) = service["loadBalancer"]["servers"]
+        upstream = urlsplit(server["url"])
+        return upstream.hostname, upstream.port
+
+    def answered_within(self, network: str, url: str) -> Answer:
+        """The first 200 from `url` on `network` within SERVER_SECONDS, else the last answer."""
+        return within(
+            SERVER_SECONDS,
+            lambda: self.curl.at(network, ["--connect-timeout", "2", url], trusted=False),
+        )
 
     def kids(self, answer: Answer) -> set[str]:
         expect(answer.status == 200, f"the key set answered {answer.status} ({answer.exit_code})")
@@ -190,14 +229,46 @@ class NetworkCells:
             if other != caller
         }
         reached = {k: a.status for k, a in crossed.items() if a.status or a.exit_code not in NO_TCP}
-        expect(
-            not reached, f"N3: an app reaches the speech service by another app's address {reached}"
-        )
+        expect(not reached, f"N3: an app reaches the speech service by another's address {reached}")
         self.hold(
             "N3",
-            f"no caller reaches the speech service's address on another app's network: "
-            f"{sorted(crossed)}",
+            "; ".join(
+                [
+                    *self.peers_kept_apart(),
+                    f"the speech service's address on another app's network: not {sorted(crossed)}",
+                ]
+            ),
         )
+
+    def peers_kept_apart(self) -> list[str]:
+        """A peer on each caller network answers there and not from any other caller network: one
+        line each."""
+        callers, held = self.topology.callers, []
+        for app, network in callers.items():
+            body = f"{app} peer"
+            with fixed_server(
+                self.app_image, self.topology.project, [network], body, port=PEER_PORT
+            ) as peer:
+                address = addresses_of(peer)[network]
+                url = plain_http(address, PEER_PORT)
+                own = self.answered_within(network, url)
+                expect(
+                    own.status == 200 and own.body == body.encode(),
+                    f"N3: the {app} peer does not answer on {network}: {own.status}",
+                )
+                crossed = {
+                    other: self.curl.at(net, ["--connect-timeout", "2", url], trusted=False)
+                    for other, net in callers.items()
+                    if other != app
+                }
+            reached = {
+                o: a.status for o, a in crossed.items() if a.status or a.exit_code not in NO_TCP
+            }
+            expect(not reached, f"N3: the {app} peer at {address} answered from {reached}")
+            held.append(
+                f"a {app} peer at {address} answers on {network}, not from {sorted(crossed)}"
+            )
+        return held
 
     def cell_n4(self) -> None:
         speech_networks = {*self.topology.callers.values(), self.topology.issuer}
@@ -251,12 +322,10 @@ class NetworkCells:
         } - {None, ""}
         targets = sorted({*gateways, *(str(a) for a in host_addresses())})
         reached = [
-            t
-            for t in targets
-            if self.in_speech(f"http://{t}:{listener.port}/", trusted=False).status
+            t for t in targets if self.in_speech(plain_http(t, listener.port), trusted=False).status
         ]
         bridge = self.network("bridge")["IPAM"]["Config"][0]["Gateway"]
-        control = self.curl.at("bridge", [f"http://{bridge}:{listener.port}/"], trusted=False)
+        control = self.curl.at("bridge", [plain_http(bridge, listener.port)], trusted=False)
         expect(not reached, f"E2: the speech service reached the host listener at {reached}")
         if control.status != 200:
             write_line(E2_LIMIT, flush=True)
@@ -309,11 +378,11 @@ class NetworkCells:
             ("GET", f"{base}%3Fx", "404"),
             ("GET", f"{base};jsessionid=x", "404"),
             ("GET", f"{base}?x=1", "certs"),
-            ("POST", base, "error"),
+            ("POST", base, "error 405"),
         ]
 
     def classify(self, answer: Answer) -> str:
-        if answer.status == 200 and b'"keys"' in answer.body:
+        if answer.status == 200 and KEY_SET in answer.body:
             return "certs" if self.kids(answer) == self.copy_kids() else "foreign certs"
         if any(leak in answer.body for leak in LEAKS):
             return f"leak {answer.status}"
@@ -321,9 +390,9 @@ class NetworkCells:
             return "404"
         if answer.status == 400:
             return "400"
-        return (
-            "error" if answer.status >= 400 and b'"keys"' not in answer.body else str(answer.status)
-        )
+        if answer.status >= 400 and KEY_SET not in answer.body:
+            return f"error {answer.status}"
+        return str(answer.status)
 
     def cell_k2(self) -> None:
         table = []
@@ -346,21 +415,21 @@ class NetworkCells:
 
     def cell_k3(self) -> None:
         answers = [
-            self.in_speech(f"http://{self.key_set_host}:{port}{self.certs_path}", trusted=False)
+            self.in_speech(plain_http(self.key_set_host, port, self.certs_path), trusted=False)
             for port in (443, 80)
         ]
         got = [(a.exit_code, a.status) for a in answers]
-        expect(all(b'"keys"' not in a.body for a in answers), f"K3: plain HTTP answered {got}")
+        expect(all(KEY_SET not in a.body for a in answers), f"K3: plain HTTP answered {got}")
         self.hold("K3", f"plain HTTP to {self.topology.gateway} on :443 and :80: no key set {got}")
 
     def cell_k4(self) -> None:
-        by_name = self.in_speech(f"http://{KEYCLOAK_SERVICE}:8080/", trusted=False)
+        by_name = self.in_speech(plain_http(KEYCLOAK_SERVICE, 8080), trusted=False)
         expect(
             by_name.exit_code == NOT_RESOLVED, f"K4: {KEYCLOAK_SERVICE} gave {by_name.exit_code}"
         )
         keycloak = addresses_of(self.project_container(KEYCLOAK_SERVICE)).values()
         database = addresses_of(self.project_container(KEYCLOAK.database)).values()
-        targets = [f"http://{a}:8080/" for a in keycloak] + [f"http://{a}:5432/" for a in database]
+        targets = [plain_http(a, 8080) for a in keycloak] + [plain_http(a, 5432) for a in database]
         answered = {
             t: a.exit_code
             for t in targets
@@ -381,50 +450,26 @@ class NetworkCells:
             f"(curl {TLS_UNTRUSTED})",
         )
 
-    def cell_k6(self, image: str) -> None:
+    def cell_k6(self) -> None:
+        """A squatter answering as Keycloak's upstream name on traefik-mcp's other networks, proven
+        to answer there, and the key set after traefik-mcp's restart opened fresh connections."""
         t = self.topology
+        host, port = self.key_set_upstream
         networks = [n for n in addresses_of(self.gateway_id) if n not in {t.keys, t.issuer}]
-        forged = json.dumps({"keys": [{"kid": "forged", "kty": "RSA", "n": "AQAB", "e": "AQAB"}]})
-        server = (
-            "import http.server as h\nclass S(h.BaseHTTPRequestHandler):\n def do_GET(self):\n"
-            f"  b={forged!r}.encode(); self.send_response(200); self.end_headers()\n"
-            "  self.wfile.write(b)\n"
-            f"h.HTTPServer(('', 8080), S).serve_forever()\n"
-        )
-        squatter = (
-            docker(
-                "run",
-                "--detach",
-                "--rm",
-                "--network",
-                networks[0],
-                "--network-alias",
-                KEYCLOAK_SERVICE,
-                "--label",
-                f"com.docker.compose.project={t.project}",
-                "--read-only",
-                "--user",
-                "65534",
-                "--entrypoint",
-                "python",
-                image,
-                "-c",
-                server,
-            )
-            .decode()
-            .strip()
-        )
-        try:
-            for network in networks[1:]:
-                docker("network", "connect", "--alias", KEYCLOAK_SERVICE, network, squatter)
-            kids = self.kids(self.in_speech(self.certs_url()))
-        finally:
-            docker("rm", "--force", squatter, check=False)
+        forged = json.dumps({"keys": [{"kid": FORGED_KID, "kty": "RSA", "n": "AQAB", "e": "AQAB"}]})
+        with fixed_server(self.app_image, t.project, networks, forged, port=port, alias=host):
+            controls = {n: self.answered_within(n, plain_http(host, port)) for n in networks}
+            silent = {n: a.status for n, a in controls.items() if a.body != forged.encode()}
+            expect(not silent, f"K6: the squatter does not answer as {host} on {silent}")
+            docker("restart", self.gateway_id)
+            answer = within(RESTARTED_SECONDS, lambda: self.in_speech(self.certs_url()))
+        kids = self.kids(answer)
         expect(kids == self.copy_kids(), f"K6: a squatter on {networks} served the kids {kids}")
         self.hold(
             "K6",
-            f"a container answering as {KEYCLOAK_SERVICE} on {networks}: the key set "
-            f"still carries Keycloak's kids {sorted(kids)} (the pinned address)",
+            f"a squatter on {networks} answered {host}:{port} there with the kid {FORGED_KID}; "
+            f"after a restart of {t.gateway} (no kept upstream connection) the key set from the "
+            f"speech service carries Keycloak's kids {sorted(kids)}",
         )
 
     def cell_m1(self) -> None:
@@ -463,6 +508,16 @@ class NetworkCells:
         )
 
 
+def within(seconds: int, ask: Callable[[], Answer]) -> Answer:
+    """The first answer of `ask` with status 200 within `seconds`, else its last one."""
+    deadline = time.monotonic() + seconds
+    while True:
+        answer = ask()
+        if answer.status == 200 or time.monotonic() > deadline:
+            return answer
+        time.sleep(1)
+
+
 def host_addresses() -> list[ipaddress.IPv4Address]:
     listed = subprocess.run(["ip", "-4", "-o", "addr"], capture_output=True, text=True, check=True)  # noqa: S603, S607 - fixed argv
     return [ipaddress.ip_interface(line.split()[3]).ip for line in listed.stdout.splitlines()]
@@ -477,14 +532,15 @@ def tcp_answers(address: str, port: int) -> bool:
 
 
 class HostListener:
-    """An HTTP listener on every host address for E2, under `timeout`, its pid in the scratch."""
+    """A fixed-response HTTP listener on every host address for E2, serving no file, under
+    `timeout`, its pid in the scratch."""
 
     def __init__(self, scratch: Path, port: int) -> None:
         self.port, self.pid_file = port, scratch / "e2-listener.pid"
         bind = "0.0.0.0"  # noqa: S104 - E2 needs a listener on every host address
-        command = ["timeout", "600", "python3", "-m", "http.server", "--bind", bind, str(port)]
+        server = [sys.executable, "-I", "-c", FIXED_RESPONSE_SERVER, bind, "E2", str(port)]
         self.process = subprocess.Popen(  # noqa: S603 - argv built here from fixed words
-            [*command, "--directory", str(scratch)],  # noqa: S607 - timeout found on PATH
+            ["timeout", "600", *server],  # noqa: S607 - timeout found on PATH
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )

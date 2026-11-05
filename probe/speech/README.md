@@ -16,14 +16,22 @@ under a probe key, never the shipped key `speech-runtime`, whose project is the 
 (D4). Each mode needs an existing, empty `--scratch`, runs H's cells H1-H6 around its own, and
 ends with `PASSED: ...` (exit 0) or `PROBE FAILED: <what>` (exit 1).
 
-Before every apply, `app_isolation.py` resolves the compose.yaml hal would start the app from
-(the release at its tag, and the checkout once it exists) and refuses a route of the live edge,
-a published port, a host namespace, the docker socket, a device or privilege, a source outside the
-scratch HOME and any network but the copy's external `<project>_speech_*`; its negative cases
-print one `self-check:` line each. The app's project is in every label sweep of the copy.
+Before every apply, `release_origin.SpeechApp` resolves the compose.yaml hal would start the app
+from (the release at its tag, and the checkout once it exists), and `app_isolation.py`'s rule
+refuses a route of the live edge, a published port, a host namespace, a `network_mode`, a service
+on no network, the docker socket, a device or privilege, a source outside the scratch HOME, a
+volume named outside the app's project, and any network but the copy's external
+`<project>_speech_*`; its negative cases print one `self-check:` line each. The app's project is
+in every label sweep of the copy.
 
-Tokens never leave the probe but on curl's stdin. The E2 cell starts an HTTP listener on every
-host address for its own length, under `timeout 600`, its pid in the scratch. Where the host
+N3 and K6 start throwaway containers of the app's image that answer every request with one fixed
+body, labelled with the copy's project: N3 a peer on each caller network, answering there and
+not from the other; K6 a squatter answering as Keycloak's upstream name on traefik-mcp's other
+networks, proven to answer there, before traefik-mcp restarts and the key set is fetched again.
+
+Tokens never leave the probe but on curl's stdin. The E2 cell starts a listener on every host
+address that answers one fixed body and serves no file, for its own length, under
+`timeout 600`, its pid in the scratch. Where the host
 drops container-to-host traffic for every bridge, its control (a container on the default
 bridge) cannot reach the listener either: E2 then prints `E2 limit: ...` instead of holding,
 the speech service's attempts must still all fail, and `gateway_mode_ipv4: isolated` is

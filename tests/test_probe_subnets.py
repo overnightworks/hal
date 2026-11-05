@@ -3,8 +3,6 @@ every copy writer of the probes, which must keep each pinned network off the liv
 the app H's copy runs, which joins only the copy's own speech networks (probe/speech)."""
 
 import ipaddress
-import json
-import os
 import re
 import sys
 from collections.abc import Iterator
@@ -13,6 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 import support.keycloak_probe as keycloak_support
+import support.probe_modules as probe_modules
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,14 +22,15 @@ import edge_copy  # noqa: E402
 import edge_subnets  # noqa: E402
 from support.script_module import loaded_script  # noqa: E402
 
-from hal.backup.docker import PROJECT_LABEL  # noqa: E402
 from hal.stack import catalog  # noqa: E402
 
 PROJECT = "edge-some-probe"
 SHIPPED_COMPOSE = (ROOT / "compose.yaml").read_text()
 IPV4 = re.compile(r"\b\d+\.\d+\.\d+\.\d+\b")
-# The Keycloak probe's module and the docker host it runs on: the support module's fixtures.
+# The Keycloak probe's module and the docker host it runs on, and the probes this file loads: the
+# support modules' fixtures.
 keycloak_probe, docker_host = keycloak_support.probe, keycloak_support.docker_host
+step_ca_probe, egress_probe = probe_modules.step_ca_probe, probe_modules.egress_probe
 
 
 def subnets_of(compose: dict) -> list[ipaddress.IPv4Network]:
@@ -82,41 +82,15 @@ def assert_beside_the_live_stack(text: str, project: str, taken: list[str]) -> N
     assert all(name.startswith(f"{project}_") for name in edge_copy.fixed_names(text))
 
 
-def a_daemon(directory: Path, monkeypatch: pytest.MonkeyPatch, networks: dict[str, str]) -> None:
-    """A docker executable on PATH whose daemon holds `networks`, each subnet with the compose
-    project that made it."""
-    directory.mkdir()
-    listed, inspected = directory / "ids", directory / "inspect.json"
-    listed.write_text("".join(f"{subnet}\n" for subnet in networks))
-    inspected.write_text(json.dumps([
-        {"Labels": {PROJECT_LABEL: project}, "IPAM": {"Config": [{"Subnet": subnet}]}}
-        for subnet, project in networks.items()
-    ]))  # fmt: skip
-    docker = directory / "docker"
-    docker.write_text(
-        f'#!/bin/sh\ncase "$*" in\n  "network ls -q") cat "{listed}" ;;\n'
-        f'  "network inspect "*) cat "{inspected}" ;;\n  *) exit 1 ;;\nesac\n'
-    )
-    docker.chmod(0o755)
-    monkeypatch.setenv("PATH", f"{directory}{os.pathsep}{os.environ['PATH']}")
+def a_copys_daemon(directory: Path, monkeypatch: pytest.MonkeyPatch, networks: dict[str, str]):
+    """probe_modules.a_daemon, with no live network for a copy's checks to find."""
+    probe_modules.a_daemon(directory, monkeypatch, networks)
     monkeypatch.setattr(edge_copy, "live_networks", set)
-
-
-@pytest.fixture(scope="module")
-def step_ca_probe() -> Iterator:
-    yield from loaded_script("step_ca_probe", ROOT / "probe" / "step-ca" / "probe.py")
 
 
 @pytest.fixture(scope="module")
 def copy_isolation(keycloak_probe) -> Iterator:
     yield from loaded_script("copy_isolation", ROOT / "probe" / "keycloak" / "copy_isolation.py")
-
-
-@pytest.fixture(scope="module")
-def egress_probe() -> Iterator:
-    path_before = list(sys.path)  # egress.py inserts its own directories
-    yield from loaded_script("egress_probe", ROOT / "probe" / "agent-service" / "egress.py")
-    sys.path[:] = path_before
 
 
 def step_ca_copy(request: pytest.FixtureRequest, scratch: Path) -> tuple[str, str]:
@@ -151,13 +125,13 @@ def test_a_probes_copy_of_compose_takes_free_subnets_and_the_same_again_beside_i
     request, tmp_path, monkeypatch, write_copy
 ):
     taken = {edge_subnets.PROBE_SUBNETS[0]: "another-project"}
-    a_daemon(tmp_path / "daemon", monkeypatch, taken)
+    a_copys_daemon(tmp_path / "daemon", monkeypatch, taken)
 
     text, project = write_copy(request, tmp_path / "first")
     assert_beside_the_live_stack(text, project, list(taken))
 
     own = {str(subnet): project for subnet in subnets_of(yaml.safe_load(text))}
-    a_daemon(tmp_path / "daemon-with-the-copy", monkeypatch, taken | own)
+    a_copys_daemon(tmp_path / "daemon-with-the-copy", monkeypatch, taken | own)
     again, _ = write_copy(request, tmp_path / "again")
     assert subnets_of(yaml.safe_load(again)) == subnets_of(yaml.safe_load(text))
 
@@ -167,17 +141,20 @@ def test_a_copy_that_would_keep_a_pin_the_probe_does_not_hold_is_refused():
         edge_copy.compose_beside_the_live_stack(SHIPPED_COMPOSE, PROJECT, {})
 
 
-def test_the_keycloak_probe_moves_keycloaks_networks_and_pinned_address_onto_its_own_subnets(
-    keycloak_probe, docker_host, tmp_path
+def test_the_keycloak_probe_moves_keycloaks_networks_and_pinned_address_onto_free_subnets(
+    keycloak_probe, tmp_path, monkeypatch
 ):
-    stack = keycloak_probe.Stack(tmp_path)
+    taken = {edge_subnets.PROBE_SUBNETS[0]: "another-project"}
+    probe_modules.a_daemon(tmp_path / "daemon", monkeypatch, taken)
+    stack = keycloak_probe.Stack(tmp_path / "scratch")
 
     # compose's `!override` tag says only how the overlay's values merge
     overlay = yaml.safe_load(stack.network_overlay.read_text().replace("!override", ""))
 
-    taken = {stack.keycloak_subnet, stack.key_set_subnet}
-    assert len(taken) == 2
-    assert {str(subnet) for subnet in subnets_of(overlay)} == taken
+    moved = {stack.keycloak_subnet, stack.key_set_subnet}
+    assert len(moved) == 2
+    assert {str(subnet) for subnet in subnets_of(overlay)} == moved
+    assert not moved & set(taken)
     assert_pins_moved_off(overlay, yaml.safe_load(SHIPPED_COMPOSE))
 
 
@@ -225,6 +202,28 @@ def a_release(home: Path) -> dict:
     }
 
 
+def on_network_mode(mode: str):
+    """The service on `mode` instead of its networks, as Compose resolves a `network_mode`."""
+
+    def change(resolved: dict) -> None:
+        speech = resolved["services"]["speech"]
+        del speech["networks"]
+        speech["network_mode"] = mode
+
+    return change
+
+
+def with_volume(name: str, **declared: object):
+    """The service mounting a top-level volume that resolves to `name`."""
+
+    def change(resolved: dict) -> None:
+        resolved["volumes"] = {"data": {"name": name, **declared}}
+        mount = {"type": "volume", "source": "data", "target": "/data"}
+        resolved["services"]["speech"]["volumes"] = [mount]
+
+    return change
+
+
 def live_edge_name() -> str:
     shipped = yaml.safe_load((ROOT / "compose.yaml").read_text())["services"]["keycloak"]
     return shipped["labels"]["edge.name"]
@@ -252,6 +251,23 @@ APP_REFUSALS = {
                                   "networks not the copy's"),
     "a live edge name": (lambda r: r["services"]["speech"].update(
         labels={"edge.name": live_edge_name()}), "would route"),
+    "the default bridge by network_mode": (on_network_mode("bridge"), "network_mode"),
+    "no network by network_mode": (on_network_mode("none"), "network_mode"),
+    "an app service's namespace": (on_network_mode("service:speech"), "network_mode"),
+    "a live network by network_mode": (on_network_mode("hal_keycloak"), "network_mode"),
+    "no declared network": (lambda r: r["services"]["speech"].pop("networks"),
+                            "default bridge"),
+    "a live external volume": (with_volume("hal_keycloak-db", external=True),
+                               "volumes outside"),
+    "another project's volume": (with_volume("other_models"), "volumes outside"),
+    "a copy's speech name compose would create": (with_volume(f"{COPY_PROJECT}_speech_models"),
+                                                  "volumes outside"),
+}  # fmt: skip
+
+APP_VOLUMES = {
+    "its own project's volume": with_volume(f"{APP_KEY}_models"),
+    "an external volume of the copy's speech names": with_volume(
+        f"{COPY_PROJECT}_speech_models", external=True),
 }  # fmt: skip
 
 
@@ -260,6 +276,15 @@ def test_the_apps_release_on_the_copys_speech_networks_passes(app_isolation, tmp
         a_release(tmp_path), APP_KEY, COPY_PROJECT, tmp_path
     )
     assert checked == 1
+
+
+@pytest.mark.parametrize("change", APP_VOLUMES.values(), ids=APP_VOLUMES)
+def test_an_app_volume_named_inside_the_app_or_the_copys_speech_names_passes(
+    app_isolation, tmp_path, change
+):
+    resolved = a_release(tmp_path)
+    change(resolved)
+    assert app_isolation.expect_app_config_isolated(resolved, APP_KEY, COPY_PROJECT, tmp_path) == 1
 
 
 @pytest.mark.parametrize("change, reason", APP_REFUSALS.values(), ids=APP_REFUSALS)

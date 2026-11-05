@@ -45,8 +45,9 @@ jobs:
 
       - name: overnightworks-hal tests
         # pytest and pytest-cov come from the lock file, installed by the sync step above;
-        # pyproject.toml's pythonpath makes src and scripts importable.
-        run: uv run --no-sync --no-build pytest --cov=src --cov=scripts --cov=probe/agent-service --cov=agent-service --cov-report=xml:coverage.xml
+        # pyproject.toml's pythonpath makes src and scripts importable. probe/edge_subnets.py is
+        # measured by its module name, the one its tests import it under.
+        run: uv run --no-sync --no-build pytest --cov=src --cov=scripts --cov=probe/agent-service --cov=agent-service --cov=probe/speech --cov=edge_subnets --cov-report=xml:coverage.xml
 
       # home's, hal's and hal.output's floor: edge's own code carries none, so the floor is per path, not a global fail_under.
       # If a home or hal path moves, this include moves with it. hal's console script runs in child
