@@ -1,5 +1,6 @@
 """The /24s a probe's copy or overlay of compose.yaml pins (#872): probe/edge_subnets.py's rule and
-every copy writer of the probes, which must keep each pinned network off the live stack's /24."""
+every copy writer of the probes, which must keep each pinned network off the live stack's /24; and
+the app H's copy runs, which joins only the copy's own speech networks (probe/speech)."""
 
 import ipaddress
 import json
@@ -23,6 +24,7 @@ import edge_subnets  # noqa: E402
 from support.script_module import loaded_script  # noqa: E402
 
 from hal.backup.docker import PROJECT_LABEL  # noqa: E402
+from hal.stack import catalog  # noqa: E402
 
 PROJECT = "edge-some-probe"
 SHIPPED_COMPOSE = (ROOT / "compose.yaml").read_text()
@@ -190,3 +192,81 @@ def test_the_first_candidate_that_overlaps_no_occupied_subnet_is_free():
 def test_a_candidate_inside_a_wider_occupied_subnet_is_taken():
     with pytest.raises(ValueError, match="no free /24"):
         edge_subnets.free_subnet(CANDIDATES, ["172.31.0.0/16"])
+
+
+COPY_PROJECT = "edge-kc-in-copy"
+APP_KEY = f"{COPY_PROJECT}-speech"
+
+
+@pytest.fixture(scope="module")
+def app_isolation(copy_isolation) -> Iterator:
+    yield from loaded_script("app_isolation", ROOT / "probe" / "speech" / "app_isolation.py")
+
+
+def test_the_copys_fleet_runs_the_stands_app_alone_and_refuses_another(copy_isolation):
+    entry = f"  {APP_KEY}:\n    repo: {{default_branch: main}}\n    run: {{enabled: true}}\n"
+    fleet = copy_isolation.Fleet(frozenset({"keycloak"}), {APP_KEY: SimpleNamespace(entry=entry)})
+    stand = SimpleNamespace(fleet=fleet)
+    text = copy_isolation.probe_fleet((ROOT / "fleet.yaml").read_text(), stand)
+    apps = {key for key, one in catalog.parse(text.encode())["services"].items()
+            if catalog.is_app(one)}  # fmt: skip
+    assert apps == {APP_KEY}
+    other = "  other-app:\n    repo: {default_branch: main}\n    run: {enabled: true}\n"
+    with pytest.raises(edge_copy.ProbeFailed, match=r"has the apps \['other-app'\]"):
+        copy_isolation.expect_fleet_isolated(text + other, stand)
+
+
+def a_release(home: Path) -> dict:
+    """A resolved app configuration on the copy's speech networks with its secret in the HOME."""
+    return {
+        "services": {"speech": {"networks": {"issuer": None}, "secrets": [{"source": "root"}]}},
+        "networks": {"issuer": {"name": f"{COPY_PROJECT}_speech_issuer", "external": True}},
+        "secrets": {"root": {"file": str(home / ".secrets" / "root.crt")}},
+    }
+
+
+def live_edge_name() -> str:
+    shipped = yaml.safe_load((ROOT / "compose.yaml").read_text())["services"]["keycloak"]
+    return shipped["labels"]["edge.name"]
+
+
+APP_REFUSALS = {
+    "a published port": (lambda r: r["services"]["speech"].update(ports=[{"target": 8080}]),
+                         "publish a host port"),
+    "the host network": (lambda r: r["services"]["speech"].update(network_mode="host"),
+                         "host network"),
+    "a live container's network": (lambda r: r["services"]["speech"].update(
+        network_mode="container:hal-traefik-1"), "outside the copy"),
+    "a fixed name outside the project": (lambda r: r["services"]["speech"].update(
+        container_name="hal-speech"), "outside the copy"),
+    "a bind outside the HOME": (lambda r: r["services"]["speech"].update(volumes=[
+        {"type": "bind", "source": "/srv", "target": "/srv"}]), "outside the scratch HOME"),
+    "the docker socket": (lambda r: r["services"]["speech"].update(volumes=[{"type": "bind",
+        "source": "/var/run/docker.sock", "target": "/s"}]), "docker socket"),
+    "a secret file outside the HOME": (lambda r: r["secrets"]["root"].update(
+        file="/etc/hostname"), "outside the scratch HOME"),
+    "privileged": (lambda r: r["services"]["speech"].update(privileged=True), "widen"),
+    "the live speech network": (lambda r: r["networks"]["issuer"].update(
+        name="hal_speech_issuer"), "networks not the copy's"),
+    "a network compose creates": (lambda r: r["networks"]["issuer"].pop("external"),
+                                  "networks not the copy's"),
+    "a live edge name": (lambda r: r["services"]["speech"].update(
+        labels={"edge.name": live_edge_name()}), "would route"),
+}  # fmt: skip
+
+
+def test_the_apps_release_on_the_copys_speech_networks_passes(app_isolation, tmp_path):
+    checked = app_isolation.expect_app_config_isolated(
+        a_release(tmp_path), APP_KEY, COPY_PROJECT, tmp_path
+    )
+    assert checked == 1
+
+
+@pytest.mark.parametrize("change, reason", APP_REFUSALS.values(), ids=APP_REFUSALS)
+def test_an_app_configuration_that_reaches_beyond_the_copy_is_refused(
+    app_isolation, tmp_path, change, reason
+):
+    resolved = a_release(tmp_path)
+    change(resolved)
+    with pytest.raises(edge_copy.ProbeFailed, match=reason):
+        app_isolation.expect_app_config_isolated(resolved, APP_KEY, COPY_PROJECT, tmp_path)

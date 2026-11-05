@@ -28,7 +28,7 @@ import secrets
 import subprocess
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -146,13 +146,17 @@ def key_id(token: str) -> str:
     return json.loads(base64.urlsafe_b64decode(header + "=" * (-len(header) % 4)))["kid"]
 
 
-def project_resources(kind: str) -> list[str]:
-    """The containers (any state), networks or volumes that carry the project's label."""
+def project_resources(kind: str, projects: Sequence[str] = (PROJECT,)) -> list[str]:
+    """The containers (any state), networks or volumes that carry the label of one of `projects`."""
     every = ["--all"] if kind == "container" else []
-    label = f"label={PROJECT_LABEL}={PROJECT}"
-    return run_checked(
-        ["docker", kind, "ls", *every, "--quiet", "--filter", label], os.environ
-    ).split()
+    return [
+        found
+        for project in projects
+        for found in run_checked(
+            ["docker", kind, "ls", *every, "--quiet", "--filter",
+             f"label={PROJECT_LABEL}={project}"], os.environ,
+        ).split()
+    ]  # fmt: skip
 
 
 class KeycloakCopy:
@@ -172,6 +176,9 @@ class KeycloakCopy:
         self.http: ScratchOnlyHttp | None = None
         self.kc: Any = None
         self.inspected: list[str] = []  # the moments every container was looked at
+        # the copy's project and the project of each app its fleet ran: what every check of the
+        # live edge's view and every label sweep covers
+        self.projects: list[str] = [PROJECT]
         self.self_checks = 0
 
     @property
@@ -275,9 +282,9 @@ class KeycloakCopy:
         return set(listed.split())
 
     def expect_hidden_from_live_edge(self, moment: str) -> None:
-        """Every container of the copy's project, in any state, carries no `edge.name` the live
-        constraint accepts, so the live Traefik never takes one as a server."""
-        containers = project_resources("container")
+        """Every container of the copy's project and its apps', in any state, carries no
+        `edge.name` the live constraint accepts, so the live Traefik never takes one as a server."""
+        containers = project_resources("container", self.projects)
         if containers:
             inspected = run_checked(
                 ["docker", "container", "inspect", "--format", "{{json .Config.Labels}}",
@@ -293,7 +300,7 @@ class KeycloakCopy:
         the seconds it took. A copy whose files cannot be read or are not isolated any more is
         removed by its project label alone, and its error then stops the teardown."""
         started = time.monotonic()
-        if stray := project_resources("container"):
+        if stray := project_resources("container", self.projects):
             run_checked(["docker", "rm", "--force", *stray], os.environ, timeout=SHORT_SECONDS)
         removed_whatever_fails(self.checked_down, self.sweep)
         return time.monotonic() - started
@@ -328,17 +335,21 @@ class KeycloakCopy:
                          "--timeout", "10", timeout=COMPOSE_SECONDS)  # fmt: skip
 
     def sweep(self) -> None:
-        """Removes the networks and volumes labelled with the project and checks that nothing of it
-        is left and the live networks kept their ids."""
+        """Removes the networks and volumes labelled with one of the projects and checks that
+        nothing of them is left and the live networks kept their ids."""
         for kind in ("network", "volume"):
-            if found := project_resources(kind):
+            if found := project_resources(kind, self.projects):
                 run_checked(["docker", kind, "rm", *found], os.environ, timeout=SHORT_SECONDS)
-        named = run_checked(
-            ["docker", "volume", "ls", "--quiet", "--filter", f"name={PROJECT}_"], os.environ
-        ).split()
+        named = [
+            volume
+            for project in self.projects
+            for volume in run_checked(
+                ["docker", "volume", "ls", "--quiet", "--filter", f"name={project}_"], os.environ
+            ).split()
+        ]
         left = [
             *(found for kind in ("container", "network", "volume")
-              for found in project_resources(kind)),
+              for found in project_resources(kind, self.projects)),
             *named,
         ]  # fmt: skip
         expect(not left, f"the teardown left {left}")

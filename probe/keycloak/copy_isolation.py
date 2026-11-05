@@ -17,10 +17,10 @@ import shlex
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from types import ModuleType
-from typing import Any
+from typing import Any, Protocol
 from urllib.parse import urlsplit
 
 import edge_copy
@@ -108,8 +108,7 @@ class Isolation:
     @classmethod
     def allocate(cls, project: str, shipped_compose: str) -> Isolation:
         """Two free loopback ports and the probe's /24s (edge_copy.probe_prefixes), none of them
-        the shipped compose.yaml's own, so the copy keeps clear of the live stack even while it is
-        down."""
+        the shipped compose.yaml's: the copy keeps clear of the live stack even while it is down."""
         edge_port, admin_port = keycloak.free_loopback_ports(2)
         expect(not {edge_port, admin_port} & LIVE_PORTS, "a free port is a live entrypoint's")
         pinned = edge_copy.probe_prefixes(shipped_compose, project)
@@ -150,11 +149,21 @@ class Isolation:
         return frozenset(f"{p}{edge_subnets.SUBNET_SUFFIX}" for p in self.pinned.values())
 
 
+class FleetApp(Protocol):
+    """An app the copy's fleet runs through hal's app compose, which no check of the copy resolves:
+    its fleet.yaml lines, and the check of what hal would start it from, run with the copy's."""
+
+    entry: str
+
+    def expect_isolated(self, stand: CopyStand) -> str: ...
+
+
 @dataclass(frozen=True)
 class Fleet:
-    """The copy's fleet.yaml: the units of `units_on` on, every other unit off, and no app."""
+    """The copy's fleet.yaml: the units of `units_on` on, every other unit off, the apps alone."""
 
     units_on: frozenset[str]
+    apps: Mapping[str, FleetApp] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -258,7 +267,7 @@ def probe_fleet(text: str, stand: CopyStand) -> str:
     expect(fleet.units_on <= found, f"{FLEET_FILE} switches no {sorted(fleet.units_on - found)}")
     switched = UNIT_SWITCH.sub(
         lambda switch: f"{switch[1]}{str(switch['unit'] in fleet.units_on).lower()}", without
-    )
+    ) + "".join(app.entry for app in fleet.apps.values())  # services is fleet.yaml's last mapping
     expect_fleet_isolated(switched, stand)
     return switched
 
@@ -314,8 +323,7 @@ def install(stand: CopyStand, files: Mapping[str, str | None], message: str) -> 
 
 @functools.cache
 def live_routed_name() -> re.Pattern[str]:
-    """The names the live Traefik routes: the pattern of its one constraint, as traefik.yml
-    ships it."""
+    """The names the live Traefik routes: its one constraint's pattern, as traefik.yml ships it."""
     shipped = yaml.safe_load((REPO / TRAEFIK_FILE).read_text())["providers"]["docker"]
     constraint = shipped["constraints"]
     expect(constraint == keycloak.LIVE_CONSTRAINTS, f"the live constraint is {constraint!r}")
@@ -334,6 +342,7 @@ def expect_isolated(stand: CopyStand) -> str:
     that says what holds."""
     units = expect_files_isolated(stand)
     started = expect_resolved_isolated(stand, units)
+    apps = "; ".join(app.expect_isolated(stand) for app in stand.fleet.apps.values()) or "no app"
     bootstrapping = (stand.home / KEYCLOAK_SECRETS / go_live.BOOTSTRAP_SECRET).exists()
     if bootstrapping:
         command = go_live_bootstrap_start(stand)
@@ -346,9 +355,10 @@ def expect_isolated(stand: CopyStand) -> str:
         f"{isolation.admin_url}, keycloak subnet {isolation.keycloak_subnet}, pinned "
         f"{sorted(isolation.pinned.values())}; {started} started services{overlay}, none "
         "routable by the live edge, none publishing a port, only traefik on the host network, no "
-        "bind, volume backing or secret file outside the scratch HOME but the socket proxy's "
-        "docker socket, no namespace of a container outside the copy; no app; every fixed name "
-        "and the backup records in the project"
+        "bind or secret file outside the scratch HOME but the socket proxy's docker socket, every "
+        "volume local without driver_opts, the shipped tmpfs or a bind inside the scratch HOME, "
+        f"no namespace of a container outside the copy; {apps}; every fixed name and the backup "
+        "records in the project"
     )
 
 
@@ -397,10 +407,10 @@ def expect_traefik_isolated(text: str, isolation: Isolation) -> None:
 
 def expect_fleet_isolated(text: str, stand: CopyStand) -> frozenset[str]:
     """The units fleet.yaml `text` switches on, read as hal reads it, once they are the stand's and
-    it has no app: an app runs through hal's app compose, which no check of the copy resolves."""
+    it has no app but the stand's, whose own check resolves what hal starts it from."""
     what = f"the copy's {FLEET_FILE}"
     services = fleet_services(text, what)
-    apps = sorted(key for key, entry in services.items() if catalog.is_app(entry))
+    apps = sorted(k for k, e in services.items() if catalog.is_app(e) and k not in stand.fleet.apps)
     expect(not apps, f"{what} has the apps {apps}")
     enabled = frozenset(
         key
