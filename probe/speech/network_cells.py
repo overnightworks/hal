@@ -304,8 +304,9 @@ class NetworkCells:
             ("GET", f"{base}/../token", "404"),
             ("GET", f"{token}/../certs", "certs"),
             ("GET", f"/{base}", "certs"),
-            ("GET", f"{base}%2F..%2Ftoken", "400"),
-            ("GET", f"{base}%3Fx", "400"),
+            # an encoded path matches no exact Path rule: Traefik's own 404 (run, not read)
+            ("GET", f"{base}%2F..%2Ftoken", "404"),
+            ("GET", f"{base}%3Fx", "404"),
             ("GET", f"{base};jsessionid=x", "404"),
             ("GET", f"{base}?x=1", "certs"),
             ("POST", base, "error"),
