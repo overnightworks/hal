@@ -381,14 +381,18 @@ class SpeechProbe(in_copy.Probe, NetworkCells, AdmissionCells):
             files=self.candidate_files,
             exit_code=HAL_FAILURE,
         )
-        named = re.search(rf"{APP_KEY}\b.{{0,300}}", out)
-        expect(named is not None, f"D4: the apply names no {APP_KEY}: {out[-600:]}")
+        missing = "|".join(re.escape(name) for name in speech_networks)
+        lines = [line for line in out.splitlines() if re.search(missing, line)]
+        expect(
+            APP_KEY in out and lines, f"D4: no {APP_KEY} row naming a missing network: {out[-600:]}"
+        )
         expect(not self.speech_containers(), f"D4: the app has {self.speech_containers()}")
         left = set(speech_networks) & set(networks_of(PROJECT))
         expect(not left, f"D4: the apply created {sorted(left)}")
         self.hold(
             "D4",
-            f"exit {HAL_FAILURE}, `{named[0]}`; no app container; {speech_networks} still absent",
+            f"exit {HAL_FAILURE}, `{lines[0].strip()}`; no app container; {speech_networks} still "
+            "absent",
         )
 
     # --- teardown ----------------------------------------------------------------------------
