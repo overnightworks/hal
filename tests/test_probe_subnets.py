@@ -233,7 +233,7 @@ APP_REFUSALS = {
     "a published port": (lambda r: r["services"]["speech"].update(ports=[{"target": 8080}]),
                          "publish a host port"),
     "the host network": (lambda r: r["services"]["speech"].update(network_mode="host"),
-                         "host network"),
+                         "network_mode"),
     "a live container's network": (lambda r: r["services"]["speech"].update(
         network_mode="container:hal-traefik-1"), "outside the copy"),
     "a fixed name outside the project": (lambda r: r["services"]["speech"].update(
@@ -262,12 +262,12 @@ APP_REFUSALS = {
     "another project's volume": (with_volume("other_models"), "volumes outside"),
     "a copy's speech name compose would create": (with_volume(f"{COPY_PROJECT}_speech_models"),
                                                   "volumes outside"),
+    "an external volume of the copy's speech names": (
+        with_volume(f"{COPY_PROJECT}_speech_models", external=True), "volumes outside"),
 }  # fmt: skip
 
 APP_VOLUMES = {
     "its own project's volume": with_volume(f"{APP_KEY}_models"),
-    "an external volume of the copy's speech names": with_volume(
-        f"{COPY_PROJECT}_speech_models", external=True),
 }  # fmt: skip
 
 
@@ -279,9 +279,7 @@ def test_the_apps_release_on_the_copys_speech_networks_passes(app_isolation, tmp
 
 
 @pytest.mark.parametrize("change", APP_VOLUMES.values(), ids=APP_VOLUMES)
-def test_an_app_volume_named_inside_the_app_or_the_copys_speech_names_passes(
-    app_isolation, tmp_path, change
-):
+def test_an_app_volume_named_inside_the_app_passes(app_isolation, tmp_path, change):
     resolved = a_release(tmp_path)
     change(resolved)
     assert app_isolation.expect_app_config_isolated(resolved, APP_KEY, COPY_PROJECT, tmp_path) == 1

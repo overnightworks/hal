@@ -18,10 +18,10 @@ ends with `PASSED: ...` (exit 0) or `PROBE FAILED: <what>` (exit 1).
 
 Before every apply, `release_origin.SpeechApp` resolves the compose.yaml hal would start the app
 from (the release at its tag, and the checkout once it exists), and `app_isolation.py`'s rule
-refuses a route of the live edge, a published port, a host namespace, a `network_mode`, a service
-on no network, the docker socket, a device or privilege, a source outside the scratch HOME, a
-volume named outside the app's project, and any network but the copy's external
-`<project>_speech_*`; its negative cases print one `self-check:` line each. The app's project is
+refuses a route of the live edge, a published port, a host namespace, a service on no network,
+the docker socket, a device or privilege, a source outside the scratch HOME, a volume named
+outside the app's project, and any network but the copy's external `<project>_speech_*`, also as
+a `network_mode`; its negative cases print one `self-check:` line each. The app's project is
 in every label sweep of the copy.
 
 N3 and K6 start throwaway containers of the app's image that answer every request with one fixed

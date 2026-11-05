@@ -138,9 +138,9 @@ class SpeechApp:
         ]
         return (
             f"app {self.key} ({', '.join(counted)}): no route of the live edge, port, host "
-            "namespace, network_mode, socket, device or privilege, no source outside the scratch "
-            f"HOME, no volume named outside the app, only the copy's external "
-            f"{speech_prefix(stand.isolation.project)}* networks"
+            "namespace, socket, device or privilege, no source outside the scratch HOME, no "
+            "volume named outside the app, only the copy's external "
+            f"{speech_prefix(stand.isolation.project)}* networks, as a network_mode too"
         )
 
     def resolved(self, stand: CopyStand, text: str) -> dict[str, Any]:
@@ -210,7 +210,7 @@ def refusal_cases(resolved: Mapping[str, Any], live_network: str) -> dict[str, t
             with_service(resolved, ports=[{"target": 8080}]),
             "publish a host port",
         ),
-        "the host network": (with_service(resolved, network_mode=HOST_NAMESPACE), "host network"),
+        "the host network": (with_service(resolved, network_mode=HOST_NAMESPACE), "network_mode"),
         "the default bridge by network_mode": (on_network_mode(resolved, "bridge"), "network_mode"),
         "the docker socket": (with_service(resolved, volumes=[socket]), "mount the docker socket"),
         "privileged": (with_service(resolved, privileged=True), "widen the container"),

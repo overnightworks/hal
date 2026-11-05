@@ -44,7 +44,10 @@ http.server.HTTPServer((bind, port), Fixed).serve_forever()
 """
 
 
-PLAIN_HTTP = "http://"  # NOSONAR(S5332) the copy's internal networks; speech has no TLS by design
+# Every probe URL is plain HTTP to a fixed listener and carries no credentials: the copy's
+# internal networks (speech has no TLS by design), the host's own addresses (E2) and the default
+# bridge's gateway (K3, K4).
+PLAIN_HTTP = "http://"  # NOSONAR(S5332) deliberate probes of fixed listeners, no credentials
 
 
 def plain_http(host: str, port: int, path: str = "/") -> str:
@@ -90,7 +93,7 @@ def networks_of(project: str) -> dict[str, str]:
         "--format",
         "{{.Name}} {{.ID}}",
     )
-    return {name: network_id for name, network_id in map(str.split, listed.decode().splitlines())}
+    return dict(map(str.split, listed.decode().splitlines()))
 
 
 def addresses_of(container: str) -> dict[str, str]:

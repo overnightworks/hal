@@ -33,13 +33,11 @@ def speech_prefix(project: str) -> str:
 
 
 def expect_exposure_refused(services: Mapping[str, Any]) -> None:
-    """Refuses a label the live Traefik routes, a published port and the host network."""
+    """Refuses a label the live Traefik routes and a published port."""
     routable = sorted(n for n, s in services.items() if routable_by_live_edge(s.get("labels")))
     expect(not routable, f"the live Traefik would route {routable}")
     published = sorted(name for name, service in services.items() if service.get("ports"))
     expect(not published, f"{published} publish a host port")
-    on_host = sorted(n for n, s in services.items() if s.get("network_mode") == HOST_NAMESPACE)
-    expect(not on_host, f"{on_host} run on the host network")
 
 
 def expect_widening_refused(services: Mapping[str, Any]) -> None:
@@ -62,8 +60,8 @@ def expect_widening_refused(services: Mapping[str, Any]) -> None:
 def expect_networks_in_copy(
     resolved: Mapping[str, Any], services: Mapping[str, Any], prefix: str
 ) -> None:
-    """Refuses a network but an external one named `prefix*`, a `network_mode` (bridge, host,
-    none, `container:`, `service:` or a network's name) that names none of them, and a service
+    """Refuses a network but an external one named `prefix*`, every `network_mode` outside
+    `prefix*` (bridge, host, none, `container:`, `service:` or a network's name), and a service
     that joins no network, which Docker puts on the default bridge."""
     foreign = sorted(
         f"{key}: {network.get('name')}"
@@ -84,21 +82,14 @@ def expect_networks_in_copy(
     expect(not unattached, f"{unattached} join no network and would land on the default bridge")
 
 
-def volume_named_in_app(volume: Mapping[str, Any], key: str, prefix: str) -> bool:
-    """Whether a resolved volume's name is in the app's project `key`, or is an external one of
-    the copy's `prefix*` names."""
-    name = str(volume.get("name"))
-    return name.startswith(f"{key}_") or (bool(volume.get("external")) and name.startswith(prefix))
-
-
-def expect_volume_names_in_app(volumes: Mapping[str, Any], key: str, prefix: str) -> None:
-    """Refuses a volume `volume_named_in_app` refuses, so no volume of the live stack is mounted."""
+def expect_volume_names_in_app(volumes: Mapping[str, Any], key: str) -> None:
+    """Refuses a volume not named `<key>_*`, so no volume of the live stack is mounted."""
     outside = sorted(
         f"{volume_key}: {volume.get('name')}"
         for volume_key, volume in volumes.items()
-        if not volume_named_in_app(volume, key, prefix)
+        if not str(volume.get("name")).startswith(f"{key}_")
     )
-    expect(not outside, f"volumes outside {key}_* and the external {prefix}*: {outside}")
+    expect(not outside, f"volumes outside {key}_*: {outside}")
 
 
 def expect_app_config_isolated(
@@ -108,8 +99,8 @@ def expect_app_config_isolated(
     host: a label the live Traefik routes, a published port, a namespace of the host or of a
     container outside the app, a bind, secret file or volume backing outside the scratch HOME, a
     volume named outside the app, the docker socket, a device or a privilege; or when it reaches
-    any network but an external one the copy names `<copy project>_speech_*`. The number of
-    services."""
+    any network (by `networks` or by `network_mode`) but an external one the copy names
+    `<copy project>_speech_*`. The number of services."""
     services = resolved["services"]
     expect_exposure_refused(services)
     expect_widening_refused(services)  # before the source check, which spares the socket proxy's
@@ -117,5 +108,5 @@ def expect_app_config_isolated(
     expect_namespaces_in_project(services, services, key)
     prefix = speech_prefix(copy_project)
     expect_networks_in_copy(resolved, services, prefix)
-    expect_volume_names_in_app(resolved.get("volumes") or {}, key, prefix)
+    expect_volume_names_in_app(resolved.get("volumes") or {}, key)
     return len(services)
