@@ -1,7 +1,0 @@
-claim_id = "cb0d546ba26f4d35aa14e0295a23ab12"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "f138a2e68efbab5973b879fe54f1aaa13b2e3ad6"
-branch = "claude/issue-1017-quality-v0-9-2"
-scope = ["src/hal/workstation/setup.py"]
-opened_commit = "c56b5a27cdd2639dd7bb59ef458482a602ee8661"
