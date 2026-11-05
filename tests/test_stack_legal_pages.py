@@ -269,6 +269,21 @@ def test_an_apps_terms_may_not_link_the_ids_of_another_part_than_its_own(target,
     assert "is not allowed" in refusal([general(), *other_blocks, app("alpha"), terms])
 
 
+def test_a_service_and_an_app_sharing_an_anchor_may_not_link_each_others_ids():
+    """L13."""
+    sections = '<section id="shared-eins">\n<h3>Eins</h3>\n<p>x</p>\n</section>\n'
+    terms = app(
+        "shared",
+        body='<p><a href="/datenschutz#shared-eins">l</a></p>\n',
+        page="nutzungsbedingungen",
+    )
+    privacy = block(
+        BlockKind.SERVICE, f'<h2 id="shared">Shared</h2>\n<p>s</p>\n{sections}', "shared"
+    )
+
+    assert "is not allowed" in refusal([general(), privacy, terms])
+
+
 def test_a_link_to_an_unknown_id_is_refused():
     """L13."""
     linking = app("alpha", body='<p><a href="/datenschutz#nirgends">l</a></p>\n')

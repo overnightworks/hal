@@ -162,7 +162,9 @@ class _Owner:
     """What owns an id: the frame or a block file, and the unit that block belongs to."""
 
     name: str
-    unit: str | None  # a service's or app's anchor; None for the frame and the general part
+    # a service's or app's kind with its anchor (a service and an app may share an anchor);
+    # None for the frame and the general part
+    unit: tuple[BlockKind, str] | None
 
 
 @dataclass(frozen=True)
@@ -182,7 +184,8 @@ def _anchor(block: Block) -> str:
 
 
 def _owner_of(block: Block) -> _Owner:
-    return _Owner(block.path, None if block.kind is BlockKind.GENERAL else _anchor(block))
+    unit = None if block.kind is BlockKind.GENERAL else (block.kind, _anchor(block))
+    return _Owner(block.path, unit)
 
 
 def _fill(text: str, path: str, **fields: str) -> str:
