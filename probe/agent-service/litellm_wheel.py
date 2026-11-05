@@ -40,6 +40,7 @@ from litellm import (
     LABEL,
     PROJECT,
     REPO,
+    ProbeFailed,
     expect,
     run_scratch_probe,
 )
@@ -109,7 +110,8 @@ asyncio.run(main())
 def base_image() -> str:
     """The agent-service image's pinned base: the reference of its Dockerfile's first `FROM`."""
     matched = BASE_IMAGE.search(DOCKERFILE.read_text(encoding="utf-8"))
-    expect(matched is not None and "@sha256:" in matched[1], f"{DOCKERFILE}: no pinned FROM")
+    if matched is None or "@sha256:" not in matched[1]:
+        raise ProbeFailed(f"{DOCKERFILE}: no pinned FROM")
     return matched[1]
 
 
@@ -160,7 +162,10 @@ class WheelProbe(RetentionProbe):
         events = self.turn({
             "tool": tool, "description": canaries["description"], "message": canaries["message"],
             "result": canaries["result"], "principal": principal, "api_group": API_GROUP,
-            "origin": f"http://{FRONT}:{FRONT_PORT}", "key_file": KEY_FILE,
+            "origin": (
+                f"http://{FRONT}:{FRONT_PORT}"  # NOSONAR(S5332) plain HTTP front, as apps reach it
+            ),
+            "key_file": KEY_FILE,
             "model": DEFAULT_MODEL, "seconds": TURN_SECONDS,
         })  # fmt: skip
         self.steer()
