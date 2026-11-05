@@ -126,7 +126,7 @@ def test_the_packaged_manifest_names_its_readers_in_english() -> None:
 
 # --- songmaker's secret files: five copied from its .env, the Redis ones generated -----------------------------------
 
-# Where songmaker's scripts/secret_files.py copied its .env values to, and the Redis files songmaker#2270 mounts.
+# Where songmaker's scripts/secret_files.py copied its .env values to, and the Redis ACL files songmaker will mount.
 COPIED_SONGMAKER_FILES = tuple(f".secrets/songmaker/{file}" for file in ("session-secret", "postgres-password", "internal-token", "monitoring-token", "hf-token"))
 REDIS_SONGMAKER_FILES = tuple(f".secrets/songmaker/{file}" for file in ("redis-ops", "redis-app", "redis-gpu-acestep-worker-0"))
 
