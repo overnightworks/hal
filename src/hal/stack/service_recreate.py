@@ -155,13 +155,17 @@ def proven_snapshot(backup: Backup, progress: Progress, unit: DatabaseUnit) -> s
     """The unit's new pre-apply snapshot, once its restore test passed."""
     progress.step = f"take the {unit.key} pre-apply snapshot"
     snapshot = backup.pre_apply(unit)
-    short = printable(snapshot[:SNAPSHOT_SHORT_ID])
+    short = short_snapshot(snapshot)
     progress.step = f"prove pre-apply snapshot {short}"
     try:
         backup.restore_test(unit, snapshot)
     except PreApplyError as error:
         raise PreApplyError(f"{error}, pre-apply snapshot {short} not proven") from error
     return snapshot
+
+
+def short_snapshot(snapshot: str) -> str:
+    return printable(snapshot[:SNAPSHOT_SHORT_ID])
 
 
 @dataclass
@@ -184,8 +188,16 @@ class SwitchOnSnapshots:
             raise PreApplyError(f"{error}; {unit.key} is not started") from error
         return start(lambda: self.began.add(unit.key))
 
-    def way_back(self, unit: str) -> str | None:
-        return _way_back(unit, self.taken.get(unit), unit in self.began)
+    def proven(self, unit: str) -> str | None:
+        """What the unit's result line says of its snapshot, once one was proven."""
+        return f"snapshot {short_snapshot(self.taken[unit])} proven" if unit in self.taken else None
+
+    def way_back(self) -> str | None:
+        """The way back of every unit of the run that holds a snapshot."""
+        lines = (
+            _way_back(unit, snapshot, unit in self.began) for unit, snapshot in self.taken.items()
+        )
+        return "; ".join(filter(None, lines)) or None
 
 
 def _way_back(unit: str, snapshot: str | None, recreating: bool) -> str | None:
@@ -194,7 +206,7 @@ def _way_back(unit: str, snapshot: str | None, recreating: bool) -> str | None:
     database took since."""
     if snapshot is None:
         return None
-    short = printable(snapshot[:SNAPSHOT_SHORT_ID])
+    short = short_snapshot(snapshot)
     if not recreating:
         return f"pre-apply snapshot {short} taken"
     restore = f"{command(Verb.RESTORE)} {unit} --live --snapshot {short}"

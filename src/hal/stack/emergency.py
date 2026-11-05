@@ -359,26 +359,16 @@ def start_unit(
         _complain(START, f"refused, {not_set_up}")
         return ApplyExit.REFUSED
     try:
-        services, starts = _what_starts(engine, fleet, key)
+        services, over = unit_plans.services_to_start(fleet, key, engine, DATABASE_UNITS)
     except compose.ComposeError as error:
         _complain(START, f"cannot plan, {error}")
         return ApplyExit.CANNOT_PLAN
+    starts = f"nothing over {over.name}'s data" if over else f"services {', '.join(services)}"
     _say(START, f"{key}: start {starts}; {_ending(read)}")
-    if not confirmed(f"start {key}"):
+    if not confirmed(f"start {key}" if services else f"end the switch of {key}"):
         _complain(START, ABORTED_UNCHANGED)
         return ApplyExit.REFUSED
     return _open(engine, marks, target.ingress, key, services, read, fleet.config, watch)
-
-
-def _what_starts(
-    engine: compose.Compose, fleet: unit_plans.Fleet, key: str
-) -> tuple[tuple[str, ...], str]:
-    """The services the start starts and its words for them; none over a database unit's data."""
-    services = fleet.profile_services[key]
-    over = unit_plans.snapshot_before_start(fleet, key, engine.states(), engine, DATABASE_UNITS)
-    if over:
-        return (), f"nothing over {over.name}'s data"
-    return services, f"services {', '.join(services)}"
 
 
 def _ending(read: switches.Mark | None) -> str:
@@ -539,7 +529,8 @@ def _open(
             try:
                 ingress.open()
             except barrier.BarrierError as error:
-                _complain(START, f"partial, {key} is on but {error}; its switch stays")
+                lead = f"{key} is on but" if services else f"{key} started nothing and"
+                _complain(START, f"partial, {lead} {error}; its switch stays")
                 return ApplyExit.REFUSED
             if read and not marks.clear(key, read):
                 _complain(START, _switched_off_again_line(key, marks.mark(key)))

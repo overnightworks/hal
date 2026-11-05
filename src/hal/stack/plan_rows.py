@@ -399,7 +399,8 @@ def _unit_plan_row(plan: UnitPlan) -> Row:
     key, services = plan.unit.key, ", ".join(plan.services)
     match plan.action:
         case Action.ON:
-            return Row(Glyph.ADD, key, PlanEvent.SWITCH_ON, services)
+            facts = (services, *((_SNAPSHOT_FIRST,) if plan.snapshot else ()))
+            return Row(Glyph.ADD, key, PlanEvent.SWITCH_ON, _SEPARATOR.join(facts))
         case Action.OFF:
             facts = (
                 services,

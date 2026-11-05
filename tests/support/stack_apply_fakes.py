@@ -421,6 +421,7 @@ class RealmBackup:
 
     asked: list[str] = field(default_factory=list)
     failing: str | None = None
+    failing_unit: str | None = None  # only this unit's ask fails; None, every unit's
     timeline: list[list[str]] | None = None
 
     def pre_apply(self, unit: DatabaseUnit) -> str:
@@ -434,7 +435,7 @@ class RealmBackup:
         self.asked.append(part)
         if self.timeline is not None:
             self.timeline.append(["hal", "-", part, unit.key])
-        if part == self.failing:
+        if part == self.failing and self.failing_unit in (None, unit.key):
             raise PreApplyError(f"{part} broke")
         return "ab12cd34"
 

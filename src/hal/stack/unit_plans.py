@@ -25,6 +25,7 @@ class UnitPlan:
     switched_off_since: str | None = None
     running: bool = False
     snapshot: DatabaseUnit | None = None  # a switch-on that takes this unit's snapshot first
+    creates_app: bool = False  # ... and whose start then creates the app, which has no container
 
 
 @dataclass(frozen=True)
@@ -87,16 +88,17 @@ def plan_switch_on_snapshots(
     database_units: Collection[DatabaseUnit],
 ) -> list[UnitPlan]:
     """The plans, each switch-on that starts a database unit over its data with the unit's
-    snapshot first (`snapshot_before_start`)."""
-    return [
-        dataclasses.replace(
-            plan,
-            snapshot=snapshot_before_start(fleet, plan.unit.key, states, engine, database_units),
+    snapshot first (`snapshot_before_start`), and whether its start then creates the app."""
+    planned = []
+    for plan in plans:
+        unit = (
+            snapshot_before_start(fleet, plan.unit.key, states, engine, database_units)
+            if plan.action is Action.ON
+            else None
         )
-        if plan.action is Action.ON
-        else plan
-        for plan in plans
-    ]
+        creates_app = unit is not None and unit.service not in states
+        planned.append(dataclasses.replace(plan, snapshot=unit, creates_app=creates_app))
+    return planned
 
 
 def snapshot_before_start(
@@ -117,6 +119,19 @@ def snapshot_before_start(
     volumes = unit_volumes(fleet.config, fleet.profile_services[key])
     names = (compose.volume_name(fleet.config, volume) for volume in volumes)
     return unit if any(map(engine.volume_exists, names)) else None
+
+
+def services_to_start(
+    fleet: Fleet,
+    key: str,
+    engine: compose.Compose,
+    database_units: Collection[DatabaseUnit],
+) -> tuple[tuple[str, ...], DatabaseUnit | None]:
+    """The services `hal start` starts for the unit `key`, and the database unit whose data they
+    would be created over; then none start, since a switch-on over data is `hal apply`'s, after
+    its snapshot."""
+    over = snapshot_before_start(fleet, key, engine.states(), engine, database_units)
+    return ((), over) if over else (fleet.profile_services[key], None)
 
 
 DIGEST_SEPARATOR = "@"
@@ -509,7 +524,10 @@ def switch(
         if since := starter.start((database,), f"start {database} alone"):
             return since
         return snapshot_first(
-            plan.snapshot, lambda begin: starter.start(plan.services, "start", begin)
+            plan.snapshot,
+            lambda begin: starter.start(
+                plan.services, "start", begin if plan.creates_app else None
+            ),
         )
     progress.step = "stop"
     engine.stop(plan.unit.key, plan.services)
@@ -526,16 +544,15 @@ class _Starter:
     marks: switches.Switches
     read: switches.Mark | None
 
-    def start(
-        self, services: tuple[str, ...], step: str, begin: Begin = lambda: None
-    ) -> str | None:
+    def start(self, services: tuple[str, ...], step: str, begin: Begin | None = None) -> str | None:
         """Start `services` of the unit under the switch lock; the time of a switch that
         appeared since the plan read its mark, and nothing started then."""
         self.progress.step = step
         with self.marks.lock():
             if changed := self.marks.changed(self.plan.unit.key, self.read):
                 return since_of(changed)
-            begin()
+            if begin:
+                begin()
             self.engine.start(self.plan.unit.key, services)
         return None
 

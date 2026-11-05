@@ -342,8 +342,8 @@ and the admin budget with its customer rows (the key step below).
   502 and the key step reads nothing. A changed image of `litellm` or `litellm-db` is recreated
   after LiteLLM's proven pre-apply snapshot, as `docs/stack.md` "Images" says; the snapshot's restore
   test refuses a store with no key, and then nothing is recreated. `litellm-front` keeps its old
-  image and is named `!`. Dependabot proposes no LiteLLM image, so a bump is a pull request opened
-  by hand. A change of `config.yaml` or `start.sh` alone does not recreate it.
+  image and is named `!`. A switch-on after a removal takes the same snapshot first. A change of
+  `config.yaml` or `start.sh` alone does not recreate it.
 - **The admin group's rows.** After the apps the step makes `litellm-admin` and links to it exactly
   the customer rows of the direct members of `/services/litellm/admin`, read at each plan through
   the realm observer's members mode; each fingerprint is `person_fingerprint` of agent-runtime's

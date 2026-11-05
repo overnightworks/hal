@@ -733,22 +733,23 @@ def _confirm_and_switch(
         keys_failed = _apply_keys(engine, planned)
         apps_failed = _apply_apps(planned, marks, progress)
     except pre_apply.PreApplyError as error:
-        write_error(f"partial, {error}", command(Verb.APPLY))
+        write_error(f"partial, {_with_way_back(str(error), snapshots)}", command(Verb.APPLY))
         return ApplyExit.REFUSED
     except (compose.ComposeError, switches.SwitchError, core.CoreError) as error:
         failure = f"{progress.unit}: could not {progress.step}, {error}"
-        write_error(f"partial, {_with_way_back(failure, snapshots, progress.unit)}")
+        write_error(f"partial, {_with_way_back(failure, snapshots)}")
         return ApplyExit.REFUSED
     except KeyboardInterrupt as interruption:
-        _say_interrupted(progress, interruption, snapshots.way_back(progress.unit))
+        _say_interrupted(progress, interruption, snapshots.way_back())
         return ApplyExit.REFUSED
     later_failed = realm_failed or keys_failed or apps_failed
     return _report_switched(changes, withheld, mismatched, later_failed, snapshots)
 
 
-def _with_way_back(failure: str, snapshots: SwitchOnSnapshots, unit: str) -> str:
-    """The failure, with the unit's switch-on snapshot and its way back once one was proven."""
-    way_back = snapshots.way_back(unit)
+def _with_way_back(failure: str, snapshots: SwitchOnSnapshots) -> str:
+    """The failure, with every switch-on snapshot of the run and its way back once one was
+    proven."""
+    way_back = snapshots.way_back()
     return f"{failure}; {way_back}" if way_back else failure
 
 
@@ -761,12 +762,13 @@ def _report_switched(
 ) -> int:
     for unit, since in withheld.items():
         failure = f"{unit} was switched off meanwhile (since {switches.describe_since(since)})"
-        write_error(f"partial, {_with_way_back(failure, snapshots, unit)}; not started")
+        write_error(f"partial, {_with_way_back(failure, snapshots)}; not started")
     for plan in mismatched:
         failure = f"{plan.unit.key} is not {plan.action} after the change"
-        write_error(f"partial, {_with_way_back(failure, snapshots, plan.unit.key)}")
+        write_error(f"partial, {_with_way_back(failure, snapshots)}")
     if mismatched or withheld or later_steps_failed:
         return ApplyExit.REFUSED
     for plan in changes:
-        write_line(f"{plan.unit.key} is {plan.action}")
+        facts = (f"{plan.unit.key} is {plan.action}", snapshots.proven(plan.unit.key))
+        write_line(" · ".join(filter(None, facts)))
     return ApplyExit.APPLIED_OR_NOTHING
