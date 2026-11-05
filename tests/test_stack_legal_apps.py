@@ -5,6 +5,7 @@ beside the legal unit of `tests/support/stack_apps.py`."""
 
 import json
 import shutil
+from collections.abc import Callable
 
 import pytest
 import support.stack_apply_apps as stack_apply_apps_support
@@ -270,40 +271,46 @@ SERVICE_PRIVACY = f'<h2 id="{SERVICE_ANCHOR}">Fahrdienst</h2>\n<p>Er läuft bei 
 
 
 @pytest.fixture
-def edge_service_section(legal_apps, monkeypatch) -> LegalApps:
-    """The app's key as one of edge's own services, whose privacy section edge holds and
-    commits."""
+def edge_service_section(legal_apps, monkeypatch) -> Callable[[str], LegalApps]:
+    """The app's key as one of edge's own services, and how edge holds and commits its
+    section for one page."""
     monkeypatch.setitem(legal_step.SERVICE_ANCHORS, KEY, SERVICE_ANCHOR)
-    held = f"legal/sections/{KEY}/datenschutz.html"
-    edge = legal_apps.world.repository
-    (edge / held).parent.mkdir(parents=True)
-    (edge / held).write_text(SERVICE_PRIVACY)
-    plain_git(edge, "add", held)
-    plain_git(edge, "-c", "core.hooksPath=/dev/null", "commit", "--quiet",
-              "--message", "service section", "--", held)  # fmt: skip
-    legal_apps.catalog(enabled=True)
-    return legal_apps
+
+    def hold(page: str) -> LegalApps:
+        held = f"legal/sections/{KEY}/{page}.html"
+        edge = legal_apps.world.repository
+        (edge / held).parent.mkdir(parents=True)
+        (edge / held).write_text(SERVICE_PRIVACY)
+        plain_git(edge, "add", held)
+        plain_git(edge, "-c", "core.hooksPath=/dev/null", "commit", "--quiet",
+                  "--message", "service section", "--", held)  # fmt: skip
+        legal_apps.catalog(enabled=True)
+        return legal_apps
+
+    return hold
 
 
 def test_edges_section_for_a_service_whose_release_ships_no_legal_part_composes_with_its_anchor(
     edge_service_section,
 ):
     """L8: one owner, edge, holds the text of its own service."""
-    edge_service_section.release(FIRST)
+    service = edge_service_section("datenschutz")
+    service.release(FIRST)
 
-    exit_code, _, err = edge_service_section.world.apply()
+    exit_code, _, err = service.world.apply()
 
     assert exit_code == 0, err
-    assert f'<h2 id="{SERVICE_ANCHOR}">' in edge_service_section.page()
+    assert f'<h2 id="{SERVICE_ANCHOR}">' in service.page()
 
 
-def test_edges_section_for_a_service_whose_release_ships_a_legal_part_refuses_naming_both(
+def test_edges_terms_section_for_a_service_whose_release_ships_its_privacy_part_refuses_naming_both(
     edge_service_section,
 ):
-    """L8: a service's text still has one owner."""
-    edge_service_section.release(FIRST, SERVICE_PRIVACY)
+    """L8: the two owners hold different pages, so only the two-owner rule can refuse."""
+    service = edge_service_section("nutzungsbedingungen")
+    service.release(FIRST, SERVICE_PRIVACY)
 
-    exit_code, out, err = edge_service_section.world.apply()
+    exit_code, out, err = service.world.apply()
 
     assert exit_code == 2
     assert f"legal/sections/{KEY}/" in err
