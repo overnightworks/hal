@@ -81,13 +81,13 @@ Only `agent-egress` sits on `internet`, a plain NAT bridge. It listens on two en
 and `:443`: `egress` (`172.31.252.10` of the network `egress`, for the agent service) and `litellm`
 (`172.31.239.10` of `litellm-egress`, for LiteLLM). The router `provider` of `allowed.yml` is bound to
 both entrypoints, `issuer` to `egress` alone and `pictures` to `litellm` alone, so LiteLLM reaches
-the two providers' names and nothing else. The
-three networks of the API route (`litellm-api`, `litellm-backend`, `litellm-egress`) are internal and
-isolated like the others, and the exclusions between them hold: the service reaches LiteLLM only
-through the front; LiteLLM reaches the front and, beyond it, only the two providers' names on
+the two providers' names and nothing else. The two
+networks of the API route (`litellm-backend`, `litellm-egress`) are internal and
+isolated like the others, and the exclusions between them hold: the service has no address on
+either; LiteLLM reaches the front and, beyond it, only the two providers' names on
 entrypoint 2, and neither the service, entrypoint 1, the issuer, `mcp` nor the internet; the front
-reaches LiteLLM, and the service's `litellm-api` address answers it. Like `traefik-mcp` it is a follower: its static file is bound at Traefik's static-config
-path, so `hal apply` recreates it alone while the unit `agent-service` is on; no plain
+reaches LiteLLM. Like `traefik-mcp` it is a follower: its static file is bound at Traefik's static-config
+path, so `hal apply` recreates it alone while the unit `litellm` is on; no plain
 `docker compose up -d` starts it.
 
 **Proof:** `probe/agent-service/egress.py` (with `--target service` for the real service and a dummy

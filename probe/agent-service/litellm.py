@@ -63,7 +63,7 @@ from hal.stack import litellm_keys  # noqa: E402
 FAKE_PROVIDER, FAKE_PICTURES, FAKE_ISSUER = "fake-anthropic", "fake-openai", "fake-issuer"
 PROVIDER_HOST, ISSUER_HOST = "api.anthropic.com", "auth.hallucinai.de"
 PICTURE_HOST = "api.openai.com"
-NEW_NETWORKS = ("litellm-api", "litellm-backend", "litellm-egress", "litellm-db")
+NEW_NETWORKS = ("litellm-backend", "litellm-egress", "litellm-db")
 ISOLATED = "isolated"
 LISTEN_SECONDS = 60
 FAKE_DIRECTORY = "/fake"
@@ -686,7 +686,7 @@ class LitellmProbe(IssuerProbe):
             service: {n for n in resolved["services"][service]["networks"] if n in NEW_NETWORKS}
             for service in members
         }
-        expect(declared[FRONT] == {"litellm-api", "litellm-backend"}, f"N1: {declared[FRONT]}")
+        expect(declared[FRONT] == {"litellm-backend"}, f"N1: {declared[FRONT]}")
         expect(
             declared[LITELLM] == {"litellm-backend", "litellm-egress", "litellm-db"},
             f"N1: {declared[LITELLM]}",
@@ -702,7 +702,9 @@ class LitellmProbe(IssuerProbe):
             members = {c["Name"] for c in inspected["Containers"].values()}
             wanted = {self.container_name(s) for s, n in declared.items() if network in n}
             expect(members == wanted, f"N1: {network} holds {sorted(members)}")
-        self.hold("N1", "members as declared; the four new networks internal and isolated; no port")
+        self.hold(
+            "N1", "members as declared; the three new networks internal and isolated; no port"
+        )
 
     def container_name(self, service: str) -> str:
         found = json.loads(self.run(["docker", "inspect", self.container(service)]).stdout)[0]
