@@ -40,6 +40,33 @@ DEVICE_KEYS = ("privileged", "devices", "cap_add")
 CHECK_DIRECTORY = ".probe-app-check"  # under the scratch HOME, beside the app's checkout
 
 
+def expect_exposure_refused(services: Mapping[str, Any]) -> None:
+    """Refuses a label the live Traefik routes, a published port and the host network."""
+    routable = sorted(n for n, s in services.items() if routable_by_live_edge(s.get("labels")))
+    expect(not routable, f"the live Traefik would route {routable}")
+    published = sorted(name for name, service in services.items() if service.get("ports"))
+    expect(not published, f"{published} publish a host port")
+    on_host = sorted(n for n, s in services.items() if s.get("network_mode") == HOST_NAMESPACE)
+    expect(not on_host, f"{on_host} run on the host network")
+
+
+def expect_widening_refused(services: Mapping[str, Any]) -> None:
+    """Refuses the docker socket, a device, a privilege and a host uts, user or cgroup namespace."""
+    socket = sorted(
+        name
+        for name, service in services.items()
+        for mount in service.get("volumes") or []
+        if mount.get("source") == DOCKER_SOCKET_BIND[1]
+    )
+    expect(not socket, f"{socket} mount the docker socket")
+    widened = sorted(
+        [f"{n}.{k}" for n, s in services.items() for k in DEVICE_KEYS if s.get(k)]
+        + [f"{n}.{k}: host" for n, s in services.items() for k in HOST_MODES
+           if s.get(k) == HOST_NAMESPACE]
+    )  # fmt: skip
+    expect(not widened, f"{widened} widen the container")
+
+
 def expect_app_config_isolated(
     resolved: Mapping[str, Any], key: str, copy_project: str, home: Path
 ) -> int:
@@ -49,31 +76,10 @@ def expect_app_config_isolated(
     docker socket, a device or a privilege; or when it joins any network but an external one the
     copy names `<copy project>_speech_*`. The number of services."""
     services = resolved["services"]
-    routable = sorted(n for n, s in services.items() if routable_by_live_edge(s.get("labels")))
-    expect(not routable, f"the live Traefik would route {routable}")
-    published = sorted(name for name, service in services.items() if service.get("ports"))
-    expect(not published, f"{published} publish a host port")
-    on_host = sorted(n for n, s in services.items() if s.get("network_mode") == HOST_NAMESPACE)
-    expect(not on_host, f"{on_host} run on the host network")
-    socket = sorted(
-        name
-        for name, service in services.items()
-        for mount in service.get("volumes") or []
-        if mount.get("source") == DOCKER_SOCKET_BIND[1]
-    )
-    expect(not socket, f"{socket} mount the docker socket")
+    expect_exposure_refused(services)
+    expect_widening_refused(services)  # before the source check, which spares the socket proxy's
     expect_sources_in_scratch(resolved, services, home)
     expect_namespaces_in_project(services, services, key)
-    widened = sorted(
-        [f"{n}.{k}" for n, s in services.items() for k in DEVICE_KEYS if s.get(k)]
-        + [
-            f"{n}.{k}: host"
-            for n, s in services.items()
-            for k in HOST_MODES
-            if s.get(k) == HOST_NAMESPACE
-        ]
-    )
-    expect(not widened, f"{widened} widen the container")
     prefix = f"{copy_project}{SPEECH_NETWORK}"
     networks = resolved.get("networks") or {}
     foreign = sorted(

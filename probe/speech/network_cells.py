@@ -473,19 +473,10 @@ class HostListener:
 
     def __init__(self, scratch: Path, port: int) -> None:
         self.port, self.pid_file = port, scratch / "e2-listener.pid"
-        self.process = subprocess.Popen(  # noqa: S603 - argv built here
-            [
-                "timeout",
-                "600",
-                "python3",
-                "-m",
-                "http.server",
-                "--bind",
-                "0.0.0.0",
-                str(port),  # noqa: S104 - E2 needs every host address
-                "--directory",
-                str(scratch),
-            ],
+        bind = "0.0.0.0"  # noqa: S104 - E2 needs a listener on every host address
+        command = ["timeout", "600", "python3", "-m", "http.server", "--bind", bind, str(port)]
+        self.process = subprocess.Popen(  # noqa: S603 - argv built here from fixed words
+            [*command, "--directory", str(scratch)],  # noqa: S607 - timeout found on PATH
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
