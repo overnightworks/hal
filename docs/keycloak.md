@@ -179,6 +179,8 @@ offers (no registration, no "Passwort vergessen?", no mail: the operator resets
 passwords in the admin console), the account console's layout and its pages, the
 browser's passkey window and the code page's content.
 
+Two places deviate from the legal-row rule of overnightworks/appkit#82, which owns the rule. The account console (keycloak.v3, React) shows no legal links, because a theme cannot add the kit's `AccountMenu` to Keycloak's React app. The sign-in pages show the legal row inside the card, in the card-footer slot that `footer.ftl` fills, not under it: Keycloak's login template gives a theme no other slot, and moving the row out would need a copy of `template.ftl`, kept in step with every Keycloak update.
+
 The pages appear in German and English: the browser's language decides,
 English applies when neither is asked for, and the pages carry a language
 switcher (`internationalizationEnabled`, `supportedLocales`, `defaultLocale`
