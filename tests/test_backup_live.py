@@ -3,6 +3,7 @@ refusals, the question, the database started alone, the held signals and each en
 outcome table. `docker compose config` answers the checkout's compose.yaml as it is."""
 
 import dataclasses
+import fcntl
 import os
 import signal
 from contextlib import ExitStack, contextmanager
@@ -71,6 +72,17 @@ def snapshot(machine) -> str:
 
 def live_loads_started(machine) -> bool:
     return LIVE_LOAD_LABEL in machine.labels()
+
+
+def switch_lock_is_held(home: Path) -> bool:
+    """Whether another holder has `switch.lock`: a second descriptor cannot take it."""
+    with (home / ".local/state/edge" / switches.LOCK_FILE).open("a") as handle:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        fcntl.flock(handle, fcntl.LOCK_UN)
+        return False
 
 
 def test_a_loaded_snapshot_starts_only_the_stopped_database_and_names_hal_start(
@@ -337,6 +349,47 @@ def test_a_switch_changed_after_the_guard_is_refused(live, machine, monkeypatch,
     assert not live_loads_started(machine)
 
 
+@pytest.mark.parametrize("unit", ["keycloak", APP])
+def test_the_switch_lock_is_held_from_the_recheck_to_the_end_of_the_load(
+    live, machine, home, monkeypatch, edge_backup, unit
+):
+    assert edge_backup(*declare_shipped_apps(), "backup", unit).exit_code == 0
+    switch_off(home, unit)
+    held = []
+    real_changed = switches.Switches.changed
+
+    def watched_changed(self, *arguments):
+        held.append(("re-check", switch_lock_is_held(home)))
+        return real_changed(self, *arguments)
+
+    monkeypatch.setattr(switches.Switches, "changed", watched_changed)
+    machine.during_live_load = lambda: held.append(("load", switch_lock_is_held(home)))
+
+    outcome = edge_backup(*declare_shipped_apps(), "restore", unit, "--live")
+
+    assert outcome.exit_code == 0
+    assert held == [("re-check", True), ("load", True)]
+    assert not switch_lock_is_held(home)
+
+
+def test_a_switch_lock_that_cannot_be_taken_fails_with_its_error_and_loads_nothing(
+    live, machine, monkeypatch, home
+):
+    def unopenable(self):
+        raise switches.SwitchError("cannot take the switch lock (Permission denied)")
+
+    monkeypatch.setattr(switches.Switches, "lock", unopenable)
+
+    outcome = live()
+
+    assert (outcome.exit_code, outcome.err.splitlines()) == (
+        3,
+        [f"error: {APP}: cannot take the switch lock (Permission denied)"],
+    )
+    assert not live_loads_started(machine)
+    assert list(work_directory(home).iterdir()) == []
+
+
 def test_a_switch_that_cannot_be_read_at_the_recheck_is_refused_as_changed(
     live, machine, monkeypatch
 ):
@@ -423,8 +476,18 @@ def test_an_interrupt_at_the_holds_release_leaves_the_outcome_line_and_its_exit(
     assert squeezed(outcome.out).splitlines()[-1] == f"next: hal start {APP}"
 
 
-def test_an_interrupt_at_the_holds_entry_spawns_no_client(live, machine, monkeypatch):
-    monkeypatch.setattr(backup_commands, "signals_ignored", _raising_at_entry)
+@pytest.mark.parametrize(
+    ("owner", "entry", "entered"),
+    [
+        (backup_commands, "signals_ignored", _raising_at_entry),
+        (switches.Switches, "lock", lambda _: _raising_at_entry()),
+    ],
+    ids=["the hold", "the switch lock"],
+)
+def test_an_interrupt_at_the_entry_of_the_hold_or_the_switch_lock_spawns_no_client(
+    live, machine, monkeypatch, home, owner, entry, entered
+):
+    monkeypatch.setattr(owner, entry, entered)
 
     outcome = live()
 
@@ -433,6 +496,7 @@ def test_an_interrupt_at_the_holds_entry_spawns_no_client(live, machine, monkeyp
         ["error: interrupted · nothing loaded"],
     )
     assert not live_loads_started(machine)
+    assert list(work_directory(home).iterdir()) == []
 
 
 def test_the_hold_is_entered_before_the_client_is_spawned(live, machine, monkeypatch):

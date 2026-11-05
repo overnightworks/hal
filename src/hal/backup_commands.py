@@ -1,14 +1,15 @@
 """`hal backup` and `hal restore`: the backup runner behind hal's door. The steps are the typed
 functions of `hal.backup.cli` and `hal.backup.live`; this module adds the grammar, the one host
 lock around every run, the SIGTERM that systemd stops a unit with, and the exit code. For
-`restore --live` it reads what `hal.backup` may not: the unit's switch, the catalog and the
-terminal, and hands plain values to the step."""
+`restore --live` it reads what `hal.backup` may not: the unit's switch and its lock, the catalog
+and the terminal, and hands plain values to the step."""
 
 import argparse
 import functools
 import os
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -18,6 +19,7 @@ from hal.backup.apps import PRE_APPLY_TAG
 from hal.backup.cli import StepExit
 from hal.backup.runner import Interrupted, StepFailed
 from hal.backup.settings import Settings
+from hal.backup.status import ExitCategory
 from hal.grammar import Asks, Command, ExitCode
 from hal.output import write_error
 from hal.output.command import Verb, command
@@ -215,7 +217,16 @@ def _restore_live(arguments: argparse.Namespace) -> ExitCode:
         except switches.SwitchError:
             return False
 
-    guards = live.Guards(signals_ignored, switch_unchanged, terminal.at_terminal())
+    @contextmanager
+    def switch_lock() -> Iterator[None]:
+        with ExitStack() as held:
+            try:
+                held.enter_context(marks.lock())
+            except switches.SwitchError as error:
+                raise StepFailed(ExitCategory.COMMAND_FAILED, str(error)) from error
+            yield
+
+    guards = live.Guards(signals_ignored, switch_lock, switch_unchanged, terminal.at_terminal())
     step = functools.partial(live.restore_live, guards=guards)
     return _run(HAL_RESTORE, step, arguments, _tell_live_ended(app))
 

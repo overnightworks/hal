@@ -1,9 +1,11 @@
 """`hal restore <app> --live`: a DB-only Postgres app's snapshot loaded into its live database.
 
 hal's door checks that the app is switched off and hands in the hold of the stop signals, the
-switch re-check and whether a terminal is there. This step starts the app's database container
-alone, never another one, and spawns the client only inside the hold, which it leaves only by
-returning: an interrupt before the spawn is `Interrupted`, one after it leaves the outcome as it is.
+switch lock, the switch re-check and whether a terminal is there. This step starts the app's
+database container alone, never another one, then takes the switch lock, so no start comes in
+between, re-checks the switch under it and spawns the client only inside the hold, which it leaves
+only by returning: an interrupt before the spawn is `Interrupted`, one after it leaves the outcome
+as it is.
 """
 
 import argparse
@@ -33,10 +35,12 @@ class LiveEvent(StrEnum):
 
 @dataclass(frozen=True)
 class Guards:
-    """What only the door can read: the hold, whether the switch is still the one its guard
-    read, and whether somebody can answer at a terminal."""
+    """What only the door can read: the hold, the switch lock that every start and stop takes,
+    whether the switch is still the one its guard read, and whether somebody can answer at a
+    terminal."""
 
     hold: Callable[[], AbstractContextManager[None]]
+    switch_lock: Callable[[], AbstractContextManager[None]]
     switch_unchanged: Callable[[], bool]
     at_terminal: bool
 
@@ -134,12 +138,14 @@ def _staged(
 
 
 def _held(load: _Load, guards: Guards, staging: ExitStack, client: _Client) -> StepExit:
-    """The re-check of the switch, then the hold, and only inside it the client."""
-    if not guards.switch_unchanged():
-        write_error(f"{load.app.name}'s switch changed · nothing loaded")
-        return StepExit.REFUSED
-    with guards.hold():
-        return _load(load, staging, client)
+    """Under the switch lock to the end of the load: the re-check of the switch, then the hold,
+    and only inside it the client."""
+    with guards.switch_lock():
+        if not guards.switch_unchanged():
+            write_error(f"{load.app.name}'s switch changed · nothing loaded")
+            return StepExit.REFUSED
+        with guards.hold():
+            return _load(load, staging, client)
 
 
 def _load(load: _Load, staging: ExitStack, client: _Client) -> StepExit:

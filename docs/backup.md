@@ -444,7 +444,9 @@ volume. The copied files keep the owner restic restored them with (your user).
 Only you restore Keycloak. `hal restore keycloak --live` loads the last good snapshot into
 Keycloak's live database in one transaction, after you type `yes` at a terminal, and only while
 Keycloak is switched off. It starts `keycloak-db` alone if it is stopped, leaves `keycloak` stopped,
-holds the backup lock and removes the restored dump when it ends:
+holds the backup lock, and from its second read of the switch to the end of the load the switch lock,
+so no `hal start`, `hal stop` or `hal apply` comes in between ([stack.md](stack.md)), and removes the
+restored dump when it ends:
 
 1. `hal stop keycloak`
 2. `hal restore keycloak --live`, and check that its loaded row names the snapshot you meant

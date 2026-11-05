@@ -331,6 +331,9 @@ ein Container und damit sein Router: ihr Host antwortet Traefiks einfaches 404 (
 Ausschaltens (ISO 8601). `hal apply --local` startet eine ausgeschaltete Einheit nie und loescht
 ihren Schalter nie ("stays stopped"); sein Ende ist allein `hal start`. Ein `stop` waehrend der
 Rueckfrage von `apply` gewinnt (`apply` liest den Schalter nach dem `yes` noch einmal, `switch.lock`).
+`hal restore <app> --live` haelt `switch.lock` von seiner zweiten Lesung des Schalters bis zum Ende
+des Ladens ([backup.md](backup.md)): so lange warten `hal stop`, `hal start`, `hal apply` und sein
+Realm-Schritt. `hal offline` wartet nicht; nur seine zweite Notiz des globalen Schalters folgt danach.
 Ein `stopped/`-Verzeichnis, das nicht 0700 ist, setzt `hal stop` auf 0700 zurueck. Exit 0 ausgeschaltet
 oder schon so; 3 teilweise (Schalter notiert, aber ein Container laeuft noch, oder er liess sich nicht
 notieren), verweigert oder nicht planbar.
