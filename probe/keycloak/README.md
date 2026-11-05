@@ -154,3 +154,64 @@ Exit 1 with `PROBE FAILED: ...` when the bring-up fails, when a signal arrives b
 when the teardown leaves the stack behind (after `READY` too).
 
 Callers pin edge by commit SHA and require a clean checkout of it.
+
+## `in_copy.py`: Keycloak in an edge copy through `hal apply`
+
+`in_copy.py` brings Keycloak and step-ca up the way the operator's machine does, through the copy's
+own `hal apply --local`, in an edge copy (`probe/edge_copy.py`) under the project
+`edge-kc-in-copy` and a scratch HOME, beside the live stack. Later probes reuse it to drive
+Keycloak changes through hal itself.
+
+    flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \
+        uv run --frozen python3 probe/keycloak/in_copy.py --scratch DIR
+
+It needs an existing, empty `--scratch` directory and leaves it empty, passed or failed, and `uv`:
+it runs `uv sync` in the copy. It prints one `H<n> held:` line per cell and ends with
+`PASSED: H1, ..., H6` (exit 0), or `PROBE FAILED: <what>` (exit 1).
+
+- H1, copy isolation: the copy's compose.yaml has every fixed name in the project, the pinned /24s
+  and the `&keycloak-subnet` anchor on free /24s (the IPAM pool and `KC_PROXY_TRUSTED_ADDRESSES`
+  move together), the `&admin-hostname` anchor on the copy's admin port, and Keycloak's
+  `edge.name` `PROBE`, which the live `LabelRegex` refuses; its traefik.yml listens on two free
+  ports of 127.0.0.1 and routes the project label only; go-live's two addresses are the copy's;
+  its fleet switches on keycloak and step-ca alone; its backup records name the project. No
+  service of the started profiles carries an `edge.name` the live constraint accepts, publishes a
+  port or, but Traefik, joins the host network. Installing the shipped files again leaves the copy
+  byte-identical: the allocation is the same.
+- H2, bootstrap as go-live's steps, never go-live itself: the copy's compose with
+  `keycloak/bootstrap.compose.yaml` starts Keycloak, the copy's core (Traefik included) starts and
+  its admin entrypoint answers, `admin-frontend.sh` moves master, one `keycloak-config-cli` run
+  applies the realms, `temp-admin` is deleted through the `config-cli` client and its password file
+  unlinked, and Keycloak's containers go while the volume stays. The copy's
+  `keycloak/go-live --check` then exits 0 with `set up`.
+- H3, `hal apply --local`: keycloak and step-ca are on, the realm step runs after its proven
+  snapshot (the next apply, since a run that starts Keycloak leaves the step to the next one), and
+  the apply after it says `nothing to change` and asks nothing.
+- H4, tokens only from the copy: a hopin workload token and a member's PKCE sign-in through the
+  copy's edge entrypoint carry `iss` `https://auth.hallucinai.de/realms/hallucinai`, and the `kid`
+  of each token is in the copy's key set.
+- H5, the live stack untouched: the live project, its containers and the `hal_*` networks with
+  their ids are as before; every container of the project, inspected after each start and apply,
+  carries no `edge.name` the live constraint accepts, so the live `auth` router never has it as a
+  server; every HTTP request went to the copy's two entrypoints.
+- H6, teardown: the project's containers, networks and volumes are gone, measured.
+
+`install(stand, files, message)` is the one way a later probe puts a file set (base, candidate,
+revert) into the copy: it maps each path to its text, or to None for a file that set lacks, applies
+the same allocation to every file it rewrites, publishes the copy and checks its isolation again.
+`apply(stand)` checks it again before each `hal apply`, and the teardown before its `compose down`.
+`KeycloakCopy` carries the steps: `prepare(Fleet(units_on, app_entries))`, `bootstrap()` and
+`gate()`.
+
+It never touches the live project `hal`, its containers or volumes, and never creates or removes a
+`hal_*` network: every compose call goes through edge_copy's `NetworkGuard`. It never sends a
+request to the live entrypoints (`127.0.0.1:8081`, `localhost:8090`): probe.py's helpers it reuses
+are allowed only the copy's two addresses, and go-live never runs. It never reads `~/.secrets` or
+the live configuration: every secret is a scratch value under the scratch HOME. While it runs,
+`hal check exposure` reports its Keycloak as a routing name that is not valid, by design.
+
+After an exit 137 or a teardown that failed, remove the project under the lock, from a directory
+without a compose file:
+
+    flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM \
+        timeout -k 30 300 docker compose --project-name edge-kc-in-copy down --volumes --remove-orphans
