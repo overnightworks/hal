@@ -355,6 +355,11 @@ def moved_keycloak(**overrides: Any) -> Recreate:
             id="switch on",
         ),
         pytest.param(
+            {"unit_plans": (unit_plan(Action.ON, volumes=(), snapshot=KEYCLOAK_UNIT),)},
+            Row(Glyph.ADD, "step-ca", PlanEvent.SWITCH_ON, "step-ca, traefik-mcp · snapshot first"),
+            id="switch on over data, after the snapshot",
+        ),
+        pytest.param(
             {"unit_plans": (unit_plan(Action.OFF),)},
             Row(
                 Glyph.REMOVE,

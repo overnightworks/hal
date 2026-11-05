@@ -58,7 +58,7 @@ from hal.stack.realm.reconcile import (
     Stage,
     StepResult,
 )
-from hal.stack.service_recreate import Recreated
+from hal.stack.service_recreate import Recreated, short_snapshot
 from hal.stack.unit_plans import NotWritten
 
 _SEPARATOR = " · "
@@ -264,14 +264,10 @@ def recreated_row(recreated: Recreated) -> Row:
     proved before."""
     facts = (
         *(("barriers proven",) if recreated.barriers_proven else ()),
-        *((f"snapshot {_short(recreated.snapshot)} proven",) if recreated.snapshot else ()),
+        *((f"snapshot {short_snapshot(recreated.snapshot)} proven",) if recreated.snapshot else ()),
         format_duration(recreated.seconds),
     )
     return Row(Glyph.DONE, recreated.service, ResultEvent.RECREATED, _SEPARATOR.join(facts))
-
-
-def _short(snapshot: str) -> str:
-    return printable(snapshot[:SNAPSHOT_SHORT_ID])
 
 
 def unproven_row(failure: BarriersUnproven) -> Row:

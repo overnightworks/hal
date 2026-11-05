@@ -1047,13 +1047,14 @@ edge apply: nothing published</pre>
 <span class="b">  ~</span> keycloak        recreate       <span class="d">image quay.io/keycloak/keycloak:26.8.1@79c6… → @a78d… · snapshot first</span>
 <span class="b">  ~</span> legal           recreate       <span class="d">definition changed</span>
 <span class="g">  +</span> agent-service   switch on      <span class="d">agent-egress, agent-service</span>
+<span class="g">  +</span> litellm         switch on      <span class="d">litellm, litellm-db, litellm-front · snapshot first</span>
 <span class="y">  !</span> step-ca         old image      <span class="d">smallstep/step-ca:0.30.2@a2b1… · compose.yaml @7c4e…</span>
 <span class="y">  !</span> keycloak        realm skipped  <span class="d">the realm observer failed (…)</span>
 <span class="hd">apps</span>
 <span class="b">  ~</span> hopin           update         <span class="d">v2026.10.26.1 → v2026.10.27.1</span>
 <span class="hd">cloudflare</span>
 <span class="d">  · publish         later          own plan after a clean local run</span>
-Type <span class="w">yes</span> to apply 9 changes: yes
+Type <span class="w">yes</span> to apply 10 changes: yes
 <span class="g">  ✓</span> legal           pages written  <span class="d">datenschutz, nutzungsbedingungen</span>
 <span class="hd">core</span>
 <span class="g">  ✓</span> traefik         recreated      <span class="d">barriers proven · 9s</span>

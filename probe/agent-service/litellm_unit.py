@@ -12,13 +12,15 @@ The copy is edge_copy's: a scratch HOME whose live checkout runs the lane's file
 name moved into the probe's project, and every network of edge_copy.PINNED_NETWORKS moved to a free
 /24 (the live project owns the shipped ones). Its catalog is the shipped one with the entry
 `litellm` as shipped and Keycloak switched off, so no setup asks and the key step holds the admin
-rows. Secrets are random scratch values under the scratch HOME's `~/.secrets/litellm/`, never a real
-key; every network a service of profile `litellm` joins must be internal, and `agent-egress` is in
-no unit, or the probe refuses to start. E counts the key step's one-off containers in `docker
-events` of the project during a run and names each one's mode, `--read` or `--write`, from a
-`docker` stand-in in front of the real one (U5 is its control); D digests the complete rows of the
-key table and the budget table, read by SQL in `litellm-db`, and prints the digest alone. Exit 0:
-every cell held.
+rows. Its `backup/apps.toml` names the probe's project (edge_copy), and its restic repository and
+password are the scratch HOME's: U12's switch-on over the kept volume takes LiteLLM's pre-apply
+snapshot first. Secrets are random scratch values under the scratch HOME's `~/.secrets/litellm/`,
+never a real key; every network a service of profile `litellm` joins must be internal, and
+`agent-egress` is in no unit, or the probe refuses to start. E counts the key step's one-off
+containers in `docker events` of the project during a run and names each one's mode, `--read` or
+`--write`, from a `docker` stand-in in front of the real one (U5 is its control); D digests the
+complete rows of the key table and the budget table, read by SQL in `litellm-db`, and prints the
+digest alone. Exit 0: every cell held.
 """
 
 from __future__ import annotations
@@ -44,6 +46,7 @@ sys.path[:0] = [str(Path(__file__).resolve().parent), str(REPO / "probe"), str(R
 import edge_copy  # noqa: E402
 from edge_copy import HAL_DECLINED, HAL_FAILURE, HAL_OK, HAL_REFUSED, expect, publish  # noqa: E402
 
+from hal.backup.settings import Settings  # noqa: E402
 from hal.output import write_line  # noqa: E402
 from hal.stack import api_limits, catalog, core, litellm_keys  # noqa: E402
 from hal.stack.litellm_admin import hashed  # noqa: E402
@@ -64,6 +67,7 @@ COMPOSE_FILE = "compose.yaml"
 YES_PROMPT = "Type yes"
 PLAN_END = "to apply"
 LITELLM_ON = "litellm is on"
+LIVE_RESTORE = re.compile(r"pre-apply snapshot [0-9a-f]+, `hal restore litellm --live --snapshot")
 CELL_U14C = "U14 (c)"
 SUBNET_CANDIDATES = [f"172.31.{third}.0/24" for third in range(230, 210, -1)]
 ENTRY = re.compile(r"^ {2}litellm:\n(?: {4}.*\n)+", re.MULTILINE)
@@ -120,6 +124,13 @@ class Probe:
         self.copy = Path()
         self.held: list[str] = []
         self.files: dict[Path, str] = {}
+        # the scratch HOME's restic password: a switch-on over the kept volume backs it up first
+        settings = Settings.for_home(self.home, os.getuid(), os.getgid())
+        (self.home / ".secrets").mkdir(mode=0o700)
+        settings.password_file.parent.mkdir(mode=0o700)
+        descriptor = os.open(settings.password_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, "w") as file:
+            file.write(secrets.token_urlsafe(32))
 
     # --- plumbing -----------------------------------------------------------------------------
 
@@ -307,6 +318,8 @@ class Probe:
             self.write_secret(SECRETS / "apps" / app, f"sk-{secrets.token_urlsafe(32)}")
         entry = ENTRY.search(shipped)
         expect(entry is not None, "the shipped fleet.yaml has no litellm entry")
+        code, said, _ = self.hal("backup", "--init")
+        expect(code == HAL_OK, f"hal backup --init exited {code}: {said[-200:]}")
         return without, without + entry[0]
 
     def expect_no_egress(self) -> None:
@@ -531,11 +544,13 @@ class Probe:
             "partial, litellm is not on after the change" in output and LITELLM_ON not in output,
             f"U12: {output[-300:]}",
         )
+        expect(LIVE_RESTORE.search(output) is not None, f"U12: no way back: {output[-300:]}")
         expect({"litellm-db", FRONT} <= self.running(), f"U12: running {self.running()}")
         expect(ran.created == 0, f"U12: E saw {ran}")
         self.hold(
             "U12",
-            "partial, litellm is not on after the change, exit 3; litellm-db and the front run",
+            "partial, litellm is not on after the change, exit 3, after the kept volume's proven "
+            "snapshot, `hal restore litellm --live` named; litellm-db and the front run",
         )
 
     def cell_r1(self) -> None:

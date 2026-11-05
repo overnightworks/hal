@@ -2,17 +2,18 @@
 a follower whose file or definition changed, a live service of a unit that runs on whose
 definition changed, the built service whose image or definition changed in whatever state its
 container is, and a database unit's service whose image moved, after the unit's proven pre-apply
-snapshot (#89, #376, #995)."""
+snapshot (#89, #376, #995); and the snapshot before a switch-on starts a database unit over its
+data."""
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from hal.output import printable
 from hal.output.command import Verb, command
 from hal.stack import built_image, compose, core, switches
 from hal.stack.pre_apply import SNAPSHOT_SHORT_ID, Backup, PreApplyError
-from hal.stack.unit_plans import DatabaseUnit, Progress, Recreate, since_of
+from hal.stack.unit_plans import Begin, DatabaseUnit, Progress, Recreate, since_of
 
 
 @dataclass(frozen=True)
@@ -111,7 +112,9 @@ class ServiceRecreator:
 
         try:
             if isinstance(plan, Recreate) and plan.snapshot:
-                taken = snapshots[plan.unit] = self._proven_snapshot(plan.snapshot)
+                taken = snapshots[plan.unit] = proven_snapshot(
+                    self.backup, self.progress, plan.snapshot
+                )
             failure = self.alone(plan.unit, plan.service, begin)
         except PreApplyError as error:
             return f"{error}; {plan.unit} is not recreated"
@@ -126,18 +129,6 @@ class ServiceRecreator:
             return f"{failure}; {way_back}" if way_back else failure
         self.tell(Recreated(plan.service, self.watch.clock() - started, snapshot=taken))
         return None
-
-    def _proven_snapshot(self, unit: DatabaseUnit) -> str:
-        """The unit's new pre-apply snapshot, once its restore test passed."""
-        self.progress.step = f"take the {unit.key} pre-apply snapshot"
-        snapshot = self.backup.pre_apply(unit)
-        short = printable(snapshot[:SNAPSHOT_SHORT_ID])
-        self.progress.step = f"prove pre-apply snapshot {short}"
-        try:
-            self.backup.restore_test(unit, snapshot)
-        except PreApplyError as error:
-            raise PreApplyError(f"{error}, pre-apply snapshot {short} not proven") from error
-        return snapshot
 
     def alone(
         self, unit: str, service: str, before: Callable[[], None] = lambda: None
@@ -160,14 +151,63 @@ class ServiceRecreator:
         return None
 
 
+def proven_snapshot(backup: Backup, progress: Progress, unit: DatabaseUnit) -> str:
+    """The unit's new pre-apply snapshot, once its restore test passed."""
+    progress.step = f"take the {unit.key} pre-apply snapshot"
+    snapshot = backup.pre_apply(unit)
+    short = short_snapshot(snapshot)
+    progress.step = f"prove pre-apply snapshot {short}"
+    try:
+        backup.restore_test(unit, snapshot)
+    except PreApplyError as error:
+        raise PreApplyError(f"{error}, pre-apply snapshot {short} not proven") from error
+    return snapshot
+
+
+def short_snapshot(snapshot: str) -> str:
+    return printable(snapshot[:SNAPSHOT_SHORT_ID])
+
+
+@dataclass
+class SwitchOnSnapshots:
+    """The pre-apply snapshots one apply run takes before a switch-on starts a database unit over
+    its data, and each unit's way back. Its database, started alone for the backup, is not counted
+    as started over the data: the snapshot is taken from it, so loading it would undo nothing that
+    start did."""
+
+    backup: Backup
+    progress: Progress
+    taken: dict[str, str] = field(default_factory=dict)  # unit -> its proven snapshot
+    began: set[str] = field(default_factory=set)  # the units whose start over the data began
+
+    def first(self, unit: DatabaseUnit, start: Callable[[Begin], str | None]) -> str | None:
+        """The proven snapshot, then `start`; a snapshot that fails starts nothing more."""
+        try:
+            self.taken[unit.key] = proven_snapshot(self.backup, self.progress, unit)
+        except PreApplyError as error:
+            raise PreApplyError(f"{error}; {unit.key} is not started") from error
+        return start(lambda: self.began.add(unit.key))
+
+    def proven(self, unit: str) -> str | None:
+        """What the unit's result line says of its snapshot, once one was proven."""
+        return f"snapshot {short_snapshot(self.taken[unit])} proven" if unit in self.taken else None
+
+    def way_back(self) -> str | None:
+        """The way back of every unit of the run that holds a snapshot."""
+        lines = (
+            _way_back(unit, snapshot, unit in self.began) for unit, snapshot in self.taken.items()
+        )
+        return "; ".join(filter(None, lines)) or None
+
+
 def _way_back(unit: str, snapshot: str | None, recreating: bool) -> str | None:
     """Once the unit's snapshot was proven, it by name; once its recreate has begun, also how its
     database goes back to it. Before that nothing was changed, and loading it would lose what the
     database took since."""
     if snapshot is None:
         return None
-    short = printable(snapshot[:SNAPSHOT_SHORT_ID])
+    short = short_snapshot(snapshot)
     if not recreating:
-        return f"pre-apply snapshot {short} taken"
+        return f"{unit}: pre-apply snapshot {short} taken"
     restore = f"{command(Verb.RESTORE)} {unit} --live --snapshot {short}"
     return f"pre-apply snapshot {short}, `{restore}` loads it"

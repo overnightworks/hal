@@ -12,7 +12,6 @@ import secrets
 import stat
 import subprocess
 from collections.abc import Iterator
-from fnmatch import fnmatchcase
 from pathlib import Path
 from types import ModuleType
 
@@ -172,22 +171,6 @@ def test_litellm_finds_exactly_the_names_the_gateway_passes_it_at_the_gateways_a
     assert passed
     assert compose["services"][LITELLM]["extra_hosts"] == dict.fromkeys(
         passed, compose["x-litellm-egress-address"]
-    )
-
-
-def test_dependabot_proposes_no_litellm_image_with_or_without_its_registry_host(compose):
-    """LiteLLM migrates its database at start and hal apply takes no backup before an image move,
-    so no bump arrives unasked."""
-    updates = load(ROOT / ".github" / "dependabot.yml")["updates"]
-    (images,) = [update for update in updates if update["package-ecosystem"] == "docker-compose"]
-    ignored = [
-        entry["dependency-name"] for entry in images["ignore"] if "update-types" not in entry
-    ]
-    name = compose["services"][LITELLM]["image"].partition(":")[0]
-    without_host = name.partition("/")[2]
-
-    assert any(
-        fnmatchcase(name, pattern) and fnmatchcase(without_host, pattern) for pattern in ignored
     )
 
 
