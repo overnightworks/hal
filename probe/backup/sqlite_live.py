@@ -203,38 +203,43 @@ class SqliteLiveProbe:
         )
         os.close(secondary)
         self.hal_pids.append(process.pid)
-        output, beside, failures = bytearray(), None, []
-
-        def beside_hal(pid: int) -> None:
-            try:
-                (during or (lambda _: None))(pid)
-            except (ProbeFailed, subprocess.TimeoutExpired, OSError) as failure:
-                failures.append(failure)
-
+        output, failures, beside = bytearray(), [], []
         deadline = time.monotonic() + HAL_SECONDS
         try:
-            while time.monotonic() < deadline:
-                ready, _, _ = select.select([primary], [], [], 0.05)
-                if ready:
-                    try:
-                        chunk = os.read(primary, 65536)
-                    except OSError:
-                        break
-                    if not chunk:
-                        break
-                    output += chunk
-                if beside is None and b"Type yes" in output:
-                    os.write(primary, typed)
-                    beside = threading.Thread(target=beside_hal, args=(process.pid,))
-                    beside.start()
+            self._answer_at_pty(primary, process.pid, typed, during,
+                                (output, failures, beside), deadline)  # fmt: skip
             process.wait(timeout=max(1, deadline - time.monotonic()))
         finally:
             os.close(primary)
-            if beside is not None:
-                beside.join(timeout=HAL_SECONDS)
+            for thread in beside:
+                thread.join(timeout=HAL_SECONDS)
         if failures:
             raise failures[0]
         return process.returncode, _squeezed(bytes(output))
+
+    @staticmethod
+    def _answer_at_pty(
+        primary: int,
+        pid: int,
+        typed: bytes,
+        during: Callable[[int], None] | None,
+        collected: tuple[bytearray, list, list],
+        deadline: float,
+    ) -> None:
+        """Collects the pty output until it closes; types `typed` once the question shows and
+        starts `during` beside it."""
+        output, failures, beside = collected
+        while time.monotonic() < deadline:
+            ready, _, _ = select.select([primary], [], [], 0.05)
+            if ready:
+                chunk = _read_pty(primary)
+                if not chunk:
+                    break
+                output += chunk
+            if not beside and b"Type yes" in output:
+                os.write(primary, typed)
+                beside.append(threading.Thread(target=_run_beside, args=(during, pid, failures)))
+                beside[0].start()
 
     def live(self, *options: str, **keywords) -> tuple[int, str]:
         return self.hal("restore", APP, "--live", *options, **keywords)
@@ -558,6 +563,21 @@ class SqliteLiveProbe:
             self.docker("volume", "rm", *volumes)
         left = self.docker("ps", "--all", "--quiet", "--filter", f"label={self.label}").split()
         expect(not left, f"teardown left {len(left)} containers")
+
+
+def _read_pty(primary: int) -> bytes:
+    """One chunk from the pty; empty once the child closed it."""
+    try:
+        return os.read(primary, 65536)
+    except OSError:
+        return b""
+
+
+def _run_beside(during: Callable[[int], None] | None, pid: int, failures: list) -> None:
+    try:
+        (during or (lambda _: None))(pid)
+    except (ProbeFailed, subprocess.TimeoutExpired, OSError) as failure:
+        failures.append(failure)
 
 
 def _squeezed(output: bytes) -> str:

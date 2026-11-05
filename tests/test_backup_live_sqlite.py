@@ -387,7 +387,8 @@ def test_a_loaded_snapshot_names_hal_start_and_the_loader_runs_hardened_as_the_o
     live_file = PurePosixPath(argv[-2])
     assert live_file.name == "presentator.sqlite3"
     [volume] = [mount for mount in mounts if f"target={live_file.parent}" in mount]
-    assert f"source={VOLUME}," in volume and not volume.endswith(",readonly")
+    assert f"source={VOLUME}," in volume
+    assert not volume.endswith(",readonly")
     [staged] = [mount for mount in mounts if f"target={argv[argv.index('load') + 1]}," in mount]
     assert staged.endswith(",readonly")
     [copy] = loader.staged
