@@ -562,24 +562,39 @@ def _restore_test(settings: Settings, app: App, run: Run, snapshot_prefix: str |
 
 def _verify(settings: Settings, app: App, restored: Path, run: Run) -> None:
     """Only what the copy shows fails verification; a container that will not run is a command."""
-    restored_db = restored / DB_FOLDER
-    manifest_file = _restored_file(restored_db / MANIFEST_NAME, "no manifest")
-    manifest = Manifest.from_json(manifest_file.read_text(encoding="utf-8"))
+    manifest = _restored_manifest(restored / DB_FOLDER)
     match app.database:
         case PostgresDatabase() as database:
             _verify_postgres(settings, app, database, restored, manifest, run)
         case SqliteDatabase(files=files):
-            _restored_file(restored_db / SQLITE_COPY_NAME, "no SQLite database")
+            _restored_file(restored / DB_FOLDER / SQLITE_COPY_NAME, "no SQLite database")
             with run.phase(Phase.VERIFY):
                 if files:
                     _verify_files(settings, restored / files.volume, files.skip, manifest)
-                rows = docker.check_sqlite(
-                    settings, restored_db, SQLITE_COPY_NAME, app.restore_test.count_table
-                )
-                check_rows(manifest, rows)
-                check_row_count(
-                    app.restore_test.count_table, rows, require_rows=app.restore_test.require_rows
-                )
+                _verified_sqlite_rows(settings, app, restored / DB_FOLDER, manifest)
+
+
+def verified_sqlite_copy(settings: Settings, app: App, restored: Path) -> tuple[Path, int]:
+    """The restored SQLite copy and its rows, which match its manifest and the record's rule; the
+    snapshot's files are not looked at."""
+    manifest = _restored_manifest(restored / DB_FOLDER)
+    copy = _restored_file(restored / DB_FOLDER / SQLITE_COPY_NAME, "no SQLite database")
+    return copy, _verified_sqlite_rows(settings, app, restored / DB_FOLDER, manifest)
+
+
+def _restored_manifest(restored_db: Path) -> Manifest:
+    manifest_file = _restored_file(restored_db / MANIFEST_NAME, "no manifest")
+    return Manifest.from_json(manifest_file.read_text(encoding="utf-8"))
+
+
+def _verified_sqlite_rows(
+    settings: Settings, app: App, restored_db: Path, manifest: Manifest
+) -> int:
+    table = app.restore_test.count_table
+    rows = docker.check_sqlite(settings, restored_db, SQLITE_COPY_NAME, table)
+    check_rows(manifest, rows)
+    check_row_count(table, rows, require_rows=app.restore_test.require_rows)
+    return rows
 
 
 def _verify_files(settings: Settings, restored: Path, skip: str | None, manifest: Manifest) -> None:

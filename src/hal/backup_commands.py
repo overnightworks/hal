@@ -175,15 +175,23 @@ class _Refusal:
 
 
 def _switched_off(app: str) -> switches.Mark | _Refusal:
-    """The marker of the enabled unit `app` names, read as `hal stop` finds its unit; the global
-    switch is not read, so a unit on is refused whatever the tunnel."""
+    """The marker of the enabled unit or catalog app `app` names, read as `hal stop` finds it; the
+    global switch is not read, so one that is on is refused whatever the tunnel."""
     try:
         fleet = unit_plans.read_fleet(compose.Compose(), compose.REPOSITORY)
-        unit = next((unit for unit in fleet.units if unit.key == app), None)
-        if unit is None:
-            known = ", ".join(sorted(unit.key for unit in fleet.units))
-            return _Refusal(ExitCode.REFUSED, f"{app} is not a unit of fleet.yaml (units: {known})")
-        if not unit.enabled:
+        enabled = {unit.key: unit.enabled for unit in fleet.units}
+        apps: dict[str, bool] = {}
+        if app not in enabled:  # an invalid app entry never stands between an operator and a unit
+            document = catalog.read(compose.REPOSITORY / catalog.FLEET_FILE)
+            every = catalog.apps(document, fleet.profile_services, fleet.config["name"])
+            apps = {entry.key: entry.enabled for entry in every}
+        if app not in enabled | apps:
+            units, named = ", ".join(sorted(enabled)), ", ".join(sorted(apps))
+            return _Refusal(
+                ExitCode.REFUSED,
+                f"{app} is not a unit of fleet.yaml (units: {units}; apps: {named})",
+            )
+        if not (enabled | apps)[app]:
             return _Refusal(ExitCode.REFUSED, f"{app} is disabled in the catalog")
         mark = switches.Switches(switches.default_state_directory()).mark(app)
     except (compose.ComposeError, catalog.CatalogError, switches.SwitchError) as error:
@@ -249,8 +257,9 @@ def _tell_live_ended(app: str) -> Callable[[Ended], None]:
 
 
 def _names(reason: str, app: str) -> bool:
-    """Whether the reason holds the app's name as a word of its own, not inside `<app>-db`."""
-    return re.search(rf"(?<![\w-]){re.escape(app)}(?![\w-])", reason) is not None
+    """Whether the reason holds the app's name as a word of its own, not inside `<app>-db` or
+    `<app>.sqlite3`."""
+    return re.search(rf"(?<![\w-]){re.escape(app)}(?![\w.-])", reason) is not None
 
 
 def _run(

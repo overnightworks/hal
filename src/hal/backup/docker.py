@@ -45,13 +45,19 @@ SQLITE_OWNER_LABEL = "SQLite owner read"
 DATABASE_START_LABEL = "database start"
 SESSION_COUNT_LABEL = "pg_restore session count"
 LIVE_LOAD_LABEL = "live load"
+SQLITE_LOAD_LABEL = "SQLite live load"
+VOLUME_USERS_LABEL = "docker ps of the volume"
 # pg_restore names its session so (postgres src/bin/pg_dump/pg_backup_db.c); no PGAPPNAME hides it.
 PG_RESTORE_APPLICATION = "pg_restore"
 _SCANNED = "/scanned"
 _SQLITE_SCRIPT = "/sqlite_copy.py"
 _SQLITE_DATA = "/data"
+_SQLITE_STAGED = "/staged.sqlite3"
 _OWNER = re.compile(r"(\d+):(\d+)\n")
 _RUNNING = "running"
+# What `docker ps` calls a container that runs no process; paused and restarting ones still do.
+_STOPPED_STATES = frozenset({"exited", "created", "dead"})
+_ID_AND_STATE = re.compile(r"([0-9a-f]{64}) ([a-z]+)")
 _READY_STATES = frozenset({_RUNNING, "running healthy"})
 # What `docker run --detach` prints: the full ID, never a name or a shortened one.
 _CONTAINER_ID = re.compile(r"[0-9a-f]{64}")
@@ -193,6 +199,26 @@ def app_volume(app: App, volume: str) -> str:
     return names[0]
 
 
+def volume_users(volume: str) -> int:
+    """How many containers that are not stopped mount the volume, whatever their project."""
+    output = host.run(
+        ["docker", "ps", "--all", "--no-trunc", "--filter", f"volume={volume}",
+         "--format", "{{.ID}} {{.State}}"],
+        label=VOLUME_USERS_LABEL,
+        timeout=PROBE_TIMEOUT,
+    )  # fmt: skip
+    try:
+        lines = output.decode().splitlines()
+    except UnicodeDecodeError as error:
+        raise host.UnreadableOutputError("docker printed output that is not UTF-8") from error
+    running = 0
+    for line in lines:
+        if (container := _ID_AND_STATE.fullmatch(line)) is None:
+            raise host.UnreadableOutputError("docker ps printed a line that is no ID and state")
+        running += container[2] not in _STOPPED_STATES
+    return running
+
+
 def dump_database(database: PostgresDatabase, container_id: str, target: Path) -> None:
     host.run(
         ["docker", "exec", "-i", container_id, "pg_dump",
@@ -282,25 +308,64 @@ def _read_owner(settings: Settings, volume: str, file: str) -> bytes:
         ) from error
 
 
+def database_owner(settings: Settings, volume: str, file: str) -> str:
+    """`uid:gid` of the database file, whose user runs every container that opens it."""
+    answer = _read_owner(settings, volume, file)
+    owner = _OWNER.fullmatch(answer.decode(errors="replace"))
+    if owner is None or int(owner[1]) == 0:
+        raise TargetError(f"the owner of the database {file} is unreadable or root")
+    return f"{owner[1]}:{owner[2]}"
+
+
 def copy_sqlite(settings: Settings, volume: str, database: SqliteDatabase, target: Path) -> None:
     """The online copy runs as the file's owner with the volume writable: a WAL reader keeps its
     read lock in the `-shm` file. Its connection is read-only: the database file stays unwritten."""
     path = f"{_SQLITE_DATA}/{database.file}"
-    answer = _read_owner(settings, volume, database.file)
-    owner = _OWNER.fullmatch(answer.decode(errors="replace"))
-    if owner is None or int(owner[1]) == 0:
-        raise TargetError(f"the owner of the database {database.file} is unreadable or root")
     host.run(
         _sqlite_argv(
             settings,
             Mount(MountKind.VOLUME, volume, _SQLITE_DATA, readonly=False),
-            user=f"{owner[1]}:{owner[2]}",
+            user=database_owner(settings, volume, database.file),
             command=["copy", path],
         ),
         label=SQLITE_COPY_LABEL,
         stdout=target,
         discard_stderr=True,
     )
+
+
+def load_sqlite(
+    settings: Settings, volume: str, database: SqliteDatabase, owner: str, staged: Path, table: str
+) -> int:
+    """The staged copy loaded into the live file by the file's owner, with the volume writable
+    and the copy mounted read-only; the live file's row count after it. The loader checks the
+    copy against the size and sha256 read here, and runs in its own session, so a Ctrl-C at the
+    terminal reaches only hal. A failed run raises `HostCommandError`, whose exit code is the
+    script's `LoadExit` when it decided one."""
+    with staged.open("rb") as file:
+        sha256 = hashlib.file_digest(file, "sha256").hexdigest()
+        size = file.tell()
+    # The loader is an "other" to the copy; its 0700 staging directory keeps every host user out.
+    staged.chmod(0o644)
+    output = host.run(
+        _sqlite_argv(
+            settings,
+            Mount(MountKind.BIND, str(staged), _SQLITE_STAGED),
+            Mount(MountKind.VOLUME, volume, _SQLITE_DATA, readonly=False),
+            user=owner,
+            command=["load", _SQLITE_STAGED, str(size), sha256,
+                     f"{_SQLITE_DATA}/{database.file}", table],
+        ),
+        label=SQLITE_LOAD_LABEL,
+        discard_stderr=True,
+        new_session=True,
+    )  # fmt: skip
+    try:
+        return int(output)
+    except ValueError as error:
+        raise host.UnreadableOutputError(
+            "the row count of the loaded database is unreadable"
+        ) from error
 
 
 def check_sqlite(settings: Settings, directory: Path, file: str, table: str) -> int:

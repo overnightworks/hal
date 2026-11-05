@@ -3,11 +3,9 @@ refusals, the question, the database started alone, the held signals and each en
 outcome table. `docker compose config` answers the checkout's compose.yaml as it is."""
 
 import dataclasses
-import fcntl
 import os
 import signal
 from contextlib import ExitStack, contextmanager
-from pathlib import Path
 
 import pytest
 import yaml
@@ -17,6 +15,12 @@ from support.backup_support import (
     declare_apps,
     declare_shipped_apps,
 )
+from support.live_restore_support import (
+    squeezed,
+    switch_lock_is_held,
+    switch_off,
+    work_directory,
+)
 from support.terminal_support import type_at_prompt
 
 from hal import backup_commands
@@ -24,7 +28,6 @@ from hal.backup import host, runner
 from hal.backup import live as live_step
 from hal.backup.docker import LIVE_LOAD_LABEL, SESSION_COUNT_LABEL
 from hal.backup.runner import RUN_MARK_SUFFIX, STAGING_PREFIX, StepFailed
-from hal.backup.settings import Settings
 from hal.backup.status import ExitCategory
 from hal.stack import compose, switches, terminal, unit_plans
 
@@ -32,10 +35,6 @@ APP = "litellm"
 SERVICE = "litellm-db"
 CONTAINER = ("hal", SERVICE)
 COMPOSE_FILE = compose.REPOSITORY / "compose.yaml"
-
-
-def squeezed(text: str) -> str:
-    return "\n".join(" ".join(line.split()) for line in text.splitlines())
 
 
 @pytest.fixture
@@ -46,7 +45,7 @@ def live(edge_backup, machine, home, monkeypatch, restored_signal_handlers):
     monkeypatch.setattr(compose.Compose, "resolved_configuration", lambda _: resolved)
     monkeypatch.setattr(terminal, "at_terminal", lambda: True)
     assert edge_backup(*declare_shipped_apps(), "backup", APP).exit_code == 0
-    switch_off(home)
+    switch_off(home, APP)
     type_at_prompt(monkeypatch, "yes")
 
     def run(*options: str, apps: tuple[str, str] = declare_shipped_apps()):
@@ -55,34 +54,12 @@ def live(edge_backup, machine, home, monkeypatch, restored_signal_handlers):
     return run
 
 
-def switch_off(home: Path, unit: str = APP) -> Path:
-    marker = home / ".local/state/edge/stopped" / unit
-    marker.parent.mkdir(parents=True, exist_ok=True)
-    marker.write_text("2026-11-04T10:00:00+01:00")
-    return marker
-
-
-def work_directory(home: Path) -> Path:
-    return Settings.for_home(home, os.getuid(), os.getgid()).work_dir
-
-
 def snapshot(machine) -> str:
     return machine.snapshots[-1]["id"][:8]
 
 
 def live_loads_started(machine) -> bool:
     return LIVE_LOAD_LABEL in machine.labels()
-
-
-def switch_lock_is_held(home: Path) -> bool:
-    """Whether another holder has `switch.lock`: a second descriptor cannot take it."""
-    with (home / ".local/state/edge" / switches.LOCK_FILE).open("a") as handle:
-        try:
-            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            return True
-        fcntl.flock(handle, fcntl.LOCK_UN)
-        return False
 
 
 def test_a_loaded_snapshot_starts_only_the_stopped_database_and_names_hal_start(
@@ -217,12 +194,13 @@ compose_project = "hal"
 dump = "sqlite_online_copy"
 database_volume = "database"
 database_file = "litellm.sqlite3"
+files_volume = "builds"
 [app.{APP}.restore_test]
 count_table = "users"
 """
 
 
-@pytest.mark.parametrize("record", [AUDIO_RECORD, SQLITE_RECORD], ids=["audio", "sqlite"])
+@pytest.mark.parametrize("record", [AUDIO_RECORD, SQLITE_RECORD], ids=["audio", "sqlite files"])
 def test_a_record_with_files_is_refused_with_one_line_and_starts_nothing(
     live, machine, home, record
 ):
@@ -334,9 +312,9 @@ def test_a_load_still_running_is_refused(live, machine):
 
 def test_a_switch_changed_after_the_guard_is_refused(live, machine, monkeypatch, home):
     def stop_again():
-        marker = switch_off(home)
+        marker = switch_off(home, APP)
         marker.unlink()
-        switch_off(home)
+        switch_off(home, APP)
 
     type_at_prompt(monkeypatch, "yes", while_waiting=stop_again)
 
