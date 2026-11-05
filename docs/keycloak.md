@@ -157,12 +157,13 @@ admin console stay Keycloak's own.
 The themes give both pages the look of hallucinai.de, light and dark by the
 device, with the violet main button of songmaker's vocabulary
 (`docs/design/keycloak-theme.html` is the picture): the wordmark, hallucinai's
-colours and shapes over Keycloak's PatternFly, the favicon, and Impressum and
-Datenschutz in the sign-in card. The tokens and the fonts (Oswald and Open Sans,
+colours and shapes over Keycloak's PatternFly, the favicon, and Impressum,
+Datenschutz and Nutzungsbedingungen as the kit's legal row on the sign-in
+pages. The tokens and the fonts (Oswald and Open Sans,
 with their licences, so no page asks a third party) come from the installed
 appkit: the appkit step of `hal apply` writes `appkit-<version>/` (git-ignored)
 into each theme's `resources/`, and `styles=` lists its `appkit.css` first, then
-the theme's own `css/edge-2.css` with the app colour and the shapes. The theme
+the theme's own `css/edge-3.css` with the app colour and the shapes. The theme
 files reach Keycloak on `hal update` of the live checkout, the appkit
 directory on `hal apply`, so a restart between the two serves pages without
 tokens. They are CSS, `footer.ftl` and message texts on top of `keycloak.v2` and
@@ -194,7 +195,7 @@ restart keeps the same URL. Cloudflare caches css, js, svg, ico and woff2 for 30
 days under that URL as well, and a browser keeps them as long. A file changed in
 place therefore keeps coming from those caches; a look change names a new file
 (for a stylesheet, `styles=` in `theme.properties`; appkit's path changes with each
-release, and a restyled `css/edge-2.css` takes a new name). A purge at Cloudflare
+release, and a restyled `css/edge-3.css` takes a new name). A purge at Cloudflare
 clears only Cloudflare's copy; a browser that already holds the old file keeps it.
 
 
