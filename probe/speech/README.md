@@ -23,5 +23,9 @@ scratch HOME and any network but the copy's external `<project>_speech_*`; its n
 print one `self-check:` line each. The app's project is in every label sweep of the copy.
 
 Tokens never leave the probe but on curl's stdin. The E2 cell starts an HTTP listener on every
-host address for its own length, under `timeout 600`, its pid in the scratch. The first image
+host address for its own length, under `timeout 600`, its pid in the scratch. Where the host
+drops container-to-host traffic for every bridge, its control (a container on the default
+bridge) cannot reach the listener either: E2 then prints `E2 limit: ...` instead of holding,
+the speech service's attempts must still all fail, and `gateway_mode_ipv4: isolated` is
+proven by C1 (tests/test_traefik_mcp.py). The first image
 build of the release takes about 12 minutes without a build cache.
