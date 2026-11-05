@@ -1,0 +1,7 @@
+claim_id = "0a476ac3f95e4418b39d83f646acf101"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "f138a2e68efbab5973b879fe54f1aaa13b2e3ad6"
+branch = "claude/issue-1019-agent-dienst-training"
+scope = ["legal/sections/agent-service/datenschutz.html"]
+opened_commit = "1da2752080cb4a70d04c68756d9645bdd9682f05"
