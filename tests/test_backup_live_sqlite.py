@@ -568,7 +568,7 @@ def test_a_container_that_is_not_stopped_on_the_volume_refuses_the_load(
             4,
             [
                 f"error: a container still uses {APP}'s database · nothing loaded",
-                f"next: hal stop {APP}",
+                f"next: hal stop {APP}, or wait for an earlier load to end; then rerun",
             ],
         )
         assert loader.loads == []

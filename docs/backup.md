@@ -357,7 +357,7 @@ Exit 4: the app is on (`stop it first: hal stop <app>`), disabled or neither uni
 catalog, there is no terminal, a `pg_restore` session still runs in its database, its switch changed
 after the check, a container that is not stopped (exited, created or dead) still uses a SQLite app's
 database volume (`a container still uses <app>'s database · nothing loaded` and
-`next: hal stop <app>`), or the SQLite loader refused before its copy began (below). Exit 1: the
+`next: hal stop <app>, or wait for an earlier load to end; then rerun`), or the SQLite loader refused before its copy began (below). Exit 1: the
 question was answered with anything but `yes`.
 Exit 3: the record keeps audio or files, or a step before the load failed (`error: <app>: <reason>`;
 for SQLite also a live file that is missing, no regular file or owned by root, and a snapshot whose

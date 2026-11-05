@@ -221,7 +221,8 @@ def _held(load: _Load, guards: Guards, staging: ExitStack, client: _Client) -> S
         ):
             write_error(
                 f"a container still uses {load.app.name}'s database · nothing loaded",
-                command(Verb.STOP, load.app.name),
+                f"{command(Verb.STOP, load.app.name)}, or wait for an earlier load to end; "
+                "then rerun",
             )
             return StepExit.REFUSED
         with guards.hold():
