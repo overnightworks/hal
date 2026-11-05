@@ -439,7 +439,8 @@ and the admin budget with its customer rows (the key step below).
   `hal apply`'s own plan and run, and that LiteLLM calls no provider from its start to the first app
   call (S0), `litellm_limits.py` the operator's numbers from `config.toml` through that step, and
   `litellm_backup.py` the backup, its restore test and a lost volume, on the same
-  stack and with the same caller. `litellm_unit.py` drives the copy's real `hal apply` with the
+  stack and with the same caller; `litellm_wheel.py` runs one tool turn of hal's own client
+  wheel through the route on that stack. `litellm_unit.py` drives the copy's real `hal apply` with the
   shipped unit `litellm`: its first start and the second apply, the refusals of a missing file, the
   switch-off and the stop that hold the key step, the recreates that make it wait, a start after a
   failed one and the way on after a new master key. Re-run them for every LiteLLM,
