@@ -302,12 +302,13 @@ class KeycloakCopy:
         """The teardown's path on a copy whose files are missing, with one volume carrying the
         project's label and nothing started: the real label sweep removes the volume, and the
         read's error still stops the teardown."""
-        if self.stand is None:
+        stand = self.stand
+        if stand is None:
             raise ProbeFailed("self-check: the teardown self-check ran before prepare")
         volume = f"{PROJECT}_teardown-self-check"
         label = f"{PROJECT_LABEL}={PROJECT}"
         run_checked(["docker", "volume", "create", "--label", label, volume], os.environ)
-        missing = replace(self.stand, copy=self.stand.copy / "missing")
+        missing = replace(stand, copy=stand.copy / "missing")
         try:
             removed_whatever_fails(lambda: expect_isolated(missing), self.sweep)
         except FileNotFoundError as failure:
