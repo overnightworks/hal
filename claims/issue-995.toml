@@ -1,8 +1,0 @@
-claim_id = "c8dbbb1f4c834dd88e7a5ecd5e79c3ab"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "e086a0ba4b324f8df07eb47a5bce63b083b0a25c"
-branch = "claude/issue-995-image-move-snapshot"
-scope = ["docs/agent-service.md", "docs/architecture.md", "docs/backup.md", "docs/design/hal-output.html", "docs/keycloak.md", "docs/stack.md", "probe/agent-service/litellm_move.py", "probe/agent-service/litellm_unit.py", "probe/keycloak/probe.py", "quality/baseline.toml", "src/hal/stack/apply.py", "src/hal/stack/core_phase.py", "src/hal/stack/litellm_keys.py", "src/hal/stack/plan_rows.py", "src/hal/stack/pre_apply.py", "src/hal/stack/realm/reconcile.py", "src/hal/stack/result_rows.py", "src/hal/stack/service_recreate.py", "src/hal/stack/unit_plans.py", "tests/support/stack_apply_fakes.py", "tests/support/stack_plan_rows.py", "tests/test_hal_log_events.py", "tests/test_stack_apply.py", "tests/test_stack_apply_image_move.py", "tests/test_stack_plan_rows.py", "tests/test_stack_realm_backup_failures.py", "tests/test_stack_realm_reconcile.py"]
-opened_commit = "68327b5bf735fcbbe4eaa63a2eb19e3e3eb69059"
-whole_reason = "One mechanism threaded through the plan, its rows, the recreator and the one backup owner; split by unit it would build the same path twice."
