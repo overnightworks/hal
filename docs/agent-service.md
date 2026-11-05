@@ -396,10 +396,11 @@ and the admin budget with its customer rows (the key step below).
 - **What stays reachable.** The front sees every message and every app key in memory; a
   compromised front could spend credit through LiteLLM, bounded by each key's budget and parallel
   bound. The front is a member of every app's agent network, so an app could give itself the alias
-  `litellm` there; the service sends nothing to the front or LiteLLM and has no network of the
-  route besides the app networks it shares with every app; the front therefore finds LiteLLM through
+  `litellm` there; the front therefore finds LiteLLM through
   `extra_hosts` at its fixed address on `litellm-backend` (`compose.yaml` pins the subnet, and its
-  `ip_range` keeps that address from any other container), never by Docker's DNS. LiteLLM reaches
+  `ip_range` keeps that address from any other container), never by Docker's DNS. The service shares
+  those app networks with the front but sends it nothing, and has no address on `litellm-backend` or
+  `litellm-egress`. LiteLLM reaches
   only the front, its database and, through the gateway's `litellm` entrypoint, the providers'
   names; `api.openai.com` is open to that entrypoint alone, so the agent service cannot reach it.
 - **The bound.** Each app key's `max_parallel_requests` bounds its requests in flight; LiteLLM

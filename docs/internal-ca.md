@@ -87,7 +87,7 @@ isolated like the others, and the exclusions between them hold: the service has 
 either; LiteLLM reaches the front and, beyond it, only the two providers' names on
 entrypoint 2, and neither the service, entrypoint 1, the issuer, `mcp` nor the internet; the front
 reaches LiteLLM. Like `traefik-mcp` it is a follower: its static file is bound at Traefik's static-config
-path, so `hal apply` recreates it alone while the unit `agent-service` is on; no plain
+path, so `hal apply` recreates it alone while the unit `litellm` is on; no plain
 `docker compose up -d` starts it.
 
 **Proof:** `probe/agent-service/egress.py` (with `--target service` for the real service and a dummy
