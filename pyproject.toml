@@ -26,6 +26,13 @@ dev = [
 requires = ["uv_build>=0.10,<0.11"]
 build-backend = "uv_build"
 
+[tool.uv]
+# The overnightworks client library is built from its git tag; a named package
+# overrides a global --no-build, so every other package still installs as a wheel.
+no-binary-package = ["overnightworks-agent-runtime-client"]
+# Its build backend runs with these exact tools.
+build-constraint-dependencies = ["setuptools==84.2.1", "wheel==0.48.0"]
+
 [tool.uv.build-backend]
 module-name = "hal"
 
