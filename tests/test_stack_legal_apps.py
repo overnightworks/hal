@@ -521,6 +521,16 @@ def test_edge_holds_no_section_of_its_own_for_any_host_only_app():
         assert not (sections / key).exists()
 
 
+def test_every_shipped_section_directory_is_the_general_part_or_a_catalog_key():
+    """#1046: the pages drop a directory no catalog key owns (L4a), so a typo is named here."""
+    sections = REPOSITORY / legal_step.SECTIONS_DIRECTORY
+    owned = legal_step._catalog_keys(REPOSITORY) | {legal_step.GENERAL_UNIT}
+
+    unowned = {path.name for path in sections.iterdir() if path.is_dir()} - owned
+
+    assert not unowned, f"no catalog key owns the section directories {sorted(unowned)}"
+
+
 def test_a_section_edge_still_holds_for_a_host_only_app_refuses_naming_both(legal_apps):
     """E6, L8: the two owners hold different pages, so only the two-owner rule can refuse."""
     held = "legal/sections/" + HOST_ONLY_KEY + "/nutzungsbedingungen.html"

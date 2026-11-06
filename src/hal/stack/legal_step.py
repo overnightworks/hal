@@ -240,6 +240,7 @@ def check_app(repository: Path, key: str, directory: Path, today: date) -> tuple
         raise LegalError(
             f"{APP_DIRECTORY}/{PRIVACY_PAGE}.html is missing; every app needs a privacy section"
         )
+    _refuse_two_owners(repository, {key}, {key})
     build_pages(read_frame(repository), [*blocks, *app])
     return tuple(block.path for block in app)
 

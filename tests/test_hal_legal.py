@@ -8,7 +8,8 @@ import pytest
 from support.git_support import hal_program, run_hal
 
 from hal import cli
-from hal.stack import legal_section
+from hal.stack import legal_section, legal_step
+from hal.stack.legal_section import LegalError
 
 ROOT = Path(__file__).resolve().parents[1]
 KEY = "hopin"
@@ -181,14 +182,19 @@ def test_a_link_to_a_block_that_does_not_exist_is_refused(checkout, app, capsys)
     assert "nowhere" in err
 
 
-def test_a_held_copy_for_the_same_key_does_not_clash(checkout, app, capsys):
-    """Acceptance 1, invariant 3: edge's held block for the key gives way to the app's file."""
+def test_a_section_edge_holds_for_the_key_is_refused_as_hal_apply_refuses_it(checkout, app, capsys):
+    """#1046: edge's held block and the app's own part are two owners of one key."""
     held = checkout / "legal/sections" / KEY
     held.mkdir()
     (held / "datenschutz.html").write_text(VALID)
     put(app, PRIVACY)
+    with pytest.raises(LegalError) as refusal:
+        legal_step._refuse_two_owners(checkout, {KEY}, {KEY})
 
-    assert run(capsys, checkout, KEY, app)[0] == 0
+    code, out, err = run(capsys, checkout, KEY, app)
+
+    assert (code, out) == (1, "")
+    assert str(refusal.value) in err
 
 
 def test_a_run_writes_nothing(checkout, app, capsys):
