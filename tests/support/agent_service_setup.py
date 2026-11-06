@@ -6,7 +6,6 @@ import json
 import os
 import stat
 import subprocess
-import sys
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -16,7 +15,6 @@ import pytest
 from support.script_module import loaded_script
 
 SETUP = Path(__file__).resolve().parents[2] / "agent-service" / "setup"
-sys.path.insert(0, str(SETUP.parent))  # setup imports its sibling module as a script does
 IMAGE = "edge-agent-service:0.0.0-test"
 DUMMY_TOKEN = "dummy-setup-token-0123456789"
 SECOND_TOKEN = "second-dummy-token-9876543210"

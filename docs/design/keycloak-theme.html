@@ -577,11 +577,15 @@
     display: flex;
     flex-wrap: wrap;
     justify-content: center;
-    font-size: 11px;
+    gap: 4px 16px;
+    font-size: 12px;
     color: var(--h-text-muted);
   }
-
-  .legal span + span::before { content: "·"; margin: 0 .35em; }
+  .legal a {
+    color: var(--h-text-muted);
+    text-decoration: none;
+    border-bottom: 1px solid var(--h-border);
+  }
 
   .terms { margin: 0; font-size: 14px; line-height: 1.55; color: var(--h-text); }
   .terms .lnk { font-size: inherit; white-space: normal; }
@@ -790,7 +794,7 @@
       <figure class="board" style="--w: 920px">
         <figcaption class="board-title">Anmelden <span class="w">Desktop</span>
           <span class="chg chg--chg">Aussehen</span>
-          <span class="chg chg--new">Impressum · Datenschutz</span>
+          <span class="chg chg--new">Impressum, Datenschutz, Nutzungsbedingungen</span>
           <span class="chg chg--fixed">Felder</span>
         </figcaption>
         <div class="frame">
@@ -817,7 +821,7 @@
               </div>
               <span class="btn primary wide">Anmelden</span>
               <span class="btn secondary wide"><svg class="ic"><use href="#i-key"/></svg>Anmelden mit Passkey</span>
-              <p class="legal"><span>Impressum</span><span>Datenschutz</span></p>
+              <p class="legal"><a href="https://hallucinai.de/impressum">Impressum</a><a href="https://hallucinai.de/datenschutz">Datenschutz</a><a href="https://hallucinai.de/nutzungsbedingungen">Nutzungsbedingungen</a></p>
             </div>
           </div>
         </div>
@@ -852,7 +856,7 @@
               </div>
               <span class="btn primary wide">Anmelden</span>
               <span class="btn secondary wide"><svg class="ic"><use href="#i-key"/></svg>Anmelden mit Passkey</span>
-              <p class="legal"><span>Impressum</span><span>Datenschutz</span></p>
+              <p class="legal"><a href="https://hallucinai.de/impressum">Impressum</a><a href="https://hallucinai.de/datenschutz">Datenschutz</a><a href="https://hallucinai.de/nutzungsbedingungen">Nutzungsbedingungen</a></p>
             </div>
           </div>
         </div>
@@ -866,7 +870,7 @@
           <li>Marke HALLUCINAI in Oswald, oben rot, unten violett, statt des grauen Realm-Namens.</li>
           <li>Grund mit Raster und rot-violettem Schein, Karte mit rotem Hauch: wie songmakers Anmeldekarte.</li>
           <li>Felder und Knöpfe nach songmakers Vokabular: Etikett über dem Feld, Radius 4, Fokus in der Handlungsfarbe.</li>
-          <li>Impressum · Datenschutz unten in der Karte, verlinkt auf hallucinai.de (#110).</li>
+          <li>Impressum, Datenschutz und Nutzungsbedingungen als eine Zeile ohne Trenner, verlinkt auf hallucinai.de (#110).</li>
           <li>Schriften und Favicon liegen im Theme, keine Anfrage an Google. Gebaut aus CSS, <code>footer.ftl</code> und Texten, ohne Kopie von <code>template.ftl</code>.</li>
         </ul>
       </div>
@@ -1095,7 +1099,7 @@
                 <span class="btn primary">Annehmen</span>
                 <span class="btn secondary">Ablehnen</span>
               </div>
-              <p class="legal"><span>Impressum</span><span>Datenschutz</span></p>
+              <p class="legal"><a href="https://hallucinai.de/impressum">Impressum</a><a href="https://hallucinai.de/datenschutz">Datenschutz</a><a href="https://hallucinai.de/nutzungsbedingungen">Nutzungsbedingungen</a></p>
             </div>
           </div>
         </div>
@@ -1122,7 +1126,7 @@
                 <span class="btn primary">Annehmen</span>
                 <span class="btn secondary">Ablehnen</span>
               </div>
-              <p class="legal"><span>Impressum</span><span>Datenschutz</span></p>
+              <p class="legal"><a href="https://hallucinai.de/impressum">Impressum</a><a href="https://hallucinai.de/datenschutz">Datenschutz</a><a href="https://hallucinai.de/nutzungsbedingungen">Nutzungsbedingungen</a></p>
             </div>
           </div>
         </div>
@@ -1150,7 +1154,7 @@
                 <span class="btn primary">Accept</span>
                 <span class="btn secondary">Decline</span>
               </div>
-              <p class="legal"><span>Imprint</span><span>Privacy</span></p>
+              <p class="legal"><a href="https://hallucinai.de/impressum">Impressum</a><a href="https://hallucinai.de/datenschutz">Datenschutz</a><a href="https://hallucinai.de/nutzungsbedingungen">Nutzungsbedingungen</a></p>
             </div>
           </div>
         </div>

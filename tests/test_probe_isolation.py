@@ -4,28 +4,23 @@ probe's shipped script and teardown resolve."""
 import json
 import os
 import re
-import sys
 from dataclasses import replace
 from pathlib import Path
 from textwrap import dedent
 from types import SimpleNamespace
 
+import edge_copy
 import pytest
 import support.probe_modules as probe_modules
 import yaml
+from support.git_support import committed_main, plain_git
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "probe"))
-sys.path.insert(0, str(ROOT / "src"))
-
-import edge_copy  # noqa: E402
-from support.git_support import committed_main, plain_git  # noqa: E402
-
-from hal.backup.apps import parse_apps  # noqa: E402
-from hal.backup.docker import PROJECT_LABEL  # noqa: E402
-from hal.stack import catalog, checkout  # noqa: E402
+from hal.backup.apps import parse_apps
+from hal.backup.docker import PROJECT_LABEL
+from hal.stack import catalog, checkout
 
 PROJECT = "edge-some-probe"
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def fixed_names(text: str, section: str = "networks") -> dict[str, str]:

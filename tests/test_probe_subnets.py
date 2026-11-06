@@ -4,27 +4,23 @@ the app H's copy runs, which joins only the copy's own speech networks (probe/sp
 
 import ipaddress
 import re
-import sys
 from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
 
+import edge_copy
+import edge_subnets
 import pytest
 import support.keycloak_probe as keycloak_support
 import support.probe_modules as probe_modules
 import yaml
+from support.script_module import loaded_script
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "probe"))
-sys.path.insert(0, str(ROOT / "src"))
-
-import edge_copy  # noqa: E402
-import edge_subnets  # noqa: E402
-from support.script_module import loaded_script  # noqa: E402
-
-from hal.stack import catalog  # noqa: E402
+from hal.stack import catalog
 
 PROJECT = "edge-some-probe"
+ROOT = Path(__file__).resolve().parents[1]
+
 SHIPPED_COMPOSE = (ROOT / "compose.yaml").read_text()
 IPV4 = re.compile(r"\b\d+\.\d+\.\d+\.\d+\b")
 # The Keycloak probe's module and the docker host it runs on, and the probes this file loads: the

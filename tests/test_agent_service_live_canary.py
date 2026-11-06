@@ -5,19 +5,13 @@ container, key or provider is involved."""
 import io
 import json
 import subprocess
-import sys
 from dataclasses import dataclass, field
-from pathlib import Path
 
+import live_canary
 import pytest
-
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "agent-service"))
-
-import live_canary  # noqa: E402
-from retention_census import DATABASE, ROUTE_SERVICES, Completed  # noqa: E402
-from support.live_smoke_fakes import FakeStack, completed, resolved_configuration  # noqa: E402
-from support.probe_support import probe_imports  # noqa: E402
+from retention_census import DATABASE, ROUTE_SERVICES, Completed
+from support.live_smoke_fakes import FakeStack, completed, resolved_configuration
+from support.probe_support import probe_imports
 
 with probe_imports():
     from litellm_live_canary import LAST_LINES as FINAL  # the grammar table, written from the issue
