@@ -472,14 +472,24 @@ def plan_unit_services(
     return UnitServicePlans(built, recreates, [*named, *moved])
 
 
+type Show = Callable[[str, str], None]  # the live line's `show(subject, text)`
+
+
+def _shows_nothing(_subject: str, _text: str) -> None:
+    """The live line of a run that draws none."""
+
+
 @dataclass
 class Progress:
     unit: str = ""
+    show: Show = _shows_nothing
     _step: str = field(default="", init=False)
 
     def begin(self, step: str) -> None:
-        """The only way to set the step the Ctrl-C row names."""
+        """The only way to set the step the Ctrl-C row names; it shows the step under the subject
+        on the live line, with the same words."""
         self._step = step
+        self.show(self.subject, step)
 
     @property
     def step(self) -> str:

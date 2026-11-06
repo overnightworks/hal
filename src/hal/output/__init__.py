@@ -317,14 +317,18 @@ def _fit_frame(lead: str, name: str, trail: str, width: int) -> str:
 
 
 class _LiveLine:
-    """One transient line on stderr: the task running now and its own time. One thread redraws it
-    and, as its last act, erases it, so a terminal stopped with Ctrl-S cannot hold `stop`.
+    """One transient line on stderr: the task running now under its subject and the task's own
+    time. One thread redraws it and, as its last act, erases a drawn frame, so a terminal stopped
+    with Ctrl-S cannot hold `stop`. Every writer of this module first gives way, which erases the
+    frame: the line stays blank until the next `show`.
 
     The barrier is `_stop_decided`, a plain flag so that a signal can read it at any instruction:
-    from the moment it is set no frame starts, whether or not the thread could be joined."""
+    from the moment it is set no frame starts, whether or not the thread could be joined. `_blank`
+    says what the screen holds; it changes before the write that makes it true, so a Ctrl-C
+    inside that write reads the screen it leaves."""
 
-    def __init__(self, subject: str) -> None:
-        self._subject = subject
+    def __init__(self) -> None:
+        self._subject = ""
         self._stream = sys.stderr
         self._lock = threading.Lock()
         self._wake = threading.Event()
@@ -332,25 +336,45 @@ class _LiveLine:
         self._text = ""
         self._started = 0.0
         self._frame = 0
+        self._blank = True
         self._stop_decided = False
         self._erase = False
         self._ctrl_c_held = False
         self._ctrl_c_before = signal.getsignal(signal.SIGINT)
 
-    def show(self, text: str) -> None:
+    def show(self, subject: str, text: str) -> None:
+        if self._stop_decided:
+            return
         with self._lock:
+            self._subject = subject
             self._text = text
             self._started = time.monotonic()
-            self._draw()
+            if text:
+                self._draw()
+            else:
+                self._erase_frame()
             if self._thread is None:
                 self._thread = threading.Thread(target=self._redraw, daemon=True)
                 self._thread.start()
 
+    def give_way(self) -> None:
+        """A writer's first act: the drawn frame is erased, unless a stop was decided, before or
+        while it waited at the lock."""
+        if self._stop_decided:
+            return
+        with self._lock:
+            if not self._stop_decided:
+                self._erase_frame()
+
     def on_ctrl_c(self, _signal_number: int, _frame: FrameType | None) -> None:
         """Runs in place of the `KeyboardInterrupt`, wherever the Ctrl-C lands, also at the end of
-        the block where no `except` would see it: the line ends first, then `stop` raises it. A
-        Ctrl-C while `stop` runs leaves the line, unless the thread wrote the erase or a stopped
-        terminal still holds it, and waits."""
+        the block where no `except` would see it: a frame on screen becomes the newline the next
+        writer owes, the line ends without its erase, then `stop` raises it. A Ctrl-C while `stop`
+        runs leaves the line, unless the thread wrote the erase or a stopped terminal still holds
+        it, and waits."""
+        global _newline_owed
+        if not self._blank:
+            _newline_owed = self._stream
         self._erase = False
         self._ctrl_c_held = True
         self.stop(erase=False)
@@ -375,10 +399,17 @@ class _LiveLine:
     def _redraw(self) -> None:
         while not self._wake.wait(LIVE_TICK_SECONDS):
             with self._lock:
-                self._draw()
+                if not self._blank:
+                    self._draw()
         if self._erase:
-            self._stream.write(_ERASE_LINE)
-            self._stream.flush()
+            self._erase_frame()
+
+    def _erase_frame(self) -> None:
+        if self._blank:
+            return
+        self._blank = True
+        self._stream.write(_ERASE_LINE)
+        self._stream.flush()
 
     def _draw(self) -> None:
         if self._stop_decided:
@@ -392,25 +423,49 @@ class _LiveLine:
             f" · {elapsed}",
             shutil.get_terminal_size().columns - 1,
         )
+        self._blank = False
         self._stream.write(f"{_ERASE_LINE}{_styled(line, _LIVE_STYLE, self._stream)}")
         self._stream.flush()
 
 
+_active_line: _LiveLine | None = None
+"""The one line a terminal has; SIGINT is process-wide, so blocks do not nest."""
+_newline_owed: TextIO | None = None
+"""The stream of a frame a Ctrl-C left on screen, until a writer ends it."""
+
+
+def _hand_off(stream: TextIO, *, fresh_line: bool = False) -> None:
+    """Every writer's first act in its text path, before it prints on `stream`: the live line
+    gives way, then one newline ends the frame a Ctrl-C left or the line `fresh_line` asks to end,
+    once for both. No lock is held once it returns."""
+    global _newline_owed
+    if _active_line is not None:
+        _active_line.give_way()
+    owed, _newline_owed = _newline_owed, None
+    if fresh_line:
+        print(file=stream)
+    elif owed is not None:
+        print(file=owed)
+
+
 @contextmanager
-def live_line(subject: str) -> Iterator[Callable[[str], None]]:
-    """The live line of a long step, drawn on stderr under `subject` while the block runs:
-    `show(text)` names the task now running, and its time restarts. Only for a person at a
-    terminal outside `-v` and `LOG_FORMAT=json`; elsewhere `show` does nothing. A normal end
-    erases the line; a Ctrl-C leaves it, so the next row can end it with `fresh_line`, and no byte
-    of the line follows the `KeyboardInterrupt`, apart from a write a terminal stopped with Ctrl-S
-    still holds. Only the main thread may call it: it takes SIGINT for the length of the block,
-    unless the caller put its own handler there, which then stays."""
+def live_line() -> Iterator[Callable[[str, str], None]]:
+    """The live line of a long run, drawn on stderr while the block runs: `show(subject, text)`
+    names the task now running and restarts its time; an empty text leaves the line blank. Only
+    for a person at a terminal outside `-v` and `LOG_FORMAT=json`; elsewhere `show` does nothing.
+    A row or any other line of this module erases it first. A normal end erases the line; a
+    Ctrl-C leaves it for the next writer to end with one newline, and no byte of the line follows
+    the `KeyboardInterrupt`, apart from a write a terminal stopped with Ctrl-S still holds. Only
+    the main thread may call it, and blocks do not nest: it takes SIGINT for the length of the
+    block, unless the caller put its own handler there, which then stays."""
+    global _active_line
     if is_verbose() or _json_on() or not _colour_on(sys.stderr):
-        yield lambda _text: None
+        yield lambda _subject, _text: None
         return
-    line = _LiveLine(subject)
+    line = _LiveLine()
     if signal.getsignal(signal.SIGINT) is signal.default_int_handler:
         signal.signal(signal.SIGINT, line.on_ctrl_c)
+    _active_line = line
     interrupted = False
     try:
         yield line.show
@@ -419,6 +474,7 @@ def live_line(subject: str) -> Iterator[Callable[[str], None]]:
         raise
     finally:
         line.stop(erase=not interrupted)
+        _active_line = None
 
 
 VOWELS = "aeiou"
@@ -490,8 +546,7 @@ def write_row(row: Row, *, fresh_line: bool = False) -> None:
             },
         )
         return
-    if fresh_line:
-        print(file=stdout)
+    _hand_off(stdout, fresh_line=fresh_line)
     subject = printable(row.subject)
     event = printable(str(row.event)) if row.count is None else counted(row.count, row.event)
     fact = _fact_text(row)
@@ -533,8 +588,8 @@ class GroupWriter:
         heading = self._entered
         if self._headed and heading is not None and heading not in self._printed:
             self._printed.add(heading)
-            if fresh_line and not _json_on():
-                print()
+            if not _json_on():
+                _hand_off(sys.stdout, fresh_line=fresh_line)
                 fresh_line = False
             print(_styled(printable(str(heading)), _BOLD, sys.stdout))
         for row in rows:
@@ -563,6 +618,7 @@ def write_table(headers: Sequence[str], rows: Sequence[Sequence[str]]) -> None:
         "  ".join(cell.ljust(width) for cell, width in zip(line, widths, strict=True)).rstrip()
         for line in lines
     ]
+    _hand_off(sys.stdout)
     print(_styled(printed[0], _BOLD, sys.stdout))
     for line in printed[1:]:
         print(line)
@@ -593,6 +649,7 @@ def write_verdict(verdict: Verdict) -> None:
             },
         )
         return
+    _hand_off(stdout)
     headline = _styled(
         f"{verdict.glyph.value} {headline_text}", verdict.glyph.verdict_style, stdout
     )
@@ -620,8 +677,7 @@ def write_error(message: str, next_step: str | None = None, *, fresh_line: bool 
             {"message": printable(message), "next": printable(next_step or "")},
         )
         return
-    if fresh_line:
-        print(file=stderr)
+    _hand_off(stderr, fresh_line=fresh_line)
     print(f"{_styled('error:', _BOLD_RED, stderr)} {printable(message)}", file=stderr)
     if next_step:
         print(f"{_styled('next:', _CYAN, stderr)} {printable(next_step)}", file=stderr)
@@ -632,6 +688,7 @@ def write_detail(*lines: str, tone: Tone = Tone.PLAIN, flush: bool = False) -> N
     style; `flush` for a reader that follows the output as it comes."""
     stdout = sys.stdout
     for line in lines:
+        _hand_off(stdout)
         text = f"{DETAIL_INDENT}{printable(line)}"
         print(text if tone.value is None else _styled(text, tone.value, stdout), flush=flush)
 
@@ -647,13 +704,16 @@ def write_line(
     """`text` as one line on `stream`, exactly as given: for a line whose form its caller owns (a
     JSON document, a listing, a diagnostic that names its own program); `flush` for a reader that
     follows the output as it comes."""
-    print(text, end=end, file=sys.stderr if stream is Stream.STDERR else sys.stdout, flush=flush)
+    target = sys.stderr if stream is Stream.STDERR else sys.stdout
+    _hand_off(target)
+    print(text, end=end, file=target, flush=flush)
 
 
 def confirmed(purpose: str) -> bool:
     """Ask `Type yes to <purpose>: ` on stdout and return whether the answer is exactly `yes`: no
     trimming, no case folding; a closed stdin is a no, and Ctrl-C is not caught."""
     prompt = f"Type {_styled(CONFIRMATION, _BOLD, sys.stdout)} to {printable(purpose)}: "
+    _hand_off(sys.stdout)
     try:
         return input(prompt) == CONFIRMATION
     except EOFError:
