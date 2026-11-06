@@ -43,7 +43,7 @@ APP_DIRECTORY = "legal"
 # The anchor of a block of edge's own services; any other block's anchor is its catalog key.
 SERVICE_ANCHORS = {
     "keycloak": "anmeldung",
-    "agent-service": "agent-dienst",
+    "litellm": "agent-dienst",
     "speech-runtime": "sprachdienst",
 }
 _BUILT_MODE = 0o644  # nginx-unprivileged must read the page whatever the umask

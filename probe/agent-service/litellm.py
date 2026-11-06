@@ -1,11 +1,10 @@
 """Probe of LiteLLM's own keys on the API route (cells K1, K2, K4, and #768 S1a's G6-G9, N1, L1-L3,
-R1, R2, D1): the service, the front, LiteLLM and the gateway's
-second entrypoint, in a throwaway compose project, against a fake Anthropic. The caller is a
+D1): the front, LiteLLM, its database and the gateway, in the throwaway compose project of
+litellm_stack.py, against a fake Anthropic. The caller is a
 throwaway on HopIn's network that posts agent-runtime's wire body (`model`, `messages`, `user`,
 `tools`) through the front with an app key the probe made through the master key from a throwaway
 on `litellm-backend`. Nothing live and nothing paid: the probe refuses to start unless the resolved
-copy marks `internet` internal and holds only the fake hosts, and it never calls `egress.py`'s live
-cells.
+copy marks `internet` internal and holds only the fake hosts.
 
     flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \\
         python3 probe/agent-service/litellm.py --scratch DIR
@@ -13,12 +12,11 @@ cells.
 Measured: a run takes about two minutes and its teardown a few seconds (K 30 s, CAP 1800 s).
 
 The scratch HOME holds the throwaway secrets (random values, never printed): the two provider keys,
-the master key, the database password, the CA and the signing pair.
-The fake providers (aliases api.anthropic.com and api.openai.com, fake_anthropic.py's roles
-`provider` and `pictures`) and the fake issuer (alias auth.hallucinai.de) hold certificates of the
-scratch CA, which LiteLLM's SSL_CERT_FILE trusts. Keys, budgets and
-fingerprints are the probe's scenario data; a key reaches a throwaway inside the program on its
-standard input, never in argv, and only its hash is printed or persists.
+the master key and the database password; the scratch CA lies beside it. The fake providers
+(aliases api.anthropic.com and api.openai.com, fake_anthropic.py's roles `provider` and
+`pictures`) hold certificates of the scratch CA, which LiteLLM's SSL_CERT_FILE trusts. Keys,
+budgets and fingerprints are the probe's scenario data; a key reaches a throwaway inside the
+program on its standard input, never in argv, and only its hash is printed or persists.
 
 Evidence: F is the fake provider's request log, A the caller's status and LiteLLM's error type, I
 `docker inspect`, LA LiteLLM's access log. The probe differs from production in LiteLLM's log
@@ -50,19 +48,24 @@ sys.path.insert(0, str(REPO / "src"))
 sys.path.insert(0, str(REPO / "agent-service"))
 
 from agent_networks import AGENT_NETWORKS, EMBEDDED_RESOLVER, gateway_listeners, listeners_of  # noqa: E402
-from egress import LABEL, PROJECT, ProbeFailed, expect, run_scratch_probe  # noqa: E402
 from egress_observe import socket_name  # noqa: E402
-from issuer import ISSUER_SERVICE, SERVICE, IssuerProbe  # noqa: E402
+from litellm_ca import issue_certificate, write_new  # noqa: E402
 from litellm_caller import CALL_PROGRAM, caller_input  # noqa: E402
+from litellm_stack import (  # noqa: E402
+    LABEL,
+    PROJECT,
+    ProbeFailed,
+    StackProbe,
+    expect,
+    run_scratch_probe,
+)
 from retention_census import DATABASE, FRONT, GATEWAY, LITELLM, DatabaseLogin  # noqa: E402
-from scratch_secrets import issue_certificate, write_new  # noqa: E402
 
 from hal.output import write_line  # noqa: E402
 from hal.stack import litellm_keys  # noqa: E402
 
-FAKE_PROVIDER, FAKE_PICTURES, FAKE_ISSUER = "fake-anthropic", "fake-openai", "fake-issuer"
-PROVIDER_HOST, ISSUER_HOST = "api.anthropic.com", "auth.hallucinai.de"
-PICTURE_HOST = "api.openai.com"
+FAKE_PROVIDER, FAKE_PICTURES = "fake-anthropic", "fake-openai"
+PROVIDER_HOST, PICTURE_HOST = "api.anthropic.com", "api.openai.com"
 NEW_NETWORKS = ("litellm-backend", "litellm-egress", "litellm-db")
 ISOLATED = "isolated"
 LISTEN_SECONDS = 60
@@ -71,7 +74,7 @@ ACCESS_LINE = re.compile(r'"(?:GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS) \S+ HTTP/
 ADMITTED_LINE = re.compile(r'"POST /v1/chat/completions HTTP/\d(?:\.\d)?" 200')
 ROUTE, PICTURE_ROUTE = litellm_keys.COMPLETION_ROUTE, litellm_keys.PICTURE_ROUTE
 MODELS_ROUTE = litellm_keys.MODELS_ROUTE
-LISTENING = "Uvicorn running"  # the service's line; LiteLLM's listening is ProxySnapshot's
+LISTENING = "Uvicorn running"  # Uvicorn's start line, which LiteLLM prints too
 FRONT_PORT = 4000
 # The scenario of an app key and a person (docs/agent-service.md, "The API route"): each app key
 # has a money budget per month and a parallel bound, each person a budget per month.
@@ -256,19 +259,14 @@ def answer_text(answer: dict) -> str | None:
         return None
 
 
-class LitellmProbe(IssuerProbe):
-    """The service with an API-only person, the front, LiteLLM and a fake Anthropic."""
+class LitellmProbe(StackProbe):
+    """The front, LiteLLM, its database, the gateway and a fake Anthropic and OpenAI."""
 
     LITELLM_LOG_LEVEL: str | None = "INFO"  # None keeps the level compose.yaml ships
     caller_network = AGENT_NETWORKS[-1]  # the app network a request comes from unless it names one
 
     def __init__(self, scratch: Path) -> None:
         super().__init__(scratch)
-        self.profiles = (*self.profiles, "litellm")
-        # The throwaway clients and the fakes run the stand-in's plain Python, not the service image
-        # IssuerProbe resolved (whose entrypoint is the service).
-        resolved = json.loads(self.compose("config", "--format", "json").stdout)
-        self.image = resolved["services"]["agent-probe"]["image"]
         home = Path(self.environment["HOME"])
         self.provider_key, self.picture_key = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
         self.master_key = f"sk-{secrets.token_hex(32)}"
@@ -322,8 +320,8 @@ class LitellmProbe(IssuerProbe):
             encoding="utf-8"
         )
         keys = {PROVIDER_HOST: self.provider_key, PICTURE_HOST: self.picture_key}
-        for host in (PROVIDER_HOST, PICTURE_HOST, ISSUER_HOST):
-            issue_certificate(self.scratch_secrets, host, directory / host)
+        for host in (PROVIDER_HOST, PICTURE_HOST):
+            issue_certificate(self.scratch_ca, host, directory / host)
             expected = json.dumps({**expectations, "provider_key": keys.get(host, "")})
             (directory / host / "expect.json").write_text(expected, encoding="utf-8")
             (directory / host / "fake_anthropic.py").write_text(program, encoding="utf-8")
@@ -364,13 +362,12 @@ class LitellmProbe(IssuerProbe):
                         "volumes": [
                             {"type": "bind", "source": str(self.litellm_config),
                              "target": "/etc/litellm/config.yaml", "read_only": True},
-                            {"type": "bind", "source": str(self.scratch_secrets.ca_certificate),
+                            {"type": "bind", "source": str(self.scratch_ca.ca_certificate),
                              "target": "/probe/ca.crt", "read_only": True},
                         ],
                     },
                     FAKE_PROVIDER: fake("provider", PROVIDER_HOST),
                     FAKE_PICTURES: fake("pictures", PICTURE_HOST),
-                    FAKE_ISSUER: fake("issuer", ISSUER_HOST),
                 },
                 "networks": {"internet": {"internal": True}},
             }),
@@ -388,15 +385,14 @@ class LitellmProbe(IssuerProbe):
         }  # fmt: skip
         expect(resolved["networks"]["internet"].get("internal") is True, "internet is not internal")
         expect(
-            on_internet == {GATEWAY, FAKE_PROVIDER, FAKE_PICTURES, FAKE_ISSUER},
+            on_internet == {GATEWAY, FAKE_PROVIDER, FAKE_PICTURES},
             f"internet holds {sorted(on_internet)}, not the gateway and the fake hosts",
         )
 
     # --- life cycle ---------------------------------------------------------------------------
 
     def services_to_start(self) -> tuple[str, ...]:
-        return (GATEWAY, SERVICE, ISSUER_SERVICE, FAKE_PROVIDER, FAKE_PICTURES, FAKE_ISSUER, FRONT,
-                DATABASE, LITELLM)  # fmt: skip
+        return (GATEWAY, FAKE_PROVIDER, FAKE_PICTURES, FRONT, DATABASE, LITELLM)
 
     def log_of(self, service: str) -> str:
         return self.container_log(service, container=self.container(service))
@@ -573,12 +569,10 @@ class LitellmProbe(IssuerProbe):
     # --- the cells ----------------------------------------------------------------------------
 
     def drive(self) -> None:
-        self.wait_until(SERVICE, LISTENING)
         self.wait_until_listening()
         self.cell_d1()
         self.cell_n1()
         self.cells_listeners()
-        self.cells_r1_r2()
         self.admin("POST", "/budget/new", person_budget())
         key = self.make_key()
         self.cell_k1(key)
@@ -678,7 +672,7 @@ class LitellmProbe(IssuerProbe):
 
     def cell_n1(self) -> None:
         resolved = json.loads(self.compose("config", "--format", "json").stdout)
-        members = (SERVICE, FRONT, LITELLM, GATEWAY, DATABASE)
+        members = (FRONT, LITELLM, GATEWAY, DATABASE)
         for service in members:
             inspected = self.run(["docker", "inspect", self.container(service)]).stdout
             (container,) = json.loads(inspected)
@@ -777,15 +771,6 @@ class LitellmProbe(IssuerProbe):
             ).stdout
         )
         return snapshot_of(scan, self.proxy_address, self.engine_executable)
-
-    def cells_r1_r2(self) -> None:
-        for cell, name in (("R1", PROVIDER_HOST), ("R2", ISSUER_HOST)):
-            container = self.container(SERVICE)
-            seen = self.client_with(["exec", "-i", container], [self.address, name], TLS_PROGRAM)
-            expect(seen == {"subject": name, "issuer": "probe-ca"}, f"{cell}: {seen}")
-            self.hold(
-                cell, f"the handshake on entrypoint 1 for {name} shows the fake's certificate"
-            )
 
 
 def main() -> int:

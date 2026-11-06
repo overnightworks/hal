@@ -12,6 +12,7 @@ from egress_observe import UNREACHABLE
 
 if TYPE_CHECKING:
     from egress import Probe
+    from litellm_stack import StackProbe
 
 # `hal_agent_<app>` of compose.yaml, as the probe's copy names them: `<project>_agent_<app>`.
 # P36 drives only these, which keep one app from another.
@@ -34,7 +35,7 @@ def service_networks(probe: Probe, project: str) -> tuple[str, ...]:
     return tuple(name.removeprefix(prefix) for name in names)
 
 
-def listeners_of(probe: Probe, service: str) -> dict[str, list[str]]:
+def listeners_of(probe: StackProbe, service: str) -> dict[str, list[str]]:
     """The TCP and UDP sockets `service` has open in its own namespace."""
     found = probe.client_in_namespace_of(probe.container(service), "listeners")
     # Docker's embedded resolver listens on this loopback address in every container's own
@@ -45,7 +46,7 @@ def listeners_of(probe: Probe, service: str) -> dict[str, list[str]]:
     }
 
 
-def gateway_listeners(probe: Probe, gateway: str, expected_addresses: list[str]) -> None:
+def gateway_listeners(probe: StackProbe, gateway: str, expected_addresses: list[str]) -> None:
     """The gateway listens on exactly `expected_addresses` (each `address:port`) over TCP and holds
     no UDP socket. The probe copy's static file names the addresses."""
     found = listeners_of(probe, gateway)

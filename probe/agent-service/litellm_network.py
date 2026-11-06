@@ -1,34 +1,31 @@
-"""Probe of the isolation between the API-route networks (#808 S1d cells X1-X12, R3, S1, S2, G20;
-D3, S1 and S2 with the database of #937; HAL-2.11's X13 and the picture host in R3, X7 and X11):
-LiteLLM, its front, its database and the agent service reach each other and the outside only
-along the declared topology, each exclusion with the control that proves the same observer
-connects when a path exists. It runs on the stack of litellm.py: the real service, the front,
-LiteLLM and the gateway's second entrypoint against a fake Anthropic and a fake OpenAI. Nothing
-live and nothing paid: the probe refuses to start unless the resolved copy marks `internet`
-internal and holds only the fake hosts, and it never calls `egress.py`'s live cells. X13 is the
-egress cell of the picture host on the fake stack: the agent service resolves api.openai.com to
-nothing, and its SNI on entrypoint 1 ends in the gateway without a dial, as E3 to E5 judge.
+"""Probe of the isolation between the API-route networks (#808 S1d cells X1, X6-X12, R3, S1, S2,
+G20; D3, S1 and S2 with the database of #937; HAL-2.11's picture host in R3, X7 and X11):
+LiteLLM, its front, its database and the gateway reach each other and the outside only along the
+declared topology, each exclusion with the control that proves the same observer connects when a
+path exists. It runs on the stack of litellm.py: the front, LiteLLM, its database and the gateway
+against a fake Anthropic and a fake OpenAI. Nothing live and nothing paid: the probe refuses to
+start unless the resolved copy marks `internet` internal and holds only the fake hosts.
 
     flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \\
         python3 probe/agent-service/litellm_network.py --scratch DIR
 
 Measured: a run takes about six minutes and its teardown a few seconds (K 30 s, CAP 1800 s).
 
-"No connection" is an outcome of `tcp_connect` in `egress_observe.UNREACHABLE`, the rule the egress
-probe and the live smoke share; a timeout, a refusal or any other error fails the cell. X8 reads the
-first TLS record the gateway sends back: an alert holds it, a ServerHello fails it, and the same
-reading for the provider's name is its control. A cell "from a namespace" runs the
-stand-in client in a throwaway that joins that container's namespace, so the front and the gateway
-(Traefik images without Python) are observed like the rest.
+"No connection" is an outcome of `tcp_connect` in `egress_observe.UNREACHABLE`; a timeout, a
+refusal or any other error fails the cell. X8 reads the first TLS record the gateway sends back for
+a real host no router names: an alert holds it, a ServerHello fails it, and the same reading for
+the provider's name is its control. A cell "from a namespace" runs litellm_stack.py's client in a
+throwaway that joins that container's namespace, so the front and the gateway (Traefik images
+without Python) are observed like the rest.
 
 S1 and S2 need LiteLLM's namespace before LiteLLM starts. This probe's overlay replaces LiteLLM's
 entrypoint with a start gate that waits for a file in a bind-mounted scratch directory and then
 runs the shipped entrypoint with the shipped arguments; the windows open first, then the file is
 dropped. The one name LiteLLM's start may ask the resolver for beside the control's, and the one
-address it may open a connection to beside entrypoint 2, is its database, read from start.sh. S1
-and S2 claim LiteLLM's behaviour from the moment `start.sh` runs, not Docker's own start of the
-container. G20 is one gateway SYN window over the start and every driving cell, not over the
-stack's start. A window that ends before the last cell it covers is NOT DRIVEN.
+address it may open a connection to beside the gateway's entrypoint, is its database, read from
+start.sh. S1 and S2 claim LiteLLM's behaviour from the moment `start.sh` runs, not Docker's own
+start of the container. G20 is one gateway SYN window over the start and every driving cell, not
+over the stack's start. A window that ends before the last cell it covers is NOT DRIVEN.
 
 Exit 0: every cell held, 1: a cell failed or was not driven.
 """
@@ -49,29 +46,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(REPO / "src"))
 sys.path.insert(0, str(REPO / "agent-service"))
 
-from agent_networks import CALLER_PORT, listeners_of, start_caller  # noqa: E402
-from egress import (  # noqa: E402
-    GATEWAY_PORT,
-    LABEL,
-    PROJECT,
-    SERVICE_PORT,
-    NotDriven,
-    alerted,
-    expect,
-    run_scratch_probe,
-)
 from egress_observe import UNREACHABLE  # noqa: E402
-from issuer import ISSUER_PORT, ISSUER_SERVICE, SERVICE  # noqa: E402
 from litellm import (  # noqa: E402
     CA_IN_CLIENT,
     ENTRYPOINT_ADDRESS,
-    FAKE_ISSUER,
     FAKE_PICTURES,
     FAKE_PROVIDER,
     FRONT,
     GATEWAY,
-    ISSUER_HOST,
-    LISTENING,
     LITELLM,
     PICTURE_HOST,
     PROVIDER_HOST,
@@ -80,6 +62,7 @@ from litellm import (  # noqa: E402
     LitellmProbe,
     mounted_file,
 )
+from litellm_stack import GATEWAY_PORT, NotDriven, alerted, expect, run_scratch_probe  # noqa: E402
 
 CAPTURE_LITELLM = "capture-litellm"
 CAPTURE_TEMPLATE = "capture-egress"
@@ -92,6 +75,7 @@ WINDOW_MARGIN_SECONDS = 3
 LOOPBACK = "lo"
 PROVIDER_ON_INTERNET = "fake provider on internet"
 PICTURES_ON_INTERNET = "fake OpenAI on internet"
+REFUSED_HOST = "auth.hallucinai.de"  # a real host of ours that no router of the gateway names
 TLS_HANDSHAKE, TLS_ALERT, SERVER_HELLO = 22, 21, 2  # record content types, handshake type
 FIRST_RECORD_PROGRAM = """\
 import json, socket, ssl, sys
@@ -112,10 +96,6 @@ with socket.create_connection((address, int(port)), timeout=8) as raw:
 record = {"content_type": received[0], "first_byte": received[5]} if len(received) == 6 else {}
 print(json.dumps({"bytes": len(received), **record}))
 """
-SERVICE_NETWORKS = {
-    "X2a": "agent-songmaker", "X2b": "agent-presentator", "X2c": "agent-hopin",
-    "X2d": "egress", "X2e": "mcp",
-}  # fmt: skip
 
 
 @dataclass(frozen=True)
@@ -182,15 +162,14 @@ class NetworkProbe(LitellmProbe):
         found = json.loads(self.run(["docker", "inspect", self.container(service)]).stdout)[0]
         return found["NetworkSettings"]["Networks"][name]["IPAddress"]
 
-    def second_entrypoint(self) -> str:
-        """Entrypoint 2: the static file's address that is not entrypoint 1, the probe's own."""
+    def entrypoint(self) -> str:
+        """The gateway's one entrypoint: the address of the probe's copy of its static file."""
         declared = {
             found.rsplit(":", 1)[0]
             for found in ENTRYPOINT_ADDRESS.findall(self.static_file.read_text())
         }
-        others = declared - {self.address}
-        expect(self.address in declared and len(others) == 1, f"the gateway declares {declared}")
-        return others.pop()
+        expect(len(declared) == 1, f"the gateway declares {declared}")
+        return declared.pop()
 
     # --- one observer -------------------------------------------------------------------------
 
@@ -209,18 +188,18 @@ class NetworkProbe(LitellmProbe):
         self.hold(step.cell, f"{where}: {result}")
 
     def handshake(self, name: str) -> dict:
-        """R3: LiteLLM's handshake on entrypoint 2 for `name`, verified against the scratch CA.
-        It overrides the egress probe's, so R3 is the control of `refused_without_a_dial`."""
-        mount = ["-v", f"{self.scratch_secrets.ca_certificate}:{CA_IN_CLIENT}:ro"]
+        """R3: LiteLLM's handshake on the gateway's entrypoint for `name`, verified against the
+        scratch CA; it is also the control of `refused_without_a_dial`."""
+        mount = ["-v", f"{self.scratch_ca.ca_certificate}:{CA_IN_CLIENT}:ro"]
         network = [f"--network=container:{self.container(LITELLM)}", *mount]
-        seen = self.throwaway(network, [self.second_entrypoint(), name], TLS_PROGRAM)
+        seen = self.throwaway(network, [self.entrypoint(), name], TLS_PROGRAM)
         return {"handshake": True, **seen}
 
     def first_record(self, name: str) -> dict:
-        """The first TLS record the gateway sends back on entrypoint 2 to LiteLLM's ClientHello for
-        `name`, read on the raw socket: its content type and the first byte of its body."""
+        """The first TLS record the gateway sends back on its entrypoint to LiteLLM's ClientHello
+        for `name`, read on the raw socket: its content type and the first byte of its body."""
         network = [f"--network=container:{self.container(LITELLM)}"]
-        arguments = [self.second_entrypoint(), name, str(GATEWAY_PORT)]
+        arguments = [self.entrypoint(), name, str(GATEWAY_PORT)]
         return self.throwaway(network, arguments, FIRST_RECORD_PROGRAM)
 
     # --- the windows --------------------------------------------------------------------------
@@ -241,7 +220,6 @@ class NetworkProbe(LitellmProbe):
     # --- the cells ----------------------------------------------------------------------------
 
     def drive(self) -> None:
-        self.wait_until(SERVICE, LISTENING)
         observed: dict[str, dict] = {}
 
         def session() -> None:
@@ -281,7 +259,7 @@ class NetworkProbe(LitellmProbe):
         )
         self.cell_s1(observed["s1"], asked, times["dns"])
         self.cell_s2(observed["s2"], times["syn"])
-        self.hold("R3", f"LiteLLM's handshakes on entrypoint 2 for {PROVIDER_HOST} and "
+        self.hold("R3", f"LiteLLM's handshakes on the gateway's entrypoint for {PROVIDER_HOST} and "
                   f"{PICTURE_HOST} show each fake's certificate of the scratch CA")  # fmt: skip
 
     def cell_s1(self, result: dict, asked: str, control_ended: float) -> None:
@@ -305,10 +283,10 @@ class NetworkProbe(LitellmProbe):
         )
 
     def cell_s2(self, result: dict, control_ended: float) -> None:
-        """No SYN leaves LiteLLM's namespace but the control's to entrypoint 2; LiteLLM's own
+        """No SYN leaves LiteLLM's namespace but the control's to the gateway; LiteLLM's own
         connects to its loopback address stay inside it and are counted apart."""
         self.complete(result, "S2", control_ended)
-        entrypoint = (self.second_entrypoint(), GATEWAY_PORT)
+        entrypoint = (self.entrypoint(), GATEWAY_PORT)
         database = (self.address_of(self.database, "litellm-db"), self.database_port)
         leaving = [syn for syn in result["syns"] if syn["interface"] != LOOPBACK]
         inside = sorted({
@@ -338,62 +316,23 @@ class NetworkProbe(LitellmProbe):
         litellm_backend = self.address_of(LITELLM, "litellm-backend")
         litellm_egress = self.address_of(LITELLM, "litellm-egress")
         database = self.address_of(self.database, "litellm-db")
-        service_addresses = {
-            cell: self.address_of(SERVICE, network) for cell, network in SERVICE_NETWORKS.items()
-        }
-        expect(
-            set(SERVICE_NETWORKS.values()) == set(self.resolved()["services"][SERVICE]["networks"]),
-            "the service joins networks the cells do not name",
-        )
-        first, second = self.address, self.second_entrypoint()
+        entrypoint = self.entrypoint()
         provider = self.address_of(FAKE_PROVIDER, "internet")
-        issuer = self.address_of(ISSUER_SERVICE, "agent-songmaker")
-        caller = start_caller(
-            self, PROJECT, LABEL, self.network_suffix("mcp"), f"{PROJECT}-caller-mcp"
-        )
-        steps = [
-            Reach("X1a", SERVICE, "litellm-backend", litellm_backend, port, False),
-            Reach("X1b", SERVICE, "litellm-egress", litellm_egress, port, False),
+        for step in (
             Reach("X1c", front, "litellm-backend", litellm_backend, port, True),
             Reach("X1d", GATEWAY, "litellm-egress", litellm_egress, port, True),
-            *[
-                Reach(cell, litellm, SERVICE_NETWORKS[cell], address, SERVICE_PORT, False)
-                for cell, address in service_addresses.items()
-            ],
-        ]  # fmt: skip
-        for step in steps:
-            self.reach(step, intervals)
-        found = listeners_of(self, SERVICE)["tcp"]
-        expect(found == [f"0.0.0.0:{SERVICE_PORT}"], f"X2L: the service listens on {found}")
-        self.hold("X2L", f"the service has exactly one TCP listener, {found[0]}")
-        for step in (
-            Reach("X3a", litellm, "agent-egress entrypoint 1", first, GATEWAY_PORT, False),
-            Reach("X3b", SERVICE, "agent-egress entrypoint 1", first, GATEWAY_PORT, True),
-            Reach("X4a", litellm, "stand-in issuer", issuer, ISSUER_PORT, False),
-            Reach("X4b", SERVICE, "stand-in issuer", issuer, ISSUER_PORT, True),
-            Reach("X5a", litellm, "caller on mcp", caller, CALLER_PORT, False),
-            Reach("X5b", SERVICE, "caller on mcp", caller, CALLER_PORT, True),
-            Reach("X6a", front, "agent-egress egress", first, GATEWAY_PORT, False),
-            Reach("X6b", front, "agent-egress litellm-egress", second, GATEWAY_PORT, False),
-            Reach("X6c", litellm, "agent-egress litellm-egress", second, GATEWAY_PORT, True),
+            Reach("X6b", front, "agent-egress litellm-egress", entrypoint, GATEWAY_PORT, False),
+            Reach("X6c", litellm, "agent-egress litellm-egress", entrypoint, GATEWAY_PORT, True),
             Reach("X7a", front, PROVIDER_ON_INTERNET, provider, GATEWAY_PORT, False),
             Reach("X7b", litellm, PROVIDER_ON_INTERNET, provider, GATEWAY_PORT, False),
-            Reach("X7c", SERVICE, PROVIDER_ON_INTERNET, provider, GATEWAY_PORT, False),
             Reach("X7d", GATEWAY, PROVIDER_ON_INTERNET, provider, GATEWAY_PORT, True),
             Reach("X12a", litellm, "litellm-db", database, self.database_port, True),
             Reach("X12b", front, "litellm-db", database, self.database_port, False),
-            Reach("X12c", SERVICE, "litellm-db", database, self.database_port, False),
         ):
             self.reach(step, intervals)
-        self.cells_x8_to_x11(second, intervals)
+        self.cells_x8_to_x11(entrypoint, intervals)
         observed["cells_ended"] = {"at": time.time()}
         observed["x1d"] = {"started": intervals["X1d"][0], "ended": intervals["X1d"][1]}
-
-    def network_suffix(self, network: str) -> str:
-        name = self.resolved()["networks"][network]["name"]
-        prefix = f"{PROJECT}_"
-        expect(name.startswith(prefix), f"{network} is named {name}, outside {prefix}*")
-        return name.removeprefix(prefix)
 
     def sni_ended(self, source: str, address: str, where: str, name: str) -> str:
         """An SNI of `name` from the namespace of `source` to the gateway at `address`, which must
@@ -406,13 +345,13 @@ class NetworkProbe(LitellmProbe):
 
     def cells_x8_to_x11(self, entrypoint: str, intervals: dict[str, tuple[float, float]]) -> None:
         def ended(name: str) -> str:
-            return self.sni_ended(LITELLM, entrypoint, "entrypoint 2", name)
+            return self.sni_ended(LITELLM, entrypoint, "the gateway's entrypoint", name)
 
         def no_server_hello() -> str:
-            record = self.first_record(ISSUER_HOST)
+            record = self.first_record(REFUSED_HOST)
             expect(record.get("content_type") == TLS_ALERT, f"X8: the first record is {record}")
             return (
-                f"{ended(ISSUER_HOST)}; its first record is an alert, where {PROVIDER_HOST}'s is "
+                f"{ended(REFUSED_HOST)}; its first record is an alert, where {PROVIDER_HOST}'s is "
                 "a ServerHello"
             )
 
@@ -432,27 +371,17 @@ class NetworkProbe(LitellmProbe):
             found = self.client_in_namespace_of(container, "resolve", host)["addresses"]
             expect(found == [entrypoint], f"X11: {host} resolves to {found}")
         self.hold("X11", f"LiteLLM resolves {PROVIDER_HOST} and {PICTURE_HOST} to {entrypoint}, "
-                  "entrypoint 2")  # fmt: skip
+                  "the gateway's entrypoint")  # fmt: skip
         self.cells_picture_host(intervals)
 
     def cells_picture_host(self, intervals: dict[str, tuple[float, float]]) -> None:
-        """X7e-g: only the gateway reaches the fake OpenAI. X13: the agent service cannot reach the
-        picture host: no name, and the gateway's entrypoint 1 ends its SNI without a dial."""
+        """X7e and X7g: only the gateway reaches the fake OpenAI."""
         pictures = self.address_of(FAKE_PICTURES, "internet")
         for step in (
             Reach("X7e", LITELLM, PICTURES_ON_INTERNET, pictures, GATEWAY_PORT, False),
-            Reach("X7f", SERVICE, PICTURES_ON_INTERNET, pictures, GATEWAY_PORT, False),
             Reach("X7g", GATEWAY, PICTURES_ON_INTERNET, pictures, GATEWAY_PORT, True),
         ):
             self.reach(step, intervals)
-        found = self.client("resolve", PICTURE_HOST)["addresses"]
-        expect(found == [], f"X13: the service resolves {PICTURE_HOST} to {found}")
-
-        def ended() -> str:
-            refused = self.sni_ended(SERVICE, self.address, "entrypoint 1", PICTURE_HOST)
-            return f"the service resolves {PICTURE_HOST} to nothing; its {refused}"
-
-        self.refused_without_a_dial("X13", ended)
 
     def cell_g20(self, observed: dict[str, dict]) -> None:
         """The gateway dials only the fake hosts; X1d's own connect from its namespace to LiteLLM
@@ -461,7 +390,6 @@ class NetworkProbe(LitellmProbe):
         self.complete(result, "G20", observed["cells_ended"]["at"])
         provider = (self.address_of(FAKE_PROVIDER, "internet"), GATEWAY_PORT)
         pictures = (self.address_of(FAKE_PICTURES, "internet"), GATEWAY_PORT)
-        issuer = (self.address_of(FAKE_ISSUER, "internet"), GATEWAY_PORT)
         x1d = (self.address_of(LITELLM, "litellm-egress"), self.litellm_port)
         interval = observed["x1d"]
 
@@ -471,7 +399,7 @@ class NetworkProbe(LitellmProbe):
 
         controls = [syn for syn in result["syns"] if of_x1d(syn)]
         seen = {(syn["destination"], syn["port"]) for syn in result["syns"] if not of_x1d(syn)}
-        stray = seen - {provider, pictures, issuer}
+        stray = seen - {provider, pictures}
         expect(not stray, f"G20: the gateway sent SYNs to {sorted(stray)}")
         if provider not in seen or pictures not in seen or not controls:
             raise NotDriven("G20: not driven: the controls' SYNs are not in the gateway's window")

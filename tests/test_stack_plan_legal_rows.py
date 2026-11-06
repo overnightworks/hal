@@ -19,7 +19,7 @@ from hal.stack.apps import AppKind
 from hal.stack.legal_step import BlockChange, Change, LegalPlan, PageChange
 from hal.stack.plan_rows import LegalEvent, PlanEvent, PlanGroup
 
-SECTION = "legal/sections/agent-service/datenschutz.html"
+SECTION = "legal/sections/litellm/datenschutz.html"
 FRAME = "legal/frame/datenschutz.html"
 
 

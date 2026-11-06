@@ -1,12 +1,12 @@
 """The fake providers of the LiteLLM probe (probe/agent-service/litellm.py): a TLS server that
-stands in for api.anthropic.com, api.openai.com or auth.hallucinai.de behind the gateway, inside
-the probe's internal `internet` network. Standard library only; it runs in the service image.
+stands in for api.anthropic.com or api.openai.com behind the gateway, inside the probe's internal
+`internet` network. Standard library only; it runs in the key step's plain Python image.
 
-    python -I -B fake_anthropic.py {provider|pictures|issuer}
+    python -I -B fake_anthropic.py {provider|pictures}
 
 It reads `/fake/cert.pem`, `/fake/key.pem` and `/fake/expect.json` (the scratch provider key, the
 scratch identity strings and the answer marker; all of them
-throwaway values). The `issuer` role answers `{}` to anything. The `provider` role answers an
+throwaway values). The `provider` role answers an
 Anthropic message with the marker and prints one JSON line per request on standard output: the
 model, `max_tokens`, `metadata.user_id` (the fingerprint, which must arrive), whether the key
 matched, and counts of what must not arrive here. It prints a verdict and no other value of the

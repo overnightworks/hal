@@ -1,10 +1,10 @@
 """Probe of the direct route's retention (#814 S1c cells B1-B7, B9-B11, D9 and P7; HAL-2.8 cells
-K0, T1-T4, STR-c and STR; HAL-2.11 B12): the stack of litellm.py without the agent service and the
-issuer (the front, LiteLLM, its database and the gateway's second entrypoint, against a fake
-Anthropic and a fake OpenAI) and its caller with hopin's key, made by `hal apply`'s key step from
-a scratch key file, with a unique canary in each request and answer, searched afterwards in every
-writable mount and every log of the front, the gateway, LiteLLM and its database, and in a
-`pg_dump` of the database, by `agent-service/retention_census.py`.
+K0, T1-T4, STR-c and STR; HAL-2.11 B12): the stack of litellm.py (the front, LiteLLM, its database
+and the gateway, against a fake Anthropic and a fake OpenAI) and its caller with hopin's key, made
+by `hal apply`'s key step from a scratch key file, with a unique canary in each request and
+answer, searched afterwards in every writable mount and every log of the front, the gateway,
+LiteLLM and its database, and in a `pg_dump` of the database, by
+`agent-service/retention_census.py`.
 Nothing live and nothing paid: the probe refuses to start unless `internet` is internal and holds
 only the fakes.
 

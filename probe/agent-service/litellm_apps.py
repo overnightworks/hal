@@ -36,11 +36,9 @@ from litellm import (  # noqa: E402
     FRONT,
     FRONT_PORT,
     LABEL,
-    LISTENING,
     LITELLM,
     PROJECT,
     ROUTE,
-    SERVICE,
     START_DATABASE,
     LitellmProbe,
     ProbeFailed,
@@ -117,7 +115,6 @@ class AppsProbe(LitellmProbe):
     # --- the cells ----------------------------------------------------------------------------
 
     def drive(self) -> None:
-        self.wait_until(SERVICE, LISTENING)
         self.wait_until_listening()
         self.cell_n2()
         self.admin("POST", "/budget/new", person_budget())

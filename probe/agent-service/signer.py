@@ -19,11 +19,11 @@ from urllib.parse import urlsplit
 
 from egress import LABEL, NotDriven, ProbeFailed, expect
 from issuer import ISSUER_SERVICE, SERVICE, IssuerProbe
+from litellm_ca import issue_certificate
 from live_signer import PROOF_TOOL, STANDIN_ALIAS, failed_without_text, mcp_origin
 from live_smoke import event_names, other_lines
 from mcp_signer import LISTENING_LINE, PUBLIC_KEY_MOUNT, SCRIPT_MOUNT, VERIFIED
 from refusals import SMOKE_SERVICE
-from scratch_secrets import issue_certificate
 from service_log import LOGIN_REFUSED
 
 FRONT_SERVICE = "agent-front"

@@ -1,7 +1,7 @@
 """Probe of the unit `litellm` (#894 cells U0-U3, U5-U12, U14, R1): the copy's real `hal apply`
 with the shipped `fleet.yaml` entry starts LiteLLM, its database and its front as one unit, and the
 key step holds while the unit is off or stopped and waits while the run starts LiteLLM or its
-database. Nothing live and nothing paid: no provider key, no egress, no app.
+database. Nothing live and nothing paid: no provider key, no route out, no app.
 
     flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 50 1780 \\
         python3 probe/agent-service/litellm_unit.py --scratch DIR
@@ -15,8 +15,9 @@ live project owns the shipped ones). Its catalog is the shipped one with the ent
 rows. Its `backup/apps.toml` names the probe's project (edge_copy), and its restic repository and
 password are the scratch HOME's: U12's switch-on over the kept volume takes LiteLLM's pre-apply
 snapshot first. Secrets are random scratch values under the scratch HOME's `~/.secrets/litellm/`,
-never a real key; every network a service of profile `litellm` joins must be internal, and
-`agent-egress` is in no unit, or the probe refuses to start. E counts the key step's one-off
+never a real key. The copy's `internet` is internal and its gateway listens on the copy's address,
+so the unit's `agent-egress` starts but dials no real host; every network a service of profile
+`litellm` joins must be internal, or the probe refuses to start. E counts the key step's one-off
 containers in `docker events` of the project during a run and names each one's mode, `--read` or
 `--write`, from a `docker` stand-in in front of the real one (U5 is its control); D digests the
 complete rows of the key table and the budget table, read by SQL in `litellm-db`, and prints the
@@ -44,6 +45,7 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path[:0] = [str(Path(__file__).resolve().parent), str(REPO / "probe"), str(REPO / "src")]
 
 import edge_copy  # noqa: E402
+import yaml  # noqa: E402
 from edge_copy import HAL_DECLINED, HAL_FAILURE, HAL_OK, HAL_REFUSED, expect, publish  # noqa: E402
 
 from hal.backup.settings import Settings  # noqa: E402
@@ -54,7 +56,8 @@ from hal.stack.result_rows import ResultEvent  # noqa: E402
 
 PROJECT = "edge-litellm-unit-probe"
 UNIT = litellm_keys.UNIT
-SERVICES = ("litellm", "litellm-db", "litellm-front")  # Compose's resolved order, by name
+# Compose's resolved order, by name
+SERVICES = ("agent-egress", "litellm", "litellm-db", "litellm-front")
 FRONT = "litellm-front"
 APPS = ("hopin", "presentator", "songmaker")
 SECRETS = Path(".secrets/litellm")
@@ -65,6 +68,9 @@ LISTEN_SECONDS = 240
 LABEL = f"{PROJECT}.throwaway=1"
 KEY_TABLE = '"LiteLLM_VerificationToken"'
 COMPOSE_FILE = "compose.yaml"
+GATEWAY_STATIC = Path("agent-service/egress/traefik.yml")
+GATEWAY_ADDRESS = "x-litellm-egress-address"  # compose.yaml's anchor of the static file's address
+OPEN_INTERNET = "  internet:\n    driver: bridge\n"
 YES_PROMPT = "Type yes"
 PLAN_END = "to apply"
 LITELLM_ON = re.compile(rf"\blitellm\s+{ResultEvent.SWITCHED_ON}\b")
@@ -89,7 +95,7 @@ for argument in "$@"; do
 done
 exec "$REAL_DOCKER" "$@"
 """
-SWITCH_ON = "+ litellm switch on litellm, litellm-db, litellm-front"
+SWITCH_ON = f"+ litellm switch on {', '.join(SERVICES)}"
 STARTS_NOW = "· litellm keys later LiteLLM starts now · next apply checks them"
 DB_RESTARTS = "· litellm keys later its database restarts now · next apply checks them"
 
@@ -306,7 +312,8 @@ class Probe:
         shipped = (REPO / catalog.FLEET_FILE).read_text()
         without = shipped[: shipped.index("\nservices:\n")] + "\nservices:\n" + KEYCLOAK_OFF
         (self.copy / catalog.FLEET_FILE).write_text(without)
-        publish(self.copy, "probe: the catalog without litellm")
+        self.write_fake_only_gateway()
+        publish(self.copy, "probe: the catalog without litellm, the gateway fake-only")
         self.expect_no_egress()
         for relative in (PROVIDER, MASTER, PICTURES):
             self.write_secret(relative, f"sk-{secrets.token_hex(32)}")
@@ -319,6 +326,22 @@ class Probe:
         expect(code == HAL_OK, f"hal backup --init exited {code}: {said[-200:]}")
         return without, without + entry[0]
 
+    def write_fake_only_gateway(self) -> None:
+        """The copy's gateway on the address the copy's compose.yaml gives it, and the copy's
+        `internet` internal, so the unit's gateway starts and reaches no real host."""
+        compose_file = self.copy / COMPOSE_FILE
+        copied = compose_file.read_text()
+        live = yaml.safe_load((REPO / COMPOSE_FILE).read_text())[GATEWAY_ADDRESS]
+        moved = yaml.safe_load(copied)[GATEWAY_ADDRESS]
+        static = self.copy / GATEWAY_STATIC
+        text = static.read_text()
+        expect(text.count(live) == 1, f"{GATEWAY_STATIC} names {live} {text.count(live)} times")
+        static.write_text(text.replace(live, moved))
+        expect(copied.count(OPEN_INTERNET) == 1, "the copy's compose.yaml has no plain internet")
+        compose_file.write_text(
+            copied.replace(OPEN_INTERNET, OPEN_INTERNET + "    internal: true\n")
+        )
+
     def expect_no_egress(self) -> None:
         resolved = json.loads(self.compose("config", "--format", "json"))
         joined = {
@@ -329,10 +352,6 @@ class Probe:
         }
         open_networks = sorted(n for n in joined if not resolved["networks"][n].get("internal"))
         expect(not open_networks, f"a litellm network is not internal: {open_networks}")
-        expect(
-            "agent-service" not in (self.copy / catalog.FLEET_FILE).read_text(),
-            "agent-egress is in a unit",
-        )
 
     def teardown(self) -> None:
         started = time.monotonic()
@@ -377,7 +396,10 @@ class Probe:
 
     def cell_u0(self, with_entry: str) -> None:
         output, _ = self.apply("U0", HAL_OK)
-        expect("litellm" not in output, f"U0: a row names litellm: {output[-300:]}")
+        expect(
+            "litellm" not in output.partition(PLAN_END)[0],
+            f"U0: a row names litellm: {output[-300:]}",
+        )
         expect(not self.running(), "U0: a container of the copy runs")
         (self.copy / catalog.FLEET_FILE).write_text(with_entry)
         publish(self.copy, "probe: the shipped litellm entry")
@@ -516,8 +538,7 @@ class Probe:
         output, ran = self.apply("U7", HAL_OK)
         plan, _, after = output.partition(PLAN_END)
         expect(
-            "- litellm switch off litellm, litellm-db, litellm-front · volumes litellm-db kept"
-            in plan,
+            f"- litellm switch off {', '.join(SERVICES)} · volumes litellm-db kept" in plan,
             f"U7: {plan[-300:]}",
         )
         expect(

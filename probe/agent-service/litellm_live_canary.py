@@ -30,9 +30,9 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(REPO / "agent-service"))
 
-from egress import PROJECT  # noqa: E402
 from litellm import DATABASE, FRONT, LISTENING, LITELLM, expect, hashed, run_scratch_probe  # noqa: E402
 from litellm_retention import RetentionProbe  # noqa: E402
+from litellm_stack import PROJECT  # noqa: E402
 from live_canary import Verdicts, live_canary, route_targets  # noqa: E402
 from live_smoke import Stack  # noqa: E402
 from retention_census import DUMP, Census, contains, run_docker  # noqa: E402

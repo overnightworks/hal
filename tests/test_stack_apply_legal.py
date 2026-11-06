@@ -48,12 +48,12 @@ from hal.stack.result_rows import ResultEvent
 FLEET = (
     f"cloudflare:\n  zone: {ZONE}\nservices:\n"
     "  legal:\n    run: {enabled: true}\n"
-    "  agent-service:\n    run: {enabled: false, setup: agent-service/setup}\n"
+    "  litellm:\n    run: {enabled: false}\n"
 )
-WITHOUT_AGENT = FLEET.split("  agent-service:")[0]
+WITHOUT_AGENT = FLEET.split("  litellm:")[0]
 THE_PAGES = [".gitkeep", "datenschutz.html", "impressum.html", "nutzungsbedingungen.html"]
 PRIVACY = "legal/sections/allgemein/datenschutz.html"
-AGENT = "legal/sections/agent-service/datenschutz.html"
+AGENT = "legal/sections/litellm/datenschutz.html"
 NEW_HEADING = b'<h2 id="neu">Neu</h2>\n<p>Text</p>\n'
 
 
@@ -83,11 +83,11 @@ class World:
 
 @pytest.fixture
 def world(repository: Path, scripted: ScriptedCompose, switch, state: Path) -> World:  # noqa: F811
-    """The repository's own frame, general part and agent service block (a catalog entry,
-    disabled) committed, with an empty `legal/built`."""
+    """The repository's own frame, general part and the Agent-Dienst block of the unit `litellm`
+    (a catalog entry, disabled) committed, with an empty `legal/built`."""
     legal = repository / "legal"
     shutil.copytree(REPOSITORY / "legal/frame", legal / "frame")
-    for unit in ("allgemein", "agent-service"):
+    for unit in ("allgemein", "litellm"):
         shutil.copytree(REPOSITORY / "legal/sections" / unit, legal / "sections" / unit)
     (legal / "built").mkdir()
     (legal / "built/.gitkeep").touch()
@@ -97,10 +97,10 @@ def world(repository: Path, scripted: ScriptedCompose, switch, state: Path) -> W
         "restart": "unless-stopped",
         "profiles": ["legal"],
     }
-    scripted.config["services"]["agent-service"] = {
-        "image": "agent-service:test",
+    scripted.config["services"]["litellm"] = {
+        "image": "litellm:test",
         "restart": "unless-stopped",
-        "profiles": ["agent-service"],
+        "profiles": ["litellm"],
     }
     shutil.rmtree(repository / ".git")
     committed_main(repository)
