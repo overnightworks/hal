@@ -618,7 +618,8 @@ def _app_does_not_run(scripted) -> None:  # noqa: F811
             id="S5 Ctrl-C before the app is created",
         ),
         pytest.param(
-            _switched_off_before_the_apps_start, None, "litellm was switched off meanwhile", False,
+            _switched_off_before_the_apps_start, None,
+            "partial, litellm switched off meanwhile", False,
             id="switched off before the app is created",
         ),
         pytest.param(
@@ -626,7 +627,7 @@ def _app_does_not_run(scripted) -> None:  # noqa: F811
             id="Ctrl-C while the app is created",
         ),
         pytest.param(
-            None, _app_does_not_run, "litellm is not on after the change", True,
+            None, _app_does_not_run, "partial, litellm not running", True,
             id="the app does not run",
         ),
     ],

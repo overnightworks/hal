@@ -287,10 +287,10 @@ def test_a_commands_last_line_is_printed_escaped_on_one_line(
     scripted.failing_verb = "rm"
     scripted.failure_line = line
 
-    _, _, err = switch()
+    _, out, _ = switch()
 
-    assert f"`docker compose rm` exited 1: {printed}" in err
-    assert "\x1b" not in err
+    assert f"`docker compose rm` exited 1: {printed}" in plain(out)
+    assert (line in out) == (line == printed)
     setup_check.exit_code, setup_check.line = 1, f"step-ca/init --check:\n{line}"
     step_ca = catalog.Unit("step-ca", True, "step-ca/init")
     assert setup.not_set_up_line(step_ca, repository, setup_check) == printed
@@ -305,9 +305,8 @@ def test_a_failed_removal_is_partial_and_never_reported_as_applied(switch, scrip
     exit_code, out, err = switch()
 
     assert exit_code == 1
-    assert "partial" in err
-    assert "step-ca" in err
-    assert "last line" in err
+    assert find_row(out, "step-ca", ResultEvent.FAILED, "last line")
+    assert "partial, step-ca failed" in err
     assert SWITCHED_OFF not in plain(out)
 
 
@@ -343,17 +342,6 @@ def test_switching_on_off_on_keeps_the_volumes_and_what_they_hold(switch, script
     assert exit_code == 0
     assert scripted.volumes == held
     assert scripted.containers["step-ca"] == "running"
-
-
-def test_a_start_that_leaves_the_unit_down_is_partial(switch, scripted):
-    """#52 rule 6 / P15: success only for observed state."""
-    scripted.starts_nothing = True
-
-    exit_code, out, err = switch()
-
-    assert exit_code == 1
-    assert "partial, step-ca is not on after the change" in err
-    assert SWITCHED_ON not in plain(out)
 
 
 # --- #75: switching on starts existing containers as they are, never recreates them -------------
@@ -398,17 +386,6 @@ def test_switching_on_keeps_every_existing_container_and_the_volumes(
     assert scripted.volumes == held
 
 
-def test_a_switch_on_whose_start_fails_is_partial_as_before(switch, scripted):
-    """#75 cell 7 / #52 P15: a failed `up` is partial with Compose's last line, never on."""
-    scripted.failing_verb = "up"
-
-    exit_code, out, err = switch()
-
-    assert exit_code == 1
-    assert "partial, step-ca: could not start, `docker compose up` exited 1: last line" in err
-    assert SWITCHED_ON not in plain(out)
-
-
 def test_the_repositorys_agent_service_unit_starts_both_services_and_then_changes_nothing(
     switch, scripted, setup_check, repository, agent_service_unit
 ):
@@ -446,12 +423,11 @@ def test_an_agent_service_whose_image_or_login_is_missing_is_partial_and_never_o
     and the unit is never reported on."""
     scripted.failing_verb, scripted.failure_line = "up", docker_line
 
-    exit_code, out, err = switch()
+    exit_code, out, _ = switch()
 
     assert exit_code == 1
-    assert (
-        f"partial, agent-service: could not start, `docker compose up` exited 1: {docker_line}"
-        in err
+    assert find_row(
+        out, "agent-service", ResultEvent.FAILED, f"`docker compose up` exited 1: {docker_line}"
     )
     assert not find_row(out, "agent-service", SWITCHED_ON)
 
@@ -461,7 +437,7 @@ def test_an_agent_service_whose_image_or_login_is_missing_is_partial_and_never_o
     ("failure", "partial"),
     [
         ("unstartable", "partial, agent-service"),
-        ("crash_loops", "partial, agent-service is not on after the change"),
+        ("crash_loops", "partial, agent-service not running"),
     ],
 )
 def test_an_agent_service_that_never_runs_or_restarts_is_partial_and_never_on(
@@ -1652,16 +1628,6 @@ def test_a_re_enabled_unit_with_a_switch_stays_stopped_and_nothing_is_created(
     assert "nothing to change" in out
     assert scripted.calls[-1][2] == "ps"
     assert scripted.changing_verbs() == []
-
-
-def test_a_switch_that_appears_after_the_plan_keeps_the_unit_down(switch, scripted, state):
-    """#60 rule 5: apply reads the marker again after `yes`, before the `up`."""
-    exit_code, out, err = switch(while_prompt_waits=lambda: switch_off(state))
-
-    assert exit_code == 1
-    assert "step-ca was switched off meanwhile (since 17.10. 22:10); not started" in err
-    assert scripted.changing_verbs() == []
-    assert SWITCHED_ON not in plain(out)
 
 
 def test_a_switch_renewed_during_a_start_is_kept(start, scripted, state):
@@ -3252,15 +3218,17 @@ def test_a_follower_entry_that_cannot_be_written_after_a_switch_on_is_partial_an
     write_fleet(repository, ENABLED)
     scripted.after_up = lambda: state.chmod(0o500)
     try:
-        exit_code, _, err = switch()
+        exit_code, out, _ = switch()
     finally:
         state.chmod(0o700)
 
     assert exit_code == 1
-    assert (
-        f"partial, step-ca: could not record traefik-mcp in applied.json, "
-        f"cannot write {state / 'applied.json'}"
-    ) in err
+    assert find_row(
+        out,
+        "step-ca",
+        ResultEvent.FAILED,
+        f"could not record traefik-mcp in applied.json · cannot write {state / 'applied.json'}",
+    )
     assert RECREATE_FOLLOWER not in scripted.calls
     assert follower_entry(state) is None
 
