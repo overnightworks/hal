@@ -495,6 +495,56 @@ class NotWritten:
         return f"could not write {self.path} ({self.reason})"
 
 
+CORE_SUBJECT = "core"
+
+
+@dataclass(frozen=True)
+class SeenDown:
+    """Services found not running within the watch of the recreate of `recreated`, in start
+    order; `way_back` is the unit snapshot's way back once one was proven."""
+
+    services: tuple[compose.DownService, ...]
+    watch_seconds: float
+    recreated: str
+    way_back: str | None = None
+
+
+@dataclass(frozen=True)
+class StoppedMeanwhile:
+    """A core service planned for a recreate that has no live container now."""
+
+    service: str
+
+
+@dataclass(frozen=True)
+class SwitchedOffMeanwhile:
+    """`unit` was switched off since the plan was read (`since`), so `service` is not recreated."""
+
+    unit: str
+    since: str
+    service: str
+    way_back: str | None = None
+
+
+@dataclass(frozen=True)
+class StepFailed:
+    """A step of the core phase that failed with `cause`; `subject` is the service or unit it
+    worked on, `core` while none is set."""
+
+    subject: str
+    step: str
+    cause: str
+    way_back: str | None = None
+
+    @classmethod
+    def at(cls, progress: Progress, error: Exception) -> StepFailed:
+        return cls(progress.unit or CORE_SUBJECT, progress.step, str(error))
+
+
+type RecreateFailure = SeenDown | SwitchedOffMeanwhile | StepFailed
+type CoreFailure = RecreateFailure | StoppedMeanwhile | barrier.BarriersUnproven
+
+
 type Begin = Callable[[], None]  # told under the switch lock, right before the start
 
 

@@ -188,7 +188,7 @@ def plain_apply(
     def run() -> tuple[int, str, list[object]]:
         at_terminal("yes")
         exit_code = cli.main(["apply"])
-        return exit_code, capsys.readouterr().err, published
+        return exit_code, sys.stdout.getvalue() + capsys.readouterr().err, published
 
     return run
 
@@ -212,8 +212,7 @@ def test_a_failed_snapshot_keeps_the_old_container_and_ends_partial(
     exit_code, err, published = plain_apply()
 
     assert exit_code == ExitCode.FAILURE
-    assert f"{failing} broke" in err
-    assert "keycloak is not recreated" in err
+    assert find_row(err, "keycloak", ResultEvent.FAILED, f"{failing} broke")
     assert ("pre-apply snapshot ab12cd34" in err) == names_the_snapshot
     assert scripted.container_ids == ids
     assert [step for step in steps(scripted) if step[0] == "up"] == []
@@ -345,11 +344,11 @@ def test_a_litellm_without_a_key_fails_its_restore_test_and_is_not_recreated(
     scripted.change_image(LITELLM.service, LITELLM_BUMP)
     ids = dict(scripted.container_ids)
 
-    exit_code, _, err = switch(installed_backup=True)
+    exit_code, out, _ = switch(installed_backup=True)
 
     assert exit_code == apply.ApplyExit.REFUSED
-    assert "the restored table LiteLLM_VerificationToken is empty" in err
-    assert "pre-apply snapshot ab12cd34" in err
+    assert "the restored table LiteLLM_VerificationToken is empty" in out
+    assert "pre-apply snapshot ab12cd34" in out
     assert scripted.container_ids == ids
 
 
@@ -362,11 +361,11 @@ def test_a_recreated_app_that_does_not_run_names_its_snapshot_and_the_live_resto
     scripted.change_image(KEYCLOAK.service, KEYCLOAK_BUMP)
     scripted.crash_loops = {KEYCLOAK.service}
 
-    exit_code, _, err = switch()
+    exit_code, out, _ = switch()
 
     assert exit_code == apply.ApplyExit.REFUSED
-    assert "keycloak is not running after the keycloak recreate" in err
-    assert "hal restore keycloak --live --snapshot ab12cd34" in err
+    assert find_row(out, "keycloak", ResultEvent.NOT_RUNNING, "of the keycloak recreate")
+    assert "hal restore keycloak --live --snapshot ab12cd34" in out
 
 
 @pytest.mark.usefixtures("database_units")
@@ -426,11 +425,11 @@ def test_a_stop_before_the_apps_recreate_still_names_the_live_restore_the_databa
     scripted.after_up = lambda: disturb(state, monkeypatch)
 
     try:
-        _, _, err = switch()
+        _, out, err = switch()
     finally:
         state.chmod(0o700)
 
-    assert "hal restore keycloak --live --snapshot ab12cd34" in err
+    assert "hal restore keycloak --live --snapshot ab12cd34" in out + err
 
 
 @pytest.mark.usefixtures("database_units")
@@ -451,12 +450,12 @@ def test_a_unit_switched_off_after_its_snapshot_names_the_snapshot_and_no_restor
 
     monkeypatch.setattr(realm_backup, "restore_test", proven_then_switched_off)
 
-    exit_code, _, err = switch()
+    exit_code, out, _ = switch()
 
     assert exit_code == apply.ApplyExit.REFUSED
-    assert "keycloak was switched off meanwhile" in err
-    assert "pre-apply snapshot ab12cd34" in err
-    assert "hal restore" not in err
+    assert find_row(out, "keycloak", ResultEvent.APP_HELD_OFF, "keycloak not recreated")
+    assert "pre-apply snapshot ab12cd34" in out
+    assert "hal restore" not in out
 
 
 # --- a switch-on over the data of a removed unit (#1006) ---------------------------------------

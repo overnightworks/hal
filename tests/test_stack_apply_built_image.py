@@ -354,10 +354,10 @@ def test_a_marker_that_appears_after_the_yes_prevents_the_recreate(
     """M13, P7: the marker is read again under the switch lock."""
     bump(scripted)
 
-    exit_code, _, err = switch(while_prompt_waits=lambda: switch_off(state, unit="agent-service"))
+    exit_code, out, _ = switch(while_prompt_waits=lambda: switch_off(state, unit="agent-service"))
 
     assert exit_code == 1
-    assert "agent-service was switched off meanwhile" in err
+    assert find_row(out, "agent-service", ResultEvent.APP_HELD_OFF, "agent-service not recreated")
     assert up_calls(scripted) == []
 
 
@@ -417,10 +417,10 @@ def test_a_new_container_that_crash_loops_is_partial_and_the_next_run_plans_only
     bump(scripted)
     scripted.crash_loops.add("agent-service")
 
-    exit_code, _, err = switch()
+    exit_code, out, _ = switch()
 
     assert exit_code == 1
-    assert "agent-service is not running after the agent-service recreate" in err
+    assert find_row(out, "agent-service", ResultEvent.NOT_RUNNING, "of the agent-service recreate")
 
     exit_code, out, err = switch()
 
