@@ -20,11 +20,13 @@ class TunnelIdUnknown(OSError):
 def tunnel_id(config: Path) -> str:
     try:
         document = yaml.safe_load(config.read_text())
-    except (OSError, yaml.YAMLError) as error:
-        raise TunnelIdUnknown(str(config)) from error
+    except OSError as error:
+        raise TunnelIdUnknown(f"{config} cannot be read: {error.strerror or error}") from error
+    except yaml.YAMLError as error:
+        raise TunnelIdUnknown(f"{config} is not valid YAML") from error
     identifier = document.get("tunnel") if isinstance(document, dict) else None
     if not isinstance(identifier, str) or not TUNNEL_ID_FORM.fullmatch(identifier):
-        raise TunnelIdUnknown(str(config))
+        raise TunnelIdUnknown(f"{config} names no usable `tunnel:` id")
     return identifier
 
 

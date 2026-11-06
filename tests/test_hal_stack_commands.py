@@ -288,6 +288,7 @@ def test_apply_without_a_tunnel_config_plans_nothing_and_the_line_names_it(
 
     assert result.exit_code == ExitCode.FAILURE
     assert str(stand_in_tunnel_config) in result.err
+    assert "No such file" in result.err
     assert applying.fake_tofu.calls() == []
 
 

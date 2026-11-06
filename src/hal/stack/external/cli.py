@@ -24,10 +24,9 @@ def apply_command(
     prober_for: Callable[[str], host_probe.Prober] = host_probe.HttpProber,
 ) -> int:
     """`tree` is the checkout whose `external/` is applied (this code's own by default): only the
-    live one, on a clean main; `own_tunnel` reads hal's tunnel. A plan with changes is refused
-    before `yes` while an enabled host's `ready` path does not answer on its target (`prober_for`
-    makes the prober of one target; #30 rule 8). An apply that may have changed the services, or
-    found nothing to do, ends on the host check (#30 rule 8): its verdict decides the exit.
+    live one, on a clean main; `own_tunnel` reads hal's tunnel once. A plan with changes is refused
+    before `yes` while an enabled host's `ready` path does not answer (`prober_for`; #30 rule 8).
+    An apply that may have changed the services, or found nothing to do, ends on the host check.
 
     The `try` is the first statement and SIGTERM becomes an interrupt as its first step, so every
     setup step is inside both; the one `except KeyboardInterrupt` decides every interrupt that
@@ -57,11 +56,12 @@ def apply_command(
             def plan_and_apply(home: Path, token_values: dict[str, str]) -> int:
                 nonlocal closing
                 assert planned_catalog is not None  # noqa: S101 - narrows the type; the refusal that always runs first set it
+                run.tunnel = own_tunnel()
                 try:
                     outcome = apply.apply_plan(
                         home,
                         token_values,
-                        own_tunnel().id,
+                        run.tunnel.id,
                         progress=run.progress,
                         hosts=planned_catalog.hosts,
                         prober_for=prober_for,
@@ -93,6 +93,13 @@ class _ApplyRun:
 
     progress: apply.Progress = field(default_factory=apply.Progress)
     committed_exit: int | None = None
+    tunnel: cloudflare_read.OwnTunnel | None = None
+
+    def tunnel_read(
+        self, own_tunnel: Callable[[], cloudflare_read.OwnTunnel]
+    ) -> cloudflare_read.OwnTunnel:
+        """The tunnel the plan named, else the one `own_tunnel` reads."""
+        return self.tunnel or own_tunnel()
 
 
 def _exit_after_interrupt(run: _ApplyRun) -> int:
@@ -157,7 +164,7 @@ def _close_on_host_check(
     is never turned into "interrupted"."""
     if not closing.runs_the_check:
         return apply_exit
-    check_exit = check_command(home, own_tunnel=own_tunnel)
+    check_exit = check_command(home, own_tunnel=lambda: run.tunnel_read(own_tunnel))
     with _signals_ignored():
         run.committed_exit = (
             apply_exit if check_exit == host_check.CheckExit.CLEAN else apply.ApplyExit.REFUSED

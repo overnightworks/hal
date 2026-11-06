@@ -471,7 +471,8 @@ def stand_in_tunnel() -> cloudflare_read.OwnTunnel:
 
 def publish_on_stand_in(*arguments, **keywords) -> int:
     """`apply_command` with hal's tunnel read from the stand-in."""
-    return external_cli.apply_command(*arguments, own_tunnel=stand_in_tunnel, **keywords)
+    keywords.setdefault("own_tunnel", stand_in_tunnel)
+    return external_cli.apply_command(*arguments, **keywords)
 
 
 def check_on_stand_in(home: Path, **keywords) -> external_cli.HostCheckOutcome:

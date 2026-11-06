@@ -91,7 +91,7 @@ def own_tunnel() -> OwnTunnel:
     try:
         return OwnTunnel(tunnel_config.tunnel_id(config), config)
     except tunnel_config.TunnelIdUnknown as error:
-        raise OwnTunnelUnknown(f"{config} names no usable tunnel id") from error
+        raise OwnTunnelUnknown(str(error)) from error
 
 
 def _update(_arguments: argparse.Namespace) -> ExitCode:
