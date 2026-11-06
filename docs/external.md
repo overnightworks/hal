@@ -187,24 +187,3 @@ Katalog steht oder bewusst entfaellt. Erwartet nach dem Anwenden: `https://hallu
 `https://www.hallucinai.de/` antworten 302 nach `https://auth.hallucinai.de/`; `/impressum`,
 `/datenschutz` und `/nutzungsbedingungen` antworten 200 ohne `Location`, `/favicon.ico` 404 ohne `Location`. Das Token-Recht
 `Zone › Single Redirect` (Lesen fuer `fleet-read`, Edit fuer `fleet-write`) ist nicht gemessen: es kommt vor `hal apply` dazu, wenn ein 403 es nennt.
-
-Die Reihenfolge der Umstellung: erst `hal apply`, dann Keycloak. `hal apply` erstellt Keycloak bei einer
-geaenderten Umgebung nie neu; der Betreiber startet es erst, wenn die Regel bei Cloudflare steht
-(`docker compose --profile keycloak up -d --no-deps keycloak` in `~/srv/hal`), und nur wenn
-`hal apply` sauber endete **und** ein zweites `hal apply` fuer die Publish-Phase `current` zeigt
-und nichts fragt. So gibt es kein Fenster: ein
-Keycloak auf `forwarded` ohne Regel davor wuerde ein vom Besucher gesendetes `Forwarded` vertrauen.
-
-Die Token-Rechte, vor `hal apply` im Dashboard: `Zone › Transform Rules › Read` (`fleet-read`) und
-`› Edit` (`fleet-write`). `Account › Account Rulesets › Read` ist nicht gemessen: es kommt nur dazu,
-wenn ein 403 es nennt; ob es noetig war, steht dann auf #190. Scheitert die Publish-Phase, bleibt
-Keycloak auf `xforwarded`: nicht neu erstellen, das Ergebnis auf #190 melden. Bekannte Ursachen:
-Cloudflare lehnt den Header ab (Option (b) oder hinnehmen, der Betreiber entscheidet auf #190);
-Cloudflare lehnt die `/0`-Listen ab (genauer Fehlertext auf #190); in der Phase besteht schon ein
-Ruleset (importieren und seine Regeln vorher in `cloudflare_ruleset.client_address` uebernehmen, der
-Plan darf keine Regel entfernen); 403 (ein fehlendes Recht).
-
-Danach prueft der Betreiber (L1): eine fehlgeschlagene Anmeldung durch den Tunnel
-(`https://auth.hallucinai.de/realms/hallucinai/protocol/openid-connect/token`, Passwort-Grant mit
-falschem Passwort) mit gefaelschtem `X-Forwarded-For` **und** gefaelschtem `Forwarded`. Das Ereignis in
-der Admin-Konsole (Admin-Eingang, Events) traegt seine echte Adresse.
