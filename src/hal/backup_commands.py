@@ -1,14 +1,15 @@
 """`hal backup` and `hal restore`: the backup runner behind hal's door. The steps are the typed
 functions of `hal.backup.cli` and `hal.backup.live`; this module adds the grammar, the one host
 lock around every run, the SIGTERM that systemd stops a unit with, and the exit code. For
-`restore --live` it reads what `hal.backup` may not: the unit's switch, the catalog and the
-terminal, and hands plain values to the step."""
+`restore --live` it reads what `hal.backup` may not: the unit's switch and its lock, the catalog
+and the terminal, and hands plain values to the step."""
 
 import argparse
 import functools
 import os
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -18,10 +19,11 @@ from hal.backup.apps import PRE_APPLY_TAG
 from hal.backup.cli import StepExit
 from hal.backup.runner import Interrupted, StepFailed
 from hal.backup.settings import Settings
+from hal.backup.status import ExitCategory
 from hal.grammar import Asks, Command, ExitCode
 from hal.output import write_error
 from hal.output.command import Verb, command
-from hal.stack import catalog, compose, switches, terminal, unit_plans
+from hal.stack import catalog, compose, emergency, switches, terminal, unit_plans
 from hal.stack.external.apply import signals_ignored, terminate_like_interrupt
 
 HAL_BACKUP = command(Verb.BACKUP)
@@ -173,17 +175,15 @@ class _Refusal:
 
 
 def _switched_off(app: str) -> switches.Mark | _Refusal:
-    """The marker of the enabled unit `app` names, read as `hal stop` finds its unit; the global
-    switch is not read, so a unit on is refused whatever the tunnel."""
+    """The marker of the enabled unit or catalog app `app` names, read as `hal stop` finds it; the
+    global switch is not read, so one that is on is refused whatever the tunnel."""
     try:
         fleet = unit_plans.read_fleet(compose.Compose(), compose.REPOSITORY)
-        unit = next((unit for unit in fleet.units if unit.key == app), None)
-        if unit is None:
-            known = ", ".join(sorted(unit.key for unit in fleet.units))
-            return _Refusal(ExitCode.REFUSED, f"{app} is not a unit of fleet.yaml (units: {known})")
-        if not unit.enabled:
+        if not emergency.subject_named(fleet, compose.REPOSITORY, app).enabled:
             return _Refusal(ExitCode.REFUSED, f"{app} is disabled in the catalog")
         mark = switches.Switches(switches.default_state_directory()).mark(app)
+    except emergency.UnknownSubject as unknown:
+        return _Refusal(ExitCode.REFUSED, str(unknown))
     except (compose.ComposeError, catalog.CatalogError, switches.SwitchError) as error:
         return _Refusal(ExitCode.FAILURE, str(error))
     if mark is None:
@@ -215,7 +215,16 @@ def _restore_live(arguments: argparse.Namespace) -> ExitCode:
         except switches.SwitchError:
             return False
 
-    guards = live.Guards(signals_ignored, switch_unchanged, terminal.at_terminal())
+    @contextmanager
+    def switch_lock() -> Iterator[None]:
+        with ExitStack() as held:
+            try:
+                held.enter_context(marks.lock())
+            except switches.SwitchError as error:
+                raise StepFailed(ExitCategory.COMMAND_FAILED, str(error)) from error
+            yield
+
+    guards = live.Guards(signals_ignored, switch_lock, switch_unchanged, terminal.at_terminal())
     step = functools.partial(live.restore_live, guards=guards)
     return _run(HAL_RESTORE, step, arguments, _tell_live_ended(app))
 
@@ -238,8 +247,9 @@ def _tell_live_ended(app: str) -> Callable[[Ended], None]:
 
 
 def _names(reason: str, app: str) -> bool:
-    """Whether the reason holds the app's name as a word of its own, not inside `<app>-db`."""
-    return re.search(rf"(?<![\w-]){re.escape(app)}(?![\w-])", reason) is not None
+    """Whether the reason holds the app's name as a word of its own, not inside `<app>-db` or
+    `<app>.sqlite3`."""
+    return re.search(rf"(?<![\w-]){re.escape(app)}(?![\w.-])", reason) is not None
 
 
 def _run(

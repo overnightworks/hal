@@ -131,7 +131,8 @@ class Switches:
 
     @contextmanager
     def lock(self) -> Iterator[None]:
-        """Exclusive; held only around "read the marker, then `up`" and around a `stop`."""
+        """Exclusive; held only around "read the marker, then `up`", around a `stop` and around a
+        live restore's re-check of the marker and its load."""
         try:
             self._make_private_directories()
             descriptor = os.open(self.directory / LOCK_FILE, os.O_CREAT | os.O_WRONLY, 0o600)

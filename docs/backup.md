@@ -227,22 +227,24 @@ A run removed whole before the count leaves a snapshot that is short by that run
 manifest: the restore test compares the file count only, so it passes and cannot detect the loss.
 
 Keycloak's dump holds its realm signing keys, the credential hashes and the client secrets. In the
-repository it exists only encrypted. In plain text it exists in exactly three places, each mode 0700:
-the staging directory during a backup, the restore test's directory during a restore test (both removed
-when the run ends), and the target of `hal restore keycloak --target`, which you delete yourself.
+repository it exists only encrypted. In plain text it exists in exactly four places, each mode 0700:
+the staging directory during a backup, the restore test's directory during a restore test, the
+staging directory of `hal restore keycloak --live` (all three removed when the run ends), and the
+target of `hal restore keycloak --target`, which you delete yourself.
 If Keycloak is off or its database is down, the weekly run waits 10 minutes, reports keycloak as failed
 and still backs up and forgets Songmaker and checks the repository; Keycloak's snapshots stay untouched
 in that run.
 
 LiteLLM's dump is its whole database `litellm`: each app key's hash, the person budget, the month
 spend per key and per fingerprint, the daily rows and the tool names, and `key_name`, the fragment
-LiteLLM shows of each key; never a key in clear. In plain text it exists in the same three 0700
+LiteLLM shows of each key; never a key in clear. In plain text it exists in the same four 0700
 places as Keycloak's. LiteLLM writes spend to its database in batches every 10 seconds
 (`PROXY_BATCH_WRITE_AT`), so a dump lacks at most that last batch.
 
-presentator's copy is its SQLite database and its built decks (`builds`, without the half-built
-`staged-*` directories). The database holds the people's sessions, their Keycloak `sub`s and the
-source secrets, which are encrypted with presentator's master key (the file
+presentator's copy is its SQLite database alone: its built decks (`builds`) and Git mirrors
+(`mirrors`) are caches its rows rebuild, so they are in no backup. The database holds the people's
+sessions, their Keycloak `sub`s and the source secrets, which are encrypted with presentator's
+master key (the file
 `~/.secrets/presentator/secret-key`). The master key is not in the data backup, so a restored copy
 cannot read those secrets without it. Until the separate backups of secrets and data of #291 exist,
 the master key and the data backups sit on the same disk. The session ids (the signed session
@@ -251,7 +253,7 @@ copy alone exposes the claims of the ID tokens and whatever an ID token allows a
 Keycloak. A takeover of a live session needs the master key as well, because presentator signs the
 cookies with it (`~/.secrets/presentator/secret-key`); renewing a token needs Keycloak's client secret
 (`~/.secrets/keycloak/clients/presentator`), which is not in the database either. In plain text the
-copy exists in the same three 0700 places as Keycloak's.
+copy exists in the same four 0700 places as Keycloak's.
 
 A row that `hal expire` deletes ([agent-service.md](agent-service.md), „What expires“) stays in
 every snapshot taken before the delete, until retention forgets that snapshot:
@@ -351,10 +353,15 @@ Exit 0: every phase succeeded. Exit 3: a run failed; `error: <app> not backed up
 example); nothing ran. Exit 130: Ctrl-C or SIGTERM; `backup` and the restore test record it in the status file as interrupted.
 
 `hal restore <app> --live` ends with `✓ <app>  loaded  <snapshot> · <time>` and `next: hal start <app>`, exit 0.
-Exit 4: the app is on (`stop it first: hal stop <app>`), disabled or no unit, there is no terminal,
-a `pg_restore` session still runs in its database, or its switch changed after the check. Exit 1: the
-question was answered with anything but `yes`. Exit 3: the record keeps audio or files, or a step before
-the load failed (`error: <app>: <reason>`), or the load failed. A failed load ends in one line,
+Exit 4: the app is on (`stop it first: hal stop <app>`), disabled or neither unit nor app of the
+catalog, there is no terminal, a `pg_restore` session still runs in its database, its switch changed
+after the check, a container that is not stopped (exited, created or dead) still uses a SQLite app's
+database volume (`a container still uses <app>'s database · nothing loaded` and
+`next: hal stop <app>, or wait for an earlier load to end; then rerun`), or the SQLite loader refused before its copy began (below). Exit 1: the
+question was answered with anything but `yes`.
+Exit 3: the record keeps audio or files, or a step before the load failed (`error: <app>: <reason>`;
+for SQLite also a live file that is missing, no regular file or owned by root, and a snapshot whose
+copy fails its check), or the load failed. A failed load ends in one line,
 `error: <app> load failed · <cause> · a rerun loads the snapshot whole`, and
 `next: hal restore <app> --live --snapshot <id>` naming the snapshot it tried. What the cause means for
 the data:
@@ -363,6 +370,20 @@ the data:
   transaction rolled back, so the old data stays, unless the server crashed at the commit;
 - `no exit code of pg_restore`, or the client's own exit: the load may be in, since `pg_restore`
   commits whenever the whole dump reached it.
+
+A SQLite app's loader writes the verified copy into the live file through SQLite's backup API, as
+the file's owner, in one write transaction of the file's own journal or WAL, so the file holds the
+old or the new database, never a mix; the file keeps its inode, owner, group and mode. Its lines:
+
+- `error: <app> load refused · <cause> · nothing changed`, exit 4: it stopped before its copy began.
+  `the copy or the live file does not fit` is a copy whose size, sha256 or integrity check fails, a
+  live file SQLite cannot open, or a live file in WAL mode with another page size;
+  `another connection holds the live database` is a writer that held its lock for 5 s. The logical
+  content is unchanged; SQLite's own recovery of a hot journal or a stale WAL may still have
+  changed the files;
+- `error: <app> load failed · <cause> · it holds the old or the new database · a rerun loads the
+  snapshot whole`, exit 3: the copy began and did not end as loaded (it did not finish, its check
+  afterwards failed, the loader ended otherwise, or the loaded rows differ from the snapshot's).
 
 In every case the rerun the line names, of the same snapshot, is the way back. `hal start <app>` on
 the old data is your own choice, and only after a printed code other than 0. Ctrl-C or SIGTERM before
@@ -444,7 +465,9 @@ volume. The copied files keep the owner restic restored them with (your user).
 Only you restore Keycloak. `hal restore keycloak --live` loads the last good snapshot into
 Keycloak's live database in one transaction, after you type `yes` at a terminal, and only while
 Keycloak is switched off. It starts `keycloak-db` alone if it is stopped, leaves `keycloak` stopped,
-holds the backup lock and removes the restored dump when it ends:
+holds the backup lock, and from its second read of the switch to the end of the load the switch lock,
+so no `hal start`, `hal stop` or `hal apply` comes in between ([stack.md](stack.md)), and removes the
+restored dump when it ends:
 
 1. `hal stop keycloak`
 2. `hal restore keycloak --live`, and check that its loaded row names the snapshot you meant
@@ -469,6 +492,32 @@ The same three commands load LiteLLM's database:
 Every key and person then counts from the snapshot's spend: one past its budget stays refused, and
 spend since the snapshot is lost. A snapshot from an earlier month is reset by LiteLLM's own budget
 job, as its `budget_reset_at` has passed. No app reaches LiteLLM while it is switched off.
+
+### Restore presentator
+
+Only you restore presentator. `hal restore presentator --live` loads the last good snapshot's
+database into presentator's live database file, after you type `yes` at a terminal, and only while
+presentator is switched off. It proves under the switch lock that no container uses the database
+volume, then loads the copy through SQLite's backup API in one transaction, as the file's owner;
+it leaves presentator stopped, holds the backup lock and the switch lock as Keycloak's does, and
+removes the restored copy when it ends:
+
+1. `hal stop presentator`
+2. `hal restore presentator --live`, and check that its loaded row names the snapshot you meant
+3. `hal start presentator`, which runs presentator's schema steps and waits for `/health`
+
+`--live` keeps the `builds` volume as it is. A restore onto an empty one rebuilds every deck at
+presentator's next refresh; a deck whose newest commit fails to build, or whose Git host does not
+answer, stays at 404 until a fix lands or the host answers. Older snapshots also hold `builds`;
+`--live` loads only their database, and `--target` restores their decks too.
+
+The load discards every write since the chosen snapshot that no other snapshot holds; nothing makes a
+completed load reversible, so the question names the snapshot's time. A release that migrated the
+schema also needs its older image back (architecture.md, section 6).
+
+A run killed outright reports nothing: its load ends whole or not at all. Run
+`hal restore presentator --live --snapshot <id>` with the ID the killed run's question named: it
+refuses while the killed run's loader still uses the volume, then loads.
 
 ### A lost LiteLLM volume
 
