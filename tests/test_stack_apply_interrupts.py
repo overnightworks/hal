@@ -20,10 +20,9 @@ from support.stack_apply import (
     switch,  # noqa: F401 the fixture, requested by name below
 )
 from support.stack_plan_rows import detail_lines, find_row
-from test_stack_apply_legal import world  # noqa: F401 the fixture, requested by name below
 
 from hal.output.command import Verb, command
-from hal.stack import appkit_step, apply, core, legal_step, unit_plans
+from hal.stack import appkit_step, apply, core, unit_plans
 from hal.stack.result_rows import ResultEvent
 
 PARTIAL = "its state may be partial"
@@ -52,14 +51,6 @@ def test_a_ctrl_c_in_the_appkit_write_names_appkit(switch, repository):  # noqa:
     exit_code, out, err = switch(rename=ctrl_c)
 
     assert_interrupted_at(exit_code, out, err, "appkit", "write the appkit files")
-
-
-def test_a_ctrl_c_in_the_legal_write_names_legal(world, monkeypatch):  # noqa: F811
-    monkeypatch.setattr(legal_step, "_replace", ctrl_c)
-
-    exit_code, out, err = world.switch()
-
-    assert_interrupted_at(exit_code, out, err, "legal", "write the legal pages")
 
 
 def test_a_ctrl_c_in_a_core_recreate_names_the_service_and_its_step(

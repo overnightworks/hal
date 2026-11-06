@@ -39,7 +39,7 @@ from support.stack_apply_fakes import (
 )
 from support.stack_plan_rows import detail_lines, find_row, plain, row_at
 
-from hal.stack import appkit_step, apply
+from hal.stack import appkit_step, apply, legal_step
 from hal.stack.legal_section import MAXIMUM_BYTES
 from hal.stack.legal_step import RECORD_FILE
 from hal.stack.plan_rows import LegalEvent
@@ -135,6 +135,19 @@ def test_the_first_apply_names_and_writes_the_three_pages_readable_by_the_unit(w
     privacy = world.built_page("datenschutz")
     assert 'id="agent-dienst"' in privacy
     assert re.search(r'<p class="stand">Stand: \d{1,2}\. [A-Za-zä]+ 20\d\d</p>', privacy)
+
+
+def test_a_ctrl_c_in_the_legal_write_names_legal(world, monkeypatch):
+    def interrupted(*_arguments: object) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(legal_step, "_replace", interrupted)
+
+    exit_code, out, err = world.switch()
+
+    assert exit_code == apply.ApplyExit.REFUSED
+    assert find_row(out, "legal", ResultEvent.INTERRUPTED, "write the legal pages · its state")
+    assert err.splitlines()[-2:] == ["error: interrupted at legal", "next: hal apply"]
 
 
 def test_the_second_apply_changes_nothing_and_says_so(world):
