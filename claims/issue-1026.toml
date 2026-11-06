@@ -1,8 +1,0 @@
-claim_id = "7db6621197934df6bfe9ccdc1cd216dd"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "ab56417cc8a1cf5cb6a9e4524d5615870f550821"
-branch = "claude/issue-1026-sqlite-live-restore"
-scope = ["backup/apps.toml", "docs/architecture.md", "docs/backup.md", "docs/stack.md", "probe/backup/sqlite_live.py", "sonar-project.properties", "src/hal/backup/docker.py", "src/hal/backup/live.py", "src/hal/backup/restic.py", "src/hal/backup/runner.py", "src/hal/backup/sqlite_copy.py", "src/hal/backup_commands.py", "src/hal/stack/emergency.py", "src/hal/stack/switches.py", "tests/support/live_restore_support.py", "tests/test_backup_live.py", "tests/test_backup_live_sqlite.py", "tests/test_backup_sqlite.py", "tests/test_hal_stop_commands.py"]
-opened_commit = "05d0c6de3d7bcd6fc974f74abe5b440cf24a661c"
-whole_reason = "One command loads a switched-off SQLite app's verified snapshot into its live file through SQLite's backup API under switch.lock: the loader, its door integration, the lock for every kind and the record change keep one invariant (no load without the locked re-check and proof), so none lands without the others."
