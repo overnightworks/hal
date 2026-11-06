@@ -479,8 +479,7 @@ nothing is pasted (it waits as long as the code lives). Keycloak starts a
 device sign-in only for a request with songmaker's client secret, which lives in `~/.secrets` on
 this machine, so no stranger can send you a link to confirm; no other client allows the grant.
 It recreates the service and runs the live cells L2-L7, L9
-and E6-E10, E12 against it, which its docstring lists; E3-E5 and E10's packet windows stay with the
-probe's `egress.py`. L3 holds when `run_started` names `anthropic/` and a model of `[cli.anthropic] models` on route `cli`, and shows both. L9 holds when no
+and E6-E10, E12 against it, which its docstring lists. L3 holds when `run_started` names `anthropic/` and a model of `[cli.anthropic] models` on route `cli`, and shows both. L9 holds when no
 JWT-shaped string is in the smoke output, `docker inspect` or the service log. It needs the image, the client's secret file and the login token under
 `~/.secrets`, and the person in the groups `/apps/songmaker` and `/services/agent-service/subscription`.
 The realm declares these groups but grants no membership: add yourself once in the admin

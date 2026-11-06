@@ -26,6 +26,7 @@ GATEWAY = "agent-egress"
 LITELLM_EGRESS = "litellm-egress"
 OBSERVER = "realm-observer"
 ISOLATED_MODE = {"com.docker.network.bridge.gateway_mode_ipv4": "isolated"}
+APP_NETWORK_NAME = re.compile(r"hal_agent_[a-z]+")
 HOST_SNI = re.compile(r"HostSNI\(`([^`]+)`\)")
 
 
@@ -46,6 +47,21 @@ def overlay() -> dict:
 @pytest.fixture(scope="module")
 def routers() -> dict:
     return load("agent-service/egress/dynamic/allowed.yml")["tcp"]["routers"]
+
+
+def test_every_app_network_is_internal_isolated_and_joined_by_the_front_of_litellm(compose):
+    """E16: each `hal_agent_<app>` network has no route out, and the front of LiteLLM joins all."""
+    app_networks = {
+        key: network
+        for key, network in compose["networks"].items()
+        if APP_NETWORK_NAME.fullmatch((network or {}).get("name", ""))
+    }
+
+    assert app_networks
+    for key, network in app_networks.items():
+        assert network["internal"] is True
+        assert network["driver_opts"] == ISOLATED_MODE
+        assert key in compose["services"]["litellm-front"]["networks"]
 
 
 def test_the_gateway_is_the_only_service_on_internet(compose):
