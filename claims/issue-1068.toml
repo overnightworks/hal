@@ -1,8 +1,0 @@
-claim_id = "68900ada171e4c969e88649d2d3f4df9"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "46d62ad9608869249fa5a8f5c2f0578d23f3c380"
-branch = "claude/issue-1068-result-headings"
-scope = ["docs/design/hal-output.html", "src/hal/output/__init__.py", "src/hal/stack/apply.py", "src/hal/stack/core_phase.py", "tests/test_hal_output.py", "tests/test_stack_apply_headings.py", "tests/test_stack_apply_unit_failures.py"]
-opened_commit = "05d7cd122378e1b828134ae2ac45a727df99dd63"
-whole_reason = "One heading writer after the yes: the writer in the output owner, the steps that enter their groups, the moved failed unit rows and the figure that shows them change together."
