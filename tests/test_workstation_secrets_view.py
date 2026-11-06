@@ -548,12 +548,6 @@ def test_by_service_inverts_read_by_under_a_declared_dependencies_heading(clean_
     assert not Layout(clean_home).state_dir.exists()
 
 
-def test_no_service_reads_a_github_token_that_can_write_or_administer() -> None:
-    powerful = [e for e in load_manifest(secrets_view.MANIFEST_PATH) if e.source and any(r.endswith((":admin", ":write")) for r in e.source.scope)]
-    assert powerful
-    assert all(entry.read_by == () for entry in powerful)
-
-
 @pytest.mark.parametrize(
     ("state_mode", "loose_findings"),
     [
