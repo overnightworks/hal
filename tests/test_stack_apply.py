@@ -2696,8 +2696,6 @@ def test_a_core_left_down_whole_after_the_traefik_recreate_names_both_in_start_o
 ):
     """#89 rule 7, cell F17 (#34 finding 57): both down at one look are named socket-proxy first,
     and the way on reads the log of the first."""
-    ps_line = scripted.ps_line
-    scripted.ps_line = lambda service, state: ps_line(service, state) | {"Name": f"hal-{service}-1"}
     edit_traefik_yml(repository)
     scripted.after_up = lambda: scripted.containers.update(
         {"socket-proxy": "exited", "traefik": "exited"}
@@ -2707,7 +2705,7 @@ def test_a_core_left_down_whole_after_the_traefik_recreate_names_both_in_start_o
 
     assert exit_code == 1
     assert find_row(out, "traefik", ResultEvent.NOT_RUNNING, "seen down within")
-    assert seen_down(out, err, "socket-proxy", "traefik", "hal-socket-proxy-1")
+    assert seen_down(out, err, "socket-proxy", "traefik")
     assert applied(state) == UNFINISHED
 
 
@@ -2929,9 +2927,9 @@ def failed_recreate(out, err, service) -> bool:
     )
 
 
-def seen_down(out, err, service, recreated=None, container=None) -> bool:
+def seen_down(out, err, service, recreated=None) -> bool:
     fact = f"of the {recreated or service} recreate"
-    logs = container and f"docker logs --tail 50 {container}"
+    logs = f"docker logs --tail 50 hal-{service}-1"
     return stopped_with(out, err, service, ResultEvent.NOT_RUNNING, fact, logs)
 
 

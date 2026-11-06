@@ -345,7 +345,7 @@ class ScriptedCompose:
         return ""
 
     def ps_line(self, service: str, state: str) -> dict:
-        line = {"Service": service, "State": state, "ExitCode": 0}
+        line = {"Name": f"hal-{service}-1", "Service": service, "State": state, "ExitCode": 0}
         if (image := self.image_of(service)) is not None:
             line["Image"] = image
         return line | {"Labels": self.labels_of(service)}
