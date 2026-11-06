@@ -365,6 +365,15 @@ def test_a_unit_declares_its_hosts_whether_it_is_enabled_or_not(enabled, tmp_pat
     assert unit.hosts == ("@", "www")
 
 
+def test_a_run_build_key_is_refused_as_unknown(tmp_path):
+    entry = {"kc": {"run": {"enabled": True, "build": "kc/image"}}}
+
+    with pytest.raises(catalog.CatalogError) as refused:
+        catalog.units(document(entry), PROFILES, tmp_path)
+
+    assert str(refused.value) == "services.kc.run.build: unknown key"
+
+
 def test_a_unit_without_hosts_declares_none_and_needs_no_zone(tmp_path):
     [unit] = catalog.units({"services": {"kc": {"run": {"enabled": True}}}}, PROFILES, tmp_path)
 
