@@ -333,7 +333,6 @@ def apply_local(
 
 
 def _say_waiting(writer: GroupWriter, grace_seconds: float) -> None:
-    writer.enter(PlanGroup.UNITS)
     writer.write(waiting_row(grace_seconds))
     sys.stdout.flush()  # the wait is minutes long: the row must not sit in a pipe's buffer
 

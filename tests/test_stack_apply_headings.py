@@ -3,12 +3,13 @@ scripted boundaries of `tests/support/stack_apply.py`."""
 
 import re
 import stat
-from collections.abc import Callable
 
 import pytest
+from support.hal_stack_commands import ctrl_c
 from support.stack_apply import (
     DISABLED,
     ENABLED,
+    KEYCLOAK_ENABLED,
     LITELLM_ON,
     PROBE_ENABLED,
     applied_core,  # noqa: F401 the fixture, requested by name below
@@ -192,7 +193,55 @@ def test_failed_and_switched_units_print_in_switch_order_before_the_key_rows_eac
     assert err.count("error: partial,") == 1
 
 
-def test_a_raise_in_a_later_step_leaves_the_failed_unit_rows_already_printed(
+@pytest.mark.usefixtures("headed_from_one_row")
+def test_a_failed_unit_row_stands_under_units_before_the_realm_row(
+    keys,
+    realm_unit,  # noqa: F811
+    switch,  # noqa: F811
+    scripted,  # noqa: F811
+    repository,  # noqa: F811
+):
+    write_fleet(
+        repository, KEYCLOAK_ENABLED + PROBE_ENABLED.removeprefix("services:\n") + LITELLM_ON
+    )
+    scripted.crash_loops = {"step-ca"}
+    scripted.failing_verb = "run"  # the realm observer reads through `compose run`
+
+    exit_code, out, _ = switch()
+
+    assert exit_code == 1
+    assert outline(out)[:4] == [
+        PlanGroup.UNITS,
+        failed("step-ca"),
+        done("probe"),
+        f"{Glyph.NEEDS_YOU.value} {REALM_UNIT}",
+    ]
+    assert outline(out).count(PlanGroup.UNITS) == 1
+
+
+@pytest.mark.usefixtures("headed_from_one_row")
+def test_a_failed_unit_row_stands_under_units_before_the_apps_heading_and_its_row(
+    keys,
+    app_world,  # noqa: F811
+):
+    with (app_world.repository / "fleet.yaml").open("a") as fleet:
+        fleet.write(LITELLM_ON)
+    app_world.origin.release(RELEASE)
+    for container in ("litellm", "litellm-db", "litellm-front"):
+        app_world.scripted.containers.pop(container)  # the unit has to be switched on
+    app_world.scripted.crash_loops = {"litellm"}
+
+    exit_code, out, _ = app_world.apply()
+
+    assert exit_code == 1
+    shown = outline(out)
+    assert shown[0] == PlanGroup.UNITS
+    assert shown[1] == failed("litellm")
+    assert shown[-2:] == [PlanGroup.APPS, done("hopin")]
+    assert shown.count(PlanGroup.UNITS) == 1
+
+
+def test_an_injected_compose_error_in_the_key_step_leaves_the_failed_unit_rows_already_printed(
     keys,
     switch,  # noqa: F811
     scripted,  # noqa: F811
@@ -214,41 +263,37 @@ def test_a_raise_in_a_later_step_leaves_the_failed_unit_rows_already_printed(
     assert err.count("error: partial, step-ca") == 1
 
 
-@pytest.mark.usefixtures("headed_from_one_row")
-@pytest.mark.parametrize(
-    ("arrange", "expected"),
-    [
-        pytest.param(
-            lambda keys: setattr(keys, "read_fails", True),
-            [f"{Glyph.NEEDS_YOU.value} litellm"],
-            id="skipped",
-        ),
-        pytest.param(
-            lambda keys: (setattr(keys, "fail_at", 1), setattr(keys, "cause", "name taken")),
-            [
-                done(BUDGET_ID),
-                failed(APPS[0]),
-                *(f"{Glyph.UNCHANGED.value} {app}" for app in APPS[1:]),
-            ],
-            id="failed",
-        ),
-    ],
-)
-def test_the_key_step_rows_stand_under_litellm_the_skipped_and_failed_ones_too(
-    arrange: Callable[[object], object],
-    expected: list[str],
+def test_a_failed_key_result_stands_under_litellm(
+    keys,
+    switch,  # noqa: F811
+    repository,  # noqa: F811
+):
+    write_fleet(repository, PROBE_ENABLED + LITELLM_ON)
+    keys.fail_at, keys.cause = 1, "name taken"
+
+    _, out, _ = switch()
+
+    shown = outline(out)
+    assert shown.count(PlanGroup.LITELLM) == 1
+    assert shown[shown.index(PlanGroup.LITELLM) + 1 :] == [
+        done(BUDGET_ID),
+        failed(APPS[0]),
+        *(f"{Glyph.UNCHANGED.value} {app}" for app in APPS[1:]),
+    ]
+
+
+@pytest.mark.usefixtures("headed_from_one_row")  # a skipped key step is one plan row
+def test_a_skipped_key_result_stands_under_litellm(
     keys,
     switch,  # noqa: F811
     repository,  # noqa: F811
 ):
     write_fleet(repository, ENABLED + LITELLM_ON)
-    arrange(keys)
+    keys.read_fails = True
 
     _, out, _ = switch()
 
-    shown = outline(out)
-    assert shown[shown.index(PlanGroup.LITELLM) + 1 :] == expected
-    assert shown.count(PlanGroup.LITELLM) == 1
+    assert outline(out)[-2:] == [PlanGroup.LITELLM, f"{Glyph.NEEDS_YOU.value} litellm"]
 
 
 RECREATES = [
@@ -265,23 +310,25 @@ def drift(group: PlanGroup, tree, compose_script) -> None:
         compose_script.change_definition("step-ca")
 
 
-@pytest.mark.usefixtures("headed_from_one_row")
 @pytest.mark.parametrize(("group", "subject"), RECREATES)
 def test_a_failed_recreate_stands_under_the_heading_of_the_step_that_failed(
     group,
     subject,
     step_ca_applied,  # noqa: F811
+    keys,
     switch,  # noqa: F811
     scripted,  # noqa: F811
     repository,  # noqa: F811
 ):
+    write_fleet(repository, PROBE_ENABLED + LITELLM_ON)
     drift(group, repository, scripted)
     scripted.crash_loops = {subject}
 
     exit_code, out, _ = switch()
 
     assert exit_code == 1
-    assert outline(out) == [group, failed(subject)]
+    assert outline(out)[:2] == [group, failed(subject)]
+    assert headings_of(outline(out))[0] == group
 
 
 @pytest.mark.usefixtures("headed_from_one_row", "realm_unit")
@@ -302,20 +349,17 @@ def test_the_waiting_row_of_a_stopped_hal_is_the_first_row_under_units(
     assert outline(out)[:2] == [PlanGroup.UNITS, f"{Glyph.ANNOUNCE.value} {REALM_UNIT}"]
 
 
-def ctrl_c(*_arguments: object) -> None:
-    raise KeyboardInterrupt
-
-
-@pytest.mark.usefixtures("headed_from_one_row")
 @pytest.mark.parametrize(("group", "subject"), RECREATES)
 def test_a_ctrl_c_row_ends_the_open_line_then_stands_under_the_heading_of_its_step(
     group,
     subject,
     step_ca_applied,  # noqa: F811
+    keys,
     switch,  # noqa: F811
     scripted,  # noqa: F811
     repository,  # noqa: F811
 ):
+    write_fleet(repository, PROBE_ENABLED + LITELLM_ON)
     drift(group, repository, scripted)
     scripted.verb_up = ctrl_c
 
