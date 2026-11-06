@@ -16,7 +16,7 @@ A one-shot service and a `depends_on` that waits for health or completion are re
 """
 
 import re
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Collection, Iterator, Mapping, Sequence
 from typing import Any
 
 import yaml
@@ -50,9 +50,17 @@ class ContractError(Exception):
     """The compose file breaks the contract; the message is one line."""
 
 
-def check(text: str | None, entry: str, tag: str, hosts: Sequence[str]) -> tuple[str, ...]:
+def check(
+    text: str | None,
+    entry: str,
+    tag: str,
+    hosts: Sequence[str],
+    *,
+    served_elsewhere: Collection[str] = frozenset(),
+) -> tuple[str, ...]:
     """The services of a release's compose file when it keeps the contract for the entry's
-    `hosts`; else ContractError."""
+    `hosts`; else ContractError. A host in `served_elsewhere` needs no labelled service, but a
+    label may still name it."""
 
     def refuse(reason: str) -> ContractError:
         return ContractError(f"services.{entry}: compose.yaml at {tag}: {reason}")
@@ -66,7 +74,7 @@ def check(text: str | None, entry: str, tag: str, hosts: Sequence[str]) -> tuple
     for name, definition in services.items():
         if reason := _service_refusal(definition):
             raise refuse(f"service {printable(str(name))} {reason}")
-    for reason in _routing_refusals(services, hosts):
+    for reason in _routing_refusals(services, hosts, served_elsewhere):
         raise refuse(reason)
     return tuple(str(name) for name in services)
 
@@ -184,14 +192,17 @@ def _mount_interpolates(volume: object) -> bool:
     return any(_interpolates(part) for part in deciding)
 
 
-def _routing_refusals(services: dict, hosts: Sequence[str]) -> Iterator[str]:
-    """Each host has exactly one service labelled with its name, or with it as `edge.alias`, and
-    `traefik.enable: "true"`; a labelled service names hosts of the entry and has a healthcheck."""
+def _routing_refusals(
+    services: dict, hosts: Sequence[str], served_elsewhere: Collection[str]
+) -> Iterator[str]:
+    """Each host hal's tunnel serves has exactly one service labelled with its name, or with it as
+    `edge.alias`, and `traefik.enable: "true"`; a labelled service names hosts of the entry and has
+    a healthcheck."""
     holders: dict[str, list[str]] = {}
     for name, definition in services.items():
         yield from _service_refusals(str(name), definition, hosts, holders)
     for host in hosts:
-        if len(holders.get(host, [])) != 1:
+        if host not in served_elsewhere and len(holders.get(host, [])) != 1:
             yield (
                 f"host {printable(host)} needs exactly one service labelled "
                 f"{EDGE_NAME_LABEL} or {EDGE_ALIAS_LABEL} with it (labels)"
