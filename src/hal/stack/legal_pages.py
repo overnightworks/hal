@@ -39,6 +39,7 @@ STABLE_IDS: Mapping[str, frozenset[str]] = {
             "pseudonym",
             "anmeldung",
             "agent-dienst",
+            "sprachdienst",
         }
     ),
     "nutzungsbedingungen": frozenset({"haftung", "recht"}),
