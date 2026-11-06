@@ -55,7 +55,7 @@ class WorktreeConfig:
 def _git(run: CommandRunner, worktree: Path, *arguments: str) -> str:
     output = run(["git", "-C", str(worktree), *arguments])
     if output is None:
-        raise HookCheckUnavailable(f"git {' '.join(arguments)} in {worktree} lässt sich nicht ausführen")
+        raise HookCheckUnavailable(f"git {' '.join(arguments)} in {worktree} cannot be run")
     return output
 
 
@@ -92,12 +92,12 @@ def _unapplied_hooks_path(config: WorktreeConfig, layout: Layout) -> HookFinding
     expected = str(layout.git_hooks_dir)
     subject = str(config.worktree)
     if config.hooks_path_setting is None:
-        return HookFinding("hooks-path", subject, "core.hooksPath ist nicht gesetzt", SETUP_APPLY)
+        return HookFinding("hooks-path", subject, "core.hooksPath is not set", SETUP_APPLY)
     origin, value = config.hooks_path_setting
     if not any(_same_file(origin, candidate) for candidate in _global_config_files(layout)):
-        return HookFinding("hooks-path", subject, f"core.hooksPath = {value} aus {origin}", _remove_override(config, origin))
+        return HookFinding("hooks-path", subject, f"core.hooksPath = {value} is set by {origin}", _remove_override(config, origin))
     if value != expected:
-        return HookFinding("hooks-path", subject, f"core.hooksPath der globalen Config ist {value}, erwartet {expected}", SETUP_APPLY)
+        return HookFinding("hooks-path", subject, f"the global core.hooksPath is {value}, expected {expected}", SETUP_APPLY)
     return None
 
 
@@ -106,7 +106,7 @@ def _remove_override(config: WorktreeConfig, origin: Path) -> str:
         return f"`git -C {quote(str(config.worktree))} config --local --unset core.hooksPath`"
     if _same_file(origin, config.worktree_file):
         return f"`git -C {quote(str(config.worktree))} config --worktree --unset core.hooksPath`"
-    return f"{origin} bearbeiten und die Zeile core.hooksPath (oder das include) entfernen"
+    return f"edit {origin} and remove the core.hooksPath line (or the include)"
 
 
 def _worktrees_under_git(layout: Layout, run: CommandRunner) -> Iterator[tuple[Path, Path]]:
@@ -116,16 +116,16 @@ def _worktrees_under_git(layout: Layout, run: CommandRunner) -> Iterator[tuple[P
             continue
         worktrees = registered_worktrees(repo, run)
         if not worktrees:
-            raise HookCheckUnavailable(f"git worktree list in {repo} lässt sich nicht ausführen")
+            raise HookCheckUnavailable(f"git worktree list in {repo} cannot be run")
         yield from ((repo, worktree) for worktree in sorted(worktrees) if worktree.is_dir())
 
 
 def _hook_file_problem(path: Path, rendered_hook: str) -> str | None:
     if not path.is_file():
-        return "fehlt"
+        return "missing"
     if not _has_hook_mode(path):
-        return "Modus nicht 755"
-    return None if path.read_text() == rendered_hook else "weicht vom Soll-Text ab"
+        return "mode is not 755"
+    return None if path.read_text() == rendered_hook else "differs from the expected text"
 
 
 def _hook_file_findings(layout: Layout) -> list[HookFinding]:
@@ -137,36 +137,36 @@ def _hook_file_findings(layout: Layout) -> list[HookFinding]:
 def _quality_findings(layout: Layout, run: CommandRunner) -> list[HookFinding]:
     quality = layout.quality_executable
     if not _is_executable(quality):
-        return [HookFinding("quality", str(quality), "fehlt oder ist nicht ausführbar", SETUP_APPLY)]
+        return [HookFinding("quality", str(quality), "missing or not executable", SETUP_APPLY)]
     findings = []
     if not _recorded_quality_source_matches(layout):
-        findings.append(HookFinding("quality", str(quality), "nicht auf QUALITY_SOURCE festgelegt", SETUP_APPLY))
+        findings.append(HookFinding("quality", str(quality), "not pinned to QUALITY_SOURCE", SETUP_APPLY))
     engines_dir = layout.quality_engines_dir
     if run([str(quality), "engines", "verify", str(engines_dir)]) is None:
-        findings.append(HookFinding("engines", str(engines_dir), "`quality engines verify` schlägt fehl", SETUP_APPLY))
+        findings.append(HookFinding("engines", str(engines_dir), "`quality engines verify` fails", SETUP_APPLY))
     return findings
 
 
 def _mise_findings(layout: Layout) -> list[HookFinding]:
     mise = layout.mise_executable
     if not _is_executable(mise):
-        return [HookFinding("mise", str(mise), "fehlt oder ist nicht ausführbar", SETUP_APPLY)]
+        return [HookFinding("mise", str(mise), "missing or not executable", SETUP_APPLY)]
     if not mise_hash_is_pinned(mise):
-        return [HookFinding("mise", str(mise), "weicht vom gepinnten sha256 ab", SETUP_APPLY)]
+        return [HookFinding("mise", str(mise), "differs from the pinned sha256", SETUP_APPLY)]
     return []
 
 
 def _hidden_repository_hooks(common_dir: Path) -> list[HookFinding]:
     """The global hooks path hides a repository's own hook unless it carries one of the chained names."""
     hooks_dir = common_dir / "hooks"
-    chained_names = " oder ".join(f"`{name}`" for name in HOOK_NAMES)
+    chained_names = " or ".join(f"`{name}`" for name in HOOK_NAMES)
     hidden = sorted(
         path
         for path in (hooks_dir.iterdir() if hooks_dir.is_dir() else [])
         if path.is_file() and not path.name.endswith(SAMPLE_SUFFIX) and path.name not in HOOK_NAMES
     )
     return [
-        HookFinding("hidden-hook", str(path), "wird vom globalen Hook-Pfad verdeckt", f"in {chained_names} umbenennen oder löschen")
+        HookFinding("hidden-hook", str(path), "hidden by the global hooks path", f"rename it to {chained_names}, or delete it")
         for path in hidden
     ]
 

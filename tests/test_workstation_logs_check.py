@@ -97,8 +97,9 @@ def test_a_journal_entry_older_than_the_retention_is_a_finding(machine, log_dire
 def test_the_report_states_the_journal_age_and_the_default_driver_without_a_finding(machine, log_directory) -> None:
     _found, report = logs_check.inspect(machine, NOW, log_directory)
 
-    assert "3 Tage alt" in report
-    assert "Docker-Standardtreiber: journald" in report
+    assert "3 days old" in report
+    assert "Docker default driver: journald" in report
+    assert (NOW - timedelta(days=3)).astimezone().strftime("%Y-%m-%d") in report
 
 
 def test_an_rsyslog_file_and_its_archives_are_findings_by_name(machine, log_directory) -> None:
@@ -150,7 +151,7 @@ def test_a_system_journal_that_cannot_be_read_is_named_while_the_merged_age_stil
     found = findings(machine, log_directory)
 
     assert set(found) == {("journal-unreadable", "journal"), ("journal-age", "journal")}
-    assert "Teilansicht" in found[("journal-unreadable", "journal")]
+    assert "partial view" in found[("journal-unreadable", "journal")]
 
 
 def test_the_age_counts_the_hour_the_autumn_clock_change_adds(machine, log_directory, berlin_time) -> None:

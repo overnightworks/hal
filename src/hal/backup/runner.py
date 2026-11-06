@@ -472,7 +472,6 @@ class _PostgresTarget:
 class _SqliteTarget:
     database: SqliteDatabase
     volume: str
-    kept: KeptVolume | None
 
 
 def _ready_target(app: App, readiness: Deadline) -> _PostgresTarget | _SqliteTarget:
@@ -485,18 +484,14 @@ def _ready_target(app: App, readiness: Deadline) -> _PostgresTarget | _SqliteTar
                     readiness,
                     READINESS_POLL_SECONDS,
                 ),
-                _kept_volume(app, restic.AUDIO_FOLDER, audio.volume, None) if audio else None,
+                _kept_volume(app, restic.AUDIO_FOLDER, audio.volume) if audio else None,
             )
-        case SqliteDatabase(volume=volume, files=files) as database:
-            return _SqliteTarget(
-                database,
-                _resolved(lambda: docker.app_volume(app, volume)),
-                _kept_volume(app, files.volume, files.volume, files.skip) if files else None,
-            )
+        case SqliteDatabase(volume=volume) as database:
+            return _SqliteTarget(database, _resolved(lambda: docker.app_volume(app, volume)))
 
 
-def _kept_volume(app: App, folder: str, volume: str, skip: str | None) -> KeptVolume:
-    return KeptVolume(folder, _resolved(lambda: docker.app_volume(app, volume)), skip)
+def _kept_volume(app: App, folder: str, volume: str) -> KeptVolume:
+    return KeptVolume(folder, _resolved(lambda: docker.app_volume(app, volume)))
 
 
 def _back_up(
@@ -511,7 +506,8 @@ def _back_up(
             manifest = _manifest(settings, app, target, staging)
             _write_private(staging / MANIFEST_NAME, manifest.as_json())
         with run.phase(Phase.BACKUP):
-            summary = restic.backup(settings, app.name, staging, target.kept, pre_apply=pre_apply)
+            kept = target.kept if isinstance(target, _PostgresTarget) else None
+            summary = restic.backup(settings, app.name, staging, kept, pre_apply=pre_apply)
             run.backed_up(app.name, summary.snapshot_id)
     return summary
 
@@ -534,15 +530,15 @@ def _manifest(
             return Manifest(app.name, None)
         case _PostgresTarget(kept=kept):
             return Manifest(app.name, _count_kept(settings, kept))
-        case _SqliteTarget(kept=kept):
+        case _SqliteTarget():
             rows = docker.check_sqlite(
                 settings, staging, SQLITE_COPY_NAME, app.restore_test.count_table
             )
-            return Manifest(app.name, None, rows, _count_kept(settings, kept) if kept else None)
+            return Manifest(app.name, None, rows)
 
 
 def _count_kept(settings: Settings, kept: KeptVolume) -> int:
-    return docker.count_files(settings, MountKind.VOLUME, kept.volume, kept.skip)
+    return docker.count_files(settings, MountKind.VOLUME, kept.volume)
 
 
 def _restore_test(settings: Settings, app: App, run: Run, snapshot_prefix: str | None) -> str:
@@ -566,11 +562,9 @@ def _verify(settings: Settings, app: App, restored: Path, run: Run) -> None:
     match app.database:
         case PostgresDatabase() as database:
             _verify_postgres(settings, app, database, restored, manifest, run)
-        case SqliteDatabase(files=files):
+        case SqliteDatabase():
             _restored_file(restored / DB_FOLDER / SQLITE_COPY_NAME, "no SQLite database")
             with run.phase(Phase.VERIFY):
-                if files:
-                    _verify_files(settings, restored / files.volume, files.skip, manifest)
                 _verified_sqlite_rows(settings, app, restored / DB_FOLDER, manifest)
 
 
@@ -595,14 +589,6 @@ def _verified_sqlite_rows(
     check_rows(manifest, rows)
     check_row_count(table, rows, require_rows=app.restore_test.require_rows)
     return rows
-
-
-def _verify_files(settings: Settings, restored: Path, skip: str | None, manifest: Manifest) -> None:
-    if not restored.is_dir():
-        raise VerificationError("the snapshot holds no file list")
-    check_file_count(
-        manifest.files, docker.count_files(settings, MountKind.BIND, str(restored), skip), "files"
-    )
 
 
 def _verify_postgres(

@@ -17,14 +17,9 @@ _PLAIN_NAME = re.compile(r"[a-z_][a-z0-9_-]{0,62}")
 _SQL_IDENTIFIER = re.compile(r"[A-Za-z_]\w{0,62}", re.ASCII)
 # A SQLite file name is one path segment, so it stays inside its volume and is safe in a URI.
 _SQLITE_FILE_NAME = re.compile(r"\w[\w.-]{0,127}", re.ASCII)
-# One name glob: a plain prefix and exactly one trailing `*`, so it is never `*`, a path or another
-# wildcard, and restic and `find` read it alike.
-_FILES_SKIP = re.compile(r"\w[\w.-]{0,62}\*", re.ASCII)
 _COMMON_KEYS = frozenset({"compose_project", "dump", "restore_test"})
 _POSTGRES_KEYS = frozenset({"db_service", "db_user", "db_name", "postgres_major"})
 _SQLITE_KEYS = frozenset({"database_volume", "database_file"})
-_FILES_VOLUME_KEY = "files_volume"
-_FILES_SKIP_KEY = "files_skip"
 _AUDIO_VOLUME_KEY = "volume"
 _AUDIO_REFERENCE_KEYS = frozenset({"audio_reference_table", "audio_reference_column"})
 _RESTORE_TEST_KEYS = frozenset({"count_table"})
@@ -82,16 +77,6 @@ class PostgresDatabase:
 
 
 @dataclass(frozen=True)
-class SqliteFiles:
-    """The files an app keeps beside its SQLite database: one volume, backed up read-only."""
-
-    volume: str
-    """The compose volume (`com.docker.compose.volume`); it names the snapshot folder too."""
-    skip: str | None
-    """A name glob (`staged-*`) left out at every depth, in the snapshot and in the count."""
-
-
-@dataclass(frozen=True)
 class SqliteDatabase:
     """A SQLite file in a compose volume, copied online; such an app has no audio."""
 
@@ -100,7 +85,6 @@ class SqliteDatabase:
     """The compose volume (`com.docker.compose.volume`) that holds the file."""
     file: str
     """One path segment, in the volume's root."""
-    files: SqliteFiles | None = None
 
 
 @dataclass(frozen=True)
@@ -141,17 +125,11 @@ def _parse_app(name: str, record: object) -> App:
     dump = _dump_kind(label, record)
     restore_test_label = f"{label}.restore_test"
     if dump is DumpKind.SQLITE_ONLINE_COPY:
-        _require_exact_keys(
-            label,
-            record,
-            _COMMON_KEYS | _SQLITE_KEYS,
-            optional=frozenset({_FILES_VOLUME_KEY, _FILES_SKIP_KEY}),
-        )
+        _require_exact_keys(label, record, _COMMON_KEYS | _SQLITE_KEYS)
         restore_test_record = _table(restore_test_label, record["restore_test"])
         database: PostgresDatabase | SqliteDatabase = SqliteDatabase(
             volume=_plain(label, record, "database_volume"),
             file=_matching(label, record, "database_file", _SQLITE_FILE_NAME),
-            files=_parse_files(label, record),
         )
         audio_keys = frozenset()
     else:
@@ -212,25 +190,6 @@ def _parse_restore_test(label: str, record: dict, audio_keys: frozenset[str]) ->
     return RestoreTest(
         count_table=_identifier(label, record, "count_table"), require_rows=require_rows
     )
-
-
-def _parse_files(label: str, record: dict) -> SqliteFiles | None:
-    """The files volume is optional; its skip needs it, and it is never the database's own."""
-    if _FILES_VOLUME_KEY not in record:
-        if _FILES_SKIP_KEY in record:
-            raise AppsError(f"{label}: {_FILES_SKIP_KEY} needs {_FILES_VOLUME_KEY}")
-        return None
-    volume = _plain(label, record, _FILES_VOLUME_KEY)
-    if volume in {DB_FOLDER, record["database_volume"]}:
-        raise AppsError(
-            f"{label}: {_FILES_VOLUME_KEY} may be neither {DB_FOLDER!r} nor the database volume"
-        )
-    skip = (
-        _matching(label, record, _FILES_SKIP_KEY, _FILES_SKIP)
-        if _FILES_SKIP_KEY in record
-        else None
-    )
-    return SqliteFiles(volume, skip)
 
 
 def _parse_audio(label: str, record: dict, restore_test_record: dict) -> Audio | None:
