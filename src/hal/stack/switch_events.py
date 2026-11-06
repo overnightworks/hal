@@ -126,12 +126,14 @@ def _write(key: str, event: SwitchEvent, fact: str) -> None:
     write_row(Row(_GLYPH_OF_EVENT[event], key, event, fact))
 
 
+def _still_served(served_elsewhere: Sequence[catalog.Host]) -> list[str]:
+    """The barrier stands on hal's Traefik only, so every row of a stop names each host another
+    tunnel still serves."""
+    return [f"{host.fqdn} stays served by tunnel {host.tunnel}" for host in served_elsewhere]
+
+
 def report_closing(key: str, closing: Closing, served_elsewhere: Sequence[catalog.Host]) -> None:
-    """The barrier stands on hal's Traefik only, so the row names each host another tunnel still
-    serves."""
-    still_served = [
-        f"{host.fqdn} stays served by tunnel {host.tunnel}" for host in served_elsewhere
-    ]
+    still_served = _still_served(served_elsewhere)
     if closing.complete:
         parts = [f"{closing.barrier}", StopPart.STOPPED, "volumes kept", *still_served]
         _write(key, SwitchEvent.SWITCHED_OFF, " · ".join(parts))
@@ -141,12 +143,15 @@ def report_closing(key: str, closing: Closing, served_elsewhere: Sequence[catalo
     write_error(f"{key} is only partly off · {cause}", f"{COMMAND} {key}")
 
 
-def report_already_off(key: str, since: str, barrier_repaired: bool) -> None:
+def report_already_off(
+    key: str, since: str, barrier_repaired: bool, served_elsewhere: Sequence[catalog.Host]
+) -> None:
     time = switches.describe_since(since)
+    still_served = _still_served(served_elsewhere)
     if barrier_repaired:
-        _write(key, SwitchEvent.BARRIER_BACK, f"off since {time}")
+        _write(key, SwitchEvent.BARRIER_BACK, " · ".join([f"off since {time}", *still_served]))
     else:
-        _write(key, SwitchEvent.ALREADY_OFF, f"since {time}")
+        _write(key, SwitchEvent.ALREADY_OFF, " · ".join([f"since {time}", *still_served]))
 
 
 def report_disabled(key: str) -> None:

@@ -56,7 +56,7 @@ def check(
     tag: str,
     hosts: Sequence[str],
     *,
-    served_elsewhere: Collection[str] = frozenset(),
+    served_elsewhere: Collection[str],
 ) -> tuple[str, ...]:
     """The services of a release's compose file when it keeps the contract for the entry's
     `hosts`; else ContractError. A host in `served_elsewhere` needs no labelled service, but a
@@ -196,16 +196,18 @@ def _routing_refusals(
     services: dict, hosts: Sequence[str], served_elsewhere: Collection[str]
 ) -> Iterator[str]:
     """Each host hal's tunnel serves has exactly one service labelled with its name, or with it as
-    `edge.alias`, and `traefik.enable: "true"`; a labelled service names hosts of the entry and has
-    a healthcheck."""
+    `edge.alias`, and `traefik.enable: "true"`, and a host another tunnel serves at most one; a
+    labelled service names hosts of the entry and has a healthcheck."""
     holders: dict[str, list[str]] = {}
     for name, definition in services.items():
         yield from _service_refusals(str(name), definition, hosts, holders)
     for host in hosts:
-        if host not in served_elsewhere and len(holders.get(host, [])) != 1:
+        held = len(holders.get(host, []))
+        elsewhere = host in served_elsewhere
+        if held > 1 or (held == 0 and not elsewhere):
             yield (
-                f"host {printable(host)} needs exactly one service labelled "
-                f"{EDGE_NAME_LABEL} or {EDGE_ALIAS_LABEL} with it (labels)"
+                f"host {printable(host)} needs {'at most' if elsewhere else 'exactly'} one "
+                f"service labelled {EDGE_NAME_LABEL} or {EDGE_ALIAS_LABEL} with it (labels)"
             )
 
 

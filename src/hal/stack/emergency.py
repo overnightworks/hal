@@ -168,7 +168,7 @@ def stop_unit(
         )
     if off:
         since, repaired = off
-        switch_events.report_already_off(key, since, repaired)
+        switch_events.report_already_off(key, since, repaired, target.subject.served_elsewhere)
         return ApplyExit.APPLIED_OR_NOTHING
     return _close(marks, target, now)
 

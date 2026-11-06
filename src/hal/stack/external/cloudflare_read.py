@@ -276,14 +276,17 @@ class CloudflareClient:
         return tunnel.id
 
     def _named_tunnel_id(self, path: str, name: str) -> str:
-        """The one live tunnel by that name. A list that ignored the filter holds hal's own tunnel
-        too, so it is refused for its count."""
+        """The one live tunnel by that name, never hal's own. A list that ignored the filter holds
+        hal's own tunnel too, so it is refused for its count or for its name."""
         found = self._pages(
             path, {"is_deleted": "false", "name": name}, announces_total_pages=False
         )
         if len(found) != 1:
             raise CloudflareReadError(f"{path}: not one but {len(found)} live tunnels named {name}")
-        return _text(found[0], "id", path)
+        tunnel_id = _text(found[0], "id", path)
+        if tunnel_id == self._tunnel.id or _text(found[0], "name", path) != name:
+            raise CloudflareReadError(f"{path}: the live tunnel named {name} is not another tunnel")
+        return tunnel_id
 
     def _pages(
         self,

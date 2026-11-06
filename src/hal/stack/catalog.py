@@ -211,12 +211,13 @@ def _app(
     run = _app_run(key, entry)
     entered = _entered_hosts(key, entry, document)
     _require_ready(entered)
+    enabled = _enabled(key, run)
     return App(
         key,
-        _enabled(key, run),
+        enabled,
         _default_branch(key, entry["repo"]),
         _names(entered),
-        _served_elsewhere(entered),
+        _served_elsewhere(entered, enabled),
     )
 
 
@@ -273,13 +274,14 @@ def _unit(
         if run_key not in _RUN_KEYS:
             raise CatalogError(f"services.{key}.run.{run_key}: unknown key")
     entered = _entered_hosts(key, entry, document)
+    enabled = _enabled(key, run)
     return Unit(
         key,
-        _enabled(key, run),
+        enabled,
         _setup(key, run.get("setup"), repository),
         _names(entered),
         _build(key, run.get("build"), repository),
-        _served_elsewhere(entered),
+        _served_elsewhere(entered, enabled),
     )
 
 
@@ -288,8 +290,9 @@ def _names(entered: list[tuple[str, Host]]) -> tuple[str, ...]:
     return tuple(one.name for _, one in entered)
 
 
-def _served_elsewhere(entered: list[tuple[str, Host]]) -> tuple[Host, ...]:
-    return tuple(one for _, one in entered if one.tunnel is not None)
+def _served_elsewhere(entered: list[tuple[str, Host]], enabled: bool) -> tuple[Host, ...]:
+    """The hosts another tunnel serves; a disabled entry publishes none, as `hosts` has it."""
+    return tuple(one for _, one in entered if enabled and one.tunnel is not None)
 
 
 def _enabled(key: str, run: dict) -> bool:
