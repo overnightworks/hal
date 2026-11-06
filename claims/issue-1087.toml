@@ -3,6 +3,6 @@ agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
 role = "builder"
 base = "171c02b4e12af39111be7bbc726973529e7324cf"
 branch = "claude/issue-1087-halr-a"
-scope = [".github/workflows/ci.yml", "README.md", "agent-service/egress", "compose.yaml", "docs/agent-service.md", "docs/architecture.md", "docs/design/hal-output.html", "docs/internal-ca.md", "fleet.yaml", "legal/sections", "probe/agent-service", "quality/baseline.toml", "src/hal/stack/legal_step.py", "tests"]
+scope = [".github/workflows/ci.yml", "README.md", "agent-service/egress", "compose.yaml", "docs/agent-service.md", "docs/architecture.md", "docs/design/hal-output.html", "docs/internal-ca.md", "fleet.yaml", "legal/sections", "probe/agent-service", "quality/baseline.toml", "quality/config.toml", "src/hal/stack/legal_step.py", "tests"]
 opened_commit = "769b9ba5b0d6e673403b05bbd4de0911340003d4"
 whole_reason = "One enabling step: LiteLLM's egress, probes and privacy section leave the old service together"
