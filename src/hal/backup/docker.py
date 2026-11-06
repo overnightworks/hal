@@ -399,8 +399,8 @@ def check_sqlite(settings: Settings, directory: Path, file: str, table: str) -> 
 def count_files(settings: Settings, kind: MountKind, source: str) -> int:
     """Regular files under a volume or host directory, counted read-only in a container.
 
-    The one rule for the manifest's count and the restored copy's; names never leave it. An entry
-    any read error fails the count.
+    The one rule for the manifest's count and the restored copy's; names never leave it. Any read
+    error fails the count.
     """
     listing = host.run(
         [

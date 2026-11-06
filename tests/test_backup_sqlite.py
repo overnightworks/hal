@@ -511,6 +511,40 @@ def test_a_container_that_will_not_run_is_a_failed_command_not_a_verification(
     assert outcome.status["exit_category"] == "command-failed"
 
 
+def test_a_missing_database_file_is_named_without_a_path_or_a_row_value(edge_backup, machine, home):
+    """#468 M16: the owner run's verdict exit says the configured file is missing."""
+    machine.other_volumes["presentator"] = ["presentator_database"]
+    machine.sqlite_copy = None
+    machine.sqlite_diagnostic = "unable to open /data/presentator.sqlite3: row secret-name"
+
+    outcome = edge_backup("backup", *_sqlite_apps(home))
+
+    assert "presentator.sqlite3 is missing or unreadable" in outcome.out
+    assert "/data/" not in outcome.out
+    assert "secret-name" not in outcome.out
+    assert (outcome.status["failing_phase"], outcome.status["exit_category"]) == (
+        "dump",
+        "command-failed",
+    )
+
+
+def test_an_owner_run_that_fails_for_another_reason_is_not_called_a_missing_file(
+    edge_backup, machine, home
+):
+    """#468 M16: docker failing to start the owner run says so."""
+    machine.other_volumes["presentator"] = ["presentator_database"]
+    machine.failing[SQLITE_OWNER_LABEL] = 125
+
+    outcome = edge_backup("backup", *_sqlite_apps(home))
+
+    assert f"{SQLITE_OWNER_LABEL} ended with exit 125" in outcome.out
+    assert "is missing or unreadable" not in outcome.out
+    assert (outcome.status["failing_phase"], outcome.status["exit_category"]) == (
+        "dump",
+        "command-failed",
+    )
+
+
 @pytest.mark.parametrize(
     ("toml", "pulled"),
     [

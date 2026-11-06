@@ -1,7 +1,6 @@
 """A scripted Docker host in place of docker and restic, for the edge-backup test modules."""
 
 import fcntl
-import fnmatch
 import json
 import re
 import stat
@@ -137,8 +136,6 @@ class Machine:
     other_volumes: dict[str, list[str]] = field(
         default_factory=lambda: {"radio": ["radio_audiofiles"]}
     )
-    volume_files: dict[str, dict[str, bytes]] = field(default_factory=dict)
-    """The files of a kept volume by Docker volume name; songmaker's audio volume holds `audio`."""
     volumes_by_label: dict[str, list[str]] = field(
         default_factory=lambda: {
             app.database.volume: [f"{app.compose_project}_{app.database.volume}"]
@@ -147,8 +144,6 @@ class Machine:
         }
     )
     """What `docker volume ls` answers for a compose volume name, whatever the project."""
-    unreadable_directories: set[str] = field(default_factory=set)
-    """Directories of a kept volume the operator cannot traverse: a count entering one exits 1."""
     clock: Clock = field(default_factory=lambda: Clock())
     absent_polls: int = 0
     """How many `docker ps` polls find no database container before it appears."""
@@ -461,12 +456,10 @@ class Machine:
         return exit_with(label, exit_code)
 
     def _scan(self, argv, **_) -> bytes:
-        """`find <mount> [-mindepth 1 -name <skip> -prune -o] -type f -print0` over a live volume or
-        a restored directory."""
+        """`find <mount> -type f -print0` over a live volume or a restored directory."""
         mount = mount_of(argv, "/scanned")
-        skip = argv[argv.index("-name") + 1] if "-name" in argv else None
         if mount["type"] == "volume":
-            names = self.volume_files.get(mount["source"], self.audio)
+            names = self.audio
         else:
             root = Path(mount["source"])
             names = {
@@ -474,12 +467,7 @@ class Machine:
                 for path in root.rglob("*")
                 if path.is_file() and not path.is_symlink()
             }
-        if skip is not None and "-mindepth" not in argv and fnmatch.fnmatchcase("scanned", skip):
-            return b""
-        kept = [name for name in names if not _skipped(name, skip)]
-        if any(set(map(str, Path(name).parents)) & self.unreadable_directories for name in kept):
-            return exit_with(FILE_COUNT_LABEL, 1)
-        return b"".join(name.encode() + b"\0" for name in kept)
+        return b"".join(name.encode() + b"\0" for name in names)
 
     def _backup(self, argv, **_) -> bytes:
         self.status_seen_during_backup = json.loads(self.status_file.read_text())
@@ -519,23 +507,15 @@ class Machine:
         return "".join(f"{json.dumps(line)}\n" for line in lines).encode()
 
     def _kept_by_folder(self, argv, app: str) -> dict[str, dict[str, bytes]]:
-        """The volumes restic is told to keep beside `db/`, without what `--exclude` leaves out."""
+        """The volumes restic is told to keep beside `db/`."""
         source = f"/backup/{app}/"
-        excludes = [argv[i + 1] for i, a in enumerate(argv) if a == "--exclude"]
         kept = {}
         for argument in (argv[i + 1] for i, a in enumerate(argv) if a == "--mount"):
             mount = dict(part.split("=", 1) for part in argument.split(",") if "=" in part)
             folder = mount["target"].removeprefix(source)
             if not mount["target"].startswith(source) or folder == "db":
                 continue
-            skips = [
-                e.rsplit("/", 1)[1] for e in excludes if e.startswith(f"{mount['target']}/**/")
-            ]
-            kept[folder] = {
-                name: content
-                for name, content in self.volume_files.get(mount["source"], self.audio).items()
-                if not any(_skipped(name, skip) for skip in skips)
-            }
+            kept[folder] = dict(self.audio)
         return kept
 
     def _snapshots(self, argv, **_) -> bytes:
@@ -662,12 +642,6 @@ def _tags(snapshot: dict) -> list[str]:
 def restic_time(moment: datetime) -> str:
     """A snapshot's time as restic's JSON writes it: RFC 3339, `Z` for UTC."""
     return moment.isoformat().replace("+00:00", "Z")
-
-
-def _skipped(name: str, glob: str | None) -> bool:
-    """`find -name <glob> -prune` and restic's `**/<glob>` both drop an entry whose own name, or
-    one of its parents' below the root, matches."""
-    return glob is not None and any(fnmatch.fnmatchcase(part, glob) for part in Path(name).parts)
 
 
 def declare_apps(home: Path, toml: str) -> tuple[str, str]:

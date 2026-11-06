@@ -2,6 +2,7 @@
 without Docker, then the door on the scripted Docker host."""
 
 import hashlib
+import json
 import re
 import shutil
 import signal
@@ -663,7 +664,10 @@ def test_an_old_snapshot_with_built_decks_loads_only_its_database(
     live, edge_backup, machine, loader, home
 ):
     assert edge_backup(*declare_apps(home, SQLITE_TOML), "backup", APP).exit_code == 0
-    machine.snapshots[-1]["volumes"] = {"builds": {"deck/index.html": b"<html>"}}
+    snapshot = machine.snapshots[-1]
+    snapshot["volumes"] = {"builds": {"deck/index.html": b"<html>"}}
+    manifest = json.loads(snapshot["db"]["manifest.json"])
+    snapshot["db"]["manifest.json"] = json.dumps(manifest | {"files": 1}).encode()
     database_only = declare_apps(home, SQLITE_TOML)
     target = home / "restored"
 
