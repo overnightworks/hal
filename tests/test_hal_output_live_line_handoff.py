@@ -1,5 +1,5 @@
-"""The handoff of hal.output's live line: every writer erases a drawn frame first, a frame a
-Ctrl-C kept gets one newline, and a stopped line draws no frame more, on a terminal whose stdout
+"""The handoff of hal.output's live line: every writer erases a drawn frame first, a line a
+Ctrl-C took gets one newline, and a stopped line draws no frame more, on a terminal whose stdout
 and stderr are one buffer."""
 
 from __future__ import annotations
@@ -160,26 +160,60 @@ def test_a_frame_a_ctrl_c_kept_gets_exactly_one_newline_from_the_next_writer(
 
 
 class CtrlCAfterTheErase(FrameStream):
-    """A terminal on which a Ctrl-C lands right after the main thread erased the frame: between a
-    writer's erase and its print."""
+    """A terminal on which a Ctrl-C lands right after the main thread erased the frame, between a
+    writer's erase and its print, once `ready` says so, when it is given."""
 
     pressed = False
+
+    def __init__(self, ready: threading.Event | None = None) -> None:
+        super().__init__()
+        self.ready = ready
 
     def write(self, text: str, /) -> int:
         written = super().write(text)
         main_thread = threading.current_thread() is threading.main_thread()
         if text == ERASE and main_thread and not self.pressed:
             self.pressed = True
+            if self.ready is not None:
+                assert self.ready.wait(timeout=10)
             press_ctrl_c()
         return written
 
 
+class LockThatReportsTheWait:
+    """The line's lock, which says when the main thread, once `armed`, goes to wait for it, and
+    when the redraw thread comes to a lock that is held."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self.armed = False
+        self.main_waits = threading.Event()
+        self.redraw_waits = threading.Event()
+
+    def __enter__(self) -> None:
+        if threading.current_thread() is threading.main_thread():
+            if self.armed:
+                self.main_waits.set()
+        elif self._lock.locked():
+            self.redraw_waits.set()
+        self._lock.acquire()
+
+    def __exit__(self, *_exception: object) -> None:
+        self._lock.release()
+
+
 @pytest.mark.parametrize("fresh_line", [False, True], ids=["plain row", "fresh_line"])
-def test_a_ctrl_c_between_the_erase_and_the_print_leaves_no_newline_owed(
-    monkeypatch: pytest.MonkeyPatch, fresh_line: bool
+@pytest.mark.parametrize(
+    "redraw_waits", [False, True], ids=["right after the erase", "redraw waits at the lock"]
+)
+def test_a_ctrl_c_in_a_writers_erase_owes_one_newline_which_the_next_writer_pays_once(
+    monkeypatch: pytest.MonkeyPatch, fresh_line: bool, redraw_waits: bool
 ) -> None:
-    shared = one_terminal(monkeypatch, CtrlCAfterTheErase())
-    ticks = ticking_line(monkeypatch)
+    lock = LockThatReportsTheWait()
+    shared = one_terminal(
+        monkeypatch, CtrlCAfterTheErase(lock.redraw_waits if redraw_waits else None)
+    )
+    ticks = ticking_line(monkeypatch, lock=lambda: lock)
     monkeypatch.setattr(hal.output, "LIVE_STOP_SECONDS", 0.01)
 
     def block() -> None:
@@ -190,32 +224,15 @@ def test_a_ctrl_c_between_the_erase_and_the_print_leaves_no_newline_owed(
 
     with pytest.raises(KeyboardInterrupt):
         block()
-    left = shared.getvalue()
     assert ticks.redrawer_ended()
+    left = shared.getvalue()
     write_row(Row(Glyph.FAILED, SUBJECT, Step.INTERRUPTED), fresh_line=fresh_line)
 
     rest = shared.getvalue()[len(left) :]
     assert left.endswith(ERASE)
     assert "restarted" not in left
     assert "\r" not in rest
-    assert visible_lines(rest) == [*([[]] if fresh_line else []), ["✗", SUBJECT, "interrupted"], []]
-
-
-class LockThatReportsTheWait:
-    """The line's lock, which says when the main thread, once `armed`, goes to wait for it."""
-
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self.armed = False
-        self.main_waits = threading.Event()
-
-    def __enter__(self) -> None:
-        if self.armed and threading.current_thread() is threading.main_thread():
-            self.main_waits.set()
-        self._lock.acquire()
-
-    def __exit__(self, *_exception: object) -> None:
-        self._lock.release()
+    assert visible_lines(rest) == [[], ["✗", SUBJECT, "interrupted"], []]
 
 
 @pytest.fixture
@@ -287,37 +304,28 @@ def test_a_ctrl_c_ends_a_writers_wait_at_the_lock_and_no_frame_starts_after_it(
     assert visible_lines(rest) == [[], ["✗", SUBJECT, "interrupted"], []]
 
 
-@pytest.mark.parametrize(
-    ("erase_lands", "newline_owed"),
-    [(False, True), (True, False)],
-    ids=["terminal holds the erase", "erase lands in the stop"],
-)
-def test_a_ctrl_c_in_the_final_erase_owes_a_newline_only_while_the_frame_is_on_screen(
-    monkeypatch: pytest.MonkeyPatch,
-    terminal_stopped_at_the_erase: StoppedTerminal,
-    erase_lands: bool,
-    newline_owed: bool,
+def test_a_ctrl_c_in_a_normal_ends_stop_after_the_erase_owes_one_newline_and_raises(
+    monkeypatch: pytest.MonkeyPatch, terminal_stopped_at_the_erase: StoppedTerminal
 ) -> None:
     stopped = terminal_stopped_at_the_erase
     one_terminal(monkeypatch, stopped)
 
-    class CtrlCOnceTheEraseIsHeld(threading.Thread):
+    class CtrlCOnceTheEraseLanded(threading.Thread):
         pressed = False
 
         def join(self, timeout: float | None = None) -> None:
             if not self.pressed:
                 self.pressed = True
                 assert stopped.hanging.wait(timeout=10)
+                stopped.resumed.set()
+                super().join(timeout=10)
                 press_ctrl_c()
-                if erase_lands:
-                    stopped.resumed.set()
-                    super().join(timeout=10)
             super().join(timeout)
 
     monkeypatch.setattr(
         hal.output,
         "threading",
-        SimpleNamespace(Thread=CtrlCOnceTheEraseIsHeld, Lock=threading.Lock, Event=threading.Event),
+        SimpleNamespace(Thread=CtrlCOnceTheEraseLanded, Lock=threading.Lock, Event=threading.Event),
     )
 
     def block() -> None:
@@ -331,11 +339,8 @@ def test_a_ctrl_c_in_the_final_erase_owes_a_newline_only_while_the_frame_is_on_s
 
     rest = stopped.getvalue()[len(left) :]
     assert not stopped.watchdog_fired
-    assert visible_lines(rest) == [
-        *([[]] if newline_owed else []),
-        ["✗", SUBJECT, "interrupted"],
-        [],
-    ]
+    assert left.endswith(ERASE)
+    assert visible_lines(rest) == [[], ["✗", SUBJECT, "interrupted"], []]
 
 
 def test_a_show_after_the_line_stopped_returns_at_once_while_the_redraw_holds_the_lock(

@@ -324,9 +324,8 @@ class _LiveLine:
 
     The barrier is `_stop_decided`, a plain flag so that a signal can read it at any instruction:
     from the moment it is set no frame starts, whether or not the thread could be joined. `_blank`
-    says what the screen holds; the redraw thread changes it before the write that makes it true.
-    The main thread's erase has a window between `_blank = True` and its write: a Ctrl-C there
-    leaves the frame with no newline owed."""
+    serves only the redraw and the erase: whether a frame is drawn. A Ctrl-C reads neither it nor
+    the thread."""
 
     def __init__(self) -> None:
         self._subject = ""
@@ -369,9 +368,11 @@ class _LiveLine:
 
     def on_ctrl_c(self, _signal_number: int, _frame: FrameType | None) -> None:
         """Runs in place of the `KeyboardInterrupt`, wherever the Ctrl-C lands, also at the end of
-        the block where no `except` would see it: a frame on screen becomes the newline the next
-        writer owes, the line ends without its erase, then `stop` raises it. A Ctrl-C while `stop`
-        runs waits for it, which settles the newline from the screen the thread leaves."""
+        the block where no `except` would see it. The terminal echoes `^C` at the cursor, so the
+        line holds the kept frame with it or `^C` alone: one newline is owed whatever `_blank`
+        says, then the line ends without its erase and `stop` raises the Ctrl-C."""
+        global _newline_owed
+        _newline_owed = self._stream
         self._erase = False
         self._ctrl_c_held = True
         self.stop(erase=False)
@@ -379,10 +380,9 @@ class _LiveLine:
     def stop(self, *, erase: bool) -> None:
         """Ends the thread, then gives Ctrl-C back and raises one that came meanwhile. Only the
         first call acts. The wait ends at `LIVE_STOP_SECONDS`: a write the terminal holds, a frame
-        or the erase, keeps its daemon thread and lands at Ctrl-Q: that costs just the line. After
-        a Ctrl-C the next writer owes one newline if a frame is on screen when the wait ends: a
-        frame still drawn, or a held write of the thread, which counts as kept."""
-        global _newline_owed
+        or the erase, keeps its daemon thread and lands at Ctrl-Q: that costs just the line, and a
+        Ctrl-C that lands while a writer holds the lock and a tick waits at it ends that long
+        later."""
         if self._stop_decided:
             return
         self._erase = erase
@@ -392,14 +392,9 @@ class _LiveLine:
             self._thread.join(LIVE_STOP_SECONDS)
             if self._thread.is_alive():
                 self._erase = False
-        if self._ctrl_c_held and (not self._blank or self._thread_holds_a_write()):
-            _newline_owed = self._stream
         signal.signal(signal.SIGINT, self._ctrl_c_before)
         if self._ctrl_c_held:
             signal.raise_signal(signal.SIGINT)
-
-    def _thread_holds_a_write(self) -> bool:
-        return self._thread is not None and self._thread.is_alive()
 
     def _redraw(self) -> None:
         while not self._wake.wait(LIVE_TICK_SECONDS):
@@ -436,12 +431,12 @@ class _LiveLine:
 _active_line: _LiveLine | None = None
 """The one line a terminal has; SIGINT is process-wide, so blocks do not nest."""
 _newline_owed: TextIO | None = None
-"""The stream of a frame a Ctrl-C left on screen, until a writer ends it."""
+"""The stream of the line a Ctrl-C took, until a writer ends it with one newline."""
 
 
 def _hand_off(stream: TextIO, *, fresh_line: bool = False) -> None:
     """Every writer's first act in its text path, before it prints on `stream`: the live line
-    gives way, then one newline ends the frame a Ctrl-C left or the line `fresh_line` asks to end,
+    gives way, then one newline ends the line a Ctrl-C took or the line `fresh_line` asks to end,
     once for both. No lock is held once it returns."""
     global _newline_owed
     if _active_line is not None:
