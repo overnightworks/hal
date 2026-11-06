@@ -422,12 +422,12 @@ def test_a_new_container_that_crash_loops_is_partial_and_the_next_run_plans_only
     assert exit_code == 1
     assert find_row(out, "agent-service", ResultEvent.NOT_RUNNING, "of the agent-service recreate")
 
-    exit_code, out, err = switch()
+    exit_code, out, _ = switch()
 
     assert exit_code == 1
     assert not recreate_row(out)
     assert find_row(out, "agent-service", PlanEvent.SWITCH_ON)
-    assert "agent-service is not on after the change" in err
+    assert find_row(out, "agent-service", ResultEvent.NOT_RUNNING, "of the start")
 
 
 def test_a_new_container_that_recovers_after_the_watch_leaves_nothing_to_change(

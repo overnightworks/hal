@@ -566,8 +566,7 @@ def test_a_failed_switch_on_snapshot_creates_no_app_and_names_no_restore(
 
     assert exit_code == ExitCode.FAILURE
     assert f"{failing} broke" in output
-    assert "litellm is not started" in output
-    assert ("pre-apply snapshot ab12cd34" in output) == names_the_snapshot
+    assert output.count("pre-apply snapshot ab12cd34") == int(names_the_snapshot)
     assert "hal restore" not in output
     assert switch_on_steps(scripted)[-1] != LITELLM_UP
     assert LITELLM.service not in scripted.containers
@@ -611,22 +610,23 @@ def _app_does_not_run(scripted) -> None:  # noqa: F811
 
 
 @pytest.mark.parametrize(
-    ("after_the_proof", "in_the_start", "line", "restores"),
+    ("after_the_proof", "in_the_start", "line", "restores", "withheld"),
     [
         pytest.param(
-            _ctrl_c_before_the_apps_start, None, "interrupted while changing litellm", False,
+            _ctrl_c_before_the_apps_start, None, "interrupted while changing litellm", False, False,
             id="S5 Ctrl-C before the app is created",
         ),
         pytest.param(
-            _switched_off_before_the_apps_start, None, "litellm was switched off meanwhile", False,
+            _switched_off_before_the_apps_start, None,
+            "partial, litellm switched off meanwhile", False, True,
             id="switched off before the app is created",
         ),
         pytest.param(
-            None, _ctrl_c_in_the_apps_start, "interrupted while changing litellm", True,
+            None, _ctrl_c_in_the_apps_start, "interrupted while changing litellm", True, False,
             id="Ctrl-C while the app is created",
         ),
         pytest.param(
-            None, _app_does_not_run, "litellm is not on after the change", True,
+            None, _app_does_not_run, "partial, litellm not running", True, False,
             id="the app does not run",
         ),
     ],
@@ -637,6 +637,7 @@ def test_a_switch_on_stopped_after_its_snapshot_names_it_and_the_restore_once_th
     in_the_start,
     line,
     restores,
+    withheld,
     plain_apply,
     scripted,  # noqa: F811
     realm_backup,
@@ -662,6 +663,12 @@ def test_a_switch_on_stopped_after_its_snapshot_names_it_and_the_restore_once_th
     assert "pre-apply snapshot ab12cd34" in output
     assert ("hal restore litellm --live --snapshot ab12cd34" in output) == restores
     assert (LITELLM.service in scripted.containers) == restores
+    if withheld:
+        row = find_row(output, LITELLM.key, ResultEvent.APP_HELD_OFF, "not started")
+        assert row
+        not_started = row.group(0).partition(" · ")[2].removesuffix(" not started").split(", ")
+        assert LITELLM.database not in not_started
+        assert LITELLM.service in not_started
 
 
 @pytest.mark.usefixtures("litellm_data")
@@ -712,8 +719,7 @@ def test_a_partial_switch_on_names_the_way_back_of_every_unit_that_holds_a_snaps
     exit_code, output, _ = plain_apply()
 
     assert exit_code == ExitCode.FAILURE
-    assert "backup broke" in output
-    assert "litellm is not started" in output
+    assert find_row(output, LITELLM.key, ResultEvent.FAILED, "backup broke")
     assert keycloak_fragment in output
     assert "hal restore litellm" not in output
 

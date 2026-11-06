@@ -542,8 +542,7 @@ class Probe:
         self.set_enabled(True)
         output, ran = self.apply("U12", HAL_FAILURE)
         expect(
-            "partial, litellm is not on after the change" in output
-            and LITELLM_ON.search(output) is None,
+            "partial, litellm not running" in output and LITELLM_ON.search(output) is None,
             f"U12: {output[-300:]}",
         )
         expect(LIVE_RESTORE.search(output) is not None, f"U12: no way back: {output[-300:]}")
@@ -551,7 +550,7 @@ class Probe:
         expect(ran.created == 0, f"U12: E saw {ran}")
         self.hold(
             "U12",
-            "partial, litellm is not on after the change, exit 3, after the kept volume's proven "
+            "partial, litellm not running, exit 3, after the kept volume's proven "
             "snapshot, `hal restore litellm --live` named; litellm-db and the front run",
         )
 
