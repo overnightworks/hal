@@ -1,0 +1,8 @@
+claim_id = "9dfe4d9d0db54b2ab7e74d9e2d11fad2"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "362cd7fd16b212d0f64db2a3022e9d8fb0cbc418"
+branch = "claude/issue-1059-interrupt-row"
+scope = ["docs/design/hal-output.html", "quality/baseline.toml", "src/hal/stack/appkit_step.py", "src/hal/stack/apply.py", "src/hal/stack/legal_step.py", "src/hal/stack/result_rows.py", "src/hal/stack/unit_plans.py", "tests/test_stack_appkit_step.py", "tests/test_stack_apply.py", "tests/test_stack_apply_apps.py", "tests/test_stack_apply_image_move.py", "tests/test_stack_apply_interrupts.py", "tests/test_stack_apply_legal.py", "tests/test_stack_result_rows.py"]
+opened_commit = "446f213c32637614d43842ed6942610f6419cbc1"
+whole_reason = "One interrupt row: the record, its single row owner, the printer and the two writes that cleared its subject change together, so no run prints the old line beside the new one."
