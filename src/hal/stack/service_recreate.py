@@ -188,10 +188,6 @@ class SwitchOnSnapshots:
             raise PreApplyError(f"{error}; {unit.key} is not started") from error
         return start(lambda: self.began.add(unit.key))
 
-    def proven(self, unit: str) -> str | None:
-        """What the unit's result line says of its snapshot, once one was proven."""
-        return f"snapshot {short_snapshot(self.taken[unit])} proven" if unit in self.taken else None
-
     def way_back(self) -> str | None:
         """The way back of every unit of the run that holds a snapshot."""
         lines = (

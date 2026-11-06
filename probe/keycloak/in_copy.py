@@ -403,8 +403,10 @@ class Probe(KeycloakCopy):
 
     def cell_h3(self) -> None:
         first = apply(self.stand)
-        on = [f"{unit} is on" for unit in sorted(self.stand.fleet.units_on)]
-        expect(all(line in first for line in on), f"H3: the first apply said {first[-400:]}")
+        on = [
+            rf"\b{unit}\s+{ResultEvent.SWITCHED_ON}\b" for unit in sorted(self.stand.fleet.units_on)
+        ]
+        expect(all(re.search(row, first) for row in on), f"H3: the first apply said {first[-400:]}")
         wanted = {KEYCLOAK_SERVICE, KEYCLOAK.database, STEP_CA_UNIT, *CORE_SERVICES}
         running = self.running()
         expect(wanted <= running, f"H3: running {sorted(running)}")

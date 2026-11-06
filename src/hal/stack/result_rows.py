@@ -59,7 +59,7 @@ from hal.stack.realm.reconcile import (
     StepResult,
 )
 from hal.stack.service_recreate import Recreated, short_snapshot
-from hal.stack.unit_plans import NotWritten
+from hal.stack.unit_plans import Action, NotWritten, UnitPlan
 
 _SEPARATOR = " · "
 _ONLY_IN_KEYCLOAK = "only in Keycloak: "
@@ -75,11 +75,11 @@ class ResultEvent(StrEnum):
     REALM_APPLIED = "realm applied"
     REALM_FAILED = "realm failed"
     WAITING = "waiting"
-    APP_SWITCHED_ON = "switched on"
+    SWITCHED_ON = "switched on"
     APP_STARTED_AGAIN = "started again"
     APP_UPDATED = "updated"
     APP_FAILED = "failed"
-    APP_SWITCHED_OFF = "switched off"
+    SWITCHED_OFF = "switched off"
     APP_SWITCH_OFF_FAILED = "switch off failed"
     APP_HELD_OFF = "switched off meanwhile"
     RECREATED = "recreated"
@@ -95,7 +95,7 @@ class ResultEvent(StrEnum):
 
 
 _APP_ON_EVENT = {
-    AppKind.ON: ResultEvent.APP_SWITCHED_ON,
+    AppKind.ON: ResultEvent.SWITCHED_ON,
     AppKind.START_AGAIN: ResultEvent.APP_STARTED_AGAIN,
     AppKind.UPDATE: ResultEvent.APP_UPDATED,
 }
@@ -232,9 +232,7 @@ def app_row(result: AppResult) -> Row:
             return Row(Glyph.DONE, plan.app.key, event, _SEPARATOR.join(facts))
         case AppSwitchedOff(off):
             key = off.app.key
-            return Row(
-                Glyph.DONE, key, ResultEvent.APP_SWITCHED_OFF, f"volumes and ~/srv/{key} kept"
-            )
+            return Row(Glyph.DONE, key, ResultEvent.SWITCHED_OFF, f"volumes and ~/srv/{key} kept")
         case AppFailed(subject, cause):
             return Row(Glyph.FAILED, subject.app.key, _failed_event(subject), printable(cause))
         case AppHeldOff(plan, cause):
@@ -256,6 +254,21 @@ def _failed_event(subject: AppPlan | OffPlan) -> ResultEvent:
     if isinstance(subject, OffPlan):
         return ResultEvent.APP_SWITCH_OFF_FAILED
     return ResultEvent.APP_FAILED
+
+
+def unit_row(plan: UnitPlan, snapshot: str | None) -> Row:
+    """A unit switched on and observed up, or switched off with the volumes an off never touches;
+    a switch-on that proved a pre-apply snapshot names it dim under the row."""
+    if plan.action is Action.OFF:
+        fact = f"volumes {', '.join(plan.volumes)} kept" if plan.volumes else ""
+        return Row(Glyph.DONE, plan.unit.key, ResultEvent.SWITCHED_OFF, fact)
+    details = (_snapshot_detail(snapshot, "proven"),) if snapshot else ()
+    fact = _SEPARATOR.join((", ".join(plan.services), "up"))
+    return Row(Glyph.DONE, plan.unit.key, ResultEvent.SWITCHED_ON, fact, details=details)
+
+
+def _snapshot_detail(snapshot: str, proof: str) -> str:
+    return f"pre-apply snapshot {short_snapshot(snapshot)}{_SEPARATOR}{proof}"
 
 
 def recreated_row(recreated: Recreated) -> Row:
@@ -343,9 +356,7 @@ def _failed_row(failed: RealmFailed) -> Row:
     fact = f"{printable(failed.cause)}{_SEPARATOR}{_STATE_OF_THE_REALM[failed.stage]}"
     details: tuple[str, ...] = ()
     if failed.snapshot:
-        short = printable(failed.snapshot[:SNAPSHOT_SHORT_ID])
-        proof = "proven" if failed.proven else "unproven"
-        details = (f"pre-apply snapshot {short}{_SEPARATOR}{proof}",)
+        details = (_snapshot_detail(failed.snapshot, "proven" if failed.proven else "unproven"),)
     if failed.stage is not Stage.BEFORE:
         details += (f"way back: {RESTORE_GUIDE}{_SEPARATOR}the next apply repeats the step",)
     return Row(Glyph.FAILED, REALM_UNIT, ResultEvent.REALM_FAILED, fact, details=details)
