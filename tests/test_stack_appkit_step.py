@@ -239,7 +239,7 @@ def test_a_failed_copy_of_many_entries_names_the_first_reason_once(world, monkey
 
 def _full_disk(source: str, destination: str) -> str:
     """The reason `shutil.copytree` stores for an entry it could not copy."""
-    return str(OSError(errno.ENOSPC, os.strerror(errno.ENOSPC), source, destination))
+    return str(OSError(errno.ENOSPC, os.strerror(errno.ENOSPC), source, None, destination))
 
 
 def _failing_copy(*_arguments, **_keywords):
