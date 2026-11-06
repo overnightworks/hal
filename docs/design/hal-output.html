@@ -741,19 +741,28 @@ Type <span class="w">yes</span> to set up 1 open row: yes
   <div class="pair">
     <div class="stack">
       <figure>
-        <figcaption><span class="tag new">neu S2g</span> GitHub: der Link füllt vor, du prüfst nur; ein Passwort wird erzeugt</figcaption>
+        <figcaption><span class="tag new">neu S2g</span> Cloudflare: die Seite füllt nichts vor, die Liste sagt, was du anlegst; ein Passwort wird erzeugt</figcaption>
 <pre class="term"><span class="p">$</span> <span class="u">hal setup</span>
 <span class="n">… Plan, dann das yes</span>
 <span class="d">  …</span>
 <span class="y">  !</span> secrets         2 missing      <span class="d">cloudflare/fleet-write, opentofu/passphrase</span>
 <span class="c">  ›</span> cloudflare/fleet-write  new token  <span class="d">Cloudflare fills in nothing</span>
-    why: the deploy job reads and writes the fleet's repositories
-    prefilled: Contents read and write, Metadata read, Workflows read and write
-    [ ] Repository access: All repositories
-    [ ] compare the rights in the form with the line above
-    [ ] Generate token, copy the value
+    why: hal apply writes DNS, Access apps, the tunnel rows, the zone settings (HSTS) and the visitor-address transform rule at Cloudflare with it; only the operator applies.
+    [ ] Create Token › Custom token › Get started
+    [ ] Token name: cloudflare/fleet-write
+    [ ] Permissions: Account › Cloudflare Tunnel › Edit
+    [ ] Permissions: Account › Access: Apps and Policies › Edit
+    [ ] Permissions: Account › Access: Organizations, Identity Providers, and Groups › Read
+    [ ] Permissions: Zone › Zone › Read
+    [ ] Permissions: Zone › DNS › Edit
+    [ ] Permissions: Zone › Zone Settings › Edit
+    [ ] Permissions: Zone › Transform Rules › Edit
+    [ ] Account Resources: Include › your account
+    [ ] Zone Resources: Include › Specific zone › hallucinai.de
+    [ ] TTL: leave the start date empty, set only the End Date 07.11.2027
+    [ ] Continue to summary › Create Token, copy the value
     Enter opens the page in your browser:
-<span class="d">    opened github.com/settings/personal-access-tokens/new?…</span>
+<span class="d">    opened dash.cloudflare.com/profile/api-tokens</span>
     paste the token, then an empty line (hidden, empty skips):
 <span class="g">  ✓</span> cloudflare/fleet-write  verified   <span class="d">~/.secrets/cloudflare/fleet-write (600)</span>
 <span class="g">  ✓</span> opentofu/passphrase  generated  <span class="d">~/.secrets/opentofu/passphrase (600) · never shown</span>
