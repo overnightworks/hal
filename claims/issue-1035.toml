@@ -3,6 +3,6 @@ agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
 role = "builder"
 base = "dde80c765b1389c04b21cff8c8783757c6c0cee4"
 branch = "claude/issue-1035-sqlite-files-shape-goes"
-scope = ["docs/backup.md", "src/hal/backup/apps.py", "src/hal/backup/docker.py", "src/hal/backup/live.py", "src/hal/backup/restic.py", "src/hal/backup/runner.py", "src/hal/backup/verify.py", "tests/support/backup_support.py", "tests/test_backup_apps.py", "tests/test_backup_files.py", "tests/test_backup_live.py", "tests/test_backup_live_sqlite.py", "tests/test_backup_verify.py"]
+scope = ["docs/architecture.md", "docs/backup.md", "src/hal/backup/apps.py", "src/hal/backup/docker.py", "src/hal/backup/live.py", "src/hal/backup/restic.py", "src/hal/backup/runner.py", "src/hal/backup/verify.py", "tests/support/backup_support.py", "tests/test_backup_apps.py", "tests/test_backup_files.py", "tests/test_backup_live.py", "tests/test_backup_live_sqlite.py", "tests/test_backup_verify.py"]
 opened_commit = "cc8e711dd29648a936ca2698a6960ac40340d1ee"
 whole_reason = "One removal: the files-volume shape of the SQLite record, from parser through backup, manifest, restore test, docs and their tests, which must go together or leave a half-shape."
