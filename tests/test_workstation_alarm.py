@@ -12,6 +12,7 @@ from support.workstation_support import PASSWORD_CANARY, RunnerWithCleanLogs, Sa
 from hal import alarm_commands
 from hal import cli as hal_cli
 from hal.grammar import ExitCode
+from hal.workstation import check
 from hal.workstation import ports as home_ports
 from hal.workstation.layout import Layout
 
@@ -147,8 +148,39 @@ def test_a_failed_popup_without_a_mail_channel_is_tried_again_by_the_next_run(al
     alarm()
 
     output = capsys.readouterr()
-    assert "alarm: popup failed, retries next run" in output.out
+    assert f"! {check.Delivery.POPUP_FAILED}" in output.out
     assert len(runner.notifications) == 2
+
+
+@pytest.mark.parametrize(
+    ("scenario", "line"),
+    [
+        ("mail_fails", "! mail failed, retries next run"),
+        ("popup_fails_without_mail", "! popup failed, retries next run"),
+        ("nothing_new", "✓ nothing new, no mail"),
+        ("mail_sent", "✓ mail sent"),
+        ("news_sent_without_mail", "✓ news sent"),
+        ("notifications_off", "✓ notifications off"),
+        ("no_mail_and_no_session", "✓ no mail set up"),
+    ],
+)
+def test_the_verdict_line_marks_a_delivery_that_retries_next_run_and_every_other_one_as_done(alarm, clean_home, runner, mail_stub, capsys, scenario, line) -> None:
+    if scenario != "nothing_new":
+        restarting_containers(runner, "presentator-live")
+    if scenario == "mail_fails":
+        mail_stub.exit_with(1)
+    if scenario in {"popup_fails_without_mail", "news_sent_without_mail", "no_mail_and_no_session"}:
+        (Layout(clean_home).secrets_dir / "smtp" / "account.toml").unlink()
+    if scenario == "popup_fails_without_mail":
+        runner.notify_delivers = False
+    if scenario == "no_mail_and_no_session":
+        runner.session_active = False
+    notify = "false" if scenario == "notifications_off" else "true"
+    write_hal_config(clean_home, f"[alarm]\nruns = 1\n[check]\nnotify = {notify}\n")
+
+    alarm()
+
+    assert capsys.readouterr().out.strip() == line
 
 
 def test_a_failed_popup_beside_a_delivered_mail_promises_no_retry(alarm, runner, mail_stub, capsys) -> None:
