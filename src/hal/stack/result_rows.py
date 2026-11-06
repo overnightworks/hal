@@ -59,9 +59,20 @@ from hal.stack.realm.reconcile import (
     StepResult,
 )
 from hal.stack.service_recreate import Recreated, short_snapshot
-from hal.stack.unit_plans import Action, NotWritten, UnitPlan
+from hal.stack.switches import describe_since
+from hal.stack.unit_plans import (
+    Action,
+    CoreFailure,
+    NotWritten,
+    SeenDown,
+    StepFailed,
+    StoppedMeanwhile,
+    SwitchedOffMeanwhile,
+    UnitPlan,
+)
 
 _SEPARATOR = " · "
+_LOG_LINES = 50
 _ONLY_IN_KEYCLOAK = "only in Keycloak: "
 RESTORE_GUIDE = 'docs/backup.md "Restore Keycloak"'
 _STATE_OF_THE_REALM = {
@@ -78,11 +89,13 @@ class ResultEvent(StrEnum):
     SWITCHED_ON = "switched on"
     APP_STARTED_AGAIN = "started again"
     APP_UPDATED = "updated"
-    APP_FAILED = "failed"
+    FAILED = "failed"
     SWITCHED_OFF = "switched off"
     APP_SWITCH_OFF_FAILED = "switch off failed"
     APP_HELD_OFF = "switched off meanwhile"
     RECREATED = "recreated"
+    NOT_RUNNING = "not running"
+    STOPPED_MEANWHILE = "stopped meanwhile"
     NOT_PROVEN = "not proven"
     FILES_WRITTEN = "files written"
     FILES_REMOVED = "files removed"
@@ -253,7 +266,7 @@ def app_partial(result: AppFailed | AppHeldOff) -> tuple[str, str]:
 def _failed_event(subject: AppPlan | OffPlan) -> ResultEvent:
     if isinstance(subject, OffPlan):
         return ResultEvent.APP_SWITCH_OFF_FAILED
-    return ResultEvent.APP_FAILED
+    return ResultEvent.FAILED
 
 
 def unit_row(plan: UnitPlan, snapshot: str | None) -> Row:
@@ -347,6 +360,68 @@ def not_written_partial(failure: NotWritten) -> tuple[str, str]:
     """The run's `partial, ...` text for a failed write and the command that ends it."""
     text = f"partial, {failure.subject} {ResultEvent.NOT_WRITTEN}{_SEPARATOR}no unit switched"
     return text, command(Verb.APPLY)
+
+
+def stopped_rows(failure: NotWritten | CoreFailure) -> tuple[Row, ...]:
+    """The ✗ rows of a run stopped before any unit was switched, one per service seen down; a
+    cause is escaped."""
+    match failure:
+        case NotWritten():
+            return (not_written_row(failure),)
+        case BarriersUnproven():
+            return (unproven_row(failure),)
+        case SeenDown(services, watch_seconds, recreated, way_back):
+            seen = f"seen down within {format_duration(watch_seconds)} of the {recreated} recreate"
+            return tuple(
+                Row(
+                    Glyph.FAILED,
+                    down.service,
+                    ResultEvent.NOT_RUNNING,
+                    seen,
+                    details=_way(way_back),
+                )
+                for down in services
+            )
+        case StoppedMeanwhile(service):
+            return (Row(Glyph.FAILED, service, ResultEvent.STOPPED_MEANWHILE, "not started"),)
+        case SwitchedOffMeanwhile(unit, since, service, way_back):
+            fact = f"since {describe_since(since)}{_SEPARATOR}{service} not recreated"
+            return (
+                Row(Glyph.FAILED, unit, ResultEvent.APP_HELD_OFF, fact, details=_way(way_back)),
+            )
+        case StepFailed(subject, step, cause, way_back):
+            fact = f"could not {step}{_SEPARATOR}{printable(cause)}"
+            return (Row(Glyph.FAILED, subject, ResultEvent.FAILED, fact, details=_way(way_back)),)
+
+
+def stopped_partial(failure: NotWritten | CoreFailure) -> tuple[str, str]:
+    """The run's `partial, ...` text for the first row of `stopped_rows` and the command that
+    ends it: a stop that won is ended only by start, a container seen down is read in its log."""
+    match failure:
+        case NotWritten():
+            return not_written_partial(failure)
+        case BarriersUnproven():
+            return unproven_partial()
+        case SeenDown(services):
+            service, container = services[0]
+            next_step = (
+                f"docker logs --tail {_LOG_LINES} {container}" if container else command(Verb.APPLY)
+            )
+            return _no_unit_switched(service, ResultEvent.NOT_RUNNING, next_step)
+        case StoppedMeanwhile(service):
+            return _no_unit_switched(service, ResultEvent.STOPPED_MEANWHILE, command(Verb.APPLY))
+        case SwitchedOffMeanwhile(unit):
+            return _no_unit_switched(unit, ResultEvent.APP_HELD_OFF, command(Verb.START, unit))
+        case StepFailed(subject):
+            return _no_unit_switched(subject, ResultEvent.FAILED, command(Verb.APPLY))
+
+
+def _no_unit_switched(subject: str, event: ResultEvent, next_step: str) -> tuple[str, str]:
+    return f"partial, {subject} {event}{_SEPARATOR}no unit switched", next_step
+
+
+def _way(way_back: str | None) -> tuple[str, ...]:
+    return (way_back,) if way_back else ()
 
 
 def waiting_row(grace_seconds: float) -> Row:

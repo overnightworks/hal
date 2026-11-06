@@ -535,11 +535,13 @@ def test_a_core_failure_after_the_write_names_its_own_step_and_never_legal(world
     """L3."""
     edit_traefik_yml(world.repository)
 
-    exit_code, _, err = world.switch()
+    exit_code, out, err = world.switch()
 
     assert exit_code == 1
     assert world.built_names() == THE_PAGES
-    assert "partial, could not find the services edge follows, cannot read" in err
+    assert find_row(
+        out, "core", ResultEvent.FAILED, "could not find the services edge follows · cannot read"
+    )
     assert "partial, legal" not in err
 
 

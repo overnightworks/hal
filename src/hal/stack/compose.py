@@ -14,7 +14,7 @@ import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, NamedTuple, Protocol
 
 from hal.output import printable
 from hal.stack.deploy_checkout import COMPOSE_FILE
@@ -140,17 +140,27 @@ class Container:
     definition it was created from, as Compose labelled it; None when the label is missing.
     `image` is the image reference it was created from, spelled as the definition named it then;
     None when `ps` names none. `image_id` is the id of the image it was created from, as Compose
-    labelled it; None when the label is missing."""
+    labelled it; None when the label is missing. `name` is its container name as `ps` gives it,
+    None when `ps` names none."""
 
     service: str
     state: str
     config_hash: str | None
     image: str | None
     image_id: str | None = None
+    name: str | None = None
 
     @property
     def live(self) -> bool:
         return is_live(self.state)
+
+
+class DownService(NamedTuple):
+    """A service found not up in the watch, with the name of its container at the look that found
+    it; None when it had none."""
+
+    service: str
+    container: str | None
 
 
 @dataclass(frozen=True)
@@ -258,14 +268,27 @@ class Compose:
         self, config: Mapping[str, Any], services: tuple[str, ...], watch: Watch
     ) -> tuple[str, ...]:
         """Every service found not up at any look through the watch, in the order given, none
-        when all stay up: a container that dies right after it started and is restarting is not
-        running, and a service that fails later than another is still named."""
+        when all stay up."""
+        return tuple(
+            down.service for down in self.containers_down_while_watched(config, services, watch)
+        )
+
+    def containers_down_while_watched(
+        self, config: Mapping[str, Any], services: tuple[str, ...], watch: Watch
+    ) -> tuple[DownService, ...]:
+        """`down_while_watched`, each service with its container at the last look that found it
+        down: a container that dies right after it started and is restarting is not running,
+        and a service that fails later than another is still named."""
         deadline = watch.clock() + watch.seconds
-        seen_down: set[str] = set()
+        seen_down: dict[str, str | None] = {}
         while True:
-            seen_down.update(not_up(self.states(), config, services))
+            containers = self.containers()
+            for service in not_up(states_of(containers), config, services):
+                seen_down[service] = _name_of(containers, service)
             if watch.clock() >= deadline:
-                return tuple(name for name in services if name in seen_down)
+                return tuple(
+                    DownService(name, seen_down[name]) for name in services if name in seen_down
+                )
             watch.sleep(_SETTLE_POLL_SECONDS)
 
     def stop(self, unit: str, services: tuple[str, ...]) -> None:
@@ -335,6 +358,10 @@ def states_of(containers: Iterable[Container]) -> dict[str, set[str]]:
     return states
 
 
+def _name_of(containers: Iterable[Container], service: str) -> str | None:
+    return next((c.name for c in containers if c.service == service), None)
+
+
 def _container(entry: Mapping[str, Any]) -> Container:
     labels = entry.get("Labels", "")
     config_hash = _CONFIG_HASH.search(labels)
@@ -345,6 +372,7 @@ def _container(entry: Mapping[str, Any]) -> Container:
         config_hash[1] if config_hash else None,
         entry.get("Image") or None,
         image_id[1] if image_id else None,
+        entry.get("Name") or None,
     )
 
 

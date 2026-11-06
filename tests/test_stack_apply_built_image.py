@@ -25,7 +25,7 @@ from support.stack_apply_fakes import (
 )
 from support.stack_plan_rows import find_row, plain
 
-from hal.stack import switches
+from hal.stack import core, switches
 from hal.stack.plan_rows import PlanEvent
 from hal.stack.result_rows import ResultEvent
 
@@ -354,10 +354,10 @@ def test_a_marker_that_appears_after_the_yes_prevents_the_recreate(
     """M13, P7: the marker is read again under the switch lock."""
     bump(scripted)
 
-    exit_code, _, err = switch(while_prompt_waits=lambda: switch_off(state, unit="agent-service"))
+    exit_code, out, _ = switch(while_prompt_waits=lambda: switch_off(state, unit="agent-service"))
 
     assert exit_code == 1
-    assert "agent-service was switched off meanwhile" in err
+    assert find_row(out, "agent-service", ResultEvent.APP_HELD_OFF, "agent-service not recreated")
     assert up_calls(scripted) == []
 
 
@@ -417,10 +417,10 @@ def test_a_new_container_that_crash_loops_is_partial_and_the_next_run_plans_only
     bump(scripted)
     scripted.crash_loops.add("agent-service")
 
-    exit_code, _, err = switch()
+    exit_code, out, _ = switch()
 
     assert exit_code == 1
-    assert "agent-service is not running after the agent-service recreate" in err
+    assert find_row(out, "agent-service", ResultEvent.NOT_RUNNING, "of the agent-service recreate")
 
     exit_code, out, err = switch()
 
@@ -551,3 +551,54 @@ def test_a_tag_removed_by_hand_plans_no_recreate_and_still_asks_the_setup(
     assert len(setup_run.commands) == 1
     assert not recreate_row(out)
     assert scripted.changing_verbs() == []
+
+
+def test_a_service_whose_container_vanishes_in_the_watch_is_seen_down_and_the_way_on_is_apply(
+    step_ca_applied,
+    switch,
+    scripted,
+    ingress,
+):
+    """The container read at the last look wins: one that exited, then was removed, has no log to
+    read, so the pair does not name its old name."""
+    scripted.change_definition("step-ca")
+    scripted.exits_after_up("step-ca")
+
+    def wait_while_it_is_removed(seconds: float) -> None:
+        ingress.now += seconds
+        scripted.containers.pop("step-ca", None)
+
+    ingress.sleep = wait_while_it_is_removed
+
+    exit_code, out, err = switch()
+
+    assert exit_code == 1
+    assert find_row(out, "step-ca", ResultEvent.NOT_RUNNING, "of the step-ca recreate")
+    assert "next: hal apply" in err
+    assert "docker logs" not in err
+
+
+def test_a_follow_lookup_that_fails_after_a_core_recreate_names_core(
+    step_ca_applied,
+    switch,
+    scripted,
+    monkeypatch,
+):
+    """The services edge follows are read again for the followers; the unit of the core recreate
+    before is not the subject of that step."""
+    scripted.change_definition("traefik")
+    scripted.change_definition("traefik-mcp")
+    reads = iter([core.followed_services])
+
+    def second_read_fails(*arguments: object) -> frozenset[str]:
+        if read := next(reads, None):
+            return read(*arguments)
+        raise core.CoreError("cannot read the checkout")
+
+    monkeypatch.setattr(core, "followed_services", second_read_fails)
+
+    exit_code, out, err = switch()
+
+    assert exit_code == 1
+    assert find_row(out, "core", ResultEvent.FAILED, "could not find the services edge follows")
+    assert "partial, core failed · no unit switched" in err

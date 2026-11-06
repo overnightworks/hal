@@ -188,7 +188,8 @@ def plain_apply(
     def run() -> tuple[int, str, list[object]]:
         at_terminal("yes")
         exit_code = cli.main(["apply"])
-        return exit_code, capsys.readouterr().err, published
+        terminal_output = sys.stdout.getvalue()  # `at_terminal` made stdout a StringIO
+        return exit_code, terminal_output + capsys.readouterr().err, published
 
     return run
 
@@ -209,12 +210,11 @@ def test_a_failed_snapshot_keeps_the_old_container_and_ends_partial(
     realm_backup.failing = failing
     ids = dict(scripted.container_ids)
 
-    exit_code, err, published = plain_apply()
+    exit_code, output, published = plain_apply()
 
     assert exit_code == ExitCode.FAILURE
-    assert f"{failing} broke" in err
-    assert "keycloak is not recreated" in err
-    assert ("pre-apply snapshot ab12cd34" in err) == names_the_snapshot
+    assert find_row(output, "keycloak", ResultEvent.FAILED, f"{failing} broke")
+    assert ("pre-apply snapshot ab12cd34" in output) == names_the_snapshot
     assert scripted.container_ids == ids
     assert [step for step in steps(scripted) if step[0] == "up"] == []
     assert published == []
@@ -230,10 +230,10 @@ def test_plain_hal_apply_publishes_nothing_after_a_failed_snapshot(
     scripted.change_image(KEYCLOAK.service, KEYCLOAK_BUMP)
     realm_backup.failing = "backup"
 
-    exit_code, err, published = plain_apply()
+    exit_code, output, published = plain_apply()
 
     assert exit_code == ExitCode.FAILURE
-    assert "nothing published" in err
+    assert "nothing published" in output
     assert published == []
 
 
@@ -345,11 +345,11 @@ def test_a_litellm_without_a_key_fails_its_restore_test_and_is_not_recreated(
     scripted.change_image(LITELLM.service, LITELLM_BUMP)
     ids = dict(scripted.container_ids)
 
-    exit_code, _, err = switch(installed_backup=True)
+    exit_code, out, _ = switch(installed_backup=True)
 
     assert exit_code == apply.ApplyExit.REFUSED
-    assert "the restored table LiteLLM_VerificationToken is empty" in err
-    assert "pre-apply snapshot ab12cd34" in err
+    assert "the restored table LiteLLM_VerificationToken is empty" in out
+    assert "pre-apply snapshot ab12cd34" in out
     assert scripted.container_ids == ids
 
 
@@ -362,11 +362,11 @@ def test_a_recreated_app_that_does_not_run_names_its_snapshot_and_the_live_resto
     scripted.change_image(KEYCLOAK.service, KEYCLOAK_BUMP)
     scripted.crash_loops = {KEYCLOAK.service}
 
-    exit_code, _, err = switch()
+    exit_code, out, _ = switch()
 
     assert exit_code == apply.ApplyExit.REFUSED
-    assert "keycloak is not running after the keycloak recreate" in err
-    assert "hal restore keycloak --live --snapshot ab12cd34" in err
+    assert find_row(out, "keycloak", ResultEvent.NOT_RUNNING, "of the keycloak recreate")
+    assert "hal restore keycloak --live --snapshot ab12cd34" in out
 
 
 @pytest.mark.usefixtures("database_units")
@@ -426,11 +426,11 @@ def test_a_stop_before_the_apps_recreate_still_names_the_live_restore_the_databa
     scripted.after_up = lambda: disturb(state, monkeypatch)
 
     try:
-        _, _, err = switch()
+        _, out, err = switch()
     finally:
         state.chmod(0o700)
 
-    assert "hal restore keycloak --live --snapshot ab12cd34" in err
+    assert "hal restore keycloak --live --snapshot ab12cd34" in out + err
 
 
 @pytest.mark.usefixtures("database_units")
@@ -451,12 +451,12 @@ def test_a_unit_switched_off_after_its_snapshot_names_the_snapshot_and_no_restor
 
     monkeypatch.setattr(realm_backup, "restore_test", proven_then_switched_off)
 
-    exit_code, _, err = switch()
+    exit_code, out, _ = switch()
 
     assert exit_code == apply.ApplyExit.REFUSED
-    assert "keycloak was switched off meanwhile" in err
-    assert "pre-apply snapshot ab12cd34" in err
-    assert "hal restore" not in err
+    assert find_row(out, "keycloak", ResultEvent.APP_HELD_OFF, "keycloak not recreated")
+    assert "pre-apply snapshot ab12cd34" in out
+    assert "hal restore" not in out
 
 
 # --- a switch-on over the data of a removed unit (#1006) ---------------------------------------
@@ -520,9 +520,9 @@ def test_a_switch_on_over_data_starts_the_database_alone_and_the_app_after_the_p
     scripted.change_image(unit.service, bump)
     database = scripted.container_ids.get(unit.database)
 
-    exit_code, err, _ = plain_apply()
+    exit_code, output, _ = plain_apply()
 
-    assert exit_code == ExitCode.OK, err
+    assert exit_code == ExitCode.OK, output
     assert switch_on_steps(scripted) == [
         ("up", (unit.database,)),
         *[(step, (unit.key,)) for step in SNAPSHOT_STEPS],
@@ -562,13 +562,13 @@ def test_a_failed_switch_on_snapshot_creates_no_app_and_names_no_restore(
     removed(scripted, *LITELLM_SERVICES)
     realm_backup.failing = failing
 
-    exit_code, err, published = plain_apply()
+    exit_code, output, published = plain_apply()
 
     assert exit_code == ExitCode.FAILURE
-    assert f"{failing} broke" in err
-    assert "litellm is not started" in err
-    assert ("pre-apply snapshot ab12cd34" in err) == names_the_snapshot
-    assert "hal restore" not in err
+    assert f"{failing} broke" in output
+    assert "litellm is not started" in output
+    assert ("pre-apply snapshot ab12cd34" in output) == names_the_snapshot
+    assert "hal restore" not in output
     assert switch_on_steps(scripted)[-1] != LITELLM_UP
     assert LITELLM.service not in scripted.containers
     assert published == []
@@ -655,12 +655,12 @@ def test_a_switch_on_stopped_after_its_snapshot_names_it_and_the_restore_once_th
     if in_the_start:
         in_the_start(scripted)
 
-    exit_code, err, _ = plain_apply()
+    exit_code, output, _ = plain_apply()
 
     assert exit_code == ExitCode.FAILURE
-    assert line in err
-    assert "pre-apply snapshot ab12cd34" in err
-    assert ("hal restore litellm --live --snapshot ab12cd34" in err) == restores
+    assert line in output
+    assert "pre-apply snapshot ab12cd34" in output
+    assert ("hal restore litellm --live --snapshot ab12cd34" in output) == restores
     assert (LITELLM.service in scripted.containers) == restores
 
 
@@ -673,12 +673,12 @@ def test_a_switch_on_that_creates_only_the_database_names_its_snapshot_and_no_re
     removed(scripted, LITELLM.database)
     _ctrl_c_in_the_apps_start(scripted)
 
-    exit_code, err, _ = plain_apply()
+    exit_code, output, _ = plain_apply()
 
     assert exit_code == ExitCode.FAILURE
-    assert "interrupted while changing litellm" in err
-    assert "pre-apply snapshot ab12cd34" in err
-    assert "hal restore" not in err
+    assert "interrupted while changing litellm" in output
+    assert "pre-apply snapshot ab12cd34" in output
+    assert "hal restore" not in output
 
 
 @pytest.mark.parametrize(
@@ -709,13 +709,13 @@ def test_a_partial_switch_on_names_the_way_back_of_every_unit_that_holds_a_snaps
     removed(scripted, *keycloak_gone, *LITELLM_SERVICES)
     realm_backup.failing, realm_backup.failing_unit = "backup", LITELLM.key
 
-    exit_code, err, _ = plain_apply()
+    exit_code, output, _ = plain_apply()
 
     assert exit_code == ExitCode.FAILURE
-    assert "backup broke" in err
-    assert "litellm is not started" in err
-    assert keycloak_fragment in err
-    assert "hal restore litellm" not in err
+    assert "backup broke" in output
+    assert "litellm is not started" in output
+    assert keycloak_fragment in output
+    assert "hal restore litellm" not in output
 
 
 @pytest.mark.usefixtures("database_units")
@@ -729,8 +729,8 @@ def test_a_switch_on_whose_later_key_step_fails_still_names_its_snapshot(
     removed(scripted, *KEYCLOAK_SERVICES)
     scripted.keys.fail_at = 0
 
-    exit_code, err, _ = plain_apply()
+    exit_code, output, _ = plain_apply()
 
     assert exit_code == ExitCode.FAILURE
-    assert "pre-apply snapshot ab12cd34" in err
-    assert "hal restore keycloak --live --snapshot ab12cd34" in err
+    assert "pre-apply snapshot ab12cd34" in output
+    assert "hal restore keycloak --live --snapshot ab12cd34" in output

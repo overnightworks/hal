@@ -413,7 +413,7 @@ class SpeechProbe(in_copy.Probe, NetworkCells, AdmissionCells):
             files=self.candidate_files,
             exit_code=HAL_FAILURE,
         )
-        failed = re.search(row_pattern(APP_KEY, ResultEvent.APP_FAILED), out)
+        failed = re.search(row_pattern(APP_KEY, ResultEvent.FAILED), out)
         expect(failed is not None, f"D4: no failed row of {APP_KEY} in {out[-600:]}")
         named = networks_named_by_create(self.stand, speech_networks)
         expect(bool(named), f"D4: the app's create in its checkout names none of {speech_networks}")

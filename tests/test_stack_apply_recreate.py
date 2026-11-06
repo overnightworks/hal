@@ -169,12 +169,12 @@ def test_a_follower_whose_record_cannot_be_written_is_partial_and_has_no_recreat
     scripted.change_definition("traefik-mcp")
     scripted.after_up = lambda: state.chmod(0o500)
     try:
-        exit_code, out, err = switch()
+        exit_code, out, _ = switch()
     finally:
         state.chmod(0o700)
 
     assert exit_code == 1
-    assert "could not record traefik-mcp" in err
+    assert find_row(out, "traefik-mcp", ResultEvent.FAILED, "could not record traefik-mcp")
     assert not find_row(out, "traefik-mcp", ResultEvent.RECREATED)
 
 
@@ -307,9 +307,9 @@ def test_a_marker_that_appears_after_the_yes_wins_and_the_run_is_partial(
 
     assert exit_code == 1
     assert not find_row(out, "step-ca", ResultEvent.RECREATED)
-    assert "partial, step-ca was switched off meanwhile" in err
-    assert "step-ca is not recreated" in err
-    assert err.splitlines()[-1] == "next: hal apply"
+    assert find_row(out, "step-ca", ResultEvent.APP_HELD_OFF, "step-ca not recreated")
+    assert "partial, step-ca switched off meanwhile · no unit switched" in err
+    assert err.splitlines()[-1] == "next: hal start step-ca"
     assert scripted.container_ids == ids
 
 
@@ -367,33 +367,32 @@ def test_edge_start_keeps_the_running_service_of_a_changed_definition(
     assert scripted.container_ids == ids
 
 
-NO_UNIT_SWITCHED = "; no unit switched"
 FAILING_RECREATES = {
     "an up that fails": (
         lambda world: setattr(world, "failing_verb", "up"),
-        "partial, could not recreate step-ca, `docker compose up` exited 1",
-        NO_UNIT_SWITCHED,
+        (ResultEvent.FAILED, "could not recreate step-ca · `docker compose up` exited 1"),
+        "partial, step-ca failed · no unit switched",
     ),
     "a container that crashes in the watch": (
         lambda world: world.crash_loops.add("step-ca"),
-        "partial, step-ca is not running after the step-ca recreate",
-        NO_UNIT_SWITCHED,
+        (ResultEvent.NOT_RUNNING, "of the step-ca recreate"),
+        "partial, step-ca not running · no unit switched",
     ),
     "a Ctrl-C": (
         lambda world: setattr(world, "after_up", interrupted_at_the_prompt),
-        "interrupted while changing step-ca (recreate step-ca)",
-        "its state may be partial",
+        None,
+        "interrupted while changing step-ca (recreate step-ca); its state may be partial",
     ),
 }
 
 
 @pytest.mark.parametrize(
-    ("arrange", "line", "after"), FAILING_RECREATES.values(), ids=FAILING_RECREATES
+    ("arrange", "row", "line"), FAILING_RECREATES.values(), ids=FAILING_RECREATES
 )
 def test_a_recreate_that_fails_is_partial_and_no_unit_is_switched(
     arrange,
+    row,
     line,
-    after,
     step_ca_applied,  # noqa: F811
     switch,  # noqa: F811
     scripted,  # noqa: F811
@@ -403,11 +402,11 @@ def test_a_recreate_that_fails_is_partial_and_no_unit_is_switched(
     scripted.change_definition("step-ca")
     arrange(scripted)
 
-    exit_code, _, err = switch()
+    exit_code, out, err = switch()
 
     assert exit_code == 1
+    assert row is None or find_row(out, "step-ca", *row)
     assert line in err
-    assert after in err
 
 
 @pytest.mark.parametrize(

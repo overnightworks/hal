@@ -73,12 +73,14 @@ from support.stack_apply_fakes import (
     STEP_CA_IMAGE,
     InterruptedWaitForLock,
     ScriptedGit,
+    container_name,
     definition_hash,
     resolved_configuration,
 )
 from support.stack_core import bind, sha256
 from support.stack_plan_rows import detail_lines, find_row, plain, row_at
 
+from hal.output.command import Verb, command
 from hal.stack import (
     apply,
     catalog,
@@ -2222,21 +2224,6 @@ def test_a_first_apply_recreates_traefik_proves_the_barriers_and_records_its_fil
     assert applied(state) == {"traefik": {"traefik.yml": sha256(repository / "traefik.yml")}}
 
 
-def test_a_second_apply_with_the_recorded_traefik_yml_changes_nothing(core_files, switch, scripted):
-    """#85 rule 2, P15, cell U2: nothing to change, no prompt, no changing compose verb."""
-    switch()
-    ids = dict(scripted.container_ids)
-    scripted.calls.clear()
-
-    exit_code, out, _ = switch(answer="no")
-
-    assert exit_code == 0
-    assert "nothing to change" in out
-    assert "Type yes to apply" not in plain(out)
-    assert scripted.changing_verbs() == []
-    assert scripted.container_ids == ids
-
-
 def test_a_changed_traefik_yml_is_recorded_only_after_the_barriers_are_proven(
     core_files, switch, scripted, repository, state, ingress
 ):
@@ -2330,7 +2317,7 @@ def test_a_failed_recreate_is_partial_marks_the_record_unfinished_and_touches_no
     exit_code, out, err = switch()
 
     assert exit_code == 1
-    assert "partial, could not recreate traefik, `docker compose up` exited 1" in err
+    assert failed_recreate(out, err, "traefik")
     assert applied(state) == UNFINISHED
     assert unit_calls(scripted) == []
     assert not find_row(out, *TRAEFIK_RECREATED)
@@ -2362,7 +2349,7 @@ def test_a_record_that_cannot_be_written_is_partial_names_the_step_and_touches_n
         state.chmod(0o700)
 
     assert exit_code == 1
-    assert f"partial, could not {step}, cannot write {state / 'applied.json'}" in err
+    assert step_failed(out, err, "traefik", f"could not {step} · cannot write")
     assert (RECREATE_TRAEFIK in scripted.calls) is recreated
     assert (scripted.container_ids["traefik"] != ids["traefik"]) is recreated
     assert scripted.container_ids["socket-proxy"] == ids["socket-proxy"]
@@ -2371,35 +2358,34 @@ def test_a_record_that_cannot_be_written_is_partial_names_the_step_and_touches_n
     assert not find_row(out, *TRAEFIK_RECREATED)
 
 
-def test_a_traefik_not_running_after_the_recreate_is_partial(core_files, switch, scripted, state):
-    """#85 rule 5, cell U8: not observed running, so partial, exit 1, record unfinished."""
-    scripted.after_up = lambda: scripted.containers.update(traefik="exited")
-
-    exit_code, out, err = switch()
-
-    assert exit_code == 1
-    assert "partial, traefik is not running after the traefik recreate" in err
-    assert applied(state) == UNFINISHED
-    assert not find_row(out, *TRAEFIK_RECREATED)
-
-
-def test_a_traefik_that_dies_right_after_the_recreate_is_partial_and_the_next_run_recreates_again(
-    core_files, switch, scripted, state
+@pytest.mark.parametrize(
+    ("arrange", "left_as", "planned_again"),
+    [
+        (lambda scripted: scripted.exits_after_up("traefik"), "exited", (PlanEvent.NOT_STARTED,)),
+        (
+            lambda scripted: scripted.crash_loops.add("traefik"),
+            "restarting",
+            (PlanEvent.RECREATE, "the last recreate did not finish"),
+        ),
+    ],
+    ids=["U8 it exits", "it restarts on every start"],
+)
+def test_a_traefik_not_running_after_the_recreate_is_partial_and_the_next_run_recreates_again(
+    arrange, left_as, planned_again, core_files, switch, scripted, state
 ):
-    """#85 rule 3, rule 5: a traefik.yml Traefik cannot load lets it run for a moment, then it
-    restarts on every start; that is not running, so partial, exit 1, the record says unfinished
-    and the next run plans the recreate again."""
-    scripted.crash_loops.add("traefik")
+    """#85 rules 3, 5, cell U8: not observed running, also when it restarts on every start;
+    partial, exit 1, the record says unfinished and the next run plans traefik again."""
+    arrange(scripted)
 
     exit_code, out, err = switch()
 
     assert exit_code == 1
-    assert "partial, traefik is not running after the traefik recreate" in err
+    assert seen_down(out, err, "traefik")
+    assert scripted.containers["traefik"] == left_as
     assert applied(state) == UNFINISHED
     assert not find_row(out, *TRAEFIK_RECREATED)
-    assert scripted.containers["traefik"] == "restarting"
     _, again, _ = switch("no")
-    assert find_row(again, "traefik", PlanEvent.RECREATE, "the last recreate did not finish")
+    assert find_row(again, "traefik", *planned_again)
 
 
 def test_an_unproven_barrier_after_the_recreate_is_partial_and_the_next_run_recreates_again(
@@ -2563,12 +2549,16 @@ def test_a_changed_traefik_definition_recreates_only_traefik(applied_core, switc
     assert find_row(out, *TRAEFIK_RECREATED)
 
 
-@pytest.mark.parametrize("service", ["socket-proxy", "traefik"])
-def test_a_second_run_after_a_definition_recreate_changes_nothing(
+@pytest.mark.parametrize(
+    "service", ["socket-proxy", "traefik", None], ids=["D3 socket-proxy", "D3 traefik", "U2"]
+)
+def test_a_second_run_after_a_recreate_or_none_changes_nothing(
     service, applied_core, switch, scripted
 ):
-    """#87 P15, cell D3: Compose labels the new container with the hash, so nothing is left."""
-    scripted.change_definition(service)
+    """#85 rule 2, #87 P15, cells U2, D3: Compose labels the new container with the hash and the
+    recorded traefik.yml matches, so nothing is left: no prompt, no changing compose verb."""
+    if service:
+        scripted.change_definition(service)
     assert switch()[0] == 0
     ids = dict(scripted.container_ids)
     scripted.calls.clear()
@@ -2635,7 +2625,7 @@ def test_a_failed_socket_proxy_recreate_is_partial_leaves_traefik_unfinished_and
     exit_code, out, err = switch()
 
     assert exit_code == 1
-    assert "partial, could not recreate socket-proxy, `docker compose up` exited 1" in err
+    assert failed_recreate(out, err, "socket-proxy")
     assert applied(state) == UNFINISHED
     assert scripted.container_ids == ids
     assert unit_calls(scripted) == []
@@ -2646,48 +2636,39 @@ def test_a_failed_socket_proxy_recreate_is_partial_leaves_traefik_unfinished_and
     assert find_row(again, "traefik", PlanEvent.RECREATE, "finish · socket-proxy is recreated")
 
 
-def test_a_socket_proxy_its_recreate_left_created_is_recreated_by_the_next_run(
-    applied_core, switch, scripted, state, repository
+@pytest.mark.parametrize(
+    ("service", "recreated"),
+    [
+        ("socket-proxy", [SOCKET_PROXY_RECREATED, TRAEFIK_RECREATED]),
+        ("traefik", [TRAEFIK_RECREATED]),
+    ],
+)
+def test_a_core_service_its_recreate_left_created_is_recreated_by_the_next_run(
+    service, recreated, applied_core, switch, scripted, state, repository
 ):
-    """#87 rule 4: a socket-proxy that cannot start stays created with the new label, so the
-    first run is partial; once it can start again, the next run recreates it, then traefik."""
-    scripted.change_definition("socket-proxy")
-    scripted.unstartable.add("socket-proxy")
+    """#87 rule 4: a core service that cannot start stays created, so the first run is partial;
+    once it can start again, the next run recreates it, then what it pulls in."""
+    if service == "traefik":
+        edit_traefik_yml(repository)
+    else:
+        scripted.change_definition(service)
+    scripted.unstartable.add(service)
 
-    exit_code, _, err = switch()
+    exit_code, out, err = switch()
 
     assert exit_code == 1
-    assert "partial, could not recreate socket-proxy, `docker compose up` exited 1" in err
-    assert scripted.containers["socket-proxy"] == "created"
+    assert failed_recreate(out, err, service)
+    assert scripted.containers[service] == "created"
     scripted.unstartable.clear()
     scripted.calls.clear()
     exit_code, out, _ = switch()
     assert exit_code == 0
-    assert find_row(out, "socket-proxy", PlanEvent.RECREATE, "the last recreate did not finish")
-    assert up_calls(scripted) == [RECREATE_SOCKET_PROXY, RECREATE_TRAEFIK]
-    assert row_at(out, *SOCKET_PROXY_RECREATED) < row_at(out, *TRAEFIK_RECREATED)
-    assert scripted.containers["socket-proxy"] == "running"
+    assert find_row(out, service, PlanEvent.RECREATE, "the last recreate did not finish")
+    assert len(up_calls(scripted)) == len(recreated)
+    rows = [row_at(out, *row) for row in recreated]
+    assert rows == sorted(rows)
+    assert scripted.containers[service] == "running"
     assert applied(state) == {"traefik": {"traefik.yml": sha256(repository / "traefik.yml")}}
-
-
-def test_a_traefik_its_recreate_left_created_is_recreated_by_the_next_run(
-    applied_core, switch, scripted, repository
-):
-    """#87 rule 4: a traefik that cannot start, as a taken port 80 leaves it, stays created and
-    marked unfinished; once it can start, the next run recreates only traefik, once."""
-    edit_traefik_yml(repository)
-    scripted.unstartable.add("traefik")
-
-    assert switch()[0] == 1
-    assert scripted.containers["traefik"] == "created"
-    scripted.unstartable.clear()
-    scripted.calls.clear()
-    exit_code, out, _ = switch()
-
-    assert exit_code == 0
-    assert find_row(out, "traefik", PlanEvent.RECREATE, "the last recreate did not finish")
-    assert up_calls(scripted) == [RECREATE_TRAEFIK]
-    assert find_row(out, *TRAEFIK_RECREATED)
 
 
 def test_a_crash_looping_socket_proxy_is_partial_and_the_next_run_is_partial_again(
@@ -2701,13 +2682,13 @@ def test_a_crash_looping_socket_proxy_is_partial_and_the_next_run_is_partial_aga
     exit_code, out, err = switch()
 
     assert exit_code == 1
-    assert "partial, socket-proxy is not running after the socket-proxy recreate" in err
+    assert seen_down(out, err, "socket-proxy")
     assert up_calls(scripted) == [RECREATE_SOCKET_PROXY]
     assert applied(state) == UNFINISHED
     exit_code, out, err = switch()
     assert exit_code == 1
     assert find_row(out, "traefik", PlanEvent.RECREATE, "the last recreate did not finish")
-    assert "partial, socket-proxy is not running after the traefik recreate" in err
+    assert seen_down(out, err, "socket-proxy", "traefik")
     assert not find_row(out, *TRAEFIK_RECREATED)
 
 
@@ -2720,10 +2701,11 @@ def test_a_core_left_down_whole_after_the_traefik_recreate_names_both_in_start_o
         {"socket-proxy": "exited", "traefik": "exited"}
     )
 
-    exit_code, _, err = switch()
+    exit_code, out, err = switch()
 
     assert exit_code == 1
-    assert "partial, socket-proxy and traefik are not running after the traefik recreate" in err
+    assert find_row(out, "traefik", ResultEvent.NOT_RUNNING, "seen down within")
+    assert seen_down(out, err, "socket-proxy", "traefik")
     assert applied(state) == UNFINISHED
 
 
@@ -2805,10 +2787,10 @@ def test_a_profile_bind_that_cannot_be_read_is_partial_naming_the_step_and_touch
     recreated."""
     edit_traefik_yml(repository)
 
-    exit_code, _, err = switch()
+    exit_code, out, err = switch()
 
     assert exit_code == 1
-    assert "partial, could not find the services edge follows, cannot read" in err
+    assert step_failed(out, err, "core", "could not find the services edge follows · cannot read")
     assert up_calls(scripted) == []
     assert unit_calls(scripted) == []
 
@@ -2840,6 +2822,7 @@ Q1_PS_LINE = json.dumps(
             f"{OTHER_LABELS},com.docker.compose.project=edge87q1scratch,"
             "com.docker.compose.service=a"
         ),
+        "Name": "edge87q1scratch-a-1",
         "Project": "edge87q1scratch",
         "Service": "a",
         "State": "running",
@@ -2865,6 +2848,7 @@ def test_the_definition_hash_is_read_from_a_real_ps_line_beside_labels_holding_c
         "6b06f5db5a8fd0a0d8f3dcdcd3a5e382a08ea099d03358a583156959264b46d4",
         IMAGE,
         LABELLED_IMAGE_ID,
+        "edge87q1scratch-a-1",
     )
 
 
@@ -2926,8 +2910,27 @@ def test_a_socket_proxy_change_and_a_unit_switch_share_one_yes_and_the_core_goes
 # --- #93: a core service stopped between the plan and the yes is not started ------------------
 
 
-def stopped_meanwhile(service: str) -> str:
-    return f"partial, {service} was stopped meanwhile; it is not started; no unit switched"
+def stopped_with(out, err, subject, event, fact="", next_step=None) -> bool:
+    """The ✗ row, then the partial pair with its way on, of a run stopped before any unit."""
+    next_step = next_step or command(Verb.APPLY)
+    pair = f"error: partial, {subject} {event} · no unit switched\nnext: {next_step}"
+    return bool(find_row(out, subject, event, fact)) and pair in err
+
+
+def step_failed(out, err, subject, fact) -> bool:
+    return stopped_with(out, err, subject, ResultEvent.FAILED, fact)
+
+
+def failed_recreate(out, err, service) -> bool:
+    return step_failed(
+        out, err, service, f"could not recreate {service} · `docker compose up` exited 1"
+    )
+
+
+def seen_down(out, err, service, recreated=None) -> bool:
+    fact = f"of the {recreated or service} recreate"
+    logs = f"docker logs --tail 50 {container_name(service)}"
+    return stopped_with(out, err, service, ResultEvent.NOT_RUNNING, fact, logs)
 
 
 @pytest.mark.parametrize(
@@ -2966,7 +2969,7 @@ def test_a_core_service_stopped_while_the_prompt_waits_is_not_recreated_and_no_u
 
     assert exit_code == 1
     assert find_row(out, stopped, PlanEvent.RECREATE)
-    assert stopped_meanwhile(stopped) in err
+    assert stopped_with(out, err, stopped, ResultEvent.STOPPED_MEANWHILE, "not started")
     assert up_calls(scripted) == ups
     assert scripted.containers[stopped] == left_as
     assert unit_calls(scripted) == []
@@ -2998,11 +3001,11 @@ def test_a_traefik_stopped_before_its_own_recreate_keeps_an_emptied_entry_for_th
     write_fleet(repository, ENABLED)
     scripted.change_definition("socket-proxy")
 
-    exit_code, _, err = switch(**stop_traefik(scripted))
+    exit_code, out, err = switch(**stop_traefik(scripted))
 
     assert exit_code == 1
     assert up_calls(scripted) == [RECREATE_SOCKET_PROXY]
-    assert stopped_meanwhile("traefik") in err
+    assert stopped_with(out, err, "traefik", ResultEvent.STOPPED_MEANWHILE, "not started")
     assert scripted.containers["traefik"] == "exited"
     assert unit_calls(scripted) == []
     assert applied(state) == UNFINISHED
@@ -3136,50 +3139,45 @@ def test_a_switch_that_appears_while_the_prompt_waits_holds_the_follower_and_eve
 
     assert exit_code == 1
     assert find_row(out, "probe", PlanEvent.SWITCH_ON)
-    assert (
-        "partial, step-ca was switched off meanwhile (since "
-        f"{switches.describe_since(LATER_SWITCH_AT)}); traefik-mcp is not recreated; "
-        "no unit switched" in err
-    )
+    assert stopped_with(
+        out, err, "step-ca", ResultEvent.APP_HELD_OFF,
+        f"since {switches.describe_since(LATER_SWITCH_AT)} · traefik-mcp not recreated",
+        command(Verb.START, "step-ca"),
+    )  # fmt: skip
     assert up_calls(scripted) == []
     assert follower_entry(state) == entry
 
 
-def test_a_failed_follower_recreate_empties_its_entry_and_the_next_runs_recreate_again(
-    step_ca_applied, switch, scripted, repository, state
+@pytest.mark.parametrize(
+    ("arrange", "stops_with"),
+    [
+        (lambda scripted: setattr(scripted, "failing_verb", "up"), failed_recreate),
+        (lambda scripted: scripted.crash_loops.add("traefik-mcp"), seen_down),
+    ],
+    ids=["F9 the up fails", "F10 it crash-loops"],
+)
+def test_a_follower_recreate_that_fails_empties_its_entry_and_the_next_run_recreates_again(
+    arrange, stops_with, step_ca_applied, switch, scripted, repository, state
 ):
-    """#89 rule 3 (#85 rule 5), cell F9: also after the file is reverted."""
+    """#89 rule 3 (#85 rule 5), cells F9, F10: a follower whose up fails or that is not running
+    is partial; the next run recreates again, also after the file is reverted."""
     recorded = (repository / FOLLOWER_FILE).read_text()
     edit_traefik_mcp_yml(repository)
-    scripted.failing_verb = "up"
+    arrange(scripted)
 
     exit_code, out, err = switch()
 
     assert exit_code == 1
-    assert "partial, could not recreate traefik-mcp, `docker compose up` exited 1" in err
+    assert stops_with(out, err, "traefik-mcp")
     assert follower_entry(state) == {}
     assert not find_row(out, *FOLLOWER_RECREATED)
     scripted.failing_verb = None
+    scripted.crash_loops.clear()
     (repository / FOLLOWER_FILE).write_text(recorded)
     exit_code, out, _ = switch()
     assert exit_code == 0
     assert find_row(out, "traefik-mcp", PlanEvent.RECREATE, "the last recreate did not finish")
     assert follower_entry(state) == follower_digest(repository)
-
-
-def test_a_traefik_mcp_that_crash_loops_after_its_recreate_is_partial_with_its_entry_emptied(
-    step_ca_applied, switch, scripted, repository, state
-):
-    """#89 rule 3, cell F10: observed alone, it is not running."""
-    edit_traefik_mcp_yml(repository)
-    scripted.crash_loops.add("traefik-mcp")
-
-    exit_code, out, err = switch()
-
-    assert exit_code == 1
-    assert "partial, traefik-mcp is not running after the traefik-mcp recreate" in err
-    assert follower_entry(state) == {}
-    assert not find_row(out, *FOLLOWER_RECREATED)
 
 
 def test_l5_a_traefik_mcp_stopped_while_the_prompt_waits_is_still_recreated(

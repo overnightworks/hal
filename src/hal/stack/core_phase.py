@@ -12,9 +12,14 @@ from hal.stack import barrier, compose, core, pre_apply, switches
 from hal.stack.plan import Plan
 from hal.stack.result_rows import recreated_row
 from hal.stack.service_recreate import Recreated, ServiceRecreator
-from hal.stack.unit_plans import Progress, UnitPlan
-
-type CoreFailure = str | barrier.BarriersUnproven
+from hal.stack.unit_plans import (
+    CoreFailure,
+    Progress,
+    SeenDown,
+    StepFailed,
+    StoppedMeanwhile,
+    UnitPlan,
+)
 
 
 def _say_recreated(recreated: Recreated) -> None:
@@ -42,7 +47,7 @@ class CorePhase:
     ) -> CoreFailure | None:
         """The core, the followers, then the services to recreate (a live service of a unit that
         runs on, the built service in any container state); the failure of the first step
-        that fails (a line, or the unproven barriers)."""
+        that fails."""
         return self._recreate_core(engine, planned, marks, progress) or self._recreate_services(
             engine, planned, marks, progress
         )
@@ -53,7 +58,8 @@ class CorePhase:
         planned: Plan,
         marks: switches.Switches,
         progress: Progress,
-    ) -> str | None:
+    ) -> CoreFailure | None:
+        progress.unit = ""
         config = planned.fleet.config
         recreator = ServiceRecreator(
             engine, marks, planned.read, config, self.watch, progress, _say_recreated, self.backup
@@ -76,8 +82,7 @@ class CorePhase:
         set's first recreate mark every recorded service of the set unfinished, whatever its
         liveness then; recreate each, observe it running with the core services it depends on,
         prove every active barrier, and only then record it with its plan-time digests (#85 rule
-        3, #87 rule 4). The failure of the first step that fails (a line, or the unproven
-        barriers), whose set is left marked
+        3, #87 rule 4). The failure of the first step that fails, whose set is left marked
         unfinished once its first recreate began, so the next run recreates it (#85 rule 5). One
         stopped since the plan is not started; where it is the set's first, no recreate began
         and no entry changes (C3, #93 rule 2)."""
@@ -93,16 +98,16 @@ class CorePhase:
                 if failure := self._recreate_one(engine, planned, marks, plan, followed, progress):
                     return failure
         except (compose.ComposeError, core.CoreError) as error:
-            return f"could not {progress.step}, {error}"
+            return StepFailed.at(progress, error)
         return None
 
     def _stopped_meanwhile(
         self, engine: compose.Compose, plan: core.CorePlan, progress: Progress
-    ) -> str | None:
-        """The failure line when the service has no live container now (#93 rules 1, 2)."""
+    ) -> StoppedMeanwhile | None:
+        """The failure when the service has no live container now (#93 rules 1, 2)."""
         progress.step = f"look whether {plan.service} still runs"
         if _stopped_since_the_plan(engine.states(), plan):
-            return f"{plan.service} was stopped meanwhile; it is not started"
+            return StoppedMeanwhile(plan.service)
         return None
 
     def _mark_unfinished(
@@ -125,17 +130,15 @@ class CorePhase:
         progress: Progress,
     ) -> CoreFailure | None:
         """Recreate the service, observe it running with the core services it depends on, prove
-        every active barrier, and only then record it; the failure of the first step that fails (a
-        line, or the unproven barriers)."""
+        every active barrier, and only then record it; the failure of the first step that fails."""
         config = planned.fleet.config
         started = self.watch.clock()
         progress.step = f"recreate {plan.service}"
         engine.recreate(plan.service)
         progress.step = f"observe {plan.service} running"
         observed = _in_start_order(config, {plan.service, *core.dependencies(config, plan.service)})
-        if down := engine.down_while_watched(config, observed, self.watch):
-            verb = "is" if len(down) == 1 else "are"
-            return f"{' and '.join(down)} {verb} not running after the {plan.service} recreate"
+        if down := engine.containers_down_while_watched(config, observed, self.watch):
+            return SeenDown(down, self.watch.seconds, plan.service)
         progress.step = "prove the barriers"
         proven = self._prove_barriers(planned, marks)
         if isinstance(proven, barrier.BarriersUnproven):
