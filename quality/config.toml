@@ -64,29 +64,9 @@ rule = "test-layout"
 reason = "it tests compose.yaml, the gateway files and the probe overlay of the agent service's egress, which no module of src/hal mirrors"
 
 [[layout.allow]]
-path = "tests/test_agent_service_cells_12b.py"
-rule = "test-layout"
-reason = "it tests the agent service's login command, outside src/hal, which no module of src/hal mirrors"
-
-[[layout.allow]]
-path = "tests/test_agent_service_census_client.py"
-rule = "test-layout"
-reason = "it tests the agent service's host-side census, outside src/hal, which no module of src/hal mirrors"
-
-[[layout.allow]]
 path = "tests/test_agent_service_census_watch.py"
 rule = "test-layout"
 reason = "it tests the agent service's census watch mode, outside src/hal, which no module of src/hal mirrors"
-
-[[layout.allow]]
-path = "tests/test_agent_service_containment.py"
-rule = "test-layout"
-reason = "it tests the agent service's containment probe, outside src/hal, which no module of src/hal mirrors"
-
-[[layout.allow]]
-path = "tests/test_agent_service_fake_app.py"
-rule = "test-layout"
-reason = "it tests the agent service's fake app, outside src/hal, which no module of src/hal mirrors"
 
 [[layout.allow]]
 path = "tests/test_agent_service_image.py"
@@ -119,11 +99,6 @@ rule = "test-layout"
 reason = "it tests agent-service/live_smoke.py, outside src/hal, which no module of src/hal mirrors"
 
 [[layout.allow]]
-path = "tests/test_agent_service_login_checks.py"
-rule = "test-layout"
-reason = "it tests the agent service's login checks, outside src/hal, which no module of src/hal mirrors"
-
-[[layout.allow]]
 path = "tests/test_agent_service_mcp_signer.py"
 rule = "test-layout"
 reason = "it tests agent-service/mcp_signer.py, outside src/hal, which no module of src/hal mirrors"
@@ -132,11 +107,6 @@ reason = "it tests agent-service/mcp_signer.py, outside src/hal, which no module
 path = "tests/test_agent_service_retention_census.py"
 rule = "test-layout"
 reason = "it tests the agent service's retention census and LiteLLM's config, outside src/hal, which no module of src/hal mirrors"
-
-[[layout.allow]]
-path = "tests/test_agent_service_run_client.py"
-rule = "test-layout"
-reason = "it tests the agent service's run client, outside src/hal, which no module of src/hal mirrors"
 
 [[layout.allow]]
 path = "tests/test_agent_service_setup.py"
@@ -322,9 +292,3 @@ reason = "it binds the loopback entrypoints of traefik.yml in the host's own nam
 file = "probe/agent-service/compose.probe.yaml"
 service = "capture-host"
 reason = "it captures in the host's own network namespace, loopback included"
-
-[[gate.loosened]]
-what = 'clone baseline adds probe/agent-service/litellm_stack.py Client.main <-> probe/agent-service/unit.py Inside.main'
-item = "overnightworks/hal#1087"
-date = 2026-11-06
-reason = "the pair moved with Client from egress.py to litellm_stack.py while egress.py stays; it goes when #1086 deletes unit.py"
