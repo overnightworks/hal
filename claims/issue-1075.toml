@@ -3,6 +3,6 @@ agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
 role = "builder"
 base = "a1ded40e0d63cdab3eb3416b723f4f63412ca8ee"
 branch = "claude/issue-1075-live-line"
-scope = ["docs/design/hal-output.html", "src/hal/output/__init__.py", "src/hal/stack/apply.py", "src/hal/stack/unit_plans.py", "src/hal/workstation/system_step.py", "tests/support/terminal_support.py", "tests/test_hal_output_live_line.py", "tests/test_stack_apply_live_line.py", "tests/test_workstation_system_step_runner.py"]
+scope = ["docs/design/hal-output.html", "src/hal/output/__init__.py", "src/hal/stack/apply.py", "src/hal/stack/unit_plans.py", "src/hal/workstation/system_step.py", "tests/support/terminal_support.py", "tests/test_hal_output_live_line.py", "tests/test_hal_output_live_line_handoff.py", "tests/test_stack_apply_live_line.py", "tests/test_workstation_system_step_runner.py"]
 opened_commit = "57da7d804c210aafce31b1e75e7ba003568fb789"
 whole_reason = "One live line for two callers: the owner's new signature and its handoff rule, the Progress that drives it after the yes, setup's two-line update and the picture change together."
