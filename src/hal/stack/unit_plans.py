@@ -577,9 +577,11 @@ class Interrupted:
     way_back: str | None = None
 
     @classmethod
-    def at(cls, progress: Progress, interruption: KeyboardInterrupt) -> Interrupted:
+    def at(
+        cls, progress: Progress, interruption: KeyboardInterrupt, *, way_back: str | None = None
+    ) -> Interrupted:
         notes = tuple(getattr(interruption, "__notes__", ()))
-        return cls(progress.subject, progress.step, notes)
+        return cls(progress.subject, progress.step, notes, way_back)
 
 
 type RecreateFailure = SeenDown | SwitchedOffMeanwhile | StepFailed

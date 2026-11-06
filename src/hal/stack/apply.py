@@ -729,7 +729,7 @@ def _confirm_and_switch(
         _say_failures([StepFailed.at(progress, error)], snapshots)
         return ApplyExit.REFUSED
     except KeyboardInterrupt as interruption:
-        interrupted = replace(Interrupted.at(progress, interruption), way_back=snapshots.way_back())
+        interrupted = Interrupted.at(progress, interruption, way_back=snapshots.way_back())
         write_row(interrupted_row(interrupted), fresh_line=True)
         write_error(*interrupted_error(interrupted))
         return ApplyExit.REFUSED
