@@ -699,7 +699,7 @@ class FakeCloudflare:
     def __init__(self, current: Snapshot) -> None:
         self.current = current
 
-    def read(self, _zone: str) -> Snapshot:
+    def read(self, _zone: str, _tunnel_names: object) -> Snapshot:
         return self.current
 
 

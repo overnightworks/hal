@@ -2,9 +2,11 @@
 # its lines through the API). The configuration is one object owned whole by the catalog: a line
 # added anywhere else is drift, and apply removes it after the plan and `yes`.
 locals {
-  # keys() is lexical, which fixes the order of the lines.
+  # keys() is lexical, which fixes the order of the lines. A host another tunnel serves has its
+  # line in that tunnel's ingress, which its owner writes.
   host_ingress_rules = [
     for fqdn in keys(local.hosts) : { hostname = fqdn, service = local.hosts[fqdn].target }
+    if local.hosts[fqdn].tunnel == null
   ]
   deny_by_default_rule = { service = "http_status:404" }
 
@@ -37,6 +39,12 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "this" {
     precondition {
       condition     = !contains(keys(local.hosts), local.wildcard_fqdn)
       error_message = "A ${local.wildcard_fqdn} host has no tunnel line until X8b; its lexical place would shadow every other host."
+    }
+
+    # Such a host would have no line in hal's ingress and answer its 404.
+    precondition {
+      condition     = !contains(values(local.named_tunnel_ids), local.tunnel_id)
+      error_message = "A host names a tunnel whose id ${local.tunnel_id} is hal's own; it would get no line in hal's ingress."
     }
   }
 }

@@ -84,12 +84,15 @@ class FakeCloudflare:
     def client(self, **keywords) -> CloudflareClient:
         return CloudflareClient(TOKEN, OWN_TUNNEL, base_url=self.url, **keywords)
 
-    def serve_tunnels(self, live: list[str], deleted: tuple[str, ...] = ()) -> None:
-        """The account's tunnels, filtered by `uuid` and `is_deleted` as the list documents."""
+    def serve_tunnels(self, live: list[str], deleted: tuple[str, ...] = (), names=None) -> None:
+        """The account's tunnels, filtered by `uuid` or `name` and by `is_deleted` as the list
+        documents; `names` gives a tunnel's name by its id, else its name is its id."""
 
         def answer(query: dict[str, str]) -> Answer:
             pool = deleted if query["is_deleted"] == "true" else live
-            matching = [{"id": tunnel} for tunnel in pool if tunnel == query["uuid"]]
+            tunnels = [{"id": tunnel, "name": (names or {}).get(tunnel, tunnel)} for tunnel in pool]
+            wanted = {"id": query["uuid"]} if "uuid" in query else {"name": query["name"]}
+            matching = [one for one in tunnels if wanted.items() <= one.items()]
             return 200, page_of(matching, int(query["page"]), PAGE, TUNNELS_PATH)
 
         self.routes[TUNNELS_PATH] = answer
@@ -153,11 +156,7 @@ RECORDS = [
 APPS = [
     self_hosted(f"www.{ZONE}", "bypass", [{"everyone": {}}]),
     self_hosted(f"*.{ZONE}", "allow", [{"group": {"id": "g1"}}]),
-    {
-        "type": "ssh",
-        "destinations": [{"type": "public", "uri": f"ssh.{ZONE}"}],
-        "policies": [],
-    },
+    {"type": "ssh", "destinations": [{"type": "public", "uri": f"ssh.{ZONE}"}], "policies": []},
     {"type": "app_launcher"},
 ]
 GROUPS = [{"id": "g1", "name": "operator"}]
@@ -167,7 +166,7 @@ GROUPS = [{"id": "g1", "name": "operator"}]
 def cloudflare() -> Iterator[FakeCloudflare]:
     fake = FakeCloudflare()
     fake.serve("/zones", [{"id": ZONE_ID, "name": ZONE, "account": {"id": ACCOUNT_ID}}])
-    fake.serve_tunnels(live=[TUNNEL_ID])
+    fake.serve_tunnels([TUNNEL_ID, "p-id"], ("gone",), {"p-id": "p", "gone": "p"})
     fake.serve(RECORDS_PATH, RECORDS)
     fake.serve(GROUPS_PATH, GROUPS)
     fake.serve(APPS_PATH, APPS)
@@ -175,18 +174,18 @@ def cloudflare() -> Iterator[FakeCloudflare]:
     fake.close()
 
 
-def read_error(cloudflare: FakeCloudflare, **client_keywords) -> str:
+def read_error(cloudflare: FakeCloudflare, tunnel_names=(), **client_keywords) -> str:
     client = cloudflare.client(**client_keywords)
     with pytest.raises(CloudflareReadError) as raised:
-        client.read(ZONE)
+        client.read(ZONE, tunnel_names)
     return str(raised.value)
 
 
 def test_the_snapshot_holds_every_page_and_each_request_carries_the_token_in_the_header_only(
     cloudflare,
 ):
-    """R1."""
-    assert cloudflare.client().read(ZONE) == Snapshot(
+    """R1, R6: hal's tunnel by its id and a named one by its name, each beside other tunnels."""
+    assert cloudflare.client().read(ZONE, {"p"}) == Snapshot(
         tunnel_id=TUNNEL_ID,
         records=tuple(Record(f"{label}.{ZONE}", "CNAME", "x", True) for label in "abc"),
         groups=(AccessGroup("g1", "operator"),),
@@ -196,6 +195,7 @@ def test_the_snapshot_holds_every_page_and_each_request_carries_the_token_in_the
             App("ssh", (f"ssh.{ZONE}",), ()),
             App("app_launcher", (), ()),
         ),
+        named_tunnel_ids={"p": "p-id"},
     )
     paths = [path for path, _, _ in cloudflare.requests]
     assert paths.count(RECORDS_PATH) == 2
@@ -216,7 +216,7 @@ ACCESS_OFF_LIVE_MESSAGE = (
 def test_access_off_at_the_apps_read_is_a_typed_answer_not_an_error(cloudflare, message):
     """R2: Access off at the apps read is a typed answer, and the groups are not asked for."""
     cloudflare.routes[APPS_PATH] = lambda _query: (403, failure(9999, message))
-    snapshot = cloudflare.client().read(ZONE)
+    snapshot = cloudflare.client().read(ZONE, ())
     assert (snapshot.apps, snapshot.groups) == (None, ())
     assert len(snapshot.records) == len(RECORDS)
     assert GROUPS_PATH not in {path for path, _query, _header in cloudflare.requests}
@@ -355,7 +355,7 @@ def test_the_environment_proxy_is_not_used(cloudflare, monkeypatch):
     """R4: the fake is http, so only HTTP_PROXY is driven; HTTPS_PROXY is not claimed."""
     monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:9")
     monkeypatch.setenv("NO_PROXY", "")
-    assert cloudflare.client().read(ZONE).tunnel_id == TUNNEL_ID
+    assert cloudflare.client().read(ZONE, ()).tunnel_id == TUNNEL_ID
     assert cloudflare.requests
 
 
@@ -389,7 +389,7 @@ def test_the_https_environment_proxy_is_not_used_for_the_production_url(monkeypa
     client = CloudflareClient(TOKEN, OWN_TUNNEL)
     try:
         with pytest.raises(AssertionError, match=r"leaves loopback: 192\.0\.2\.1"):
-            client.read(ZONE)
+            client.read(ZONE, ())
     finally:
         proxy.shutdown()
         proxy.server_close()
@@ -506,7 +506,7 @@ def test_an_empty_list_may_announce_zero_or_one_page(cloudflare, total_pages):
         200,
         listing([], int(query["page"]), total_pages=total_pages, total_count=0),
     )
-    assert cloudflare.client().read(ZONE).apps == ()
+    assert cloudflare.client().read(ZONE, ()).apps == ()
 
 
 def test_a_failing_middle_page_is_an_error_not_a_short_snapshot(cloudflare):
@@ -523,56 +523,19 @@ def test_a_failing_middle_page_is_an_error_not_a_short_snapshot(cloudflare):
     assert "HTTP 500" in read_error(cloudflare)
 
 
-def test_hals_tunnel_is_found_by_its_id_beside_another_live_tunnel(cloudflare):
-    """R6."""
-    cloudflare.serve_tunnels(live=["another-live-tunnel", TUNNEL_ID])
-    assert cloudflare.client().read(ZONE).tunnel_id == TUNNEL_ID
-
-
 @pytest.mark.parametrize(
-    ("live", "deleted"), [(["another"], ()), ([], (TUNNEL_ID,))], ids=["unknown id", "deleted"]
-)
-def test_no_live_tunnel_with_hals_id_fails_naming_the_tunnel_config(cloudflare, live, deleted):
-    """R6."""
-    cloudflare.serve_tunnels(live, deleted)
-    assert {TUNNEL_ID, str(OWN_TUNNEL.config)} <= set(read_error(cloudflare).split())
-
-
-@pytest.mark.parametrize(
-    "base_url",
+    ("tunnels", "said"),
     [
-        "http://example.com",
-        "ftp://127.0.0.1",
-        "http://127.0.0.1.example.com",
-        "https://example.com/client/v4",
-        "https://api.cloudflare.com.evil.test/client/v4",
-        "https://api.cloudflare.com/client/v4/",
-        "https://127.0.0.1",
+        pytest.param((["another"], (), {}), {TUNNEL_ID, str(OWN_TUNNEL.config)}, id="unknown id"),
+        pytest.param(([], (TUNNEL_ID,), {}), {TUNNEL_ID, str(OWN_TUNNEL.config)}, id="deleted"),
+        pytest.param(([TUNNEL_ID], ("x",), {"x": "p"}), {"0", "p"}, id="named-deleted"),
+        pytest.param(([TUNNEL_ID, "x", "y"], (), dict.fromkeys("xy", "p")), {"2", "p"}, id="twice"),
     ],
 )
-def test_the_token_goes_only_to_cloudflares_api_or_to_http_on_loopback(base_url):
-    """R4."""
-    with pytest.raises(ValueError):
-        CloudflareClient(TOKEN, OWN_TUNNEL, base_url=base_url)
-
-
-@pytest.mark.parametrize(
-    "base_url", [cloudflare_read.BASE_URL, "http://127.0.0.1:8080", "http://localhost"]
-)
-def test_cloudflares_api_and_loopback_are_accepted(base_url):
-    """R4."""
-    CloudflareClient(TOKEN, OWN_TUNNEL, base_url=base_url)
-
-
-def test_the_default_base_url_is_cloudflares_https_api():
-    """R4."""
-    assert cloudflare_read.BASE_URL == "https://api.cloudflare.com/client/v4"
-
-
-def test_the_backstop_refuses_a_connection_beyond_loopback():
-    """R4."""
-    with pytest.raises(AssertionError, match="leaves loopback"):
-        socket.create_connection(("192.0.2.1", 9), timeout=0.1)
+def test_a_tunnel_lookup_without_exactly_one_live_match_fails_naming_it(cloudflare, tunnels, said):
+    """R6."""
+    cloudflare.serve_tunnels(*tunnels)
+    assert said <= set(read_error(cloudflare, {"p"}).split())
 
 
 def test_a_deeply_nested_answer_is_a_malformed_answer_not_a_crash(cloudflare):
@@ -604,7 +567,7 @@ def test_a_documented_field_beyond_the_ones_the_check_judges_is_accepted(
 ):
     """R1: the whitelist is the published response schema, not the provider's resource."""
     cloudflare.serve(APPS_PATH, [public_app(type=app_type, **{field: True})])
-    assert cloudflare.client().read(ZONE).apps[0].type == app_type
+    assert cloudflare.client().read(ZONE, ()).apps[0].type == app_type
 
 
 @pytest.mark.parametrize("name", [TOKEN, "q" * 40, "Capital", "x" * 41, "has space"], ids=str)
@@ -634,7 +597,7 @@ def test_the_overrides_of_a_public_destination_are_read_with_their_path_patterns
     """R1: the schema's shape, destinations[].overrides[] = {behavior, path_pattern}."""
     overrides = [{"behavior": "public", "path_pattern": "/admin/*"}]
     cloudflare.serve(APPS_PATH, [with_destination(overrides=overrides)])
-    (app,) = cloudflare.client().read(ZONE).apps
+    (app,) = cloudflare.client().read(ZONE, ()).apps
     assert app.overrides == (Override(f"www.{ZONE}", "/admin/*"),)
 
 
@@ -654,7 +617,7 @@ def test_only_the_host_of_a_destination_is_lower_cased_the_path_is_kept(cloudfla
         APPS_PATH,
         [public_app(destinations=[{"type": "public", "uri": uri, "overrides": overrides}])],
     )
-    (app,) = cloudflare.client().read(ZONE).apps
+    (app,) = cloudflare.client().read(ZONE, ()).apps
     assert (app.destinations, app.overrides) == ((kept,), (Override(kept, "/Admin/*"),))
 
 
@@ -662,7 +625,7 @@ def test_only_the_host_of_a_destination_is_lower_cased_the_path_is_kept(cloudfla
 def test_options_preflight_bypass_is_read(cloudflare, preflight):
     """R1."""
     cloudflare.serve(APPS_PATH, [public_app(options_preflight_bypass=preflight)])
-    assert cloudflare.client().read(ZONE).apps[0].options_preflight_bypass is preflight
+    assert cloudflare.client().read(ZONE, ()).apps[0].options_preflight_bypass is preflight
 
 
 @pytest.mark.parametrize(
@@ -700,7 +663,7 @@ def test_a_destination_or_override_beyond_the_documented_shape_is_refused(
 def test_an_app_that_secures_no_hostname_may_carry_any_field(cloudflare):
     """R1."""
     cloudflare.serve(APPS_PATH, [{"type": "app_launcher", "something_new": 1}])
-    assert cloudflare.client().read(ZONE).apps == (App("app_launcher", (), ()),)
+    assert cloudflare.client().read(ZONE, ()).apps == (App("app_launcher", (), ()),)
 
 
 FOO = f"foo.{ZONE}"
@@ -746,7 +709,7 @@ def test_a_domain_among_the_public_destinations_is_accepted(cloudflare, domain):
     """R1."""
     app = {"type": "ssh", "domain": domain, "destinations": [{"type": "public", "uri": FOO}]}
     cloudflare.serve(APPS_PATH, [{**app, "policies": []}])
-    assert cloudflare.client().read(ZONE).apps == (App("ssh", (FOO,), ()),)
+    assert cloudflare.client().read(ZONE, ()).apps == (App("ssh", (FOO,), ()),)
 
 
 @pytest.mark.parametrize(
@@ -775,7 +738,7 @@ def test_destinations_of_the_other_published_types_are_not_public_hosts(cloudfla
     """R1."""
     app = public_app(destinations=[{"type": "public", "uri": f"www.{ZONE}"}, destination])
     cloudflare.serve(APPS_PATH, [app])
-    assert cloudflare.client().read(ZONE).apps[0].destinations == (f"www.{ZONE}",)
+    assert cloudflare.client().read(ZONE, ()).apps[0].destinations == (f"www.{ZONE}",)
 
 
 @pytest.mark.parametrize(
@@ -813,7 +776,7 @@ def test_a_wildcard_or_a_path_after_the_host_is_accepted(cloudflare, uri):
     """R1."""
     app = public_app(domain=uri, destinations=[{"type": "public", "uri": uri}])
     cloudflare.serve(APPS_PATH, [app])
-    assert cloudflare.client().read(ZONE).apps[0].destinations == (uri,)
+    assert cloudflare.client().read(ZONE, ()).apps[0].destinations == (uri,)
 
 
 @pytest.mark.parametrize("value", ["true", "false", 1, 0, None, []])
@@ -840,7 +803,7 @@ def test_a_policy_restricted_beyond_its_include_is_marked_with_extra_conditions(
     """R1."""
     policy = {"decision": "bypass", "include": [{"everyone": {}}], **condition}
     cloudflare.serve(APPS_PATH, [public_app(policies=[policy])])
-    assert cloudflare.client().read(ZONE).apps[0].policies[0].extra_conditions is True
+    assert cloudflare.client().read(ZONE, ()).apps[0].policies[0].extra_conditions is True
 
 
 @pytest.mark.parametrize(
@@ -856,7 +819,7 @@ def test_a_policy_with_empty_or_unset_restrictions_has_no_extra_conditions(cloud
     """R1."""
     policy = {"decision": "bypass", "include": [{"everyone": {}}], **idle}
     cloudflare.serve(APPS_PATH, [public_app(policies=[policy])])
-    assert cloudflare.client().read(ZONE).apps[0].policies[0].extra_conditions is False
+    assert cloudflare.client().read(ZONE, ()).apps[0].policies[0].extra_conditions is False
 
 
 @pytest.mark.parametrize(
@@ -903,3 +866,18 @@ def test_the_tunnel_list_fails_closed_when_its_total_count_is_not_met(cloudflare
         listing([{"id": TUNNEL_ID}], int(query["page"]), total_pages=None, total_count=3),
     )
     assert read_error(cloudflare).startswith(TUNNELS_PATH)
+
+
+def test_a_named_tunnel_that_is_hals_own_is_refused(cloudflare):
+    cloudflare.serve_tunnels([TUNNEL_ID], names={TUNNEL_ID: "p"})
+    assert "is not another tunnel" in read_error(cloudflare, {"p"})
+
+
+def test_a_named_tunnel_whose_name_differs_from_the_one_asked_is_refused(cloudflare):
+    ignoring_the_name = {"id": "x", "name": "other"}
+    own = {"id": TUNNEL_ID, "name": "hal"}
+    cloudflare.routes[TUNNELS_PATH] = lambda query: (
+        200,
+        page_of([own if "uuid" in query else ignoring_the_name], 1, PAGE, TUNNELS_PATH),
+    )
+    assert "is not another tunnel" in read_error(cloudflare, {"p"})

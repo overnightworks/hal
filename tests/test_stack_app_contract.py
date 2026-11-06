@@ -19,9 +19,11 @@ def compose(*fields: str, routed: bool = False) -> str:
     return f"services: {{web: {service(*fields, routed=routed)}}}"
 
 
-def refusal(text: str | None, hosts: tuple[str, ...] = ()) -> str:
+def refusal(
+    text: str | None, hosts: tuple[str, ...] = (), served_elsewhere: frozenset[str] = frozenset()
+) -> str:
     with pytest.raises(app_contract.ContractError) as refused:
-        app_contract.check(text, KEY, TAG, hosts)
+        app_contract.check(text, KEY, TAG, hosts, served_elsewhere=served_elsewhere)
     return str(refused.value)
 
 
@@ -105,6 +107,14 @@ def test_b2_two_services_labelled_with_one_host_are_refused():
     assert "host hopin needs exactly one service" in refusal(text, hosts=("hopin",))
 
 
+def test_a_host_another_tunnel_serves_has_at_most_one_labelled_service():
+    text = f"services: {{a: {service(routed=True)}, b: {service(routed=True)}}}"
+
+    assert "host hopin needs at most one service" in refusal(
+        text, hosts=("hopin",), served_elsewhere=frozenset({"hopin"})
+    )
+
+
 ALIASED = '{edge.name: hopin, edge.alias: talk, traefik.enable: "true"}'
 
 
@@ -123,7 +133,9 @@ def test_an_alias_names_a_second_host_of_the_entry_in_either_label_form(fields):
     """#445 R1."""
     text = compose(fields, HEALTH if fields.startswith("labels: [") else "")
 
-    assert app_contract.check(text, KEY, TAG, ("hopin", "talk")) == ("web",)
+    assert app_contract.check(text, KEY, TAG, ("hopin", "talk"), served_elsewhere=frozenset()) == (
+        "web",
+    )
 
 
 @pytest.mark.parametrize(
@@ -175,7 +187,9 @@ def test_a_host_no_service_holds_by_name_or_alias_is_refused():
 def test_b2_a_label_as_list_entry_routes_like_one_as_map_entry():
     fields = ["labels: ['edge.name=hopin', 'traefik.enable=true']", HEALTH]
 
-    assert app_contract.check(compose(*fields), KEY, TAG, ("hopin",)) == ("web",)
+    assert app_contract.check(
+        compose(*fields), KEY, TAG, ("hopin",), served_elsewhere=frozenset()
+    ) == ("web",)
 
 
 @pytest.mark.parametrize(
@@ -221,7 +235,9 @@ def test_a_healthcheck_is_disabled_as_compose_reads_the_boolean(health, disabled
     if disabled:
         assert "service web has no healthcheck (healthcheck)" in refusal(text, hosts=("hopin",))
     else:
-        assert app_contract.check(text, KEY, TAG, ("hopin",)) == ("web",)
+        assert app_contract.check(text, KEY, TAG, ("hopin",), served_elsewhere=frozenset()) == (
+            "web",
+        )
 
 
 @pytest.mark.parametrize(
@@ -286,7 +302,9 @@ def test_an_interpolated_volume_entry_is_refused_as_the_key(mount):
     ],
 )
 def test_an_interpolation_that_decides_no_rule_in_a_volume_entry_is_allowed(mount):
-    assert app_contract.check(compose(mount), KEY, TAG, ())[0] == "web"
+    assert (
+        app_contract.check(compose(mount), KEY, TAG, (), served_elsewhere=frozenset())[0] == "web"
+    )
 
 
 def test_yes_is_no_boolean_for_traefik_enable_as_compose_reads_it():
@@ -336,7 +354,12 @@ def test_a_short_volume_entry_that_starts_with_one_letter_is_refused_for_the_lon
     ],
 )
 def test_a_short_volume_entry_whose_first_section_is_no_letter_still_plans(volume):
-    assert app_contract.check(compose(f"volumes: ['{volume}']"), KEY, TAG, ())[0] == "web"
+    assert (
+        app_contract.check(
+            compose(f"volumes: ['{volume}']"), KEY, TAG, (), served_elsewhere=frozenset()
+        )[0]
+        == "web"
+    )
     app_contract.check_image_volumes(
         compose(f"volumes: ['{volume}']"), KEY, TAG, {"web": ["/data"]}
     )
@@ -355,7 +378,7 @@ def test_a_short_volume_entry_whose_first_section_is_no_letter_still_plans(volum
 def test_a_compose_file_inside_the_contract_names_its_services(text):
     hosts = ("hopin",) if "edge.name" in text else ()
 
-    assert app_contract.check(text, KEY, TAG, hosts)[0] == "web"
+    assert app_contract.check(text, KEY, TAG, hosts, served_elsewhere=frozenset())[0] == "web"
 
 
 @pytest.mark.parametrize(

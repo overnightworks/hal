@@ -5,7 +5,8 @@
     "reason": "the apex is not covered by the wildcard",
     "ready": null,
     "target": "http://127.0.0.1:8081",
-    "deny_public": []
+    "deny_public": [],
+    "tunnel": null
   },
   "*.edge-fixture.invalid": {
     "service": "edge",
@@ -13,7 +14,8 @@
     "reason": null,
     "ready": null,
     "target": "http://127.0.0.1:8081",
-    "deny_public": []
+    "deny_public": [],
+    "tunnel": null
   },
   "hopin.edge-fixture.invalid": {
     "service": "hopin",
@@ -21,6 +23,7 @@
     "reason": "own login",
     "ready": "/health",
     "target": "http://127.0.0.1:8081",
-    "deny_public": []
+    "deny_public": [],
+    "tunnel": null
   }
 }

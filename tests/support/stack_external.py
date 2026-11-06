@@ -7,7 +7,7 @@ import select
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Collection, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -483,8 +483,13 @@ def check_on_stand_in(home: Path, **keywords) -> external_cli.HostCheckOutcome:
 TUNNEL_TARGET = f"{OWN_TUNNEL.id}.cfargotunnel.com"
 
 
+# It answers the tunnel a moved host of the scenario catalogs names, as the real read must.
 CLEAN_SNAPSHOT = cloudflare_read.Snapshot(
-    OWN_TUNNEL.id, (cloudflare_read.Record("example.test", "CNAME", TUNNEL_TARGET, True),), (), ()
+    OWN_TUNNEL.id,
+    (cloudflare_read.Record("example.test", "CNAME", TUNNEL_TARGET, True),),
+    (),
+    (),
+    {"platform": "platform-tunnel-id"},
 )
 
 
@@ -511,7 +516,7 @@ class FakeReader:
         self.tokens.append(token)
         return self
 
-    def read(self, _zone: str):
+    def read(self, _zone: str, _tunnel_names: Collection[str]):
         self.reads += 1
         if isinstance(self.outcome, BaseException):
             raise self.outcome

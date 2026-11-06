@@ -45,7 +45,7 @@ variable "catalog_file" {
 }
 
 # hal's own tunnel: the wrapper reads its id from the machine's tunnel config, so a second tunnel in
-# the account is never looked up.
+# the account is never taken for it; another tunnel is looked up only by the name a host gives.
 variable "tunnel_id" {
   type = string
 }

@@ -125,6 +125,66 @@ def test_stop_of_a_unit_behind_traefik_says_the_barrier_is_up(hal, fakes):  # no
     assert result.err == ""
 
 
+def write_probe_with_a_moved_host(fakes: Fakes, enabled: bool = True) -> None:  # noqa: F811
+    moved = "{name: probe, exposure: public, reason: elsewhere, tunnel: platform}"
+    hosts = f"    hosts: [{moved}, {{name: own, exposure: public, reason: here}}]\n"
+    entry = (
+        PROBE_ENABLED
+        if enabled
+        else PROBE_ENABLED.replace(
+            "probe:\n    run: {enabled: true}", "probe:\n    run: {enabled: false}"
+        )
+    )
+    write_fleet(fakes.repository, f"cloudflare: {{zone: {ZONE}}}\n{entry}{hosts}")
+
+
+def test_stop_of_a_unit_names_each_host_another_tunnel_still_serves(hal, fakes):  # noqa: F811
+    fakes.scripted.containers = {"hello": "running"}
+    write_probe_with_a_moved_host(fakes)
+
+    result = hal("stop", "probe")
+
+    assert result.exit_code == ExitCode.OK
+    assert squeezed(result.out) == (
+        "✓ probe switched off barrier up · stopped · volumes kept"
+        f" · probe.{ZONE} stays served by tunnel platform"
+    )
+
+
+@pytest.mark.parametrize(
+    ("barrier_lifted", "outcome"),
+    [(False, "already off"), (True, "barrier back")],
+    ids=["already off", "barrier back"],
+)
+def test_a_repeated_stop_of_a_unit_still_names_each_host_another_tunnel_serves(
+    hal,  # noqa: F811
+    fakes,  # noqa: F811
+    barrier_lifted,
+    outcome,
+):
+    fakes.scripted.containers = {"hello": "running"}
+    write_probe_with_a_moved_host(fakes)
+    assert hal("stop", "probe").exit_code == ExitCode.OK
+    if barrier_lifted:
+        fakes.ingress.barrier_file().unlink()
+
+    result = hal("stop", "probe")
+
+    assert result.exit_code == ExitCode.OK
+    assert outcome in result.out
+    assert squeezed(result.out).endswith(f" · probe.{ZONE} stays served by tunnel platform")
+
+
+def test_stop_of_a_disabled_unit_names_no_host_it_does_not_publish(hal, fakes):  # noqa: F811
+    fakes.scripted.containers = {"hello": "running"}
+    write_probe_with_a_moved_host(fakes, enabled=False)
+
+    result = hal("stop", "probe")
+
+    assert result.exit_code == ExitCode.OK
+    assert "stays served" not in result.out
+
+
 def test_stop_of_a_switched_off_unit_says_since_when_and_changes_nothing(hal, fakes):  # noqa: F811
     fakes.unit_in("B")
 

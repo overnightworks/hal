@@ -15,6 +15,7 @@ locals {
         target   = try(host.target, local.default_host_target)
 
         deny_public = try(host.deny_public, [])
+        tunnel      = try(host.tunnel, null)
       }
     } if try(entry.run.enabled, true)
   ]...)

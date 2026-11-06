@@ -11,6 +11,8 @@ import support.stack_apps as stack_apps_support
 from support.app_support import (
     COMPOSE,
     FLEET,
+    HOSTED_COMPOSE,
+    HOSTED_FLEET,
     KEY,
     NOW,
     SENTINEL,
@@ -20,6 +22,7 @@ from support.app_support import (
 )
 from support.git_support import head_of, plain_git
 from support.stack_apps import (
+    EDGE_FLEET,
     FIRST,
     SECOND,
     THIRD,
@@ -596,6 +599,22 @@ def test_a_contract_refusal_in_a_release_is_a_plan_refusal_before_anything_is_bu
         world.plan()
 
     assert world.docker.verbs == []
+
+
+@pytest.mark.parametrize("compose", [COMPOSE, HOSTED_COMPOSE], ids=["unlabelled", "labelled"])
+def test_a_host_another_tunnel_serves_may_go_unlabelled_and_the_barrier_still_names_it(
+    world, origin, repository, compose
+):
+    zone = "edge-fixture.invalid"
+    moved = HOSTED_FLEET.replace("ready: /}", "ready: /, tunnel: platform}")
+    (repository / "fleet.yaml").write_text(f"cloudflare:\n  zone: {zone}\n{moved}")
+    traefik = {"traefik": {"environment": {"EDGE_DOMAIN": zone}}}
+    world.fleet = dataclasses.replace(EDGE_FLEET, config={"name": "edge", "services": traefik})
+    origin.release(FIRST, {"compose.yaml": compose})
+
+    [planned] = world.plan().plans
+
+    assert planned.ingress.names == (KEY,)
 
 
 def test_a_record_that_cannot_be_read_cannot_be_planned(world, origin):

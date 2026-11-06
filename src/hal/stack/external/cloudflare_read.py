@@ -9,8 +9,9 @@ The one documented wire shape, from Cloudflare's published OpenAPI schema
 - `GET /zones?name=`: `result[].id`, `result[].account.id`.
 - `GET /zones/{id}/dns_records`: `result[].name`, `type`, `content`, `proxied`.
 - `GET /accounts/{id}/cfd_tunnel?is_deleted=false&uuid=`: `result[].id`, at most hal's own live
-  tunnel, so the account's other tunnels never answer; its `result_info` documents no
-  `total_pages`, which is derived from `total_count` and the page size.
+  tunnel, so the account's other tunnels never answer; with `name=` instead of `uuid=`,
+  `result[].id` and `result[].name` of the live tunnels a host names. Its `result_info` documents
+  no `total_pages`, which is derived from `total_count` and the page size.
 - `GET /accounts/{id}/access/groups`: `result[].id`, `result[].name` (an include rule names a
   group by id only).
 - `GET /accounts/{id}/access/apps`: `result[].type`, `options_preflight_bypass` and the embedded
@@ -49,8 +50,8 @@ import re
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Mapping
-from dataclasses import dataclass
+from collections.abc import Collection, Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -162,12 +163,18 @@ class AccessGroup:
 
 @dataclass(frozen=True)
 class Snapshot:
-    """What the account holds. `apps` is None when Access is not enabled on it."""
+    """What the account holds. `apps` is None when Access is not enabled on it;
+    `named_tunnel_ids` holds the id of each other tunnel a host names, by its name."""
 
     tunnel_id: str
     records: tuple[Record, ...]
     groups: tuple[AccessGroup, ...]
     apps: tuple[App, ...] | None
+    named_tunnel_ids: Mapping[str, str] = field(default_factory=dict)
+
+    def tunnel_id_of(self, tunnel: str | None) -> str:
+        """The id of the tunnel a host names; None is hal's own."""
+        return self.tunnel_id if tunnel is None else self.named_tunnel_ids[tunnel]
 
 
 @dataclass(frozen=True)
@@ -184,7 +191,7 @@ class OwnTunnelUnknown(Exception):
 
 
 class CloudflareRead(Protocol):
-    def read(self, zone: str) -> Snapshot: ...
+    def read(self, zone: str, tunnel_names: Collection[str]) -> Snapshot: ...
 
 
 class _Refusal(CloudflareReadError):
@@ -214,11 +221,16 @@ class CloudflareClient:
         self._timeout_seconds = timeout_seconds
         self._opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _DoNotFollow)
 
-    def read(self, zone: str) -> Snapshot:
+    def read(self, zone: str, tunnel_names: Collection[str]) -> Snapshot:
+        """`tunnel_names` are the other tunnels the hosts name; each is looked up by its name."""
         zone_answer = self._one(ZONES_PATH, {"name": zone}, "zone")
         account_id = _identifier(zone_answer.get("account"), ZONES_PATH)
         zone_id = _identifier(zone_answer, ZONES_PATH)
-        tunnel_id = self._live_tunnel_id(f"/accounts/{account_id}/cfd_tunnel")
+        tunnels_path = f"/accounts/{account_id}/cfd_tunnel"
+        tunnel_id = self._live_tunnel_id(tunnels_path)
+        named_tunnel_ids = {
+            name: self._named_tunnel_id(tunnels_path, name) for name in sorted(tunnel_names)
+        }
         records_path = f"/zones/{zone_id}/dns_records"
         access = self._access(f"/accounts/{account_id}/access")
         apps, groups = access if access is not None else (None, ())
@@ -227,6 +239,7 @@ class CloudflareClient:
             records=tuple(_record(item, records_path) for item in self._pages(records_path)),
             groups=groups,
             apps=apps,
+            named_tunnel_ids=named_tunnel_ids,
         )
 
     def _access(self, path: str) -> tuple[tuple[App, ...], tuple[AccessGroup, ...]] | None:
@@ -261,6 +274,19 @@ class CloudflareClient:
         if any(_text(item, "id", path) != tunnel.id for item in found):
             raise CloudflareReadError(f"{path}: the answer holds a tunnel other than {tunnel.id}")
         return tunnel.id
+
+    def _named_tunnel_id(self, path: str, name: str) -> str:
+        """The one live tunnel by that name, never hal's own. A list that ignored the filter holds
+        hal's own tunnel too, so it is refused for its count or for its name."""
+        found = self._pages(
+            path, {"is_deleted": "false", "name": name}, announces_total_pages=False
+        )
+        if len(found) != 1:
+            raise CloudflareReadError(f"{path}: not one but {len(found)} live tunnels named {name}")
+        tunnel_id = _text(found[0], "id", path)
+        if tunnel_id == self._tunnel.id or _text(found[0], "name", path) != name:
+            raise CloudflareReadError(f"{path}: the live tunnel named {name} is not another tunnel")
+        return tunnel_id
 
     def _pages(
         self,

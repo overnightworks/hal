@@ -1,4 +1,4 @@
-# Cloudflare as found: each host of local.hosts gets a proxied CNAME to the tunnel and, when it
+# Cloudflare as found: each host of local.hosts gets a proxied CNAME to its tunnel and, when it
 # bypasses or protects, an Access app. Everything is looked up at plan time, so no ID is typed or
 # stored twice; live records and apps are imported as found and nothing is converted (D12).
 locals {
@@ -12,6 +12,14 @@ locals {
   zone_id    = data.cloudflare_zone.this.id
   account_id = data.cloudflare_zone.this.account.id
   tunnel_id  = data.cloudflare_zero_trust_tunnel_cloudflared.this.id
+
+  named_tunnel_ids = { for name, tunnel in data.cloudflare_zero_trust_tunnel_cloudflared.named : name => tunnel.id }
+  # A record's tunnel is its host's; a redirect-only name has no host and keeps hal's.
+  record_tunnel_ids = {
+    for fqdn in local.record_fqdns : fqdn => (
+      try(local.hosts[fqdn].tunnel, null) == null ? local.tunnel_id : local.named_tunnel_ids[local.hosts[fqdn].tunnel]
+    )
+  }
 
   operator_group_ids = [
     for group in flatten(data.cloudflare_zero_trust_access_groups.operator[*].result) : group.id
@@ -45,9 +53,9 @@ locals {
   }
 }
 
-# The provider itself fails on no or several matching zones and tunnels (C13); the tunnel is the
-# live one with hal's id. Both are looked up with no host too: the tunnel's configuration outlives
-# the last host.
+# The provider itself fails on no or several matching zones and tunnels (C13); hal's tunnel is the
+# live one with hal's id, another one the live one with the name a host gives. The zone and hal's
+# tunnel are looked up with no host too: the tunnel's configuration outlives the last host.
 data "cloudflare_zone" "this" {
   filter = { name = local.fleet.cloudflare.zone }
 }
@@ -55,6 +63,12 @@ data "cloudflare_zone" "this" {
 data "cloudflare_zero_trust_tunnel_cloudflared" "this" {
   account_id = local.account_id
   filter     = { uuid = var.tunnel_id, is_deleted = false }
+}
+
+data "cloudflare_zero_trust_tunnel_cloudflared" "named" {
+  for_each   = toset([for host in local.hosts : host.tunnel if host.tunnel != null])
+  account_id = local.account_id
+  filter     = { name = each.key, is_deleted = false }
 }
 
 data "cloudflare_dns_records" "host" {
@@ -141,7 +155,7 @@ resource "cloudflare_dns_record" "host" {
   zone_id    = local.zone_id
   name       = each.key
   type       = "CNAME"
-  content    = "${local.tunnel_id}.cfargotunnel.com"
+  content    = "${local.record_tunnel_ids[each.key]}.cfargotunnel.com"
   proxied    = true
   ttl        = 1
   depends_on = [cloudflare_zero_trust_access_application.host, cloudflare_ruleset.deny_public, cloudflare_ruleset.apex_redirect]
