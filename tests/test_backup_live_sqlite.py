@@ -662,14 +662,8 @@ def test_a_load_whose_count_cannot_be_printed_after_its_copy_says_old_or_new(
 def test_an_old_snapshot_with_built_decks_loads_only_its_database(
     live, edge_backup, machine, loader, home
 ):
-    record_with_files = SQLITE_TOML.replace(
-        "[app.presentator.restore_test]", 'files_volume = "builds"\n[app.presentator.restore_test]'
-    )
-    del machine.other_volumes[APP]
-    machine.volumes_by_label |= {"database": [VOLUME], "builds": ["presentator_builds"]}
-    machine.volume_files["presentator_builds"] = {"deck/index.html": b"<html>"}
-    assert edge_backup(*declare_apps(home, record_with_files), "backup", APP).exit_code == 0
-    assert machine.snapshots[-1]["volumes"]["builds"]
+    assert edge_backup(*declare_apps(home, SQLITE_TOML), "backup", APP).exit_code == 0
+    machine.snapshots[-1]["volumes"] = {"builds": {"deck/index.html": b"<html>"}}
     database_only = declare_apps(home, SQLITE_TOML)
     target = home / "restored"
 

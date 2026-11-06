@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from support.backup_support import SQLITE_TOML
 
 from hal.backup.apps import PRE_APPLY_TAG, App, AppsError, PostgresDatabase, parse_apps
 from hal.backup.cli import DEFAULT_APPS
@@ -114,3 +115,14 @@ def test_a_db_only_stack_record_is_a_unit_whose_profile_holds_its_database(app):
 
     assert app.name in units
     assert app.database.db_service in profiles[app.name]
+
+
+@pytest.mark.parametrize("key", ["files_volume", "files_skip"])
+def test_a_sqlite_record_naming_a_files_key_is_refused_as_an_unknown_key(key):
+    record = SQLITE_TOML.replace(
+        'database_file = "presentator.sqlite3"\n',
+        f'database_file = "presentator.sqlite3"\n{key} = "builds"\n',
+    )
+
+    with pytest.raises(AppsError, match="unknown key"):
+        parse_apps(record)

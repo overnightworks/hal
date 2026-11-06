@@ -396,19 +396,16 @@ def check_sqlite(settings: Settings, directory: Path, file: str, table: str) -> 
         ) from error
 
 
-def count_files(settings: Settings, kind: MountKind, source: str, skip: str | None = None) -> int:
+def count_files(settings: Settings, kind: MountKind, source: str) -> int:
     """Regular files under a volume or host directory, counted read-only in a container.
 
     The one rule for the manifest's count and the restored copy's; names never leave it. An entry
-    matching the skip is pruned at every depth below the root, as restic leaves it out; any read
-    error fails the count.
+    any read error fails the count.
     """
-    # `-mindepth 1` keeps the pattern from matching the root itself (`s*` over `/scanned`).
-    pruned = ["-mindepth", "1", "-name", skip, "-prune", "-o"] if skip is not None else []
     listing = host.run(
         [
             *container_argv(settings, Mount(kind, source, _SCANNED), entrypoint="find"),
-            _SCANNED, *pruned, "-type", "f", "-print0",
+            _SCANNED, "-type", "f", "-print0",
         ],
         label=FILE_COUNT_LABEL,
     )  # fmt: skip

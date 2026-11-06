@@ -141,13 +141,9 @@ class Machine:
     """The files of a kept volume by Docker volume name; songmaker's audio volume holds `audio`."""
     volumes_by_label: dict[str, list[str]] = field(
         default_factory=lambda: {
-            volume: [f"{app.compose_project}_{volume}"]
+            app.database.volume: [f"{app.compose_project}_{app.database.volume}"]
             for app in SHIPPED_APPS
             if isinstance(app.database, SqliteDatabase)
-            for volume in (
-                app.database.volume,
-                *([app.database.files.volume] if app.database.files else []),
-            )
         }
     )
     """What `docker volume ls` answers for a compose volume name, whatever the project."""
