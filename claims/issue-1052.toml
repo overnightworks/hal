@@ -3,6 +3,6 @@ agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
 role = "builder"
 base = "b5e2847d0bffb0c027c99de197e07ff24066ee7d"
 branch = "claude/issue-1052-core-failure-rows"
-scope = ["docs/design/hal-output.html", "quality/baseline.toml", "src/hal/stack/apply.py", "src/hal/stack/compose.py", "src/hal/stack/core_phase.py", "src/hal/stack/result_rows.py", "src/hal/stack/service_recreate.py", "src/hal/stack/unit_plans.py", "tests/support/stack_apply_fakes.py", "tests/test_stack_apply.py", "tests/test_stack_apply_built_image.py", "tests/test_stack_apply_image_move.py", "tests/test_stack_apply_legal.py", "tests/test_stack_apply_recreate.py", "tests/test_stack_core.py", "tests/test_stack_result_rows.py"]
+scope = ["docs/design/hal-output.html", "probe/speech/probe.py", "quality/baseline.toml", "src/hal/stack/apply.py", "src/hal/stack/compose.py", "src/hal/stack/core_phase.py", "src/hal/stack/result_rows.py", "src/hal/stack/service_recreate.py", "src/hal/stack/unit_plans.py", "tests/support/stack_apply_fakes.py", "tests/test_stack_apply.py", "tests/test_stack_apply_built_image.py", "tests/test_stack_apply_image_move.py", "tests/test_stack_apply_legal.py", "tests/test_stack_apply_recreate.py", "tests/test_stack_core.py", "tests/test_stack_result_rows.py"]
 opened_commit = "42d5254dd3a603eca0fa42e7cf889df561c9b44e"
 whole_reason = "One failure vocabulary: the typed records, their single row owner and the one printer replace the plain strings together, so no run prints two forms."
