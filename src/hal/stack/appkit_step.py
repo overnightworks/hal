@@ -86,7 +86,8 @@ class AppkitPlan:
     def write(self, progress: Progress) -> NotWritten | None:
         """Write the directory and remove the stale ones; the failure, or None. The progress
         names this step only while it runs."""
-        progress.unit, progress.step = APPKIT_UNIT, "write the appkit files"
+        progress.unit = APPKIT_UNIT
+        progress.begin("write the appkit files")
         target = self.repository
         try:
             for target in self.changed:
@@ -98,7 +99,8 @@ class AppkitPlan:
             failure = NotWritten.from_error(APPKIT_UNIT, target, error)
         else:
             failure = None
-        progress.unit = progress.step = ""
+        progress.unit = ""
+        progress.begin("")
         return failure
 
 

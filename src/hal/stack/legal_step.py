@@ -87,7 +87,8 @@ class LegalPlan:
     def write(self, progress: Progress) -> NotWritten | None:
         """Write the changed pages; the failure, or None. The progress names this step only
         while it runs."""
-        progress.unit, progress.step = LEGAL_UNIT, "write the legal pages"
+        progress.unit = LEGAL_UNIT
+        progress.begin("write the legal pages")
         failed = self.repository
         try:
             for page, change in self.changed.items():
@@ -101,7 +102,8 @@ class LegalPlan:
             failure = NotWritten.from_error(LEGAL_UNIT, failed, error)
         else:
             failure = None
-        progress.unit = progress.step = ""
+        progress.unit = ""
+        progress.begin("")
         return failure
 
 

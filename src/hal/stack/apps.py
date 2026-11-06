@@ -440,16 +440,16 @@ def _run(
     started = runtime.health.clock()
     engine = app_compose.AppCompose(key, runtime.srv / key, runtime.docker)
     try:
-        progress.step = f"look whether {key} was switched off"
+        progress.begin(f"look whether {key} was switched off")
         _require_on(plan, marks)
         _build(plan, runtime, engine, progress)
         with marks.lock():
             _require_on(plan, marks)
-            progress.step = f"create the containers at {tag}; they may be partly replaced"
+            progress.begin(f"create the containers at {tag}; they may be partly replaced")
             engine.create(tag)
             _start(plan, engine, runtime, marks, progress)
         failure = _wait_until_healthy(plan, runtime, engine, marks, progress)
-        progress.step = f"record the deployment of {tag}"
+        progress.begin(f"record the deployment of {tag}")
         with marks.lock():
             _require_on_else_switch_off(plan, runtime, marks, progress)
             if failure is None:
@@ -477,13 +477,13 @@ def _build(
     app_checkout = deploy_checkout.AppCheckout(
         checkout.Git(runtime.srv / key, runtime.git), plan.url, plan.app.default_branch
     )
-    progress.step = f"check out {tag}"
+    progress.begin(f"check out {tag}")
     app_checkout.check_out(plan.sha)
-    progress.step = f"build at {tag}"
+    progress.begin(f"build at {tag}")
     engine.build(tag)
-    progress.step = f"pull at {tag}"
+    progress.begin(f"pull at {tag}")
     engine.pull(tag)
-    progress.step = f"check the volumes of the images at {tag}"
+    progress.begin(f"check the volumes of the images at {tag}")
     app_contract.check_image_volumes(
         _compose_text(app_checkout, plan.sha) or "", key, tag,
         engine.image_volumes(plan.services, tag),
@@ -499,7 +499,7 @@ def _start(
 ) -> None:
     """Start the created containers, under the switch lock; a failure is reported as a stop when
     one came in meanwhile."""
-    progress.step = f"start at {plan.release.tag}; the containers may be partly replaced"
+    progress.begin(f"start at {plan.release.tag}; the containers may be partly replaced")
     try:
         engine.start(plan.release.tag)
     except compose.ComposeError:
@@ -519,7 +519,7 @@ def _wait_until_healthy(
     after it decides what the stop leaves."""
     key, tag = plan.app.key, plan.release.tag
     try:
-        progress.step = f"wait for {key} to be healthy"
+        progress.begin(f"wait for {key} to be healthy")
         unhealthy = unhealthy_after_waiting(
             engine, plan.services, runtime.health, lambda: _require_on(plan, marks)
         )
@@ -554,11 +554,11 @@ def _switch_off(key: str, runtime: AppRuntime, progress: Progress) -> str | None
     progress.unit = key
     engine = app_compose.AppCompose(key, runtime.srv / key, runtime.docker)
     try:
-        progress.step = f"stop the containers of {key}"
+        progress.begin(f"stop the containers of {key}")
         engine.stop()
-        progress.step = f"remove the containers of {key}"
+        progress.begin(f"remove the containers of {key}")
         engine.remove()
-        progress.step = f"remove the one-off containers of {key}"
+        progress.begin(f"remove the one-off containers of {key}")
         removal_failure: compose.ComposeError | None = None
         if left := engine.containers():
             try:

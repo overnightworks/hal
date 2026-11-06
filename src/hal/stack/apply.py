@@ -579,7 +579,7 @@ def _observe_and_record(
 ) -> dict[str, SeenDown | NotOff]:
     """The failure of each started plan not observed as planned, by unit; each unit observed on
     records the followers that started with it (#89, P15)."""
-    progress.step = "observe the result"
+    progress.begin("observe the result")
     mismatched = unobserved(engine, started, planned.fleet.config, core_phase.watch)
     switched_on = [
         plan for plan in started if plan.action is Action.ON and plan.unit.key not in mismatched
@@ -692,10 +692,12 @@ def _confirm_and_switch(
         started = [plan for plan in changes if plan.unit.key not in withheld]
         mismatched = _observe_and_record(engine, planned, core_phase, started, progress)
         _write_switched_units(changes, {**withheld, **mismatched}, snapshots, writer)
-        progress.unit, progress.step = reconcile.REALM_UNIT, "apply the realm step"
+        progress.unit = reconcile.REALM_UNIT
+        progress.begin("apply the realm step")
         realm_failed = _apply_realm(engine, planned, marks, core_phase)
         writer.enter(PlanGroup.LITELLM)
-        progress.unit, progress.step = litellm_keys.LITELLM_SERVICE, "apply the key step"
+        progress.unit = litellm_keys.LITELLM_SERVICE
+        progress.begin("apply the key step")
         keys_failed = _apply_keys(engine, planned, writer)
         writer.enter(PlanGroup.APPS)
         apps_failed = _apply_apps(planned, marks, progress, writer)
