@@ -1,8 +1,0 @@
-claim_id = "717f378017124c599142dc7b3e883f02"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "171c02b4e12af39111be7bbc726973529e7324cf"
-branch = "claude/issue-1086-hal-r"
-scope = ["agent-service", "compose.yaml", "docs/agent-service.md", "fleet.yaml"]
-opened_commit = "679c3d1fdd338fc1b068fd1f4ea8aa4a9f585f2a"
-whole_reason = "One removal of one retired service: its compose service, unit, code tree and document go together, since none of them works without the others."
