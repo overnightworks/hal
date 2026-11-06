@@ -529,7 +529,7 @@ def test_a_switch_off_reads_no_keys_and_removes_the_containers_keeping_the_volum
     assert find_row(plan, LITELLM.key, PlanEvent.SWITCH_OFF, "volumes litellm-db kept")
     assert key_step_rows(plan) == []
     assert (one_offs(scripted), keys.writes) == ([], [])
-    assert "litellm is off" in result
+    assert find_row(result, "litellm", ResultEvent.SWITCHED_OFF)
 
 
 def test_a_stop_that_keeps_litellm_off_reads_no_keys_and_changes_nothing(

@@ -50,6 +50,7 @@ from hal.backup.settings import Settings  # noqa: E402
 from hal.output import write_line  # noqa: E402
 from hal.stack import api_limits, catalog, core, litellm_keys  # noqa: E402
 from hal.stack.litellm_admin import hashed  # noqa: E402
+from hal.stack.result_rows import ResultEvent  # noqa: E402
 
 PROJECT = "edge-litellm-unit-probe"
 UNIT = litellm_keys.UNIT
@@ -66,7 +67,8 @@ KEY_TABLE = '"LiteLLM_VerificationToken"'
 COMPOSE_FILE = "compose.yaml"
 YES_PROMPT = "Type yes"
 PLAN_END = "to apply"
-LITELLM_ON = "litellm is on"
+LITELLM_ON = re.compile(rf"\blitellm\s+{ResultEvent.SWITCHED_ON}\b")
+LITELLM_OFF = re.compile(rf"\blitellm\s+{ResultEvent.SWITCHED_OFF}\b")
 LIVE_RESTORE = re.compile(r"pre-apply snapshot [0-9a-f]+, `hal restore litellm --live --snapshot")
 CELL_U14C = "U14 (c)"
 ENTRY = re.compile(r"^ {2}litellm:\n(?: {4}.*\n)+", re.MULTILINE)
@@ -410,14 +412,15 @@ class Probe:
     def cell_u3(self) -> None:
         output, ran = self.apply("U3", HAL_OK)
         after = output.partition(PLAN_END)[2]
-        expect(LITELLM_ON in after and "next:" not in after, f"U3: {after[-300:]}")
+        expect(LITELLM_ON.search(after) is not None and "next:" not in after, f"U3: {after[-300:]}")
         expect("litellm keys" not in after, f"U3: the key step printed after the yes: {after}")
         expect(self.running() == set(SERVICES), f"U3: running {self.running()}")
         record = json.loads((self.home / ".local/state/edge" / core.APPLIED_FILE).read_text())
         expect(FRONT in record, f"U3: {FRONT} is not recorded")
         expect(ran.created == 0, f"U3: E saw {ran}")
         self.hold(
-            "U3", f"litellm is on, exit 0, the three containers run, {FRONT} recorded, E empty"
+            "U3",
+            f"litellm switched on, exit 0, the three containers run, {FRONT} recorded, E empty",
         )
 
     def cell_u5(self) -> None:
@@ -521,14 +524,17 @@ class Probe:
             "litellm keys" not in output and "key changed" not in output,
             f"U7: the key step planned: {plan}",
         )
-        expect("litellm is off" in after and ran.created == 0, f"U7: E {ran}: {after[-200:]}")
+        expect(
+            LITELLM_OFF.search(after) is not None and ran.created == 0,
+            f"U7: E {ran}: {after[-200:]}",
+        )
         self.run(
             ["docker", "volume", "inspect", f"{PROJECT}_litellm-db"]
         )  # a missing volume exits 1
         self.hold(
             "U7",
-            "switch off with the volume kept, nothing under litellm, litellm is off, E empty, "
-            "the volume exists",
+            "switch off with the volume kept, nothing under litellm, litellm switched off, "
+            "E empty, the volume exists",
         )
 
     def cell_u12(self) -> None:
@@ -536,7 +542,8 @@ class Probe:
         self.set_enabled(True)
         output, ran = self.apply("U12", HAL_FAILURE)
         expect(
-            "partial, litellm is not on after the change" in output and LITELLM_ON not in output,
+            "partial, litellm is not on after the change" in output
+            and LITELLM_ON.search(output) is None,
             f"U12: {output[-300:]}",
         )
         expect(LIVE_RESTORE.search(output) is not None, f"U12: no way back: {output[-300:]}")
@@ -554,10 +561,12 @@ class Probe:
         for _ in range(2):
             code, output, _ = self.hal("apply", "--local")
             said.append(f"exit {code}: {output.partition('to apply')[2][-160:] or output[-160:]}")
-            if LITELLM_ON in output:
+            if LITELLM_ON.search(output):
                 break
         else:
-            raise edge_copy.ProbeFailed(f"R1: no `litellm is on` within two applies: {said}")
+            raise edge_copy.ProbeFailed(
+                f"R1: no `litellm switched on` row within two applies: {said}"
+            )
         self.hold("R1", f"{len(said)} applies; {' | '.join(said)}")
 
     def cell_u8(self) -> None:

@@ -269,8 +269,8 @@ Reihenfolge, und wie der Eintrag in `applied.json` gefuehrt wird:
   dem Start des Dienstes ab, nennt die Zeile nur den Snapshot; ab dem Start, der den Dienst erzeugt,
   auch `hal restore <einheit> --live`. Besteht der Dienst und fehlt nur die Datenbank, erzeugt der
   Start nichts, was ein Restore zuruecknaehme: die Zeile nennt dann nur den Snapshot. Eine
-  Teilzeile nennt Snapshot und Rueckweg jeder Einheit des Laufs, die einen hat; die Ergebniszeile
-  einer angeschalteten Einheit nennt ihren Snapshot (`snapshot <id> proven`). Ohne Volume, und wenn
+  Teilzeile nennt Snapshot und Rueckweg jeder Einheit des Laufs, die einen hat; ein bewiesener Snapshot
+  steht als Detailzeile unter der Zeile der angeschalteten Einheit (`pre-apply snapshot <id> · proven`). Ohne Volume, und wenn
   jeder Container besteht, gibt es keinen Snapshot.
 
 **Setup.** Eine Einheit mit `setup` wird erst angeschaltet, wenn `<setup> --check` Exit 0 gibt. Der

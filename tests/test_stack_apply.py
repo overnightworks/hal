@@ -95,6 +95,7 @@ from hal.stack.realm import reconcile
 from hal.stack.result_rows import ResultEvent
 from hal.stack.unit_plans import ImageReference, KeptImage, plan_kept_images
 
+SWITCHED_ON, SWITCHED_OFF = ResultEvent.SWITCHED_ON, ResultEvent.SWITCHED_OFF
 (
     agent_service_unit,
     applied_core,
@@ -183,7 +184,7 @@ def test_switching_on_starts_exactly_the_profiles_services(switch, scripted):
     }
     starting = ["up", "-d", "--no-recreate", *STEP_CA_SERVICES]
     assert ["--profile", "step-ca", *starting] in scripted.calls
-    assert "step-ca is on" in out
+    assert find_row(out, "step-ca", SWITCHED_ON, f"{', '.join(STEP_CA_SERVICES)} · up")
 
 
 def test_switching_on_asks_the_setup_check_first(switch, setup_check, repository):
@@ -204,7 +205,7 @@ def test_switching_off_removes_the_containers_and_names_the_volumes_that_stay(
 
     assert exit_code == 0
     assert scripted.containers == {}
-    assert "step-ca is off" in out
+    assert find_row(out, "step-ca", SWITCHED_OFF, "volumes step-ca, traefik-mcp-acme kept")
     assert find_row(out, "step-ca", PlanEvent.SWITCH_OFF, "volumes step-ca, traefik-mcp-acme kept")
 
 
@@ -305,7 +306,7 @@ def test_a_failed_removal_is_partial_and_never_reported_as_applied(switch, scrip
     assert "partial" in err
     assert "step-ca" in err
     assert "last line" in err
-    assert "is off" not in out
+    assert SWITCHED_OFF not in plain(out)
 
 
 def test_a_profile_of_servers_without_a_restart_policy_is_on_only_while_they_run(
@@ -350,7 +351,7 @@ def test_a_start_that_leaves_the_unit_down_is_partial(switch, scripted):
 
     assert exit_code == 1
     assert "partial, step-ca is not on after the change" in err
-    assert "is on" not in out
+    assert SWITCHED_ON not in plain(out)
 
 
 # --- #75: switching on starts existing containers as they are, never recreates them -------------
@@ -358,16 +359,16 @@ def test_a_start_that_leaves_the_unit_down_is_partial(switch, scripted):
 SWITCH_ON_CELLS = {
     # cell: (containers before, services whose definition changed, the line apply prints)
     "cell 1, all running, nothing changed": (STEP_CA_ON, set(), "nothing to change"),
-    "cell 2, db running, app exited, db image changed": (APP_EXITED, {"step-ca"}, "step-ca is on"),
+    "cell 2, db running, app exited, db image changed": (APP_EXITED, {"step-ca"}, SWITCHED_ON),
     "cell 4, all exited, definitions changed": (
         dict.fromkeys(STEP_CA_SERVICES, "exited"),
         set(STEP_CA_SERVICES),
-        "step-ca is on",
+        SWITCHED_ON,
     ),
-    "cell 5, no containers, the unit was off": ({}, set(), "step-ca is on"),
+    "cell 5, no containers, the unit was off": ({}, set(), SWITCHED_ON),
     # #34 finding 39: APP_EXITED with nothing changed is cell 2 without the changed definition;
     # cell 6 (an exited one-shot counts as up) is cell 1's data
-    "cell 2 without a changed definition": (APP_EXITED, set(), "step-ca is on"),
+    "cell 2 without a changed definition": (APP_EXITED, set(), SWITCHED_ON),
 }
 
 
@@ -403,7 +404,7 @@ def test_a_switch_on_whose_start_fails_is_partial_as_before(switch, scripted):
 
     assert exit_code == 1
     assert "partial, step-ca: could not start, `docker compose up` exited 1: last line" in err
-    assert "is on" not in out
+    assert SWITCHED_ON not in plain(out)
 
 
 def test_the_repositorys_agent_service_unit_starts_both_services_and_then_changes_nothing(
@@ -415,7 +416,7 @@ def test_the_repositorys_agent_service_unit_starts_both_services_and_then_change
 
     assert exit_code == 0
     assert setup_check.commands == [[str(repository / "agent-service/setup"), "--check"]]
-    assert "agent-service is on" in out
+    assert find_row(out, "agent-service", SWITCHED_ON)
     assert scripted.containers == dict.fromkeys(agent_service_unit, "running")
 
     exit_code, out, _ = switch()
@@ -450,32 +451,29 @@ def test_an_agent_service_whose_image_or_login_is_missing_is_partial_and_never_o
         f"partial, agent-service: could not start, `docker compose up` exited 1: {docker_line}"
         in err
     )
-    assert "agent-service is on" not in out
+    assert not find_row(out, "agent-service", SWITCHED_ON)
 
 
 @pytest.mark.usefixtures("agent_service_unit")
-def test_an_agent_service_that_is_created_but_never_runs_is_partial_and_never_on(switch, scripted):
-    """#214 S2: a container that exists but does not run is not reported on."""
-    scripted.unstartable = {"agent-service"}
+@pytest.mark.parametrize(
+    ("failure", "partial"),
+    [
+        ("unstartable", "partial, agent-service"),
+        ("crash_loops", "partial, agent-service is not on after the change"),
+    ],
+)
+def test_an_agent_service_that_never_runs_or_restarts_is_partial_and_never_on(
+    switch, scripted, failure, partial
+):
+    """#214 S2: a container that exists but does not run, or runs and then restarts (a refused
+    login), is found by the watch and never reported or recorded on."""
+    setattr(scripted, failure, {"agent-service"})
 
     exit_code, out, err = switch()
 
     assert exit_code == 1
-    assert "partial, agent-service" in err
-    assert "agent-service is on" not in out
-
-
-@pytest.mark.usefixtures("agent_service_unit")
-def test_an_agent_service_that_runs_and_then_restarts_is_partial_and_never_on(switch, scripted):
-    """#214 S2: the first look after `up` sees it running; a refused login makes it restart, and
-    the watch finds that before the unit is reported or recorded on."""
-    scripted.crash_loops = {"agent-service"}
-
-    exit_code, out, err = switch()
-
-    assert exit_code == 1
-    assert "partial, agent-service is not on after the change" in err
-    assert "agent-service is on" not in out
+    assert partial in err
+    assert not find_row(out, "agent-service", SWITCHED_ON)
 
 
 def test_every_service_that_is_down_at_any_look_of_the_watch_is_named(
@@ -1185,7 +1183,7 @@ def test_a_clean_main_in_real_git_switches_on_as_before(switch, scripted, real_m
 
     assert exit_code == 0
     assert scripted.containers["step-ca"] == "running"
-    assert "step-ca is on" in out
+    assert find_row(out, "step-ca", SWITCHED_ON)
 
 
 def test_traefik_yml_replaced_by_a_directory_refuses_before_compose(switch, scripted, real_main):
@@ -1661,7 +1659,7 @@ def test_a_switch_that_appears_after_the_plan_keeps_the_unit_down(switch, script
     assert exit_code == 1
     assert "step-ca was switched off meanwhile (since 17.10. 22:10); not started" in err
     assert scripted.changing_verbs() == []
-    assert "is on" not in out
+    assert SWITCHED_ON not in plain(out)
 
 
 def test_a_switch_renewed_during_a_start_is_kept(start, scripted, state):
@@ -2479,7 +2477,7 @@ def test_a_core_change_and_a_unit_switch_share_one_plan_and_one_yes_core_first(
     assert plain(out).count("Type yes to apply") == 1
     starting_step_ca = unit_calls(scripted)[0]
     assert scripted.calls.index(RECREATE_TRAEFIK) < scripted.calls.index(starting_step_ca)
-    assert "step-ca is on" in out
+    assert find_row(out, "step-ca", SWITCHED_ON)
 
 
 def test_a_missing_traefik_yml_cannot_be_planned_and_is_named(
@@ -2825,7 +2823,7 @@ def test_a_unit_switch_without_a_core_recreate_never_reads_the_profile_binds(
     exit_code, out, _ = switch()
 
     assert exit_code == 0
-    assert "step-ca is on" in out
+    assert find_row(out, "step-ca", SWITCHED_ON)
     assert unit_calls(scripted) != []
     assert RECREATE_TRAEFIK not in scripted.calls
 
@@ -2922,7 +2920,7 @@ def test_a_socket_proxy_change_and_a_unit_switch_share_one_yes_and_the_core_goes
     starting_step_ca = unit_calls(scripted)[0]
     assert scripted.calls.index(RECREATE_TRAEFIK) < scripted.calls.index(starting_step_ca)
     assert up_calls(scripted)[:2] == [RECREATE_SOCKET_PROXY, RECREATE_TRAEFIK]
-    assert row_at(out, *TRAEFIK_RECREATED) < plain(out).index("step-ca is on")
+    assert row_at(out, *TRAEFIK_RECREATED) < row_at(out, "step-ca", SWITCHED_ON)
 
 
 # --- #93: a core service stopped between the plan and the yes is not started ------------------
@@ -3216,7 +3214,7 @@ def test_a_fixed_file_reaches_traefik_mcp_before_a_crashed_step_ca_is_started(
     assert find_row(out, "step-ca", PlanEvent.SWITCH_ON)
     starting_step_ca = unit_calls(scripted)[0]
     assert scripted.calls.index(RECREATE_FOLLOWER) < scripted.calls.index(starting_step_ca)
-    assert find_row(out, *FOLLOWER_RECREATED).start() < plain(out).index("step-ca is on")
+    assert find_row(out, *FOLLOWER_RECREATED).start() < row_at(out, "step-ca", SWITCHED_ON)
     assert follower_entry(state) == follower_digest(repository)
 
 
@@ -3291,7 +3289,9 @@ def test_a_core_change_a_follower_change_and_a_unit_switch_share_one_yes_in_orde
     assert row_at(out, *SOCKET_PROXY_RECREATED, "barriers proven") < row_at(
         out, *TRAEFIK_RECREATED, "barriers proven"
     )
-    assert row_at(out, *TRAEFIK_RECREATED, "barriers proven") < at < plain(out).index("echo is on")
+    assert (
+        row_at(out, *TRAEFIK_RECREATED, "barriers proven") < at < row_at(out, "echo", SWITCHED_ON)
+    )
     assert not find_row(out, "traefik-mcp", ResultEvent.RECREATED, "barriers proven")
 
 
@@ -3431,7 +3431,7 @@ def test_a_unit_planned_off_is_not_named_for_its_image(switch, scripted, reposit
 
     assert exit_code == 0
     assert OLD_IMAGE not in out
-    assert "step-ca is off" in out
+    assert find_row(out, "step-ca", SWITCHED_OFF)
 
 
 def test_a_switched_off_unit_with_a_running_container_is_named_and_stays_stopped(
@@ -3558,7 +3558,7 @@ def test_the_repositorys_agent_service_unit_that_is_not_set_up_runs_its_setup_wi
     assert exit_code == 0
     assert "run `agent-service/setup` now" in out
     assert setup_run.commands == [(repository / "agent-service/setup", repository)]
-    assert "agent-service is on" in out
+    assert find_row(out, "agent-service", SWITCHED_ON)
 
 
 KEYCLOAK_DISABLED = "services:\n  keycloak:\n    run: {enabled: false, setup: keycloak/init}\n"

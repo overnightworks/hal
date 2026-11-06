@@ -128,6 +128,7 @@ from hal.stack.result_rows import (
     not_written_row,
     partial_error,
     result_rows,
+    unit_row,
     unproven_partial,
     unproven_row,
     waiting_row,
@@ -727,6 +728,7 @@ def _confirm_and_switch(
                 withheld[plan.unit.key] = since
         started = [plan for plan in changes if plan.unit.key not in withheld]
         mismatched = _observe_and_record(engine, planned, core_phase, started, progress)
+        _write_switched_units(started, mismatched, snapshots)
         progress.unit, progress.step = reconcile.REALM_UNIT, "apply the realm step"
         realm_failed = _apply_realm(engine, planned, marks, core_phase)
         progress.unit, progress.step = litellm_keys.LITELLM_SERVICE, "apply the key step"
@@ -743,7 +745,15 @@ def _confirm_and_switch(
         _say_interrupted(progress, interruption, snapshots.way_back())
         return ApplyExit.REFUSED
     later_failed = realm_failed or keys_failed or apps_failed
-    return _report_switched(changes, withheld, mismatched, later_failed, snapshots)
+    return _report_switched(withheld, mismatched, later_failed, snapshots)
+
+
+def _write_switched_units(
+    started: Sequence[UnitPlan], mismatched: Sequence[UnitPlan], snapshots: SwitchOnSnapshots
+) -> None:
+    for plan in started:
+        if plan not in mismatched:
+            write_row(unit_row(plan, snapshots.taken.get(plan.unit.key)))
 
 
 def _with_way_back(failure: str, snapshots: SwitchOnSnapshots) -> str:
@@ -754,7 +764,6 @@ def _with_way_back(failure: str, snapshots: SwitchOnSnapshots) -> str:
 
 
 def _report_switched(
-    changes: Sequence[UnitPlan],
     withheld: Mapping[str, str],
     mismatched: Sequence[UnitPlan],
     later_steps_failed: bool,
@@ -770,7 +779,4 @@ def _report_switched(
         write_error(f"partial, {snapshots.way_back()}")  # the later steps' lines name no snapshot
     if mismatched or withheld or later_steps_failed:
         return ApplyExit.REFUSED
-    for plan in changes:
-        facts = (f"{plan.unit.key} is {plan.action}", snapshots.proven(plan.unit.key))
-        write_line(" · ".join(filter(None, facts)))
     return ApplyExit.APPLIED_OR_NOTHING

@@ -48,12 +48,14 @@ from support.stack_external import (
     live_checkout,  # noqa: F401 the fixture, requested by name below
 )
 from support.stack_global_stop import hosts_asked  # noqa: F401 the fixture, used by `fakes`
+from support.stack_plan_rows import find_row
 from support.workstation_support import write_hal_config
 
 from hal import cli, stack_commands
 from hal.grammar import ExitCode
 from hal.stack import apply, checkout, emergency, switches, tunnel
 from hal.stack import cli as stack
+from hal.stack.result_rows import ResultEvent
 from hal.stack.update import UpdateEnd
 
 (
@@ -344,7 +346,7 @@ def test_apply_local_applies_the_local_part_alone(hal, applying):
     result = hal("apply", "--local", answers=("yes",))
 
     assert result.exit_code == ExitCode.OK
-    assert "step-ca is on" in result.out
+    assert find_row(result.out, "step-ca", ResultEvent.SWITCHED_ON)
     assert applying.publish_never_began()
 
 

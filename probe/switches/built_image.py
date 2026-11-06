@@ -31,6 +31,7 @@ from __future__ import annotations
 import grp
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -47,9 +48,11 @@ from hal.grammar import ExitCode  # noqa: E402
 from hal.output import write_line  # noqa: E402
 from hal.stack import compose  # noqa: E402
 from hal.stack.built_image import ENDS_RUNS  # noqa: E402
+from hal.stack.result_rows import ResultEvent  # noqa: E402
 
 PROJECT = "edge-built-image-probe"
 UNIT = "built-probe"
+UNIT_ON = re.compile(rf"\b{UNIT}\s+{ResultEvent.SWITCHED_ON}\b")
 RECIPE = f"{UNIT}/image"
 ZONE = "built-image.invalid"
 FLEET = (
@@ -196,7 +199,7 @@ class Drive:
     def d1a_a_bumped_tag(self) -> None:
         first = f"{TAG_REPOSITORY}:d1a-old"
         out = self.hal()
-        expect(f"{UNIT} is on" in out, f"the first apply said: {out[-300:]}")
+        expect(UNIT_ON.search(out) is not None, f"the first apply said: {out[-300:]}")
         before = self.container()
         bumped = self.tag(IMAGE_OTHER, "d1a-new")
         self.use_service(bumped)
@@ -315,7 +318,7 @@ class Drive:
         path.parent.mkdir(parents=True)
         path.write_text("probe\n")
         out = self.hal()
-        expect(f"{UNIT} is on" in out, f"D2 with the file the apply said: {out[-300:]}")
+        expect(UNIT_ON.search(out) is not None, f"D2 with the file the apply said: {out[-300:]}")
         expect(self.container()["state"] == "running", "D2 the unit is not running")
         write_line("D2 held: the missing file refuses before the yes; written, the unit starts")
 

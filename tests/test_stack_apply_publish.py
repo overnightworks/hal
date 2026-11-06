@@ -40,6 +40,7 @@ from support.stack_external import (
     home,  # noqa: F401 the fixture, requested by name below
     live_checkout,  # noqa: F401 the fixture, requested by name below
 )
+from support.stack_plan_rows import find_row, row_at
 from support.workstation_support import write_hal_config
 
 from hal import cli
@@ -47,6 +48,7 @@ from hal.grammar import ExitCode
 from hal.stack import apply
 from hal.stack.external import cli as external_cli
 from hal.stack.external import cloudflare_read
+from hal.stack.result_rows import ResultEvent
 
 (
     failing_app,
@@ -152,8 +154,8 @@ def test_changes_on_both_sides_ask_the_local_plan_then_the_publish(world):
 
     assert result.exit_code == ExitCode.OK
     assert result.out.count(PLAN_QUESTION) == 2
-    assert result.out.index(PLAN_QUESTION) < result.out.index("step-ca is on")
-    assert result.out.index("step-ca is on") < result.out.rindex(PLAN_QUESTION)
+    assert result.out.index(PLAN_QUESTION) < row_at(result.out, "step-ca", ResultEvent.SWITCHED_ON)
+    assert row_at(result.out, "step-ca", ResultEvent.SWITCHED_ON) < result.out.rindex(PLAN_QUESTION)
     assert world.fake_tofu.call("apply")
 
 
@@ -168,7 +170,7 @@ def test_a_missing_setup_is_asked_before_the_two_plans(world):
     assert result.out.count("Type yes") == 3
     assert result.out.count(PLAN_QUESTION) == 2
     assert result.out.index(SETUP_QUESTION) < result.out.index(PLAN_QUESTION)
-    assert result.out.index("step-ca is on") < result.out.rindex(PLAN_QUESTION)
+    assert row_at(result.out, "step-ca", ResultEvent.SWITCHED_ON) < result.out.rindex(PLAN_QUESTION)
 
 
 def test_an_interrupted_setup_whose_containers_run_is_asked_again_and_publishes_nothing_before(
@@ -297,7 +299,7 @@ def test_a_missing_write_token_after_the_local_part_ends_with_3_naming_the_file(
     result = world.run("yes")
 
     assert result.exit_code == ExitCode.FAILURE
-    assert "step-ca is on" in result.out
+    assert find_row(result.out, "step-ca", ResultEvent.SWITCHED_ON)
     assert "fleet-write" in result.err
     assert world.fake_tofu.calls() == []
 
@@ -336,7 +338,7 @@ def test_ctrl_c_in_the_gap_after_the_local_part_publishes_nothing(world, monkeyp
 
     assert result.exit_code == ExitCode.FAILURE
     assert "hal apply: interrupted, nothing published" in result.err
-    assert "step-ca is on" in result.out
+    assert find_row(result.out, "step-ca", ResultEvent.SWITCHED_ON)
     assert world.publish_never_began()
 
 
