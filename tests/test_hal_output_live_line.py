@@ -21,6 +21,7 @@ from support.terminal_support import (
     StoppedTerminal,
     TerminalStream,
     frames_of,
+    no_newline_owed_after_the_test,  # noqa: F401 the autouse fixture, active in this module
     press_ctrl_c,
     put_on_terminals,
 )

@@ -3,10 +3,12 @@
 on the scripted boundaries of `tests/support/stack_apply.py`."""
 
 import io
+import os
 import shutil
-import stat
+import signal
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 from support.stack_apply import (
@@ -195,31 +197,54 @@ def test_a_ctrl_c_in_the_realm_stops_the_line_and_the_next_step_draws_no_frame(
     assert find_row(out, REALM_UNIT, ResultEvent.REALM_FAILED, "interrupted")
 
 
-class CtrlCAtTheFirstWait(subprocess.Popen):
-    """The snapshot's process, with a Ctrl-C as hal waits for it the first time."""
+class SnapshotProcess:
+    """`hal backup` as a scripted process: its first wait meets a Ctrl-C, the grace after it meets
+    a second one that only the grace may end, and the process outlives the grace."""
 
-    pressed = False
+    pid = 4711
+    returncode = -signal.SIGKILL
 
-    def communicate(self, *arguments, **options):
-        if not CtrlCAtTheFirstWait.pressed:
-            CtrlCAtTheFirstWait.pressed = True
+    def __init__(self, *_arguments: object, **_options: object) -> None:
+        self.waits = 0
+
+    def __enter__(self) -> SnapshotProcess:
+        return self
+
+    def __exit__(self, *_exception: object) -> None:
+        return None
+
+    def communicate(self, _stdin: str | None = None, timeout: float | None = None):
+        self.waits += 1
+        if self.waits <= 2:
             press_ctrl_c()
-        return super().communicate(*arguments, **options)
+        if self.waits == 3:
+            raise subprocess.TimeoutExpired("hal backup", timeout)
+        return "", ""
 
 
-@pytest.mark.usefixtures("realm_unit")
+@pytest.fixture
+def scripted_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The snapshot step on `SnapshotProcess` and a stopped clock; no signal reaches a group."""
+    monkeypatch.setattr(
+        pre_apply,
+        "subprocess",
+        SimpleNamespace(
+            Popen=SnapshotProcess,
+            PIPE=subprocess.PIPE,
+            TimeoutExpired=subprocess.TimeoutExpired,
+            CompletedProcess=subprocess.CompletedProcess,
+        ),
+    )
+    monkeypatch.setattr(pre_apply, "time", SimpleNamespace(monotonic=lambda: 0.0))
+    monkeypatch.setattr(os, "killpg", lambda *_call: None)
+
+
+@pytest.mark.usefixtures("realm_unit", "scripted_snapshot")
 def test_a_ctrl_c_in_a_snapshot_puts_the_waiting_row_on_its_own_line_and_no_frame_follows(
     switch,  # noqa: F811
-    repository,  # noqa: F811
     monkeypatch,
 ):
     a_person_watches(monkeypatch)
-    hal = repository / ".venv/bin/hal"
-    hal.parent.mkdir(parents=True)
-    hal.write_text("#!/bin/sh\nexec sleep 30\n")
-    hal.chmod(hal.stat().st_mode | stat.S_IXUSR)
-    monkeypatch.setattr(pre_apply.subprocess, "Popen", CtrlCAtTheFirstWait)
-    monkeypatch.setattr(CtrlCAtTheFirstWait, "pressed", False)
     ticks = ticking_line(monkeypatch)
 
     _, out, _ = switch(installed_backup=True, while_prompt_waits=on_one_terminal(monkeypatch))

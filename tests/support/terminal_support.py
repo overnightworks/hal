@@ -6,7 +6,7 @@ import re
 import signal
 import sys
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from types import SimpleNamespace
 
 import pytest
@@ -69,6 +69,14 @@ def press_ctrl_c() -> None:
     signal.raise_signal(signal.SIGINT)
 
 
+@pytest.fixture(autouse=True)
+def no_newline_owed_after_the_test() -> Iterator[None]:
+    """A frame a test's Ctrl-C kept leaves a newline owed to that test's own stream, process-wide
+    state: a writer after the test ends it, so the next test's first writer does not print it."""
+    yield
+    hal.output.write_line("", end="")
+
+
 class StoppedTerminal(FrameStream):
     """A terminal stopped with Ctrl-S: the redrawing thread's write hangs until it is resumed, or
     until a watchdog gives up, which only a stop without a bound lets happen."""
@@ -80,12 +88,22 @@ class StoppedTerminal(FrameStream):
         self.watchdog_fired = False
         self.writer: threading.Thread | None = None
 
+    def stops(self, text: str) -> bool:
+        return threading.current_thread() is not threading.main_thread()
+
     def write(self, text: str, /) -> int:
-        if threading.current_thread() is not threading.main_thread():
+        if self.stops(text):
             self.writer = threading.current_thread()
             self.hanging.set()
             self.watchdog_fired = not self.resumed.wait(timeout=10)
         return super().write(text)
+
+
+class TerminalStoppedAtTheErase(StoppedTerminal):
+    """A terminal stopped with Ctrl-S that lets the frames through and holds the erase."""
+
+    def stops(self, text: str) -> bool:
+        return super().stops(text) and text == ERASE
 
 
 class CountedTicks(threading.Event):

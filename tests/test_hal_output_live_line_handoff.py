@@ -9,6 +9,7 @@ import sys
 import threading
 from collections.abc import Iterator
 from enum import StrEnum
+from types import SimpleNamespace
 
 import pytest
 from support.terminal_support import (
@@ -16,7 +17,9 @@ from support.terminal_support import (
     ERASE,
     FrameStream,
     StoppedTerminal,
+    TerminalStoppedAtTheErase,
     frames_of,
+    no_newline_owed_after_the_test,  # noqa: F401 the autouse fixture, active in this module
     press_ctrl_c,
     put_on_terminals,
     ticking_line,
@@ -179,10 +182,14 @@ def test_a_ctrl_c_between_the_erase_and_the_print_leaves_no_newline_owed(
     ticks = ticking_line(monkeypatch)
     monkeypatch.setattr(hal.output, "LIVE_STOP_SECONDS", 0.01)
 
-    with pytest.raises(KeyboardInterrupt), live_line() as show:
-        show(SUBJECT, "Restart Docker")
-        assert shared.reached.wait(timeout=10)
-        a_row()
+    def block() -> None:
+        with live_line() as show:
+            show(SUBJECT, "Restart Docker")
+            assert shared.reached.wait(timeout=10)
+            a_row()
+
+    with pytest.raises(KeyboardInterrupt):
+        block()
     left = shared.getvalue()
     assert ticks.redrawer_ended()
     write_row(Row(Glyph.FAILED, SUBJECT, Step.INTERRUPTED), fresh_line=fresh_line)
@@ -217,10 +224,23 @@ def stopped_terminal(monkeypatch: pytest.MonkeyPatch) -> Iterator[StoppedTermina
     it."""
     stopped = StoppedTerminal()
     monkeypatch.setattr(hal.output, "LIVE_STOP_SECONDS", 0.01)
+    yield from resumed_at_the_end(stopped)
+
+
+def resumed_at_the_end(stopped: StoppedTerminal) -> Iterator[StoppedTerminal]:
     yield stopped
     stopped.resumed.set()
     if stopped.writer is not None:
         stopped.writer.join(timeout=10)
+
+
+@pytest.fixture
+def terminal_stopped_at_the_erase(monkeypatch: pytest.MonkeyPatch) -> Iterator[StoppedTerminal]:
+    """A terminal stopped with Ctrl-S that holds the erase of the block's end, which the teardown
+    resumes; the redraw thread never ticks."""
+    monkeypatch.setattr(hal.output, "LIVE_TICK_SECONDS", 3600)
+    monkeypatch.setattr(hal.output, "LIVE_STOP_SECONDS", 0.01)
+    yield from resumed_at_the_end(TerminalStoppedAtTheErase())
 
 
 def ctrl_c_once_the_main_thread_waits(lock: LockThatReportsTheWait) -> threading.Thread:
@@ -240,14 +260,20 @@ def test_a_ctrl_c_ends_a_writers_wait_at_the_lock_and_no_frame_starts_after_it(
     lock = LockThatReportsTheWait()
     ticking_line(monkeypatch, lock=lambda: lock)
 
-    with pytest.raises(KeyboardInterrupt), live_line() as show:
-        show(SUBJECT, "Restart Docker")
-        assert stopped_terminal.hanging.wait(timeout=10)
-        lock.armed = True
-        sender = ctrl_c_once_the_main_thread_waits(lock)
-        a_row()
+    senders: list[threading.Thread] = []
+
+    def block() -> None:
+        with live_line() as show:
+            show(SUBJECT, "Restart Docker")
+            assert stopped_terminal.hanging.wait(timeout=10)
+            lock.armed = True
+            senders.append(ctrl_c_once_the_main_thread_waits(lock))
+            a_row()
+
+    with pytest.raises(KeyboardInterrupt):
+        block()
     left = stopped_terminal.getvalue()
-    sender.join(timeout=10)
+    senders[0].join(timeout=10)
     stopped_terminal.resumed.set()
     stopped_terminal.writer.join(timeout=10)
     released = stopped_terminal.getvalue()
@@ -259,6 +285,57 @@ def test_a_ctrl_c_ends_a_writers_wait_at_the_lock_and_no_frame_starts_after_it(
     assert "restarted" not in released
     rest = stopped_terminal.getvalue()[len(released) :]
     assert visible_lines(rest) == [[], ["✗", SUBJECT, "interrupted"], []]
+
+
+@pytest.mark.parametrize(
+    ("erase_lands", "newline_owed"),
+    [(False, True), (True, False)],
+    ids=["terminal holds the erase", "erase lands in the stop"],
+)
+def test_a_ctrl_c_in_the_final_erase_owes_a_newline_only_while_the_frame_is_on_screen(
+    monkeypatch: pytest.MonkeyPatch,
+    terminal_stopped_at_the_erase: StoppedTerminal,
+    erase_lands: bool,
+    newline_owed: bool,
+) -> None:
+    stopped = terminal_stopped_at_the_erase
+    one_terminal(monkeypatch, stopped)
+
+    class CtrlCOnceTheEraseIsHeld(threading.Thread):
+        pressed = False
+
+        def join(self, timeout: float | None = None) -> None:
+            if not self.pressed:
+                self.pressed = True
+                assert stopped.hanging.wait(timeout=10)
+                press_ctrl_c()
+                if erase_lands:
+                    stopped.resumed.set()
+                    super().join(timeout=10)
+            super().join(timeout)
+
+    monkeypatch.setattr(
+        hal.output,
+        "threading",
+        SimpleNamespace(Thread=CtrlCOnceTheEraseIsHeld, Lock=threading.Lock, Event=threading.Event),
+    )
+
+    def block() -> None:
+        with live_line() as show:
+            show(SUBJECT, "Restart Docker")
+
+    with pytest.raises(KeyboardInterrupt):
+        block()
+    left = stopped.getvalue()
+    write_row(Row(Glyph.FAILED, SUBJECT, Step.INTERRUPTED))
+
+    rest = stopped.getvalue()[len(left) :]
+    assert not stopped.watchdog_fired
+    assert visible_lines(rest) == [
+        *([[]] if newline_owed else []),
+        ["✗", SUBJECT, "interrupted"],
+        [],
+    ]
 
 
 def test_a_show_after_the_line_stopped_returns_at_once_while_the_redraw_holds_the_lock(
@@ -274,8 +351,10 @@ def test_a_show_after_the_line_stopped_returns_at_once_while_the_redraw_holds_th
             press_ctrl_c()
         show(SUBJECT, "apply the key step")
         returned_while_held = stopped_terminal.writer.is_alive()
+        released_by_the_watchdog = stopped_terminal.watchdog_fired
 
     assert returned_while_held
+    assert not released_by_the_watchdog
     assert not stopped_terminal.resumed.is_set()
     assert "apply the key step" not in stopped_terminal.getvalue()
 

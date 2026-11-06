@@ -324,8 +324,9 @@ class _LiveLine:
 
     The barrier is `_stop_decided`, a plain flag so that a signal can read it at any instruction:
     from the moment it is set no frame starts, whether or not the thread could be joined. `_blank`
-    says what the screen holds; it changes before the write that makes it true, so a Ctrl-C
-    inside that write reads the screen it leaves."""
+    says what the screen holds; the redraw thread changes it before the write that makes it true.
+    The main thread's erase has a window between `_blank = True` and its write: a Ctrl-C there
+    leaves the frame with no newline owed."""
 
     def __init__(self) -> None:
         self._subject = ""
@@ -358,23 +359,19 @@ class _LiveLine:
                 self._thread.start()
 
     def give_way(self) -> None:
-        """A writer's first act: the drawn frame is erased, unless a stop was decided, before or
-        while it waited at the lock."""
+        """A writer's first act: the drawn frame is erased, unless a stop was decided. A Ctrl-C
+        while the writer waits at the lock raises in it, so a stop is never decided behind the
+        lock."""
         if self._stop_decided:
             return
         with self._lock:
-            if not self._stop_decided:
-                self._erase_frame()
+            self._erase_frame()
 
     def on_ctrl_c(self, _signal_number: int, _frame: FrameType | None) -> None:
         """Runs in place of the `KeyboardInterrupt`, wherever the Ctrl-C lands, also at the end of
         the block where no `except` would see it: a frame on screen becomes the newline the next
         writer owes, the line ends without its erase, then `stop` raises it. A Ctrl-C while `stop`
-        runs leaves the line, unless the thread wrote the erase or a stopped terminal still holds
-        it, and waits."""
-        global _newline_owed
-        if not self._blank:
-            _newline_owed = self._stream
+        runs waits for it, which settles the newline from the screen the thread leaves."""
         self._erase = False
         self._ctrl_c_held = True
         self.stop(erase=False)
@@ -382,7 +379,10 @@ class _LiveLine:
     def stop(self, *, erase: bool) -> None:
         """Ends the thread, then gives Ctrl-C back and raises one that came meanwhile. Only the
         first call acts. The wait ends at `LIVE_STOP_SECONDS`: a write the terminal holds, a frame
-        or the erase, keeps its daemon thread and lands at Ctrl-Q: that costs just the line."""
+        or the erase, keeps its daemon thread and lands at Ctrl-Q: that costs just the line. After
+        a Ctrl-C the next writer owes one newline if a frame is on screen when the wait ends: a
+        frame still drawn, or a held write of the thread, which counts as kept."""
+        global _newline_owed
         if self._stop_decided:
             return
         self._erase = erase
@@ -392,9 +392,14 @@ class _LiveLine:
             self._thread.join(LIVE_STOP_SECONDS)
             if self._thread.is_alive():
                 self._erase = False
+        if self._ctrl_c_held and (not self._blank or self._thread_holds_a_write()):
+            _newline_owed = self._stream
         signal.signal(signal.SIGINT, self._ctrl_c_before)
         if self._ctrl_c_held:
             signal.raise_signal(signal.SIGINT)
+
+    def _thread_holds_a_write(self) -> bool:
+        return self._thread is not None and self._thread.is_alive()
 
     def _redraw(self) -> None:
         while not self._wake.wait(LIVE_TICK_SECONDS):
@@ -473,8 +478,8 @@ def live_line() -> Iterator[Callable[[str, str], None]]:
         interrupted = True
         raise
     finally:
-        line.stop(erase=not interrupted)
         _active_line = None
+        line.stop(erase=not interrupted)
 
 
 VOWELS = "aeiou"
@@ -588,9 +593,8 @@ class GroupWriter:
         heading = self._entered
         if self._headed and heading is not None and heading not in self._printed:
             self._printed.add(heading)
-            if not _json_on():
-                _hand_off(sys.stdout, fresh_line=fresh_line)
-                fresh_line = False
+            _hand_off(sys.stdout, fresh_line=fresh_line and not _json_on())
+            fresh_line = False
             print(_styled(printable(str(heading)), _BOLD, sys.stdout))
         for row in rows:
             write_row(row, fresh_line=fresh_line)
