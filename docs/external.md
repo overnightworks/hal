@@ -21,9 +21,7 @@ nicht) und gibt sie nur an das Kind `tofu` weiter, dessen Umgebung eine Allowlis
 | `~/.secrets/cloudflare/fleet-write` | `CLOUDFLARE_API_TOKEN` (statt der Lese-Datei, sobald geschrieben wird) |
 | `~/.secrets/opentofu/state-passphrase` | `TF_VAR_state_passphrase` |
 
-Die GitHub-Tokens (`~/.secrets/github/fleet-read`, `fleet-admin`) werden nicht gelesen und nicht
-weitergegeben, bis edge#30 X2/X3 die GitHub-Einstellungen als Code bauen; die weiteren Token-Dateien
-folgen mit X5b (home-tools#10).
+Die weiteren Token-Dateien folgen mit X5b (home-tools#10).
 
 ## `hal check hosts [--json]`
 

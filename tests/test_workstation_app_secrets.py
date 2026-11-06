@@ -749,35 +749,37 @@ def test_hal_setup_fails_the_secrets_step_by_name_when_the_manifest_cannot_be_re
 
 
 def test_on_a_terminal_the_walk_shows_an_opened_page_dim_and_short(
-    turn_home: Sandbox, monkeypatch: pytest.MonkeyPatch
+    turn_home: Sandbox, use_manifest: Callable[[str], Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The `opened` shows host and path, with `?\u2026` only for a page that has a query."""
-    shown = walk_on_a_terminal(turn_home, monkeypatch, browser_opens=True)
+    shown = walk_on_a_terminal(turn_home, use_manifest, monkeypatch, browser_opens=True)
 
     assert [line for line in shown if "opened" in line and "Enter opens" not in line] == [
+        "\x1b[2m    opened dash.cloudflare.com/\x1b[0m",
+        "\x1b[2m    opened dash.cloudflare.com/\x1b[0m",
         "\x1b[2m    opened github.com/settings/personal-access-tokens/new?\u2026\x1b[0m",
-        "\x1b[2m    opened dash.cloudflare.com/\x1b[0m",
-        "\x1b[2m    opened dash.cloudflare.com/\x1b[0m",
     ]
 
 
 def test_on_a_terminal_the_walk_shows_a_page_nobody_opened_yellow_and_whole(
-    turn_home: Sandbox, monkeypatch: pytest.MonkeyPatch
+    turn_home: Sandbox, use_manifest: Callable[[str], Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The operator opens it by hand, so the whole address shows."""
-    shown = walk_on_a_terminal(turn_home, monkeypatch, browser_opens=False)
+    shown = walk_on_a_terminal(turn_home, use_manifest, monkeypatch, browser_opens=False)
 
     unopened = [line for line in shown if "no browser opened" in line]
     prefix = "\x1b[33m    no browser opened \u00b7 open it yourself: https://"
     assert len(unopened) == 3
     assert all(line.startswith(prefix) and line.endswith("\x1b[0m") for line in unopened)
-    assert unopened[0].count("?") == 1
-    assert unopened[1:] == [f"{prefix}dash.cloudflare.com/\x1b[0m"] * 2
+    assert unopened[-1].count("?") == 1
+    assert unopened[:-1] == [f"{prefix}dash.cloudflare.com/\x1b[0m"] * 2
 
 
-def walk_on_a_terminal(sandbox: Sandbox, monkeypatch: pytest.MonkeyPatch, *, browser_opens: bool) -> list[str]:
-    """The setup walk of the GitHub token and both TURN values with stdout on a terminal, nothing pasted."""
-    (sandbox.home / ".secrets/github/fleet-read").unlink()
+def walk_on_a_terminal(
+    sandbox: Sandbox, use_manifest: Callable[[str], Path], monkeypatch: pytest.MonkeyPatch, *, browser_opens: bool
+) -> list[str]:
+    """The setup walk of both TURN values and a GitHub token the packaged manifest lacks, with stdout on a terminal, nothing pasted."""
+    use_manifest(PACKAGED_MANIFEST.read_text() + "\n" + GUIDED_TOKEN)
     stdout = put_stdout_on_a_terminal(monkeypatch)
     boundaries = Boundaries(FakeTerminal(browser_opens=browser_opens).boundary(), never_verified, FakeSync().sync, never_run)
 
