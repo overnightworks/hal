@@ -3,5 +3,5 @@ agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
 role = "builder"
 base = "980470b3a78f04bbf3df6a3162e3ee05070165d7"
 branch = "claude/issue-1103-tunnel-check-host"
-scope = ["fleet.yaml"]
+scope = ["external/tests/live.tftest.hcl", "fleet.yaml"]
 opened_commit = "8ccb91dbaba4217dc61db485ad467c60e1b8f716"
