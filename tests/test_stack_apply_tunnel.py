@@ -5,6 +5,7 @@ from pathlib import Path
 
 from support.stack_external import (
     CHANGING_PLAN,
+    RecordingReadyProber,
     fake_tofu,  # noqa: F401 the fixture, requested by name below
     home,  # noqa: F401 the fixture, requested by name below
     live_checkout,  # noqa: F401 the fixture, requested by name below
@@ -41,7 +42,12 @@ def test_the_plan_and_the_closing_check_use_the_tunnel_read_once(
     monkeypatch.setattr("builtins.input", lambda _prompt: "yes")
     monkeypatch.setattr(external_cli, "check_command", closing_check)
 
-    publish_on_stand_in(home, live_checkout, own_tunnel=lambda: next(answers))
+    publish_on_stand_in(
+        home,
+        live_checkout,
+        own_tunnel=lambda: next(answers),
+        prober_for=RecordingReadyProber(),
+    )
 
     assert "-var=tunnel_id=first-id" in fake_tofu.call("plan")["argv"]
     assert checked == ["first-id"]

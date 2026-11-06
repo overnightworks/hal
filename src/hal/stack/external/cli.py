@@ -81,7 +81,7 @@ def apply_command(
                 apply.ApplyExit.CANNOT_PLAN,
                 refusal=refusal,
             )
-            return _close_on_host_check(home, own_tunnel, closing, exit_code, run)
+            return _close_on_host_check(home, closing, exit_code, run)
     except KeyboardInterrupt:
         # an interrupt before the record exists left nothing behind: the fresh record says so
         return _exit_after_interrupt(locals().get("run") or _ApplyRun())
@@ -94,12 +94,6 @@ class _ApplyRun:
     progress: apply.Progress = field(default_factory=apply.Progress)
     committed_exit: int | None = None
     tunnel: cloudflare_read.OwnTunnel | None = None
-
-    def tunnel_read(
-        self, own_tunnel: Callable[[], cloudflare_read.OwnTunnel]
-    ) -> cloudflare_read.OwnTunnel:
-        """The tunnel the plan named, else the one `own_tunnel` reads."""
-        return self.tunnel or own_tunnel()
 
 
 def _exit_after_interrupt(run: _ApplyRun) -> int:
@@ -153,7 +147,6 @@ _CLOSING_LINES = {
 
 def _close_on_host_check(
     home: Path,
-    own_tunnel: Callable[[], cloudflare_read.OwnTunnel],
     closing: apply.ClosingCheck,
     apply_exit: int,
     run: _ApplyRun,
@@ -164,7 +157,9 @@ def _close_on_host_check(
     is never turned into "interrupted"."""
     if not closing.runs_the_check:
         return apply_exit
-    check_exit = check_command(home, own_tunnel=lambda: run.tunnel_read(own_tunnel))
+    tunnel = run.tunnel
+    assert tunnel is not None  # noqa: S101 - narrows the type; a closing check runs only after the plan read the tunnel
+    check_exit = check_command(home, own_tunnel=lambda: tunnel)
     with _signals_ignored():
         run.committed_exit = (
             apply_exit if check_exit == host_check.CheckExit.CLEAN else apply.ApplyExit.REFUSED
