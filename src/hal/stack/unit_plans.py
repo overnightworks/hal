@@ -549,8 +549,8 @@ class NotOff:
 
 @dataclass(frozen=True)
 class StepFailed:
-    """A step of the core phase that failed with `cause`; `subject` is the service or unit it
-    worked on, `core` while none is set."""
+    """A step of the apply that failed with `cause`; `subject` is the service or unit it worked
+    on, `core` while none is set."""
 
     subject: str
     step: str
@@ -584,28 +584,39 @@ def switch(
     marks: switches.Switches,
     read: Mapping[str, switches.Mark | None],
     snapshot_first: SnapshotFirst,
-) -> str | None:
-    """Switch one unit; the time of a switch that appeared meanwhile when the unit stays down. A
-    switch-on with a snapshot starts the unit's database alone for it, then the rest."""
+) -> SwitchedOffMeanwhile | None:
+    """Switch one unit; the services of a switch-on that a switch appeared meanwhile withheld,
+    with its time, when the unit stays down. A switch-on with a snapshot starts the unit's
+    database alone for it, then the rest."""
     progress.unit = plan.unit.key
     if plan.action is Action.ON:
         starter = _Starter(engine, plan, progress, marks, read[plan.unit.key])
         if plan.snapshot is None:
-            return starter.start(plan.services, "start")
+            return _withheld(plan, starter.start(plan.services, "start"), plan.services)
         database = plan.snapshot.database
         if since := starter.start((database,), f"start {database} alone"):
-            return since
-        return snapshot_first(
+            return _withheld(plan, since, plan.services)
+        rest = tuple(service for service in plan.services if service != database)
+        since = snapshot_first(
             plan.snapshot,
             lambda begin: starter.start(
                 plan.services, "start", begin if plan.creates_app else None
             ),
         )
+        return _withheld(plan, since, rest)
     progress.step = "stop"
     engine.stop(plan.unit.key, plan.services)
     progress.step = "remove the containers"
     engine.remove_containers(plan.unit.key, plan.services)
     return None
+
+
+def _withheld(
+    plan: UnitPlan, since: str | None, not_started: tuple[str, ...]
+) -> SwitchedOffMeanwhile | None:
+    if since is None:
+        return None
+    return SwitchedOffMeanwhile(plan.unit.key, since, ", ".join(not_started), left=NotDone.STARTED)
 
 
 @dataclass(frozen=True)

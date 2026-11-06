@@ -66,6 +66,7 @@ def test_every_service_of_a_unit_that_never_started_is_a_row_and_apply_is_next(
     assert exit_code == 1
     for service in STEP_CA_SERVICES:
         assert find_row(out, service, ResultEvent.NOT_RUNNING, "of the start")
+    assert not find_row(out, "step-ca", ResultEvent.SWITCHED_ON)
     assert partial_pair(STEP_CA_SERVICES[0], ResultEvent.NOT_RUNNING, command(Verb.APPLY)) in err
 
 
@@ -81,6 +82,7 @@ def test_a_switch_that_appears_while_the_prompt_waits_is_a_row_that_ends_not_sta
     assert f"since {describe_since(SWITCHED_OFF_AT)} · " in line
     assert line.endswith("not started")
     assert partial_pair("step-ca", ResultEvent.APP_HELD_OFF, command(Verb.START, "step-ca")) in err
+    assert not find_row(out, "step-ca", ResultEvent.SWITCHED_ON)
     assert scripted.changing_verbs() == []
 
 

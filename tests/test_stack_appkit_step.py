@@ -2,6 +2,7 @@
 `appkit-<version>/` in `legal/assets/` (served by the legal unit) and in each Keycloak theme's
 `resources/`, on the scripted boundaries of `tests/support/stack_apply.py`."""
 
+import errno
 import os
 import shutil
 import stat
@@ -231,13 +232,23 @@ def test_a_failed_copy_of_many_entries_names_the_first_reason_once(world, monkey
 
     assert exit_code == 1
     row = next(line for line in plain(out).splitlines() if "appkit" in line and "could not" in line)
-    assert row.endswith(" (No space left on device)")
+    assert row.count(_full_disk("first", "first-copy")) == 1
+    assert "second" not in row
     assert "(None)" not in out
 
 
+def _full_disk(source: str, destination: str) -> str:
+    """The reason `shutil.copytree` stores for an entry it could not copy."""
+    return str(OSError(errno.ENOSPC, os.strerror(errno.ENOSPC), source, destination))
+
+
 def _failing_copy(*_arguments, **_keywords):
-    full = "No space left on device"
-    raise shutil.Error([("first", "first-copy", full), ("second", "second-copy", full)])
+    raise shutil.Error(
+        [
+            ("first", "first-copy", _full_disk("first", "first-copy")),
+            ("second", "second-copy", _full_disk("second", "second-copy")),
+        ]
+    )
 
 
 def test_a_missing_appkit_is_one_cannot_plan_error(repository):  # noqa: F811

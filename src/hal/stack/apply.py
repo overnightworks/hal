@@ -138,7 +138,6 @@ from hal.stack.terminal import NEEDS_TERMINAL, at_terminal
 from hal.stack.unit_plans import (
     Action,
     CoreFailure,
-    NotDone,
     NotOff,
     NotWritten,
     Progress,
@@ -726,10 +725,8 @@ def _confirm_and_switch(
             _say_stopped(failure)
             return ApplyExit.REFUSED
         for plan in changes:
-            if since := switch(engine, plan, progress, marks, planned.read, snapshots.first):
-                withheld[plan.unit.key] = SwitchedOffMeanwhile(
-                    plan.unit.key, since, ", ".join(plan.services), left=NotDone.STARTED
-                )
+            if failure := switch(engine, plan, progress, marks, planned.read, snapshots.first):
+                withheld[plan.unit.key] = failure
         started = [plan for plan in changes if plan.unit.key not in withheld]
         mismatched = _observe_and_record(engine, planned, core_phase, started, progress)
         _write_switched_units(started, mismatched, snapshots)
