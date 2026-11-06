@@ -133,8 +133,8 @@ class FailureProbe(LitellmProbe):
         ]).stdout.split()  # fmt: skip
 
     def every_container(self) -> list[str]:
-        """Every container of the probe, stopped ones included: the project's, the issuers' among
-        them, and the ones it labels."""
+        """Every container of the probe, stopped ones included: the project's and the ones it
+        labels."""
         found: list[str] = []
         for label in (f"com.docker.compose.project={PROJECT}", LABEL):
             found += self.run(["docker", "ps", "-aq", "--filter", f"label={label}"]).stdout.split()

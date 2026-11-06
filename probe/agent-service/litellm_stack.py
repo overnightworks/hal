@@ -115,6 +115,7 @@ class Client:
     @staticmethod
     def tls(address: str, server_name: str, port: str, verify: str) -> dict:
         context = ssl.create_default_context()
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
         if verify != "verify":
             context.check_hostname, context.verify_mode = False, ssl.CERT_NONE
         name = None if server_name == "-" else server_name

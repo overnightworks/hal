@@ -263,7 +263,7 @@ pictures. The path starts on the app's own
 agent network, `hal_agent_<app>`, and is `litellm-front`, `litellm`, `agent-egress`, the provider,
 over the internal, isolated networks `litellm-backend` and `litellm-egress`; `litellm` also reaches its own Postgres, `litellm-db`, over
 `litellm-db`, a network with those two members. The unit `litellm` of `fleet.yaml` runs the front,
-LiteLLM and its database. While the unit is on, `hal apply` makes each app's key, the person budget
+LiteLLM, its database and `agent-egress`. While the unit is on, `hal apply` makes each app's key, the person budget
 and the admin budget with its customer rows (the key step below).
 
 - **The boundary.** `litellm-front` is the same pinned Traefik as the gateway with three routers,

@@ -110,39 +110,6 @@ and, beyond it, only the providers' names; the front reaches LiteLLM. Like `trae
 path, so `hal apply` recreates it alone while the unit `litellm` is on; no plain
 `docker compose up -d` starts it.
 
-**Proof:** `probe/step-ca/probe.py` starts a throwaway project under a throwaway `HOME` and holds the
-proofs of the CA (init modes and silence, the ACME directory, no root key in the volume, restart and
-partial-state behaviour) and of the gateway (reachable only with the root, 24-hour certificates, plain
-http refused, the network split as ruled, songmaker's route (exactly `/mcp`, no other path or
-name reaches the stand-in), no new host listener, renewal without restart, apply on and off
-keeping both volumes, the emergency switch, setup asked by apply, the follower recreate rules). Its
-compose calls and `step-ca/init` run from a copy of `compose.yaml` whose fixed network and volume names are moved into the
-probe's project, and each checks first that it resolves no other network or volume, so it never touches a live
-one. It takes 13 to 20 minutes and, like every probe stack, runs under `/tmp/probe-stack.lock` with a time cap (its
-docstring gives the command line). Re-run it for every step-ca or Traefik upgrade.
-
-## agent-egress
-
-A third Traefik, the one way out of the agent service: a TLS passthrough that reads the SNI of the
-ClientHello and dials only `api.anthropic.com:443` (the provider CLI), `api.openai.com:443` (LiteLLM's
-pictures) and `auth.hallucinai.de:443` (the JWKS fetch). It holds no key and has no API, ping or metrics. Any other name, or none, matches no router
-and `sniStrict` ends the handshake in the gateway; `agent-service/egress/dynamic/allowed.yml` is the one
-owner of the three names. The service finds the gateway through `extra_hosts` (`x-agent-attachments` in
-`compose.yaml`), not through DNS: the networks `agent-songmaker`, `agent-presentator`, `agent-hopin`, `egress` and `mcp` (the anchor's five) are internal and isolated
-(`gateway_mode_ipv4: isolated`), so a member has no route out, no host address and no DNS forwarding.
-Only `agent-egress` sits on `internet`, a plain NAT bridge. It listens on two entrypoints, both TCP
-and `:443`: `egress` (`172.31.252.10` of the network `egress`, for the agent service) and `litellm`
-(`172.31.239.10` of `litellm-egress`, for LiteLLM). The router `provider` of `allowed.yml` is bound to
-both entrypoints, `issuer` to `egress` alone and `pictures` to `litellm` alone, so LiteLLM reaches
-the two providers' names and nothing else. The two
-networks of the API route (`litellm-backend`, `litellm-egress`) are internal and
-isolated like the others, and the exclusions between them hold: the service has no address on
-either; LiteLLM reaches the front and, beyond it, only the two providers' names on
-entrypoint 2, and neither the service, entrypoint 1, the issuer, `mcp` nor the internet; the front
-reaches LiteLLM. Like `traefik-mcp` it is a follower: its static file is bound at Traefik's static-config
-path, so `hal apply` recreates it alone while the unit `litellm` is on; no plain
-`docker compose up -d` starts it.
-
 **Proof:** `probe/agent-service/litellm_network.py` starts a throwaway fake-only stack on free /24s, never a live subnet,
 drives the cells for allowed and refused names, observed through the packet windows of `probe/agent-service/capture.py`,
 and proves the exclusions of the API route, each with a positive control, and removes everything. CI holds the static facts in
