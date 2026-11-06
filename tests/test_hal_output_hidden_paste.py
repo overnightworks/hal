@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 from support.agent_service_setup import SETUP, login_directory, make_login_directory, token_path
-from support.script_module import loaded_script
+from support.script_module import script_module
 from support.workstation_secrets_support import WIZARD_NOW, never_run
 
 from hal.output.hidden_paste import read_hidden_paste
@@ -150,10 +150,10 @@ def _read_with(config: ChildConfig) -> str | None:
     if config.reader == "owner":
         return read_hidden_paste(PROMPT)
     if config.reader == "setup":
-        setup = next(loaded_script("agent_service_setup", SETUP))
-        setup.AgentServiceSetup(
-            setup.Tools(service_uid=os.getuid()), Path(config.home)
-        ).paste_token()
+        with script_module("agent_service_setup", SETUP, SETUP.parent) as setup:
+            setup.AgentServiceSetup(
+                setup.Tools(service_uid=os.getuid()), Path(config.home)
+            ).paste_token()
         return None
     secrets_view.MANIFEST_PATH = Path(config.manifest)
     opened: list[str] = []

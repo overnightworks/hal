@@ -65,7 +65,7 @@ exclude_also = ['if __name__ == "__main__":']
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = ["--strict-markers"]
-pythonpath = ["src", "scripts"]
+pythonpath = ["src", "scripts", "probe", "agent-service"]
 
 # hal's door modules sit above the stack, the backup runner and the workstation tool, which
 # stand apart; the exposure check sits below the stack, and hal.output, which prints for all of

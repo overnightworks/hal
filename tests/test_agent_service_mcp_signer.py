@@ -5,16 +5,11 @@ import base64
 import http.client
 import io
 import json
-import sys
 import threading
 from dataclasses import dataclass
-from pathlib import Path
-
-import pytest
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "agent-service"))
 
 import mcp_signer
+import pytest
 from mcp_signer import CaptureServer, Expectation
 
 TOOL = "capability_check"
