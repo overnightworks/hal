@@ -52,7 +52,7 @@ from hal.output import write_line  # noqa: E402
 from hal.stack import api_limits  # noqa: E402
 from hal.stack.api_limits import LogDepth  # noqa: E402
 
-UNKNOWN_TOKEN = "Invalid proxy server token passed"
+UNKNOWN_KEY_LINE = "Invalid proxy server token passed"
 PROVIDER_REFUSED = "litellm.AuthenticationError"
 SPEND_TABLE = "LiteLLM_SpendLogs"
 APP_ALIAS = "hopin"
@@ -195,14 +195,14 @@ class LogsProbe(FailureProbe, PictureCalls):
         front_before, litellm_before = self.marks()
         status = self.asked(self.unknown_key, self.person("L1"))["status"]
         expect(status == 401, f"L1: the unknown key got {status}")
-        lines = self.new_lines(LITELLM, litellm_before, lambda line: UNKNOWN_TOKEN in line)
+        lines = self.new_lines(LITELLM, litellm_before, lambda line: UNKNOWN_KEY_LINE in line)
         logged = "\n".join(self.log_of(FRONT).splitlines()[front_before:])
         refused = [line for line in front_lines(logged) if line["DownstreamStatus"] == 401]
         expect(refused, "L1: no front line with 401")
         expect(not any(PROVIDER_REFUSED in line for line in lines), "L1: a provider's class")
         write_line(f"L1 FL: {json.dumps(refused[-1], sort_keys=True)}", flush=True)
         self.hold("L1", f"an unknown key: A 401, FL {sorted(refused[-1])} with status 401, LL "
-                  f"`{UNKNOWN_TOKEN}` and no `{PROVIDER_REFUSED}`")  # fmt: skip
+                  f"`{UNKNOWN_KEY_LINE}` and no `{PROVIDER_REFUSED}`")  # fmt: skip
 
     def cell_l1b(self) -> None:
         """A bearer that is no virtual key (it does not start with `sk-`) at the default depth. A
@@ -211,7 +211,7 @@ class LogsProbe(FailureProbe, PictureCalls):
         status = self.asked(self.plain_bearer, self.person("L1b"))["status"]
         expect(status == 401, f"L1b: the plain bearer got {status}")
         self.asked(self.unknown_key, self.person("L1b after"))
-        lines = self.new_lines(LITELLM, litellm_before, lambda line: UNKNOWN_TOKEN in line)
+        lines = self.new_lines(LITELLM, litellm_before, lambda line: UNKNOWN_KEY_LINE in line)
         logged = self.log_of(FRONT).splitlines()[front_before:]
         for service, found in ((LITELLM, lines), (FRONT, logged)):
             shown = [self.masked(line)[:EXCERPT] for line in found if self.plain_bearer in line]
@@ -228,12 +228,12 @@ class LogsProbe(FailureProbe, PictureCalls):
         self.steer()
         expect(answer["status"] == 401, f"L2: the provider's 401 reached the caller as {answer}")
         lines = self.new_lines(LITELLM, litellm_before, lambda line: PROVIDER_REFUSED in line)
-        expect(not any(UNKNOWN_TOKEN in line for line in lines), "L2: the unknown key's line")
+        expect(not any(UNKNOWN_KEY_LINE in line for line in lines), "L2: the unknown key's line")
         row = self.row_of("L2", user, "failure")
         error = row["metadata"].get("error_information") or {}
         expect("AuthenticationError" in json.dumps(error), f"L2: R's error {sorted(error)}")
         self.hold("L2", f"Anthropic's 401: A 401, LL `{PROVIDER_REFUSED}` and no "
-                  f"`{UNKNOWN_TOKEN}`, R status {row['status']} for the person, its error class "
+                  f"`{UNKNOWN_KEY_LINE}`, R status {row['status']} for the person, its error class "
                   f"{error.get('error_class')}")  # fmt: skip
 
     def cell_l3(self) -> None:
