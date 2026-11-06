@@ -39,7 +39,7 @@ from support.stack_apply_fakes import (
 )
 from support.stack_plan_rows import detail_lines, find_row, plain, row_at
 
-from hal.stack import appkit_step, apply, legal_step
+from hal.stack import appkit_step, apply
 from hal.stack.legal_section import MAXIMUM_BYTES
 from hal.stack.legal_step import RECORD_FILE
 from hal.stack.plan_rows import LegalEvent
@@ -138,10 +138,14 @@ def test_the_first_apply_names_and_writes_the_three_pages_readable_by_the_unit(w
 
 
 def test_a_ctrl_c_in_the_legal_write_names_legal(world, monkeypatch):
-    def interrupted(*_arguments: object) -> None:
-        raise KeyboardInterrupt
+    rename = os.replace
 
-    monkeypatch.setattr(legal_step, "_replace", interrupted)
+    def interrupted_into_built(source: os.PathLike[str], destination: os.PathLike[str]) -> None:
+        if Path(destination).is_relative_to(world.built):
+            raise KeyboardInterrupt
+        rename(source, destination)
+
+    monkeypatch.setattr(os, "replace", interrupted_into_built)
 
     exit_code, out, err = world.switch()
 

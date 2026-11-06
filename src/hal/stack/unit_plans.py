@@ -477,6 +477,10 @@ class Progress:
     unit: str = ""
     step: str = ""
 
+    @property
+    def subject(self) -> str:
+        return self.unit or CORE_SUBJECT
+
 
 @dataclass(frozen=True)
 class NotWritten:
@@ -559,7 +563,7 @@ class StepFailed:
 
     @classmethod
     def at(cls, progress: Progress, error: Exception) -> StepFailed:
-        return cls(progress.unit or CORE_SUBJECT, progress.step, str(error))
+        return cls(progress.subject, progress.step, str(error))
 
 
 @dataclass(frozen=True)
@@ -575,7 +579,7 @@ class Interrupted:
     @classmethod
     def at(cls, progress: Progress, interruption: KeyboardInterrupt) -> Interrupted:
         notes = tuple(getattr(interruption, "__notes__", ()))
-        return cls(progress.unit or CORE_SUBJECT, progress.step, notes)
+        return cls(progress.subject, progress.step, notes)
 
 
 type RecreateFailure = SeenDown | SwitchedOffMeanwhile | StepFailed

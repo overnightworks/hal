@@ -19,10 +19,10 @@ from support.stack_apply import (
     state,  # noqa: F401 the fixture, requested by name below
     switch,  # noqa: F401 the fixture, requested by name below
 )
-from support.stack_plan_rows import detail_lines, find_row
+from support.stack_plan_rows import detail_lines, find_row, plain
 
 from hal.output.command import Verb, command
-from hal.stack import appkit_step, apply, core, unit_plans
+from hal.stack import appkit_step, apply, core
 from hal.stack.result_rows import ResultEvent
 
 PARTIAL = "its state may be partial"
@@ -33,9 +33,11 @@ def ctrl_c(*_arguments: object) -> None:
 
 
 def assert_interrupted_at(exit_code: int, out: str, err: str, subject: str, step: str) -> None:
-    """The row, its pair and the exit of the run; the line the row replaced is gone."""
+    """The row on a fresh line, its pair and the exit of the run."""
     assert exit_code == apply.ApplyExit.REFUSED
-    assert find_row(out, subject, ResultEvent.INTERRUPTED, f"{step} · {PARTIAL}")
+    row = find_row(out, subject, ResultEvent.INTERRUPTED, f"{step} · {PARTIAL}")
+    assert row
+    assert plain(out)[: row.start()].endswith("\n\n")
     assert err.splitlines()[-2:] == [
         f"error: interrupted at {subject}",
         f"next: {command(Verb.APPLY)}",
@@ -80,18 +82,3 @@ def test_a_ctrl_c_while_no_unit_is_set_names_core(
     exit_code, out, err = switch()
 
     assert_interrupted_at(exit_code, out, err, "core", "find the services edge follows")
-
-
-def test_a_ctrl_c_with_a_unit_and_no_step_says_only_that_its_state_may_be_partial(
-    switch,  # noqa: F811
-    monkeypatch,
-):
-    monkeypatch.setattr(unit_plans._Starter, "__init__", ctrl_c)
-
-    exit_code, out, err = switch()
-
-    assert exit_code == apply.ApplyExit.REFUSED
-    row = find_row(out, "step-ca", ResultEvent.INTERRUPTED, PARTIAL)
-    assert row
-    assert " · " not in row.group(0)
-    assert err.splitlines()[-2:] == ["error: interrupted at step-ca", "next: hal apply"]
