@@ -16,7 +16,7 @@ from support.git_support import advance, committed_main, with_origin
 from support.stack_apply_fakes import Terminal
 from support.stack_plan_rows import plain
 
-from hal.stack import apply, checkout, compose, switches, update
+from hal.stack import apply_lock, checkout, compose, switches, update
 from hal.stack.update import UpdateEnd
 
 FAKE_SYNC = """#!/bin/sh
@@ -66,7 +66,7 @@ class World:
 
     @property
     def lock_is_free(self) -> bool:
-        with (self.state / apply.APPLY_LOCK).open("w") as lock:
+        with (self.state / apply_lock.APPLY_LOCK).open("w") as lock:
             try:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
@@ -128,7 +128,7 @@ def world(home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys) -
     state.mkdir(parents=True)
     (state / "applied.json").write_bytes(APPLIED_RECORD)
     monkeypatch.setenv("FAKE_LOG", str(log))
-    monkeypatch.setenv("FAKE_LOCK", str(state / apply.APPLY_LOCK))
+    monkeypatch.setenv("FAKE_LOCK", str(state / apply_lock.APPLY_LOCK))
     monkeypatch.setenv("REAL_GIT", shutil.which("git"))
     saved = sys.stdin, sys.stdout, sys.stderr
     yield World(live, tmp_path / "origin.git", log, state, Terminal())

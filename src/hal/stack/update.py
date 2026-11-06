@@ -43,7 +43,7 @@ from hal.output import (
     write_verdict,
 )
 from hal.output.command import Verb, command
-from hal.stack import apply, catalog, checkout, compose, core, deploy_checkout
+from hal.stack import apply, apply_lock, catalog, checkout, compose, core, deploy_checkout
 from hal.stack.plan_rows import (
     Effect,
     checkout_row,
@@ -103,12 +103,12 @@ def update_checkout(
         write_error(refusal)
         return UpdateEnd.REFUSED
     try:
-        lock = apply.take_apply_lock(state_directory)
+        lock = apply_lock.take_apply_lock(state_directory)
     except OSError as error:
-        write_error(apply.cannot_take_lock_line(state_directory, error))
+        write_error(apply_lock.cannot_take_lock_line(state_directory, error))
         return UpdateEnd.FAILED
     if lock is None:
-        write_error(apply.APPLY_RUNNING)
+        write_error(apply_lock.APPLY_RUNNING)
         return UpdateEnd.REFUSED
     try:
         runner = checkout.echoing(git) if is_verbose() else git

@@ -27,7 +27,7 @@ from support.stack_update import (
 from hal import cli
 from hal.grammar import ExitCode
 from hal.output import verbose_run
-from hal.stack import apply, checkout
+from hal.stack import apply, apply_lock, checkout
 from hal.stack import cli as stack_cli
 from hal.stack.update import UpdateEnd
 
@@ -92,7 +92,7 @@ def test_a_git_that_cannot_be_asked_about_the_checkout_ends_failed_not_refused(w
 
 def test_while_an_apply_holds_the_lock_it_refuses_and_touches_nothing(world, capsys):
     """U3: the lock held by another process."""
-    with (world.state / apply.APPLY_LOCK).open("w") as held:
+    with (world.state / apply_lock.APPLY_LOCK).open("w") as held:
         fcntl.flock(held, fcntl.LOCK_EX)
         end = world.run()
 
@@ -134,7 +134,7 @@ def test_a_lock_that_cannot_be_opened_is_a_failure(world, capsys, tmp_path):
     end = world.run()
 
     assert end is UpdateEnd.FAILED
-    assert f"error: cannot take {blocker / 'state' / apply.APPLY_LOCK}" in errors(capsys)
+    assert f"error: cannot take {blocker / 'state' / apply_lock.APPLY_LOCK}" in errors(capsys)
 
 
 @pytest.mark.parametrize("trouble", ["fetch fails", "ahead"])
@@ -466,7 +466,7 @@ def test_the_sync_is_the_merged_trees_script_with_the_checkout_alone_and_inherit
     assert world.run() is UpdateEnd.DONE
 
     assert world.logged("sync.args").splitlines() == [str(world.live)]
-    assert str(world.state / apply.APPLY_LOCK) not in world.logged("sync.fds")
+    assert str(world.state / apply_lock.APPLY_LOCK) not in world.logged("sync.fds")
     masks = [int(line.split()[1], 16) for line in world.logged("sync.mask").splitlines()]
     assert len(masks) == 2
     assert not any(mask & 1 << (signal.SIGINT - 1) for mask in masks)
