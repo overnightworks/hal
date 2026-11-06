@@ -1,0 +1,8 @@
+claim_id = "42c577fb19fc4058a82b8d7fc67bd722"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "2f003076e155661717a793e04d671c00f9344c1b"
+branch = "claude/issue-1066-clean-local-verdict"
+scope = ["docs/design/hal-output.html", "docs/stack.md", "src/hal/stack/apply.py", "src/hal/stack/cli.py", "tests/test_hal_stack_commands.py", "tests/test_stack_apply_publish.py", "tests/test_stack_apply_yes.py"]
+opened_commit = "6dd74eee1653e037869c59c2d9b8dd7205762f61"
+whole_reason = "One clean end: the verdict, the keyword that tells it from the composed run, and the two documents that describe the end change together."
