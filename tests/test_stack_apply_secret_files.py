@@ -6,8 +6,10 @@ from pathlib import Path
 import support.stack_apply as base
 import yaml
 from support.stack_apply import FOLLOWER_FILE, switch_off, up_calls, write_fleet
+from support.stack_plan_rows import find_row
 
 from hal.stack import apply
+from hal.stack.result_rows import ResultEvent
 
 # The fixtures of `tests/support/stack_apply.py` this module's tests request by name.
 agent_service_unit = base.agent_service_unit
@@ -147,7 +149,7 @@ def test_with_every_file_there_the_plan_and_the_yes_are_as_before(
     exit_code, out, err = switch()
 
     assert exit_code == 0
-    assert "agent-service is on" in out
+    assert find_row(out, "agent-service", ResultEvent.SWITCHED_ON)
     assert "needs" not in err
 
 
@@ -163,7 +165,7 @@ def test_a_file_the_units_own_setup_makes_is_asked_for_first_and_refuses_nothing
 
     assert exit_code == 0
     assert "run `agent-service/setup` now" in out
-    assert "agent-service is on" in out
+    assert find_row(out, "agent-service", ResultEvent.SWITCHED_ON)
 
 
 def test_a_file_still_missing_after_the_setup_ran_refuses_with_nothing_switched(
@@ -272,4 +274,4 @@ def test_a_secret_with_an_environment_and_no_file_is_not_looked_at(
     exit_code, out, _ = switch()
 
     assert exit_code == 0
-    assert "agent-service is on" in out
+    assert find_row(out, "agent-service", ResultEvent.SWITCHED_ON)

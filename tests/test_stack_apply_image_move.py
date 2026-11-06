@@ -26,7 +26,7 @@ from support.stack_apply import (
     write_fleet,
 )
 from support.stack_apply_fakes import RealmBackup
-from support.stack_plan_rows import find_row, plain
+from support.stack_plan_rows import find_row, plain, row_at
 
 from hal import cli
 from hal.grammar import ExitCode
@@ -531,7 +531,10 @@ def test_a_switch_on_over_data_starts_the_database_alone_and_the_app_after_the_p
     assert scripted.images[unit.service] == bump
     if database is not None:
         assert scripted.container_ids[unit.database] == database
-    assert f"{unit.key} is on · snapshot ab12cd34 proven" in plain(sys.stdout.getvalue())
+    shown = plain(sys.stdout.getvalue())
+    assert row_at(shown, unit.key, ResultEvent.SWITCHED_ON, " · up") < shown.index(
+        "\n    pre-apply snapshot ab12cd34 · proven"
+    )
     scripted.calls.clear()
 
     exit_code, _, _ = plain_apply()

@@ -45,6 +45,7 @@ from support.stack_plan_rows import (
     kept,
     plain,
     plan_of,
+    row_at,
     unit_plan,
 )
 
@@ -52,8 +53,9 @@ from hal.stack import checkout
 from hal.stack.apply import ApplyExit
 from hal.stack.external import cli as external_cli
 from hal.stack.legal_step import PageChange
-from hal.stack.plan_rows import changes_in
+from hal.stack.plan_rows import PlanEvent, changes_in
 from hal.stack.realm.reconcile import RealmAction, RealmPlan
+from hal.stack.result_rows import ResultEvent
 from hal.stack.unit_plans import Action, ImageReference
 
 
@@ -234,7 +236,9 @@ def test_an_unreadable_realm_beside_another_change_is_skipped_after_the_one_yes(
     assert exit_code == 1
     assert plain(out).count("Type yes") == 1
     assert re.search(r"^  ! keycloak +realm skipped +the realm observer failed", plain(out), re.M)
-    assert "step-ca is on" not in out
+    assert row_at(out, "step-ca", ResultEvent.SWITCHED_ON) < plain(out).rindex(
+        PlanEvent.REALM_SKIPPED
+    )
     assert lines_of(err) == ["error: partial, keycloak realm skipped", "next: hal apply"]
     assert "up" in scripted.changing_verbs()
 
