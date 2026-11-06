@@ -248,7 +248,8 @@ def test_a_repository_hook_hidden_by_the_global_path_is_found_but_not_the_chaine
 
     findings = machine.findings()
 
-    assert findings == {("hidden-hook", str(hooks / "post-commit")): "in `pre-commit` oder `pre-merge-commit` umbenennen oder löschen"}
+    assert set(findings) == {("hidden-hook", str(hooks / "post-commit"))}
+    assert all(f"`{name}`" in fix for fix in findings.values() for name in HOOK_NAMES)
     (hooks / "post-commit").unlink()
     assert machine.findings() == {}
 

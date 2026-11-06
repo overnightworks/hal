@@ -353,7 +353,7 @@ accepts more is announced.
 
 **`hal legal KEY [DIR] [--repository TREE]`** runs this validator and the page assembly on the app's `legal/datenschutz.html`
 (required) and `legal/nutzungsbedingungen.html` (optional) in `DIR` (default: the current directory), in the pages
-as this checkout (or `TREE`) builds them and with its own held block for `KEY` left out. It prints the same refusal as above
+as this checkout (or `TREE`) builds them. A `legal/sections/KEY/` in that checkout is refused, naming both owners, as `hal apply` refuses it. It prints the same refusal as above
 as `error: legal: <path relative to DIR>: line N: <rule>` and exits 1, prints the row `✓ KEY  legal valid  <pages>` and
 exits 0, and exits 3 when `DIR` does not exist; it writes nothing. A path under `legal/sections/` or `legal/frame/`
 in the line is edge's, not the app's. `hal apply` refuses what this refuses in an app's release, but a release without

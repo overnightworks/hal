@@ -229,9 +229,10 @@ def app_blocks(
 
 
 def check_app(repository: Path, key: str, directory: Path, today: date) -> tuple[str, ...]:
-    """Builds the pages with the app's files in place of the checkout's own block for `key`;
-    returns the files that were valid, and raises LegalError for what `hal apply` would refuse
-    and for a missing privacy file, which every app needs."""
+    """Builds the pages with the app's files as the block for `key`; returns the files that were
+    valid, and raises LegalError for what `hal apply` would refuse (including a
+    `legal/sections/<key>/` in the checkout, since one block has one owner) and for a missing
+    privacy file, which every app needs."""
     zone = catalog.zone(catalog.read(repository / catalog.FLEET_FILE))
     others = _catalog_keys(repository) - {key}
     blocks = read_blocks(repository, others, lambda _path: today)
@@ -240,6 +241,7 @@ def check_app(repository: Path, key: str, directory: Path, today: date) -> tuple
         raise LegalError(
             f"{APP_DIRECTORY}/{PRIVACY_PAGE}.html is missing; every app needs a privacy section"
         )
+    _refuse_two_owners(repository, {key}, {key})
     build_pages(read_frame(repository), [*blocks, *app])
     return tuple(block.path for block in app)
 

@@ -23,8 +23,8 @@ def write_account(home: Path, text: str) -> None:
 
 def message() -> EmailMessage:
     news = EmailMessage()
-    news["Subject"] = "hal check | 2 Funde"
-    news.set_content("2 neu, 0 weg.\n")
+    news["Subject"] = "hal check | 2 findings"
+    news.set_content("2 new, 0 gone.\n")
     return news
 
 

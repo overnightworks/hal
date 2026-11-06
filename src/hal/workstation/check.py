@@ -187,7 +187,7 @@ def _parse_identities(text: str) -> frozenset[str]:
     if isinstance(identities, list):
         identities = [identity for identity in identities if not _is_of_the_removed_check(identity)]
     if not isinstance(identities, list) or not all(isinstance(identity, str) and _is_remembered(identity) for identity in identities):
-        raise ValueError("gemerkte Funde ungültig: erwartet eine Liste aus Prüfung, Regel und Gegenstand")
+        raise ValueError("remembered findings invalid: expected a list of check, rule and subject")
     return frozenset(identities)
 
 
