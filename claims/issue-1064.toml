@@ -1,8 +1,0 @@
-claim_id = "2ed8b57082fa4e7c9a11b40c6acf4b77"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "3a55cb465a458465d02a4f6b5c2e27502b898840"
-branch = "claude/issue-1064-apps-failure-union"
-scope = ["src/hal/stack/apply.py", "src/hal/stack/apps.py", "src/hal/stack/result_rows.py", "tests/test_stack_result_rows.py"]
-opened_commit = "466bcdbb324a485dfd03959c3e472cfb44ff921d"
-whole_reason = "One failure union: its definition, its two deciders and the test signature change together, so no second copy remains."
