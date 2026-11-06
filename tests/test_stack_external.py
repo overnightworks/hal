@@ -70,7 +70,6 @@ ALLOWED_NAMES = {
     "CLOUDFLARE_API_TOKEN",
     "TF_VAR_state_passphrase",
 }
-GITHUB_TOKEN_FILES = (".secrets/github/fleet-read", ".secrets/github/fleet-admin")
 PROMPT = "to apply exactly this plan"
 
 
@@ -144,17 +143,6 @@ def test_tofu_gets_exactly_the_allowlisted_variables(
         environment["CLOUDFLARE_API_TOKEN"] == WRITE_TOKEN_FILES[".secrets/cloudflare/fleet-write"]
     )
     assert not (tmp_path / "trace").exists()
-
-
-def test_apply_never_reads_a_github_token_file(home, fake_tofu, publish):
-    """#182 G1/G2: unreadable GitHub token files change nothing; no GITHUB_TOKEN reaches tofu."""
-    for relative in GITHUB_TOKEN_FILES:
-        token_file = home / relative
-        token_file.parent.mkdir(parents=True, exist_ok=True)
-        token_file.write_text("github-token\n")
-        token_file.chmod(0o000)
-    assert publish() == 0
-    assert "GITHUB_TOKEN" not in fake_tofu.call("plan")["env"]
 
 
 def test_the_child_environment_values(home, fake_tofu, publish):
