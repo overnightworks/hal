@@ -1009,7 +1009,7 @@ def test_a_lock_that_flock_refuses_is_exit_2_and_leaves_no_descriptor_open(
 def test_a_ctrl_c_inside_flock_closes_the_descriptor_and_propagates(
     switch, scripted_git, monkeypatch
 ):
-    """#95 rule 4 (#34 finding 67): `_take_apply_lock`'s path for an error that is no
+    """#95 rule 4 (#34 finding 67): `take_apply_lock`'s path for an error that is no
     BlockingIOError closes the descriptor and re-raises; nothing else runs."""
     refused = refuse_flock(monkeypatch, KeyboardInterrupt())
 
@@ -1028,7 +1028,7 @@ def refuse_flock(monkeypatch: pytest.MonkeyPatch, error: BaseException) -> list[
         refused.append(descriptor)
         raise error
 
-    monkeypatch.setattr(apply.fcntl, "flock", flock)
+    monkeypatch.setattr(fcntl, "flock", flock)
     return refused
 
 

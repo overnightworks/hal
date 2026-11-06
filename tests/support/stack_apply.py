@@ -48,6 +48,7 @@ from hal.stack import (
     setup,
     switches,
 )
+from hal.stack.apply_lock import APPLY_LOCK
 from hal.stack.litellm_keys import LITELLM
 from hal.stack.plan_rows import PlanEvent
 from hal.stack.realm.reconcile import KEYCLOAK_SERVICE
@@ -390,7 +391,7 @@ TWO_SETUPS = (
 
 
 def apply_lock(state: Path) -> Path:
-    return state / apply.APPLY_LOCK
+    return state / APPLY_LOCK
 
 
 @contextmanager
