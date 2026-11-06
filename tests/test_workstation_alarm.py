@@ -12,6 +12,7 @@ from support.workstation_support import PASSWORD_CANARY, RunnerWithCleanLogs, Sa
 from hal import alarm_commands
 from hal import cli as hal_cli
 from hal.grammar import ExitCode
+from hal.workstation import check
 from hal.workstation import ports as home_ports
 from hal.workstation.layout import Layout
 
@@ -147,8 +148,22 @@ def test_a_failed_popup_without_a_mail_channel_is_tried_again_by_the_next_run(al
     alarm()
 
     output = capsys.readouterr()
-    assert "alarm: popup failed, retries next run" in output.out
+    assert f"! {check.Delivery.POPUP_FAILED}" in output.out
     assert len(runner.notifications) == 2
+
+
+def test_a_run_with_nothing_new_ends_on_a_done_verdict_without_a_program_prefix(alarm, capsys) -> None:
+    alarm()
+
+    assert capsys.readouterr().out.strip() == f"✓ {check.Delivery.NOTHING_NEW}"
+
+
+@pytest.mark.parametrize(
+    ("delivery", "glyph"),
+    [(delivery, "!" if delivery in {check.Delivery.MAIL_FAILED, check.Delivery.POPUP_FAILED} else "✓") for delivery in check.Delivery],
+)
+def test_a_delivery_that_retries_next_run_needs_the_operator_and_every_other_one_is_done(delivery, glyph) -> None:
+    assert check.delivery_glyph(delivery).value == glyph
 
 
 def test_a_failed_popup_beside_a_delivered_mail_promises_no_retry(alarm, runner, mail_stub, capsys) -> None:

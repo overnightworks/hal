@@ -574,6 +574,14 @@ class Delivery(StrEnum):
     NOTIFICATIONS_OFF = "notifications off"
 
 
+def delivery_glyph(delivery: Delivery) -> Glyph:
+    match delivery:
+        case Delivery.MAIL_FAILED | Delivery.POPUP_FAILED:
+            return Glyph.NEEDS_YOU
+        case _:
+            return Glyph.DONE
+
+
 @dataclass(frozen=True)
 class NewsOutcome:
     delivery: Delivery

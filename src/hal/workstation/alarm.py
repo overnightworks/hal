@@ -15,8 +15,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from hal.output import write_line
-from hal.output.command import Verb, command
+from hal.output import Verdict, write_verdict
 from hal.workstation import check
 from hal.workstation.jobs import DEFAULT_ALARM_INTERVAL
 from hal.workstation.layout import Layout
@@ -87,4 +86,4 @@ def alarm(ctx: check.CheckContext, settings: AlarmSettings) -> None:
     # Untold news stays unremembered, so the next run delivers it again.
     if outcome.told:
         check.remember(layout, current)
-    write_line(f"{command(Verb.ALARM)}: {outcome.delivery}")
+    write_verdict(Verdict(check.delivery_glyph(outcome.delivery), outcome.delivery, ()))
