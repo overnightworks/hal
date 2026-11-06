@@ -152,18 +152,37 @@ def test_a_failed_popup_without_a_mail_channel_is_tried_again_by_the_next_run(al
     assert len(runner.notifications) == 2
 
 
-def test_a_run_with_nothing_new_ends_on_a_done_verdict_without_a_program_prefix(alarm, capsys) -> None:
+@pytest.mark.parametrize(
+    ("scenario", "line"),
+    [
+        ("mail_fails", "! mail failed, retries next run"),
+        ("popup_fails_without_mail", "! popup failed, retries next run"),
+        ("nothing_new", "✓ nothing new, no mail"),
+        ("mail_sent", "✓ mail sent"),
+        ("news_sent_without_mail", "✓ news sent"),
+        ("notifications_off", "✓ notifications off"),
+        ("no_mail_and_no_session", "✓ no mail set up"),
+    ],
+)
+def test_the_verdict_line_marks_a_delivery_that_retries_next_run_and_every_other_one_as_done(alarm, clean_home, runner, mail_stub, capsys, scenario, line) -> None:
+    if scenario != "nothing_new":
+        restarting_containers(runner, "presentator-live")
+    if scenario == "mail_fails":
+        mail_stub.exit_with(1)
+    if scenario in {"popup_fails_without_mail", "news_sent_without_mail", "no_mail_and_no_session"}:
+        (Layout(clean_home).secrets_dir / "smtp" / "account.toml").unlink()
+    if scenario == "popup_fails_without_mail":
+        runner.notify_delivers = False
+    if scenario == "no_mail_and_no_session":
+        runner.session_active = False
+    if scenario == "notifications_off":
+        write_hal_config(clean_home, "[check]\nnotify = false\n")
+    alarm()
+    capsys.readouterr()
+
     alarm()
 
-    assert capsys.readouterr().out.strip() == f"✓ {check.Delivery.NOTHING_NEW}"
-
-
-@pytest.mark.parametrize(
-    ("delivery", "glyph"),
-    [(delivery, "!" if delivery in {check.Delivery.MAIL_FAILED, check.Delivery.POPUP_FAILED} else "✓") for delivery in check.Delivery],
-)
-def test_a_delivery_that_retries_next_run_needs_the_operator_and_every_other_one_is_done(delivery, glyph) -> None:
-    assert check.delivery_glyph(delivery).value == glyph
+    assert capsys.readouterr().out.strip() == line
 
 
 def test_a_failed_popup_beside_a_delivered_mail_promises_no_retry(alarm, runner, mail_stub, capsys) -> None:
