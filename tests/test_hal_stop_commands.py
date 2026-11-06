@@ -151,20 +151,27 @@ def test_stop_of_a_unit_names_each_host_another_tunnel_still_serves(hal, fakes):
     )
 
 
-@pytest.mark.parametrize("barrier_lifted", [False, True], ids=["already off", "barrier back"])
+@pytest.mark.parametrize(
+    ("barrier_lifted", "outcome"),
+    [(False, "already off"), (True, "barrier back")],
+    ids=["already off", "barrier back"],
+)
 def test_a_repeated_stop_of_a_unit_still_names_each_host_another_tunnel_serves(
     hal,  # noqa: F811
     fakes,  # noqa: F811
     barrier_lifted,
+    outcome,
 ):
-    fakes.probe_switched_off_behind_a_barrier()
+    fakes.scripted.containers = {"hello": "running"}
     write_probe_with_a_moved_host(fakes)
+    assert hal("stop", "probe").exit_code == ExitCode.OK
     if barrier_lifted:
         fakes.ingress.barrier_file().unlink()
 
     result = hal("stop", "probe")
 
     assert result.exit_code == ExitCode.OK
+    assert outcome in result.out
     assert squeezed(result.out).endswith(f" · probe.{ZONE} stays served by tunnel platform")
 
 
