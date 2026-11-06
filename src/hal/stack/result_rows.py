@@ -63,6 +63,7 @@ from hal.stack.switches import describe_since
 from hal.stack.unit_plans import (
     Action,
     CoreFailure,
+    Interrupted,
     NotOff,
     NotWritten,
     SeenDown,
@@ -76,6 +77,7 @@ from hal.stack.unit_plans import (
 type RowFailure = SwitchFailure | StoppedMeanwhile
 
 _SEPARATOR = " · "
+_PARTIAL_STATE = "its state may be partial"
 _LOG_LINES = 50
 _ONLY_IN_KEYCLOAK = "only in Keycloak: "
 RESTORE_GUIDE = 'docs/backup.md "Restore Keycloak"'
@@ -110,6 +112,7 @@ class ResultEvent(StrEnum):
     NOT_MADE = "not made"
     KEYS_SKIPPED = "keys skipped"
     KEYS_FAILED = "keys failed"
+    INTERRUPTED = "interrupted"
 
 
 _APP_ON_EVENT = {
@@ -408,6 +411,23 @@ def failure_rows(failure: RowFailure) -> tuple[Row, ...]:
         case StepFailed(subject, step, cause, way_back):
             fact = f"could not {step}{_SEPARATOR}{printable(cause)}"
             return (Row(Glyph.FAILED, subject, ResultEvent.FAILED, fact, details=_way(way_back)),)
+
+
+def interrupted_row(interrupted: Interrupted) -> Row:
+    """The ✗ row of a Ctrl-C: each note, then the snapshots' way back, as a detail line."""
+    facts = (printable(interrupted.step), _PARTIAL_STATE) if interrupted.step else (_PARTIAL_STATE,)
+    return Row(
+        Glyph.FAILED,
+        interrupted.subject,
+        ResultEvent.INTERRUPTED,
+        _SEPARATOR.join(facts),
+        details=(*(printable(note) for note in interrupted.notes), *_way(interrupted.way_back)),
+    )
+
+
+def interrupted_error(interrupted: Interrupted) -> tuple[str, str]:
+    """The run's `error: ...` text for `interrupted_row` and the command that ends it."""
+    return f"{ResultEvent.INTERRUPTED} at {interrupted.subject}", command(Verb.APPLY)
 
 
 def stopped_partial(failure: NotWritten | CoreFailure) -> tuple[str, str]:

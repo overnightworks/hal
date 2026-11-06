@@ -98,10 +98,11 @@ class LegalPlan:
                 failed = self.record
                 write_record(self.record, self.fingerprints)
         except OSError as error:
-            return NotWritten.from_error(LEGAL_UNIT, failed, error)
-        finally:
-            progress.unit = progress.step = ""
-        return None
+            failure = NotWritten.from_error(LEGAL_UNIT, failed, error)
+        else:
+            failure = None
+        progress.unit = progress.step = ""
+        return failure
 
 
 def plan_legal(

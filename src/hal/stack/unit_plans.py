@@ -562,6 +562,22 @@ class StepFailed:
         return cls(progress.unit or CORE_SUBJECT, progress.step, str(error))
 
 
+@dataclass(frozen=True)
+class Interrupted:
+    """A Ctrl-C while the apply worked on `subject` (`core` while none is set) at `step`; the
+    notes are those the interrupt carried."""
+
+    subject: str
+    step: str
+    notes: tuple[str, ...]
+    way_back: str | None = None
+
+    @classmethod
+    def at(cls, progress: Progress, interruption: KeyboardInterrupt) -> Interrupted:
+        notes = tuple(getattr(interruption, "__notes__", ()))
+        return cls(progress.unit or CORE_SUBJECT, progress.step, notes)
+
+
 type RecreateFailure = SeenDown | SwitchedOffMeanwhile | StepFailed
 type CoreFailure = RecreateFailure | StoppedMeanwhile | barrier.BarriersUnproven
 type SwitchFailure = RecreateFailure | NotOff

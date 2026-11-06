@@ -477,11 +477,11 @@ def test_an_interrupt_names_the_unit_and_says_its_state_may_be_partial(switch, s
 
     scripted.verb_up = interrupted_start
 
-    exit_code, _, err = switch()
+    exit_code, out, err = switch()
 
     assert exit_code == 1
-    assert "interrupted while changing step-ca" in err
-    assert "may be partial" in err
+    assert find_row(out, "step-ca", ResultEvent.INTERRUPTED, "start · its state may be partial")
+    assert err.splitlines()[-2:] == ["error: interrupted at step-ca", "next: hal apply"]
 
 
 QUESTION = "Type yes to run `step-ca/init` now"
@@ -3646,12 +3646,12 @@ def test_an_interrupt_while_the_realm_step_is_built_ends_partial_without_a_trace
 
     monkeypatch.setattr(reconcile.Observer, "__init__", interrupted_after_the_plan)
 
-    exit_code, _, err = switch()
+    exit_code, out, err = switch()
 
-    assert exit_code == 1
-    assert "interrupted while changing keycloak (apply the realm step)" in err
+    assert (exit_code, scripted.realm_applies) == (1, 0)
+    assert find_row(out, "keycloak", ResultEvent.INTERRUPTED, "apply the realm step · its state")
+    assert "error: interrupted at keycloak" in err
     assert "Traceback" not in err
-    assert scripted.realm_applies == 0
 
 
 @pytest.mark.usefixtures("realm_unit")

@@ -122,6 +122,8 @@ from hal.stack.result_rows import (
     app_row,
     appkit_rows,
     failure_rows,
+    interrupted_error,
+    interrupted_row,
     keys_partial,
     keys_rows,
     legal_rows,
@@ -138,6 +140,7 @@ from hal.stack.terminal import NEEDS_TERMINAL, at_terminal
 from hal.stack.unit_plans import (
     Action,
     CoreFailure,
+    Interrupted,
     NotOff,
     NotWritten,
     Progress,
@@ -659,24 +662,6 @@ def _say_aborted(completed_setups: Sequence[str]) -> None:
     )
 
 
-def _say_interrupted(
-    progress: Progress, interruption: KeyboardInterrupt, way_back: str | None
-) -> None:
-    notes = getattr(interruption, "__notes__", ())
-    write_error(
-        "; ".join(
-            (
-                f"interrupted while changing {progress.unit} ({progress.step}); "
-                "its state may be partial",
-                *notes,
-                *((way_back,) if way_back else ()),
-            )
-        ),
-        command(Verb.APPLY),
-        fresh_line=True,
-    )
-
-
 def _write_plan(planned: Plan) -> None:
     """The plan as it stands: all rows."""
     write_groups(plan_groups(planned))
@@ -744,7 +729,9 @@ def _confirm_and_switch(
         _say_failures([StepFailed.at(progress, error)], snapshots)
         return ApplyExit.REFUSED
     except KeyboardInterrupt as interruption:
-        _say_interrupted(progress, interruption, snapshots.way_back())
+        interrupted = replace(Interrupted.at(progress, interruption), way_back=snapshots.way_back())
+        write_row(interrupted_row(interrupted), fresh_line=True)
+        write_error(*interrupted_error(interrupted))
         return ApplyExit.REFUSED
     later_failed = realm_failed or keys_failed or apps_failed
     failures = [*withheld.values(), *mismatched.values()]

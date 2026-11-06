@@ -95,10 +95,11 @@ class AppkitPlan:
                 target = self.repository / name
                 shutil.rmtree(target)
         except OSError as error:
-            return NotWritten.from_error(APPKIT_UNIT, target, error)
-        finally:
-            progress.unit = progress.step = ""
-        return None
+            failure = NotWritten.from_error(APPKIT_UNIT, target, error)
+        else:
+            failure = None
+        progress.unit = progress.step = ""
+        return failure
 
 
 def plan_appkit(

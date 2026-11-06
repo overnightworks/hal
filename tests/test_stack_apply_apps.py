@@ -49,9 +49,10 @@ from support.stack_apply_apps import (
 from support.stack_apply_fakes import (
     WHOAMI,
 )
-from support.stack_plan_rows import plain
+from support.stack_plan_rows import find_row, plain
 
 from hal.stack import apps, barrier, checkout, compose, emergency, switches
+from hal.stack.result_rows import ResultEvent
 
 app_world = stack_apply_apps_support.app_world
 
@@ -176,11 +177,12 @@ def test_a_ctrl_c_during_the_create_names_the_app_and_says_the_containers_may_be
     app_world.origin.release("v2026.10.22.1")
     app_world.docker.interrupted_verb = "create"
 
-    exit_code, _, err = app_world.apply()
+    exit_code, out, err = app_world.apply()
 
     assert exit_code == 1
-    assert "interrupted while changing hopin (create the containers at v2026.10.22.1" in err
-    assert "partly replaced" in err
+    assert find_row(out, "hopin", ResultEvent.INTERRUPTED, "create the containers at v2026.10.22.1")
+    assert "partly replaced" in out
+    assert "error: interrupted at hopin" in err
     assert not (app_world.state / "deployed").exists()
 
 

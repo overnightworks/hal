@@ -26,7 +26,7 @@ from support.stack_apply import (
     write_fleet,
 )
 from support.stack_apply_fakes import RealmBackup
-from support.stack_plan_rows import find_row, plain, row_at
+from support.stack_plan_rows import detail_lines, find_row, plain, row_at
 
 from hal import cli
 from hal.grammar import ExitCode
@@ -374,7 +374,7 @@ def test_ctrl_c_in_the_recreate_after_the_snapshot_names_it_and_the_live_restore
     switch,  # noqa: F811
     scripted,  # noqa: F811
 ):
-    """B1: the recreate had begun, so the interrupt line carries the way back."""
+    """B1: the recreate had begun, so the interrupt row carries the way back."""
 
     def interrupted() -> None:
         raise KeyboardInterrupt
@@ -382,11 +382,14 @@ def test_ctrl_c_in_the_recreate_after_the_snapshot_names_it_and_the_live_restore
     scripted.change_image(KEYCLOAK.service, KEYCLOAK_BUMP)
     scripted.after_up = interrupted
 
-    exit_code, _, err = switch()
+    exit_code, out, err = switch()
 
     assert exit_code == apply.ApplyExit.REFUSED
-    assert "interrupted while changing keycloak" in err
-    assert "hal restore keycloak --live --snapshot ab12cd34" in err
+    assert find_row(out, "keycloak", ResultEvent.INTERRUPTED, "recreate keycloak · its state")
+    assert any(
+        "hal restore keycloak --live --snapshot ab12cd34" in line for line in detail_lines(out)
+    )
+    assert "error: interrupted at keycloak" in err
 
 
 def _lock_cannot_be_taken(marks_directory, monkeypatch) -> None:
@@ -613,7 +616,7 @@ def _app_does_not_run(scripted) -> None:  # noqa: F811
     ("after_the_proof", "in_the_start", "line", "restores", "withheld"),
     [
         pytest.param(
-            _ctrl_c_before_the_apps_start, None, "interrupted while changing litellm", False, False,
+            _ctrl_c_before_the_apps_start, None, "error: interrupted at litellm", False, False,
             id="S5 Ctrl-C before the app is created",
         ),
         pytest.param(
@@ -622,7 +625,7 @@ def _app_does_not_run(scripted) -> None:  # noqa: F811
             id="switched off before the app is created",
         ),
         pytest.param(
-            None, _ctrl_c_in_the_apps_start, "interrupted while changing litellm", True, False,
+            None, _ctrl_c_in_the_apps_start, "error: interrupted at litellm", True, False,
             id="Ctrl-C while the app is created",
         ),
         pytest.param(
@@ -683,7 +686,7 @@ def test_a_switch_on_that_creates_only_the_database_names_its_snapshot_and_no_re
     exit_code, output, _ = plain_apply()
 
     assert exit_code == ExitCode.FAILURE
-    assert "interrupted while changing litellm" in output
+    assert find_row(output, LITELLM.key, ResultEvent.INTERRUPTED)
     assert "pre-apply snapshot ab12cd34" in output
     assert "hal restore" not in output
 
