@@ -14,6 +14,7 @@ from hal.output import (
     HEADING_THRESHOLD,
     Glyph,
     Group,
+    GroupWriter,
     Noun,
     Row,
     Stream,
@@ -537,6 +538,51 @@ def test_rows_without_a_heading_print_first_and_stay_without_one(
     lines = capsys.readouterr().out.splitlines()
     assert lines[0] == "  ✓ checkout        changed"
     assert lines[1] == "apps"
+
+
+def writer_of(rows: int) -> GroupWriter:
+    return GroupWriter.for_groups((Group(Heading.APPS, rows_of(rows)),))
+
+
+def test_a_writer_prints_a_heading_once_with_the_first_row_of_its_group_and_none_for_an_empty_one(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    writer = writer_of(HEADING_THRESHOLD)
+
+    writer.enter(Heading.UNITS)
+    writer.enter(Heading.APPS)
+    writer.write(*rows_of(1))
+    writer.write(*rows_of(1))
+    writer.enter(Heading.UNITS)
+    writer.write(*rows_of(1))
+
+    lines = capsys.readouterr().out.splitlines()
+    assert [line for line in lines if not line.startswith(" ")] == ["apps", "units"]
+    assert lines[0] == "apps"
+    assert lines[3] == "units"
+
+
+def test_a_writer_of_a_plan_below_the_threshold_prints_its_rows_flat(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    writer = writer_of(HEADING_THRESHOLD - 1)
+
+    writer.enter(Heading.APPS)
+    writer.write(*rows_of(2))
+
+    assert all(line.startswith(" ") for line in capsys.readouterr().out.splitlines())
+
+
+def test_a_writer_ends_a_line_a_ctrl_c_left_open_before_the_heading(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    writer = writer_of(HEADING_THRESHOLD)
+    sys.stdout.write("open")
+
+    writer.enter(Heading.APPS)
+    writer.write(*rows_of(1), fresh_line=True)
+
+    assert capsys.readouterr().out.splitlines()[:2] == ["open", "apps"]
 
 
 def test_on_a_terminal_a_heading_is_bold_and_add_and_remove_rows_are_green_and_red(
