@@ -118,7 +118,7 @@ class CorePhase:
         self, engine: compose.Compose, plan: core.CorePlan, progress: Progress
     ) -> StoppedMeanwhile | None:
         """The failure when the service has no live container now (#93 rules 1, 2)."""
-        progress.step = f"look whether {plan.service} still runs"
+        progress.begin(f"look whether {plan.service} still runs")
         if _stopped_since_the_plan(engine.states(), plan):
             return StoppedMeanwhile(plan.service)
         return None
@@ -130,7 +130,7 @@ class CorePhase:
         finish, or a dependent stopped before its own, is recreated by the next run (#85 rule 5,
         #93 rule 2)."""
         if recorded := [plan.service for plan in recreates if plan.service in followed]:
-            progress.step = f"mark {', '.join(recorded)} unfinished in {core.APPLIED_FILE}"
+            progress.begin(f"mark {', '.join(recorded)} unfinished in {core.APPLIED_FILE}")
             self.record.mark_unfinished(recorded, followed)
 
     def _recreate_one(
@@ -146,18 +146,18 @@ class CorePhase:
         every active barrier, and only then record it; the failure of the first step that fails."""
         config = planned.fleet.config
         started = self.watch.clock()
-        progress.step = f"recreate {plan.service}"
+        progress.begin(f"recreate {plan.service}")
         engine.recreate(plan.service)
-        progress.step = f"observe {plan.service} running"
+        progress.begin(f"observe {plan.service} running")
         observed = _in_start_order(config, {plan.service, *core.dependencies(config, plan.service)})
         if down := engine.containers_down_while_watched(config, observed, self.watch):
             return SeenDown(down, self.watch.seconds, plan.service)
-        progress.step = "prove the barriers"
+        progress.begin("prove the barriers")
         proven = self._prove_barriers(planned, marks)
         if isinstance(proven, barrier.BarriersUnproven):
             return proven
         if plan.service in followed:
-            progress.step = f"record {plan.service} in {core.APPLIED_FILE}"
+            progress.begin(f"record {plan.service} in {core.APPLIED_FILE}")
             self.record.write(plan.service, plan.digests, followed)
         self._say_recreated(Recreated(plan.service, self.watch.clock() - started, proven))
         return None
@@ -178,11 +178,11 @@ class CorePhase:
         followed = self._followed(planned, progress)
         for plan in started:
             progress.unit = plan.unit
-            progress.step = f"record {plan.service} in {core.APPLIED_FILE}"
+            progress.begin(f"record {plan.service} in {core.APPLIED_FILE}")
             self.record.write(plan.service, plan.digests, followed)
 
     def _followed(self, planned: Plan, progress: Progress) -> frozenset[str]:
-        progress.step = "find the services edge follows"
+        progress.begin("find the services edge follows")
         return core.followed_services(planned.fleet.config, planned.checkout)
 
     def _prove_barriers(

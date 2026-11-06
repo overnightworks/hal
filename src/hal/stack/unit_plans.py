@@ -3,7 +3,7 @@
 import dataclasses
 import shutil
 from collections.abc import Callable, Collection, Iterable, Iterator, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, NamedTuple, Protocol
@@ -475,7 +475,15 @@ def plan_unit_services(
 @dataclass
 class Progress:
     unit: str = ""
-    step: str = ""
+    _step: str = field(default="", init=False)
+
+    def begin(self, step: str) -> None:
+        """The only way to set the step the Ctrl-C row names."""
+        self._step = step
+
+    @property
+    def step(self) -> str:
+        return self._step
 
     @property
     def subject(self) -> str:
@@ -626,9 +634,9 @@ def switch(
             ),
         )
         return _withheld(plan, since, rest)
-    progress.step = "stop"
+    progress.begin("stop")
     engine.stop(plan.unit.key, plan.services)
-    progress.step = "remove the containers"
+    progress.begin("remove the containers")
     engine.remove_containers(plan.unit.key, plan.services)
     return None
 
@@ -652,7 +660,7 @@ class _Starter:
     def start(self, services: tuple[str, ...], step: str, begin: Begin | None = None) -> str | None:
         """Start `services` of the unit under the switch lock; the time of a switch that
         appeared since the plan read its mark, and nothing started then."""
-        self.progress.step = step
+        self.progress.begin(step)
         with self.marks.lock():
             if changed := self.marks.changed(self.plan.unit.key, self.read):
                 return since_of(changed)

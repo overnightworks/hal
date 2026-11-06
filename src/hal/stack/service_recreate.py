@@ -76,7 +76,7 @@ class ServiceRecreator:
                     lambda plan=plan: self._mark_unfinished(plan, record, followed_services),
                 ):
                     return failure
-                self.progress.step = f"record {plan.service} in {core.APPLIED_FILE}"
+                self.progress.begin(f"record {plan.service} in {core.APPLIED_FILE}")
                 record.write(plan.service, plan.digests, followed_services)
                 self.tell(Recreated(plan.service, self.watch.clock() - started))
         except (compose.ComposeError, core.CoreError, switches.SwitchError) as error:
@@ -86,7 +86,7 @@ class ServiceRecreator:
     def _mark_unfinished(
         self, plan: core.FollowerPlan, record: core.Record, followed: frozenset[str]
     ) -> None:
-        self.progress.step = f"mark {plan.service} unfinished in {core.APPLIED_FILE}"
+        self.progress.begin(f"mark {plan.service} unfinished in {core.APPLIED_FILE}")
         record.mark_unfinished([plan.service], followed)
 
     def unit_services(
@@ -143,14 +143,14 @@ class ServiceRecreator:
     ) -> SwitchedOffMeanwhile | SeenDown | None:
         """Recreate one service of `unit` under the switch lock and observe it running; the
         failure of the first step that fails."""
-        self.progress.step = f"lock the {unit} switch"
+        self.progress.begin(f"lock the {unit} switch")
         with self.marks.lock():
             if changed := self.marks.changed(unit, self.read[unit]):
                 return SwitchedOffMeanwhile(unit, since_of(changed), service)
             before()
-            self.progress.step = f"recreate {service}"
+            self.progress.begin(f"recreate {service}")
             self.engine.recreate(service)
-        self.progress.step = f"observe {service} running"
+        self.progress.begin(f"observe {service} running")
         if down := self.engine.containers_down_while_watched(self.config, (service,), self.watch):
             return SeenDown(down, self.watch.seconds, service)
         return None
@@ -158,10 +158,10 @@ class ServiceRecreator:
 
 def proven_snapshot(backup: Backup, progress: Progress, unit: DatabaseUnit) -> str:
     """The unit's new pre-apply snapshot, once its restore test passed."""
-    progress.step = f"take the {unit.key} pre-apply snapshot"
+    progress.begin(f"take the {unit.key} pre-apply snapshot")
     snapshot = backup.pre_apply(unit)
     short = short_snapshot(snapshot)
-    progress.step = f"prove pre-apply snapshot {short}"
+    progress.begin(f"prove pre-apply snapshot {short}")
     backup.restore_test(unit, snapshot)
     return snapshot
 
