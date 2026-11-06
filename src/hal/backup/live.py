@@ -130,20 +130,20 @@ def restore_live(settings: Settings, arguments: argparse.Namespace, guards: Guar
 
 
 def _target(settings: Settings, app: App) -> _PostgresTarget | _SqliteTarget:
-    """What the load goes into; a record that keeps audio or files is refused."""
+    """What the load goes into; a record that keeps audio is refused."""
     match app.database:
         case PostgresDatabase(audio=None) as database:
             return _PostgresTarget(
                 database, _resolved(lambda: docker.only_database_container(app, database))
             )
-        case SqliteDatabase(files=None) as database:
+        case SqliteDatabase() as database:
             volume = _resolved(lambda: docker.app_volume(app, database.volume))
             owner = _resolved(lambda: docker.database_owner(settings, volume, database.file))
             return _SqliteTarget(database, volume, owner)
         case _:
             raise StepFailed(
                 ExitCategory.CONFIGURATION,
-                f"{app.name} keeps audio or files; its live restore is manual: docs/backup.md",
+                f"{app.name} keeps audio; its live restore is manual: docs/backup.md",
             )
 
 

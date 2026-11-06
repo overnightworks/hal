@@ -188,29 +188,16 @@ count_table = "LiteLLM_VerificationToken"
 audio_reference_table = "generations"
 audio_reference_column = "mp3_path"
 """
-SQLITE_RECORD = f"""
-[app.{APP}]
-compose_project = "hal"
-dump = "sqlite_online_copy"
-database_volume = "database"
-database_file = "litellm.sqlite3"
-files_volume = "builds"
-[app.{APP}.restore_test]
-count_table = "users"
-"""
 
 
-@pytest.mark.parametrize("record", [AUDIO_RECORD, SQLITE_RECORD], ids=["audio", "sqlite files"])
-def test_a_record_with_files_is_refused_with_one_line_and_starts_nothing(
-    live, machine, home, record
-):
+def test_a_record_with_audio_is_refused_with_one_line_and_starts_nothing(live, machine, home):
     calls = len(machine.calls)
 
-    outcome = live(apps=declare_apps(home, record))
+    outcome = live(apps=declare_apps(home, AUDIO_RECORD))
 
     assert outcome.exit_code == 3
     assert outcome.err.splitlines() == [
-        f"error: {APP} keeps audio or files; its live restore is manual: docs/backup.md"
+        f"error: {APP} keeps audio; its live restore is manual: docs/backup.md"
     ]
     assert machine.calls[calls:] == []
 

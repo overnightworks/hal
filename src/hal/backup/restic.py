@@ -32,8 +32,7 @@ CHECK_READ_DATA_SUBSET = "10%"
 # the repository at that prune: the privacy text's bound on backups depends on it.
 PRUNE = ("--prune", "--max-unused", "0")
 _SNAPSHOTS_LABEL = "restic snapshots"
-# The snapshot layout under an app's source path: the dump and manifest (DB_FOLDER), the audio,
-# and a SQLite app's files volume under its compose volume name.
+# The snapshot layout under an app's source path: the dump and manifest (DB_FOLDER) and the audio.
 AUDIO_FOLDER = "audio"
 
 
@@ -68,8 +67,6 @@ class KeptVolume:
 
     folder: str
     volume: str
-    skip: str | None
-    """A name glob left out at every depth below the folder."""
 
 
 def app_source(app: str) -> str:
@@ -130,18 +127,15 @@ def backup(
     pre_apply: bool = False,
 ) -> BackupSummary:
     """One snapshot holding dump, manifest and the kept volume (none for a DB-only app); any
-    non-zero exit (3 too) is a failure. The skip is anchored under the volume's folder."""
+    non-zero exit (3 too) is a failure."""
     mounts = [Mount(MountKind.BIND, str(staging), f"{app_source(app)}/{DB_FOLDER}")]
-    excludes: list[str] = []
     if kept is not None:
         target = f"{app_source(app)}/{kept.folder}"
         mounts.append(Mount(MountKind.VOLUME, kept.volume, target))
-        if kept.skip is not None:
-            excludes = ["--exclude", f"{target}/**/{kept.skip}"]
     output = _restic(
         settings,
         "restic backup",
-        ["backup", "--json", *excludes, *_tag(app, pre_apply=pre_apply), app_source(app)],
+        ["backup", "--json", *_tag(app, pre_apply=pre_apply), app_source(app)],
         *mounts,
     )
     return _backup_summary(output)
