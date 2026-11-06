@@ -66,6 +66,7 @@ WHERE_THE_PERSON_STANDS: dict[str, list[str]] = {
     "L1": [], "L1b": [], "L1b after": [],  # refused before a person is known
     "L2": ["R"], "L3": ["R"], "L4": ["R"],  # a provider's refusal and a served call: the row only
 }  # fmt: skip
+PERSON_AT_EVERYTHING = ["LL", "R"]  # L6: the whole request in LL, the call's spend row
 RESOLVED_SETTING = (
     "from litellm.proxy.proxy_server import ProxyConfig; "
     "print(repr(ProxyConfig()._check_for_os_environ_vars({'s': 'os.environ/%s'})['s']))"
@@ -213,12 +214,15 @@ class LogsProbe(FailureProbe, PictureCalls):
         self.asked(self.unknown_key, self.person("L1b after"))
         lines = self.new_lines(LITELLM, litellm_before, lambda line: UNKNOWN_KEY_LINE in line)
         logged = self.log_of(FRONT).splitlines()[front_before:]
+        keyed = [line for line in lines if UNKNOWN_KEY_LINE in line]
+        expect(len(keyed) == len(lines) == 1,
+               f"L1b: LL has {len(lines)} new lines, {len(keyed)} the unknown key's")  # fmt: skip
         for service, found in ((LITELLM, lines), (FRONT, logged)):
             shown = [self.masked(line)[:EXCERPT] for line in found if self.plain_bearer in line]
             expect(not shown, f"L1b: the bearer stands in clear in {service}: {shown}")
         write_line(f"L1b LL: {[self.masked(line)[:EXCERPT] for line in lines]}", flush=True)
         self.hold("L1b", "a bearer that is no virtual key: A 401, and the bearer stands in no new "
-                  "line of FL or LL")  # fmt: skip
+                  "line of FL or LL; LL's one new line is the unknown key's after it")  # fmt: skip
 
     def cell_l2(self) -> None:
         user = self.person("L2")
@@ -298,14 +302,17 @@ class LogsProbe(FailureProbe, PictureCalls):
         resolved = self.message_logging_off()
         expect(resolved == "False", f"L6: turn_off_message_logging resolves to {resolved}")
         _, litellm_before = self.marks()
-        self.asked(self.key, self.person("L6"))
+        status = self.asked(self.key, self.person("L6"))["status"]
+        expect(status == 200, f"L6: the served call got {status}")
         canary = self.canaries[-1]
         self.new_lines(LITELLM, litellm_before, lambda line: canary in line)
+        self.row_of("L6", self.fingerprints["L6"], "success")
         texts = {"FL": self.log_of(FRONT), "LL": self.log_of(LITELLM),
                  "R": "\n".join(json.dumps(row) for row in self.spend_rows())}  # fmt: skip
         person = self.fingerprints["L6"]
         standing = [sink for sink, text in texts.items() if person in text]
         write_line(f"L6 the person stands in: {standing}", flush=True)
+        expect(standing == PERSON_AT_EVERYTHING, f"L6: the person stands in {standing}")
         found = [f"{label} in {sink}" for sink, text in texts.items()
                  for label, value in self.secret_values().items() if value in text]  # fmt: skip
         expect(not found, f"L6: at `everything` a key or the password stands in {found}")

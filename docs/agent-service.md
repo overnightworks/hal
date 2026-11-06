@@ -197,7 +197,7 @@ error text, which may quote part of a request and is logged word for word:
   as the operator ruled; OpenAI's 401 names the key masked to 3 + 4 characters, and a provider
   that quotes part of a request puts that part in the line and the row below. A served call logs no line,
   and a bearer that is no virtual key (not `sk-…`) is refused with 401 without a line of its own.
-- **A spend log row** per call, a failure included (`LiteLLM_SpendLogs`): the key's hash and
+- **A spend log row** per call with a valid app key, a failure included (`LiteLLM_SpendLogs`): the key's hash and
   alias, the person's fingerprint, model, tokens, cost, times, status and a failure's error;
   never the prompt, answer or picture (`store_prompts_in_spend_logs: false`). LiteLLM deletes a
   row, and the tool index it feeds, after 30 days (`maximum_spend_logs_retention_period`).
@@ -206,7 +206,7 @@ error text, which may quote part of a request and is logged word for word:
   refusals and a served call).
 
 At `everything` LiteLLM logs at `DEBUG` with message logging on, so each request stands whole
-in its log, its fingerprint included (probe L6); the front's line stays as above, so the one thing it does not show is the path and
+in its log, its fingerprint included, and in its spend row, and in no line of the front (probe L6); the front's line stays as above, so the one thing it does not show is the path and
 query of a request the front itself refuses before LiteLLM sees it. `hal apply` passes the
 depth's variables to Compose (`src/hal/stack/api_limits.py`), so a changed depth is a recreate of
 `litellm`; without them compose.yaml's defaults are `metadata`'s. `probe/agent-service/litellm_logs.py`
@@ -215,7 +215,7 @@ bearer or whole key in any line or row at `metadata` and each fingerprint it sen
 rows, and drives LiteLLM's cleanup (period 1h, interval 5 s) against a backdated row and its
 tool-index row.
 
-**The API route keeps no content at `metadata`, as evidence for the paths exercised only.**
+**The API route keeps no content at `metadata`, as evidence for the paths exercised only, except a provider's error text, which may quote part of a request and is logged word for word.**
 LiteLLM logs no message and redacts the `Messages:` suffix of its exceptions, and neither it nor
 the front configures a callback or cache; LiteLLM's database holds keys, budgets, tool names, each
 person's fingerprint with its counters and the spend log rows above, but no prompt. What the
@@ -239,11 +239,11 @@ four tables `hal expire` prunes, so the 90 days above do not cover them. `loggin
 `warnings.warn` reach LiteLLM's standard error too, and whether a real path sends request content
 through them is not measured. Memory holds the content
 while a run is in flight, and tmpfs may be paged to swap. The Docker log driver's retention is the daemon's
-(edge#167); the census proves that no content reaches the logs, not how long they live. Any other
+(edge#167); the census proves that no content reaches the logs, a provider's error text excepted, not how long they live. Any other
 path is not covered by this.
 
 **The metadata lines are apart from the content.** The service and the front write an access line
-per request, LiteLLM an error line per refusal or failure, and the gateway keeps no access log:
+per request, LiteLLM an error line per refusal by an unknown key or failure at a provider (none for a plain bearer), and the gateway keeps no access log:
 its TCP routers have none, and whether Traefik can log a TCP connection there is not measured.
 Their retention is the Docker daemon's (edge#167). How long Anthropic keeps the content is stated in the
 privacy section, which owns it.
