@@ -101,7 +101,7 @@ from hal.stack import (
     switches,
 )
 from hal.stack.appkit_step import AppkitError, Rename, plan_appkit
-from hal.stack.apps import AppError, AppFailed, AppHeldOff, AppRuntime, plan_apps
+from hal.stack.apps import AppError, AppFailure, AppRuntime, plan_apps
 from hal.stack.core_phase import CorePhase
 from hal.stack.legal_section import LegalError
 from hal.stack.legal_step import RECORD_FILE, plan_legal
@@ -648,7 +648,7 @@ def _apply_apps(planned: Plan, marks: switches.Switches, progress: Progress) -> 
     failed = False
     for result in planned.app_plans.run(marks, progress):
         write_row(app_row(result))
-        if isinstance(result, AppFailed | AppHeldOff):
+        if isinstance(result, AppFailure):
             write_error(*app_partial(result))
             failed = True
     return failed

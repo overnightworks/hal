@@ -197,7 +197,8 @@ class AppSwitchedOff:
     off: OffPlan
 
 
-type AppResult = AppOn | AppSwitchedOff | AppFailed | AppHeldOff
+AppFailure = AppFailed | AppHeldOff
+type AppResult = AppOn | AppSwitchedOff | AppFailure
 
 
 @dataclass(frozen=True)
