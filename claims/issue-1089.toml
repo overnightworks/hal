@@ -3,6 +3,6 @@ agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
 role = "builder"
 base = "171c02b4e12af39111be7bbc726973529e7324cf"
 branch = "claude/issue-1089-unused-tokens"
-scope = ["docs/design/hal-output.html", "docs/external.md", "docs/home.md", "src/hal/workstation/secrets_manifest.toml", "tests"]
+scope = ["docs/architecture.md", "docs/design/hal-output.html", "docs/external.md", "docs/home.md", "src/hal/workstation/secrets_manifest.toml", "tests"]
 opened_commit = "b4146f3703c3c8bbc0881afeb91a9926c2f93397"
 whole_reason = "One removal: the manifest entries, the docs that describe them and the tests that pin them go together."
