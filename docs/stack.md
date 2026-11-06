@@ -131,7 +131,9 @@ endet mit Exit 3 und "interrupted, nothing published"; waehrend der Publish-Phas
 Unterbrechungsregeln, und ihr Exit bleibt, sobald sie ihr Urteil festgehalten hat. Kommt eine
 Unterbrechung ohne festgehaltenen Exit aus ihr heraus, endet es mit Exit 3 und der Zeile
 "run `hal check hosts`". Ein SIGTERM (`kill`) vor der Publish-Phase beendet den Prozess
-wie bei `--local`: nichts wird veroeffentlicht.
+wie bei `--local`: nichts wird veroeffentlicht. Nur `hal apply --local` endet nach dem `yes` sauber auf
+dem Urteil `✓ applied · N changes · <Zeit>` (N die Zahl, die das `yes` nannte); das blosse `hal apply`
+druckt es nicht und endet mit `hal apply: done`.
 
 **Der lokale Teil.** Er bringt jede Einheit in den Zustand, den `enabled` sagt. An:
 `docker compose --profile <Einheit> up -d` fuer genau die Dienste des Profils. Aus: `stop`, dann `rm -f`

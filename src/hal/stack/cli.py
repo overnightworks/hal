@@ -87,7 +87,8 @@ def _apply_then_publish(api: api_limits.ApiSettings) -> int:
     `_exit_after_interrupt` prints (ends with a traceback)."""
     run = _Run()
     try:
-        local_exit = apply.apply_local(switches.default_state_directory(), api=api)
+        state_directory = switches.default_state_directory()
+        local_exit = apply.apply_local(state_directory, api=api, publish_follows=True)
         if local_exit != apply.ApplyExit.APPLIED_OR_NOTHING:
             write_line(f"{COMMAND}: nothing published", stream=Stream.STDERR)
             return local_exit
