@@ -566,8 +566,7 @@ def test_a_failed_switch_on_snapshot_creates_no_app_and_names_no_restore(
 
     assert exit_code == ExitCode.FAILURE
     assert f"{failing} broke" in output
-    assert "litellm is not started" in output
-    assert ("pre-apply snapshot ab12cd34" in output) == names_the_snapshot
+    assert output.count("pre-apply snapshot ab12cd34") == int(names_the_snapshot)
     assert "hal restore" not in output
     assert switch_on_steps(scripted)[-1] != LITELLM_UP
     assert LITELLM.service not in scripted.containers
@@ -714,7 +713,6 @@ def test_a_partial_switch_on_names_the_way_back_of_every_unit_that_holds_a_snaps
 
     assert exit_code == ExitCode.FAILURE
     assert "backup broke" in output
-    assert "litellm is not started" in output
     assert keycloak_fragment in output
     assert "hal restore litellm" not in output
 

@@ -162,10 +162,7 @@ def proven_snapshot(backup: Backup, progress: Progress, unit: DatabaseUnit) -> s
     snapshot = backup.pre_apply(unit)
     short = short_snapshot(snapshot)
     progress.step = f"prove pre-apply snapshot {short}"
-    try:
-        backup.restore_test(unit, snapshot)
-    except PreApplyError as error:
-        raise PreApplyError(f"{error}, pre-apply snapshot {short} not proven") from error
+    backup.restore_test(unit, snapshot)
     return snapshot
 
 
@@ -187,10 +184,7 @@ class SwitchOnSnapshots:
 
     def first(self, unit: DatabaseUnit, start: Callable[[Begin], str | None]) -> str | None:
         """The proven snapshot, then `start`; a snapshot that fails starts nothing more."""
-        try:
-            self.taken[unit.key] = proven_snapshot(self.backup, self.progress, unit)
-        except PreApplyError as error:
-            raise PreApplyError(f"{error}; {unit.key} is not started") from error
+        self.taken[unit.key] = proven_snapshot(self.backup, self.progress, unit)
         return start(lambda: self.began.add(unit.key))
 
     def way_back(self) -> str | None:
