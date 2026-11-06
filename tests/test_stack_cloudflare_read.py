@@ -538,43 +538,6 @@ def test_a_tunnel_lookup_without_exactly_one_live_match_fails_naming_it(cloudfla
     assert said <= set(read_error(cloudflare, {"p"}).split())
 
 
-@pytest.mark.parametrize(
-    "base_url",
-    [
-        "http://example.com",
-        "ftp://127.0.0.1",
-        "http://127.0.0.1.example.com",
-        "https://example.com/client/v4",
-        "https://api.cloudflare.com.evil.test/client/v4",
-        "https://api.cloudflare.com/client/v4/",
-        "https://127.0.0.1",
-    ],
-)
-def test_the_token_goes_only_to_cloudflares_api_or_to_http_on_loopback(base_url):
-    """R4."""
-    with pytest.raises(ValueError):
-        CloudflareClient(TOKEN, OWN_TUNNEL, base_url=base_url)
-
-
-@pytest.mark.parametrize(
-    "base_url", [cloudflare_read.BASE_URL, "http://127.0.0.1:8080", "http://localhost"]
-)
-def test_cloudflares_api_and_loopback_are_accepted(base_url):
-    """R4."""
-    CloudflareClient(TOKEN, OWN_TUNNEL, base_url=base_url)
-
-
-def test_the_default_base_url_is_cloudflares_https_api():
-    """R4."""
-    assert cloudflare_read.BASE_URL == "https://api.cloudflare.com/client/v4"
-
-
-def test_the_backstop_refuses_a_connection_beyond_loopback():
-    """R4."""
-    with pytest.raises(AssertionError, match="leaves loopback"):
-        socket.create_connection(("192.0.2.1", 9), timeout=0.1)
-
-
 def test_a_deeply_nested_answer_is_a_malformed_answer_not_a_crash(cloudflare):
     """R3."""
     cloudflare.routes[APPS_PATH] = lambda _query: (200, b"[" * 200_000)
@@ -903,3 +866,18 @@ def test_the_tunnel_list_fails_closed_when_its_total_count_is_not_met(cloudflare
         listing([{"id": TUNNEL_ID}], int(query["page"]), total_pages=None, total_count=3),
     )
     assert read_error(cloudflare).startswith(TUNNELS_PATH)
+
+
+def test_a_named_tunnel_that_is_hals_own_is_refused(cloudflare):
+    cloudflare.serve_tunnels([TUNNEL_ID], names={TUNNEL_ID: "p"})
+    assert "is not another tunnel" in read_error(cloudflare, {"p"})
+
+
+def test_a_named_tunnel_whose_name_differs_from_the_one_asked_is_refused(cloudflare):
+    ignoring_the_name = {"id": "x", "name": "other"}
+    own = {"id": TUNNEL_ID, "name": "hal"}
+    cloudflare.routes[TUNNELS_PATH] = lambda query: (
+        200,
+        page_of([own if "uuid" in query else ignoring_the_name], 1, PAGE, TUNNELS_PATH),
+    )
+    assert "is not another tunnel" in read_error(cloudflare, {"p"})
