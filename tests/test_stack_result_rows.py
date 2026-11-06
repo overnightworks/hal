@@ -1,6 +1,7 @@
 """The rows of a finished step: what a typed result prints as, with no step run."""
 
 from pathlib import Path
+from typing import get_args
 
 import pytest
 from support.stack_plan_legal_rows import ALL_LABELS, appkit_plan, legal_plan
@@ -10,7 +11,16 @@ from hal.output import Glyph, Row
 from hal.output.command import Verb, command
 from hal.stack import core
 from hal.stack import realm as realm_lines
-from hal.stack.apps import AppFailed, AppHeldOff, AppKind, AppOn, AppSwitchedOff, OffPlan
+from hal.stack.apps import (
+    AppFailed,
+    AppFailure,
+    AppHeldOff,
+    AppKind,
+    AppOn,
+    AppResult,
+    AppSwitchedOff,
+    OffPlan,
+)
 from hal.stack.barrier import BarriersUnproven, Unproven
 from hal.stack.legal_step import PageChange
 from hal.stack.litellm_keys import (
@@ -288,12 +298,30 @@ def test_an_app_switched_off_is_a_done_row_that_restates_what_the_off_never_touc
     ],
 )
 def test_a_failed_app_is_a_red_row_and_ends_partial_with_the_command_that_ends_it(
-    result: AppFailed | AppHeldOff, event: str, next_command: str
+    result: AppFailure, event: str, next_command: str
 ) -> None:
     row = app_row(result)
 
     assert (row.glyph, row.subject, str(row.event)) == (Glyph.FAILED, "hopin", event)
     assert app_partial(result) == (f"partial, hopin {event}", next_command)
+
+
+_APP_RESULT_BUILDERS = {
+    AppOn: lambda: AppOn(app_plan(AppKind.ON), 1.0),
+    AppSwitchedOff: lambda: AppSwitchedOff(OffPlan(APP)),
+    AppFailed: lambda: AppFailed(app_plan(AppKind.ON), "x"),
+    AppHeldOff: lambda: AppHeldOff(app_plan(AppKind.ON), "x"),
+}
+
+
+def test_an_app_row_is_red_exactly_for_the_variants_of_the_failure_union() -> None:
+    variants = get_args(AppResult.__value__)
+    failures = get_args(AppFailure)
+
+    assert set(variants) == set(_APP_RESULT_BUILDERS)
+    for variant in variants:
+        glyph = app_row(_APP_RESULT_BUILDERS[variant]()).glyph
+        assert (glyph is Glyph.FAILED) == (variant in failures)
 
 
 def test_the_cause_of_a_failed_app_is_escaped_in_the_row() -> None:

@@ -10,6 +10,7 @@ from hal.stack import realm as realm_lines
 from hal.stack.appkit_step import AppkitPlan
 from hal.stack.apps import (
     AppFailed,
+    AppFailure,
     AppHeldOff,
     AppKind,
     AppOn,
@@ -246,21 +247,22 @@ def _not_made_rows(not_made: tuple[StepChange, ...]) -> tuple[Row, ...]:
 
 def app_row(result: AppResult) -> Row:
     """The row of one app's run; every cause is escaped."""
+    glyph = Glyph.FAILED if isinstance(result, AppFailure) else Glyph.DONE
     match result:
         case AppOn(plan, seconds):
             facts = (plan.release.tag, "running", format_duration(seconds))
             event = _APP_ON_EVENT[plan.kind]
-            return Row(Glyph.DONE, plan.app.key, event, _SEPARATOR.join(facts))
+            return Row(glyph, plan.app.key, event, _SEPARATOR.join(facts))
         case AppSwitchedOff(off):
             key = off.app.key
-            return Row(Glyph.DONE, key, ResultEvent.SWITCHED_OFF, f"volumes and ~/srv/{key} kept")
+            return Row(glyph, key, ResultEvent.SWITCHED_OFF, f"volumes and ~/srv/{key} kept")
         case AppFailed(subject, cause):
-            return Row(Glyph.FAILED, subject.app.key, _failed_event(subject), printable(cause))
+            return Row(glyph, subject.app.key, _failed_event(subject), printable(cause))
         case AppHeldOff(plan, cause):
-            return Row(Glyph.FAILED, plan.app.key, ResultEvent.APP_HELD_OFF, printable(cause))
+            return Row(glyph, plan.app.key, ResultEvent.APP_HELD_OFF, printable(cause))
 
 
-def app_partial(result: AppFailed | AppHeldOff) -> tuple[str, str]:
+def app_partial(result: AppFailure) -> tuple[str, str]:
     """The run's `partial, ...` text for a failed app and the command that ends it: a stop that
     won is ended only by start."""
     match result:
