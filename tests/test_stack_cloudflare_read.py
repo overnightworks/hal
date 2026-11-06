@@ -8,6 +8,7 @@ import threading
 import urllib.parse
 from collections.abc import Callable, Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 import pytest
 
@@ -19,6 +20,7 @@ from hal.stack.external.cloudflare_read import (
     CloudflareReadError,
     Include,
     Override,
+    OwnTunnel,
     Policy,
     Record,
     Snapshot,
@@ -29,6 +31,7 @@ ZONE = "example.test"
 ZONE_ID = "a1" * 16
 ACCOUNT_ID = "b2" * 16
 TUNNEL_ID = "11111111-2222-3333-4444-555555555555"
+OWN_TUNNEL = OwnTunnel(TUNNEL_ID, Path("/scenario/cloudflared/config.yml"))
 PAGE = 2
 APPS_PATH = f"/accounts/{ACCOUNT_ID}/access/apps"
 RECORDS_PATH = f"/zones/{ZONE_ID}/dns_records"
@@ -79,7 +82,17 @@ class FakeCloudflare:
         ).start()
 
     def client(self, **keywords) -> CloudflareClient:
-        return CloudflareClient(TOKEN, base_url=self.url, **keywords)
+        return CloudflareClient(TOKEN, OWN_TUNNEL, base_url=self.url, **keywords)
+
+    def serve_tunnels(self, live: list[str], deleted: tuple[str, ...] = ()) -> None:
+        """The account's tunnels, filtered by `uuid` and `is_deleted` as the list documents."""
+
+        def answer(query: dict[str, str]) -> Answer:
+            pool = deleted if query["is_deleted"] == "true" else live
+            matching = [{"id": tunnel} for tunnel in pool if tunnel == query["uuid"]]
+            return 200, page_of(matching, int(query["page"]), PAGE, TUNNELS_PATH)
+
+        self.routes[TUNNELS_PATH] = answer
 
     def serve(self, path: str, items: list) -> None:
         items = [{"id": f"object-{number}", **item} for number, item in enumerate(items)]
@@ -154,7 +167,7 @@ GROUPS = [{"id": "g1", "name": "operator"}]
 def cloudflare() -> Iterator[FakeCloudflare]:
     fake = FakeCloudflare()
     fake.serve("/zones", [{"id": ZONE_ID, "name": ZONE, "account": {"id": ACCOUNT_ID}}])
-    fake.serve(TUNNELS_PATH, [{"id": TUNNEL_ID}])
+    fake.serve_tunnels(live=[TUNNEL_ID])
     fake.serve(RECORDS_PATH, RECORDS)
     fake.serve(GROUPS_PATH, GROUPS)
     fake.serve(APPS_PATH, APPS)
@@ -304,26 +317,11 @@ def test_a_refused_apps_read_raises_naming_path_status_and_code_but_never_body_o
     assert "echoes" not in message
 
 
-@pytest.mark.parametrize(
-    ("path", "items", "expected"),
-    [
-        pytest.param("/zones", [], "exactly one zone, found 0", id="no zone"),
-        pytest.param(
-            "/zones", [{"id": "z"}, {"id": "y"}], "exactly one zone, found 2", id="two zones"
-        ),
-        pytest.param(
-            TUNNELS_PATH,
-            [{"id": "t"}, {"id": "u"}],
-            "exactly one tunnel, found 2",
-            id="two tunnels",
-        ),
-        pytest.param(TUNNELS_PATH, [], "exactly one tunnel, found 0", id="no tunnel"),
-    ],
-)
-def test_zero_or_several_zones_or_tunnels_are_an_error(cloudflare, path, items, expected):
+@pytest.mark.parametrize("zones", [[], [{"id": "z"}, {"id": "y"}]], ids=["no zone", "two zones"])
+def test_zero_or_several_zones_are_an_error(cloudflare, zones):
     """R3."""
-    cloudflare.serve(path, items)
-    assert expected in read_error(cloudflare)
+    cloudflare.serve("/zones", zones)
+    assert f"exactly one zone, found {len(zones)}" in read_error(cloudflare)
 
 
 def test_a_timeout_is_an_error_without_a_body(cloudflare):
@@ -388,7 +386,7 @@ def test_the_https_environment_proxy_is_not_used_for_the_production_url(monkeypa
             else real_getaddrinfo(host, *rest, **keywords)
         ),
     )
-    client = CloudflareClient(TOKEN)
+    client = CloudflareClient(TOKEN, OWN_TUNNEL)
     try:
         with pytest.raises(AssertionError, match=r"leaves loopback: 192\.0\.2\.1"):
             client.read(ZONE)
@@ -525,18 +523,19 @@ def test_a_failing_middle_page_is_an_error_not_a_short_snapshot(cloudflare):
     assert "HTTP 500" in read_error(cloudflare)
 
 
-def test_only_the_live_tunnel_is_asked_for(cloudflare):
+def test_hals_tunnel_is_found_by_its_id_beside_another_live_tunnel(cloudflare):
     """R6."""
-    cloudflare.routes[TUNNELS_PATH] = lambda query: (
-        200,
-        page_of(
-            [{"id": TUNNEL_ID}] if query["is_deleted"] == "false" else [{"id": "gone"}] * 2,
-            1,
-            PAGE,
-            TUNNELS_PATH,
-        ),
-    )
+    cloudflare.serve_tunnels(live=["another-live-tunnel", TUNNEL_ID])
     assert cloudflare.client().read(ZONE).tunnel_id == TUNNEL_ID
+
+
+@pytest.mark.parametrize(
+    ("live", "deleted"), [(["another"], ()), ([], (TUNNEL_ID,))], ids=["unknown id", "deleted"]
+)
+def test_no_live_tunnel_with_hals_id_fails_naming_the_tunnel_config(cloudflare, live, deleted):
+    """R6."""
+    cloudflare.serve_tunnels(live, deleted)
+    assert {TUNNEL_ID, str(OWN_TUNNEL.config)} <= set(read_error(cloudflare).split())
 
 
 @pytest.mark.parametrize(
@@ -554,7 +553,7 @@ def test_only_the_live_tunnel_is_asked_for(cloudflare):
 def test_the_token_goes_only_to_cloudflares_api_or_to_http_on_loopback(base_url):
     """R4."""
     with pytest.raises(ValueError):
-        CloudflareClient(TOKEN, base_url=base_url)
+        CloudflareClient(TOKEN, OWN_TUNNEL, base_url=base_url)
 
 
 @pytest.mark.parametrize(
@@ -562,7 +561,7 @@ def test_the_token_goes_only_to_cloudflares_api_or_to_http_on_loopback(base_url)
 )
 def test_cloudflares_api_and_loopback_are_accepted(base_url):
     """R4."""
-    CloudflareClient(TOKEN, base_url=base_url)
+    CloudflareClient(TOKEN, OWN_TUNNEL, base_url=base_url)
 
 
 def test_the_default_base_url_is_cloudflares_https_api():
@@ -893,7 +892,7 @@ def test_the_tunnel_list_is_paged_by_its_documented_shape_without_total_pages(cl
     """R5."""
     tunnels = [{"id": f"tunnel-{number}"} for number in range(3)]
     cloudflare.serve(TUNNELS_PATH, tunnels)
-    assert "found 3" in read_error(cloudflare)
+    assert "a tunnel other than" in read_error(cloudflare)
     assert [q["page"] for path, q, _ in cloudflare.requests if path == TUNNELS_PATH] == ["1", "2"]
 
 

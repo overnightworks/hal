@@ -34,8 +34,10 @@ from support.stack_external import (
     FakeProber,
     FakeReader,
     RecordingReadyProber,
+    check_on_stand_in,
     commit_catalog,
     plain_git,
+    publish_on_stand_in,
     said,
 )
 from support.stack_host_probe import RAY, Behaviour, serving
@@ -334,7 +336,7 @@ def plan_files(home) -> list[Path]:
 
 def test_apply_without_a_terminal_exits_1_before_any_tofu_call(home, fake_tofu, capsys):
     """#45 rule 2: stdin or stdout that is no terminal refuses before tofu."""
-    assert external_cli.apply_command(home) == 1
+    assert publish_on_stand_in(home) == 1
     assert "terminal" in capsys.readouterr().err
     assert fake_tofu.calls() == []
 
@@ -461,12 +463,12 @@ def test_apply_command_refuses_off_a_clean_live_main_in_process(
     monkeypatch.setattr(
         external_apply,
         "apply_plan",
-        lambda _home, _tokens, **_ports: external_apply.ApplyOutcome(
+        lambda _home, _tokens, _tunnel_id, **_ports: external_apply.ApplyOutcome(
             42, external_apply.ClosingCheck.NO_CHECK_REFUSED
         ),
     )
     tree = arrange(live_checkout, tmp_path)
-    assert external_cli.apply_command(home, tree, git) == exit_code
+    assert publish_on_stand_in(home, tree, git) == exit_code
     error = " ".join(capsys.readouterr().err.split())
     assert stderr_contains in error
     assert (error == "") == (exit_code == 42)
@@ -476,7 +478,7 @@ def test_apply_without_a_terminal_from_a_wrong_tree_exits_1_first(
     home, fake_tofu, capsys, live_checkout, tmp_path
 ):
     """#124 E9: the terminal refusal comes before the tree is asked."""
-    assert external_cli.apply_command(home, another_copy(live_checkout, tmp_path)) == 1
+    assert publish_on_stand_in(home, another_copy(live_checkout, tmp_path)) == 1
     assert "terminal" in capsys.readouterr().err
 
 
@@ -513,7 +515,7 @@ def test_apply_without_a_terminal_refuses_before_the_catalog_is_read(
     """#131 P2: the terminal refusal still comes first."""
     commit_catalog(live_checkout, INVALID_CATALOG)
     monkeypatch.setattr(tofu, "PROJECT_ROOT", live_checkout)
-    assert external_cli.apply_command(home) == 1
+    assert publish_on_stand_in(home) == 1
     assert "terminal" in capsys.readouterr().err
 
 
@@ -523,7 +525,7 @@ def test_apply_without_a_terminal_exits_1_even_when_the_write_tokens_are_missing
     """#45 rule 2: the refusal comes before any token file is read."""
     for write_file in WRITE_TOKEN_FILES:
         (home / write_file).unlink()
-    assert external_cli.apply_command(home) == 1
+    assert publish_on_stand_in(home) == 1
     assert "terminal" in capsys.readouterr().err
     assert fake_tofu.calls() == []
 
@@ -694,7 +696,7 @@ def test_a_second_non_terminal_apply_keeps_the_plan_file_of_an_apply_awaiting_co
     fake_tofu.configure(plan=2)
     apply = terminal()
     apply.read_until(PROMPT)
-    external_cli.apply_command(home)
+    publish_on_stand_in(home)
     apply.type("yes\n")
     assert apply.finish() == 0
     assert fake_tofu.call("apply")["plan_file_existed"]
@@ -743,7 +745,7 @@ def test_a_non_terminal_apply_still_deletes_and_names_a_leftover_before_refusing
 ):
     """#45 rule 4: the refusal comes after the sweep, so a killed run's plan is not kept."""
     leftover = leave_a_killed_run_behind(home)
-    assert external_cli.apply_command(home) == 1
+    assert publish_on_stand_in(home) == 1
     error = capsys.readouterr().err
     assert plan_files(home) == []
     assert apply_line(f"removed the leftover plan file {leftover}") in error
@@ -847,7 +849,7 @@ def test_an_interrupted_cleanup_exits_1_and_warns_of_live_changes_only_after_app
         raise KeyboardInterrupt
 
     monkeypatch.setattr("builtins.input", lambda _prompt: typed)
-    outcome = external_apply.apply_plan(home, {}, plan_file_scope=interrupted_when_leaving)
+    outcome = external_apply.apply_plan(home, {}, "t-1", plan_file_scope=interrupted_when_leaving)
     assert outcome.exit == 1
     error = capsys.readouterr().err
     assert apply_line("interrupted during the cleanup") in error
@@ -898,7 +900,7 @@ def test_a_failed_cleanup_after_a_good_apply_is_not_an_interrupt_because_one_was
         raise KeyboardInterrupt
     except KeyboardInterrupt:
         with pytest.raises(external_apply.StepFailed) as failure:
-            external_apply.apply_plan(home, {}, plan_file_scope=failing_when_leaving)
+            external_apply.apply_plan(home, {}, "t-1", plan_file_scope=failing_when_leaving)
     assert failure.value.closing is external_apply.ClosingCheck.CHECK_APPLIED
 
 
@@ -937,7 +939,7 @@ def hosts_catalog(tmp_path, monkeypatch) -> Path:
 def run_check(
     home, reader: FakeReader, *, as_json: bool = False, prober: FakeProber | None = None
 ) -> int:
-    return external_cli.run_host_check(
+    return check_on_stand_in(
         home, as_json=as_json, cloudflare=reader, prober=prober or FakeProber()
     ).exit_code
 
@@ -1007,9 +1009,9 @@ def test_a_broken_chunked_answer_exits_2_and_never_prints_the_token(
     (home / ".secrets/cloudflare/fleet-read").write_text(SENTINEL)
     broken = BrokenChunkedServer(status, chunks)
     try:
-        outcome = external_cli.run_host_check(
+        outcome = check_on_stand_in(
             home,
-            cloudflare=lambda token: cloudflare_read.CloudflareClient(token, base_url=broken.url),
+            cloudflare=functools.partial(cloudflare_read.CloudflareClient, base_url=broken.url),
             prober=FakeProber(),
         )
     finally:
@@ -1043,12 +1045,10 @@ def test_a_sigterm_while_the_reader_is_built_exits_130_with_stdout_empty(
 ):
     """K7: the whole command body, not only the Cloudflare read, is covered."""
 
-    def build_and_get_terminated(_token: str):
+    def build_and_get_terminated(_token: str, _tunnel: cloudflare_read.OwnTunnel):
         os.kill(os.getpid(), signal.SIGTERM)
 
-    outcome = external_cli.run_host_check(
-        home, cloudflare=build_and_get_terminated, prober=FakeProber()
-    )
+    outcome = check_on_stand_in(home, cloudflare=build_and_get_terminated, prober=FakeProber())
     assert outcome.exit_code == 130
     assert capsys.readouterr().out == ""
 
@@ -1072,7 +1072,7 @@ def test_an_interrupt_after_the_writing_began_leaves_the_whole_document_and_the_
         os.kill(os.getpid(), interrupt)
         sys.stdout.write(text[middle:] + "\n")
 
-    code = external_cli.run_host_check(
+    code = check_on_stand_in(
         home,
         as_json=True,
         cloudflare=FakeReader(snapshot),
@@ -1097,7 +1097,7 @@ def test_an_interrupt_after_the_whole_document_is_written_keeps_the_verdict(
         sys.stdout.write(text + "\n")
         raise KeyboardInterrupt
 
-    code = external_cli.run_host_check(
+    code = check_on_stand_in(
         home,
         as_json=True,
         cloudflare=FakeReader(snapshot),
@@ -1167,7 +1167,7 @@ def test_an_os_error_in_the_transport_is_one_unreachable_finding_without_its_tex
     def probing_over_the_failing_transport():
         return host_probe.HttpProber(connection=unreachable_connection)
 
-    exit_code = external_cli.run_host_check(
+    exit_code = check_on_stand_in(
         home,
         cloudflare=FakeReader(CLEAN_SNAPSHOT),
         prober=probing_over_the_failing_transport,
@@ -1203,7 +1203,7 @@ def test_a_challenge_hides_nothing_on_the_protected_wildcard_however_it_is_sent(
     login = "https://team.cloudflareaccess.com/cdn-cgi/access/login/x"
     answering = Behaviour(302, [RAY, ("Location", login), *mitigation])
     with serving(answering) as origin:
-        exit_code = external_cli.run_host_check(
+        exit_code = check_on_stand_in(
             home,
             as_json=True,
             cloudflare=FakeReader(snapshot),
@@ -1455,7 +1455,7 @@ def apply_in_process(home, fake_tofu, live_checkout, monkeypatch, loopback_only,
         monkeypatch.setattr(
             external_cli, "check_command", around(functools.partial(REAL_CHECK_COMMAND, **ports))
         )
-        return external_cli.apply_command(
+        return publish_on_stand_in(
             home, live_checkout, prober_for=ready_prober or RecordingReadyProber()
         )
 
@@ -1471,7 +1471,7 @@ def test_an_unreadable_cloudflare_answer_after_an_apply_exits_1_never_2(
     broken = BrokenChunkedServer(200, b"5\r\nab")
     try:
         code = apply_in_process(
-            lambda token: cloudflare_read.CloudflareClient(token, base_url=broken.url)
+            functools.partial(cloudflare_read.CloudflareClient, base_url=broken.url)
         )
     finally:
         broken.close()
@@ -1586,7 +1586,7 @@ def test_a_signal_before_the_check_commits_exits_1_and_says_it_was_interrupted(
     reader = FakeReader(CLEAN_SNAPSHOT)
 
     def interrupted_first(check):
-        return lambda home_directory: (interrupt_myself(interrupt), check(home_directory))[1]
+        return lambda home, **keywords: (interrupt_myself(interrupt), check(home, **keywords))[1]
 
     if where == "while-reading":
         code = apply_in_process(FakeReader(lambda: interrupt_myself(interrupt)))
@@ -1662,7 +1662,7 @@ def test_a_cleanup_failure_of_any_kind_after_an_interrupted_apply_still_reports_
     monkeypatch.setattr(sys, "stdout", SignallingOnce("published-after-the-apply", interrupt))
     monkeypatch.setattr("builtins.input", lambda _prompt: "yes")
     with pytest.raises(external_apply.StepFailed) as failure:
-        external_apply.apply_plan(home, {}, plan_file_scope=plan_file_failing_to_leave)
+        external_apply.apply_plan(home, {}, "t-1", plan_file_scope=plan_file_failing_to_leave)
     assert failure.value.step is external_apply.Step.CLEANUP
     assert failure.value.closing is external_apply.ClosingCheck.NO_CHECK_INTERRUPTED
     error = capsys.readouterr().err
@@ -1806,8 +1806,8 @@ def test_a_signal_after_the_check_returned_does_not_turn_its_verdict_into_an_int
     monkeypatch.setattr(sys, "stderr", stderr)
 
     def armed_once_returned(check):
-        def run(home_directory):
-            verdict = check(home_directory)
+        def run(home_directory, **keywords):
+            verdict = check(home_directory, **keywords)
             stderr.armed = True
             return verdict
 
@@ -1857,8 +1857,8 @@ def test_a_signal_right_after_the_mask_is_lifted_keeps_the_committed_verdict(
             interrupt_myself(interrupt)
 
     def noting_the_return(check):
-        def run(home_directory):
-            verdict = check(home_directory)
+        def run(home_directory, **keywords):
+            verdict = check(home_directory, **keywords)
             check_returned.append(verdict)
             return verdict
 

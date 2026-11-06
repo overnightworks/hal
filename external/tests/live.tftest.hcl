@@ -17,6 +17,10 @@ mock_provider "cloudflare" {
   }
 }
 
+variables {
+  tunnel_id = "tunnel-id"
+}
+
 # The live catalog, rendered with the mocked provider: its apex redirect stays within the 10 single
 # redirects Cloudflare's Free plan allows (https://developers.cloudflare.com/rules/url-forwarding/).
 run "the_live_catalogs_apex_redirect_stays_within_the_free_plans_limit" {

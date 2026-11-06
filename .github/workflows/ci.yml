@@ -340,6 +340,7 @@ jobs:
               cd "$work/external"
               printf 'resource "terraform_data" "sentinel" {\n  input = "%s"\n}\n' "$sentinel" > sentinel.tf
               export TF_VAR_state_passphrase=throwaway-test-passphrase
+              export TF_VAR_tunnel_id=throwaway-tunnel-id
               tofu init -input=false -lockfile=readonly -backend-config=path="$work/test.tfstate"
               tofu apply -input=false -auto-approve
               grep -q encrypted_data "$work/test.tfstate"
@@ -369,6 +370,7 @@ jobs:
             (
               cd "$work/external"
               export TF_VAR_state_passphrase=throwaway-test-passphrase
+              export TF_VAR_tunnel_id=throwaway-tunnel-id
               printf 'resource "terraform_data" "sentinel" {\n  input = "%s"\n}\n' "$sentinel" > sentinel.tf
               cp main.tf encrypted.tf.orig
               sed -i '/^  encryption {$/,/^  }$/d' main.tf

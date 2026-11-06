@@ -16,6 +16,7 @@ from hal.output import write_error, write_line
 from hal.output.command import Verb, command
 from hal.stack.external import cli as external
 from hal.stack.external import host_check
+from hal.stack_commands import own_tunnel
 from hal.workstation import check as daily_check
 from hal.workstation.exposure_check import ExposureRule
 from hal.workstation.ports import build_layout_and_ports
@@ -60,7 +61,9 @@ def _run_hosts(as_json: bool) -> ExitCode:
     def emit(text: str) -> None:
         write_line(json.dumps({HOSTS: json.loads(text)}, indent=2) if as_json else text)
 
-    outcome = external.run_host_check(Path.home(), as_json=as_json, emit=emit)
+    outcome = external.run_host_check(
+        Path.home(), own_tunnel=own_tunnel, as_json=as_json, emit=emit
+    )
     for line in outcome.cause:
         write_error(f"{CHECK}: {HOSTS}: cannot check, {line}")
     return _HOST_CHECK_EXIT[outcome.exit_code]

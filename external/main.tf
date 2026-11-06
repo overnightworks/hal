@@ -44,6 +44,12 @@ variable "catalog_file" {
   default = null
 }
 
+# hal's own tunnel: the wrapper reads its id from the machine's tunnel config, so a second tunnel in
+# the account is never looked up.
+variable "tunnel_id" {
+  type = string
+}
+
 locals {
   fleet = yamldecode(file(coalesce(var.catalog_file, "${path.module}/../fleet.yaml")))
 }

@@ -8,7 +8,8 @@ The one documented wire shape, from Cloudflare's published OpenAPI schema
   `per_page`, `count`, `total_count` and, but for the tunnel list, `total_pages`.
 - `GET /zones?name=`: `result[].id`, `result[].account.id`.
 - `GET /zones/{id}/dns_records`: `result[].name`, `type`, `content`, `proxied`.
-- `GET /accounts/{id}/cfd_tunnel?is_deleted=false`: `result[].id`; its `result_info` documents no
+- `GET /accounts/{id}/cfd_tunnel?is_deleted=false&uuid=`: `result[].id`, at most hal's own live
+  tunnel, so the account's other tunnels never answer; its `result_info` documents no
   `total_pages`, which is derived from `total_count` and the page size.
 - `GET /accounts/{id}/access/groups`: `result[].id`, `result[].name` (an include rule names a
   group by id only).
@@ -50,6 +51,7 @@ import urllib.parse
 import urllib.request
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Protocol
 
 BASE_URL = "https://api.cloudflare.com/client/v4"
@@ -168,6 +170,19 @@ class Snapshot:
     apps: tuple[App, ...] | None
 
 
+@dataclass(frozen=True)
+class OwnTunnel:
+    """hal's tunnel: the id the machine's tunnel config names, and that config, which a lookup
+    that finds no live tunnel by the id names."""
+
+    id: str
+    config: Path
+
+
+class OwnTunnelUnknown(Exception):
+    """The machine's tunnel config names no usable tunnel id; the message names the config."""
+
+
 class CloudflareRead(Protocol):
     def read(self, zone: str) -> Snapshot: ...
 
@@ -185,10 +200,16 @@ class _DoNotFollow(urllib.request.HTTPRedirectHandler):
 
 class CloudflareClient:
     def __init__(
-        self, token: str, base_url: str = BASE_URL, timeout_seconds: float = TIMEOUT_SECONDS
+        self,
+        token: str,
+        tunnel: OwnTunnel,
+        base_url: str = BASE_URL,
+        timeout_seconds: float = TIMEOUT_SECONDS,
     ) -> None:
+        """`tunnel` is hal's own, the only one the account is asked for."""
         _require_cloudflare_or_loopback(base_url)
         self._token = token
+        self._tunnel = tunnel
         self._base_url = base_url.rstrip("/")
         self._timeout_seconds = timeout_seconds
         self._opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _DoNotFollow)
@@ -197,15 +218,12 @@ class CloudflareClient:
         zone_answer = self._one(ZONES_PATH, {"name": zone}, "zone")
         account_id = _identifier(zone_answer.get("account"), ZONES_PATH)
         zone_id = _identifier(zone_answer, ZONES_PATH)
-        tunnel_path = f"/accounts/{account_id}/cfd_tunnel"
-        tunnel = self._one(
-            tunnel_path, {"is_deleted": "false"}, "tunnel", announces_total_pages=False
-        )
+        tunnel_id = self._live_tunnel_id(f"/accounts/{account_id}/cfd_tunnel")
         records_path = f"/zones/{zone_id}/dns_records"
         access = self._access(f"/accounts/{account_id}/access")
         apps, groups = access if access is not None else (None, ())
         return Snapshot(
-            tunnel_id=_text(tunnel, "id", tunnel_path),
+            tunnel_id=tunnel_id,
             records=tuple(_record(item, records_path) for item in self._pages(records_path)),
             groups=groups,
             apps=apps,
@@ -223,13 +241,26 @@ class CloudflareClient:
         groups = tuple(_group(item, f"{path}/groups") for item in self._pages(f"{path}/groups"))
         return apps, groups
 
-    def _one(
-        self, path: str, query: Mapping[str, str], what: str, *, announces_total_pages: bool = True
-    ) -> dict:
-        items = self._pages(path, query, announces_total_pages=announces_total_pages)
+    def _one(self, path: str, query: Mapping[str, str], what: str) -> dict:
+        items = self._pages(path, query)
         if len(items) != 1:
             raise CloudflareReadError(f"{path}: expected exactly one {what}, found {len(items)}")
         return items[0]
+
+    def _live_tunnel_id(self, path: str) -> str:
+        """Only hal's id is asked for; an answer with any other tunnel is refused, so a list that
+        ignored the filter never hands over another tunnel."""
+        tunnel = self._tunnel
+        found = self._pages(
+            path, {"is_deleted": "false", "uuid": tunnel.id}, announces_total_pages=False
+        )
+        if not found:
+            raise CloudflareReadError(
+                f"{path}: no live tunnel has the id {tunnel.id} that {tunnel.config} names"
+            )
+        if any(_text(item, "id", path) != tunnel.id for item in found):
+            raise CloudflareReadError(f"{path}: the answer holds a tunnel other than {tunnel.id}")
+        return tunnel.id
 
     def _pages(
         self,
