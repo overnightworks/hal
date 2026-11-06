@@ -64,9 +64,9 @@ from litellm import (
     run_scratch_probe,
 )
 from litellm_admission import APP_PUSH, AdmissionProbe
+from litellm_ca import write_new
 from litellm_expiry import HAL, HAL_SECONDS
 from litellm_keys import APPS, TABLES, KeysProbe, first_of_next_month, parsed_time
-from scratch_secrets import write_new
 
 from hal.backup.apps import DB_FOLDER, parse_apps
 from hal.backup.cli import DEFAULT_APPS

@@ -1,21 +1,13 @@
-# The one owner of the names the agent service and LiteLLM may reach: the provider endpoint for the
-# CLI, the issuer host for the JWKS fetch and the picture provider. TLS passes through; the gateway
-# holds no key and dials only the upstream of a matching SNI. Any other SNI, or none, matches no
-# router, and sniStrict ends the handshake in the gateway itself. Every router names its
-# entrypoints: the provider is reachable from the agent service and from LiteLLM, the issuer from
-# the agent service alone and the picture provider from LiteLLM alone.
+# The one owner of the names LiteLLM may reach: the text provider and the picture provider. TLS
+# passes through; the gateway holds no key and dials only the upstream of a matching SNI. Any other
+# SNI, or none, matches no router, and sniStrict ends the handshake in the gateway itself. Every
+# router names its entrypoint.
 tcp:
   routers:
     provider:
       rule: HostSNI(`api.anthropic.com`)
-      entryPoints: [egress, litellm]
+      entryPoints: [litellm]
       service: provider
-      tls:
-        passthrough: true
-    issuer:
-      rule: HostSNI(`auth.hallucinai.de`)
-      entryPoints: [egress]
-      service: issuer
       tls:
         passthrough: true
     pictures:
@@ -29,10 +21,6 @@ tcp:
       loadBalancer:
         servers:
           - address: api.anthropic.com:443
-    issuer:
-      loadBalancer:
-        servers:
-          - address: auth.hallucinai.de:443
     pictures:
       loadBalancer:
         servers:

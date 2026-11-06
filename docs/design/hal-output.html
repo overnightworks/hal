@@ -1025,7 +1025,7 @@ ssh/id_ed25519.ppk  ssh/id_ed25519
   agent-egress: recreate (its compose definition changed)
   traefik-mcp: recreate (its compose definition changed)
   legal: recreate legal (its compose definition changed)
-  agent-service: on (services agent-egress, agent-service)
+  agent-service: on (services agent-service)
   agent-service: agent-service runs edge-agent-service:0.7.0-2.1.302, compose.yaml names edge-agent-service:0.10.0-2.1.302; edge apply never swaps the image of a running unit, so it keeps running; the upgrade is yours (block 6; Keycloak with a dump first, K11b)
   keycloak: keycloak runs quay.io/keycloak/keycloak:26.8.1@sha256:79c6…, compose.yaml names quay.io/keycloak/keycloak:26.8.1@sha256:a78d…; edge apply never swaps the image of a running unit, so it keeps running; the upgrade is yours (block 6; Keycloak with a dump first, K11b)
   realm: Keycloak could not be read; not checked (the realm observer failed (`docker compose run` exited 1: realm-observer: Keycloak does not answer /realms/master/protocol/openid-connect/token (unreachable)))
@@ -1055,8 +1055,8 @@ edge apply: nothing published</pre>
 <span class="b">  ~</span> agent-service   recreate       <span class="d">image edge-agent-service:0.7.0-2.1.302 → edge-agent-service:0.10.0-2.1.302 · in-flight requests end</span>
 <span class="b">  ~</span> keycloak        recreate       <span class="d">image quay.io/keycloak/keycloak:26.8.1@79c6… → @a78d… · snapshot first</span>
 <span class="b">  ~</span> legal           recreate       <span class="d">definition changed</span>
-<span class="g">  +</span> agent-service   switch on      <span class="d">agent-egress, agent-service</span>
-<span class="g">  +</span> litellm         switch on      <span class="d">litellm, litellm-db, litellm-front · snapshot first</span>
+<span class="g">  +</span> agent-service   switch on      <span class="d">agent-service</span>
+<span class="g">  +</span> litellm         switch on      <span class="d">agent-egress, litellm, litellm-db, litellm-front · snapshot first</span>
 <span class="y">  !</span> step-ca         old image      <span class="d">smallstep/step-ca:0.30.2@a2b1… · compose.yaml @7c4e…</span>
 <span class="y">  !</span> keycloak        realm skipped  <span class="d">the realm observer failed (…)</span>
 <span class="hd">apps</span>
@@ -1074,7 +1074,7 @@ Type <span class="w">yes</span> to apply 10 changes: yes
 <span class="g">  ✓</span> keycloak        recreated      <span class="d">snapshot 37c2a560 proven · 14s</span>
 <span class="g">  ✓</span> agent-service   recreated      <span class="d">3s</span>
 <span class="r">  ✗</span> agent-service   not running    <span class="d">seen down within 5s of the agent-service recreate</span>
-<span class="g">  ✓</span> litellm         switched on    <span class="d">litellm, litellm-db, litellm-front · up</span>
+<span class="g">  ✓</span> litellm         switched on    <span class="d">agent-egress, litellm, litellm-db, litellm-front · up</span>
 <span class="d">    pre-apply snapshot 5be3a1f0 · proven</span>
 <span class="y">  !</span> keycloak        realm skipped  <span class="d">the realm observer failed (…)</span>
 <span class="hd">apps</span>
@@ -1198,13 +1198,13 @@ Type <span class="w">yes</span> to apply 3 changes: yes
 <span class="hd">core</span>
 <span class="b">  ~</span> litellm-front   starts later   <span class="d">agent-service/litellm/front/traefik.yml has no applied record · with litellm</span>
 <span class="hd">units</span>
-<span class="g">  +</span> litellm         switch on      <span class="d">litellm, litellm-db, litellm-front</span>
+<span class="g">  +</span> litellm         switch on      <span class="d">agent-egress, litellm, litellm-db, litellm-front</span>
 <span class="hd">litellm</span>
 <span class="d">  · litellm         keys later     LiteLLM starts now · next apply checks them</span>
 Type <span class="w">yes</span> to apply 2 changes: yes
 <span class="d">…</span>
 <span class="hd">units</span>
-<span class="g">  ✓</span> litellm         switched on    <span class="d">litellm, litellm-db, litellm-front · up</span>
+<span class="g">  ✓</span> litellm         switched on    <span class="d">agent-egress, litellm, litellm-db, litellm-front · up</span>
 
 <span class="p">$</span> <span class="u">hal apply</span>
 <span class="d">…</span>
@@ -1317,7 +1317,7 @@ Type <span class="w">yes</span> to apply 2 changes: yes
 <span class="g">  +</span> keycloak        setup          <span class="d">keycloak/go-live · starts Keycloak</span>
 <span class="g">  +</span> legal           2 new pages    <span class="d">datenschutz, nutzungsbedingungen</span>
 <span class="hd">units</span>
-<span class="g">  +</span> agent-service   switch on      <span class="d">agent-egress, agent-service</span>
+<span class="g">  +</span> agent-service   switch on      <span class="d">agent-service</span>
 <span class="hd">cloudflare</span>
 <span class="g">  +</span> app.example.de  create         <span class="d">CNAME → tunnel</span>
 <span class="b">  ~</span> www.example.de  update         <span class="d">ttl 300 → auto</span>
@@ -1417,7 +1417,7 @@ Type <span class="w">yes</span> to apply 1 change: yes
 <span class="g">  +</span> keycloak        setup          <span class="d">keycloak/go-live · starts Keycloak</span>
 <span class="g">  +</span> legal           2 new pages    <span class="d">datenschutz, nutzungsbedingungen</span>
 <span class="hd">units</span>
-<span class="g">  +</span> agent-service   switch on      <span class="d">agent-egress, agent-service</span>
+<span class="g">  +</span> agent-service   switch on      <span class="d">agent-service</span>
 <span class="hd">cloudflare</span>
 <span class="g">  +</span> app.example.de  create         <span class="d">CNAME → tunnel</span>
 <span class="b">  ~</span> www.example.de  update         <span class="d">ttl 300 → auto</span>

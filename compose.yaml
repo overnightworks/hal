@@ -14,16 +14,11 @@ x-traefik: &traefik
 # (mcp/dynamic/keycloak.yml), which needs a certificate of the same CA.
 x-mcp-origins: &mcp-origins [hello.mcp.internal, songmaker.mcp.internal, keycloak.mcp.internal]
 
-# The agent service's egress (agent-service/egress/): the gateway's one address on the egress
-# network, and what a member of the agent networks carries. The service finds the gateway through
+# The egress gateway's address (agent-service/egress/), on the network LiteLLM shares with it: the
+# entrypoint `litellm` of agent-service/egress/traefik.yml. LiteLLM finds its providers through
 # extra_hosts, not through aliases on the gateway, which resolves its upstreams through the same
-# Docker DNS and would find itself. The names equal the HostSNI names of the routers on the
-# entrypoint `egress` of agent-service/egress/dynamic/allowed.yml.
-x-egress-address: &egress-address 172.31.252.10
-# The gateway's second address, on the network LiteLLM shares with it: the entrypoint `litellm`
-# of agent-service/egress/traefik.yml. LiteLLM finds its providers through extra_hosts too, whose
-# names equal the HostSNI names of the routers on that entrypoint; api.openai.com is among them
-# and not in the agent attachments, so only LiteLLM reaches it.
+# Docker DNS and would find itself. The names equal the HostSNI names of the routers of
+# agent-service/egress/dynamic/allowed.yml.
 x-litellm-egress-address: &litellm-egress-address 172.31.239.10
 # LiteLLM's address on litellm-backend, where the front finds it through extra_hosts: the front
 # shares the app networks, where an app could claim the name `litellm` in Docker's DNS.
@@ -44,10 +39,7 @@ x-postgres: &postgres
   security_opt: ["no-new-privileges:true"]
 
 x-agent-attachments: &agent-attachments
-  networks: [agent-songmaker, agent-presentator, agent-hopin, egress, mcp]
-  extra_hosts:
-    api.anthropic.com: *egress-address
-    auth.hallucinai.de: *egress-address
+  networks: [agent-songmaker, agent-presentator, agent-hopin, mcp]
 
 # A one-off container's output belongs to its caller alone: it stays out of the journal.
 x-one-off-logging: &one-off-logging {driver: none}
@@ -449,18 +441,17 @@ services:
     profiles: [probe]
     networks: [mcp-backends]
 
-  # The agent service's egress: a third Traefik instance, a TLS passthrough that dials only the
-  # upstream of an allowed SNI (agent-service/egress/dynamic/allowed.yml). The only service on
-  # `internet`. The unit `agent-service` of fleet.yaml starts it with the service.
+  # LiteLLM's egress: a third Traefik instance, a TLS passthrough that dials only the upstream of
+  # an allowed SNI (agent-service/egress/dynamic/allowed.yml). The only service on `internet`. The
+  # unit `litellm` of fleet.yaml starts it with LiteLLM.
   agent-egress:
     <<: *traefik
-    profiles: [agent-service]
+    profiles: [litellm]
     restart: unless-stopped
     # The entrypoint listens on 443 as uid 65534.
     sysctls:
       net.ipv4.ip_unprivileged_port_start: 0
     networks:
-      egress: {ipv4_address: *egress-address}
       litellm-egress: {ipv4_address: *litellm-egress-address}
       internet: {}
     volumes:
@@ -786,14 +777,6 @@ networks:
     name: hal_backchannel_presentator
     internal: true
     driver_opts: *isolated-bridge
-  # The agent service and agent-egress, the only way out of the service.
-  egress:
-    internal: true
-    driver_opts: *isolated-bridge
-    ipam:
-      config:
-        # Pinned so agent-egress has one address; the probe overlay takes its own free subnet.
-        - subnet: 172.31.252.0/24
   # The front, LiteLLM and hal apply's key step. Pinned so LiteLLM has one address, which no app
   # network can claim; the dynamic range keeps it from the others, the key step included. The probe
   # moves it to a free /24.
@@ -804,7 +787,7 @@ networks:
       config:
         - subnet: 172.31.199.0/24
           ip_range: 172.31.199.128/25
-  # LiteLLM and agent-egress's second entrypoint, the only way out of LiteLLM.
+  # LiteLLM and agent-egress's entrypoint, the only way out of LiteLLM.
   litellm-egress:
     internal: true
     driver_opts: *isolated-bridge

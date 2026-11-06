@@ -105,8 +105,14 @@ def test_each_member_joins_exactly_the_networks_the_boundary_declares(compose):
     assert set(services[SERVICE]["networks"]) & set(services[FRONT]["networks"]) == app_networks(
         compose
     )
-    assert "egress" not in services[LITELLM]["networks"]
     assert "litellm-egress" in services[GATEWAY]["networks"]
+
+
+def test_the_gateway_starts_and_stops_with_litellm_as_one_unit(compose):
+    """LiteLLM's only way out is a service of its own profile, so the unit `litellm` starts it."""
+    services = compose["services"]
+
+    assert services[GATEWAY]["profiles"] == services[LITELLM]["profiles"]
 
 
 def test_only_litellm_holds_a_static_backend_address_and_it_lies_outside_the_dynamic_range(

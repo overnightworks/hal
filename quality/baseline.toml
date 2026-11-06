@@ -33,7 +33,7 @@
 [function_lines."tests/support/realm_fake.py"]
 "hallucinai" = 96
 
-[clones."probe/agent-service/egress.py"]
+[clones."probe/agent-service/litellm_stack.py"]
 "Client.main" = [["probe/agent-service/unit.py", "Inside.main"]]
 
 [clones."probe/apps/probe.py"]

@@ -171,24 +171,6 @@ class IssuerProbe(Probe):
         resolved = self.compose("config", "--format", "json")
         return json.loads(resolved.stdout)["services"][SERVICE]["image"]
 
-    def container_log(
-        self,
-        service: str,
-        since: int | None = None,
-        timeout: int = 300,
-        container: str | None = None,
-    ) -> str:
-        """The log text, from the unix time `since` on when given; a failed read reports the
-        command and its exit code, never its output, because the probes print only verdicts,
-        counts and event names. `timeout` bounds the read in seconds; a caller that knows the
-        `container` of the service saves the lookup, which has no bound of its own."""
-        container = container or self.container(service)
-        bound = [] if since is None else ["--since", str(since)]
-        logs = self.run(["docker", "logs", *bound, container], check=False, timeout=timeout)
-        if logs.returncode != 0:
-            raise ProbeFailed(f"docker logs {container} exited {logs.returncode}")
-        return logs.stdout + logs.stderr
-
     def wait_until_listening(self, since: int | None = None) -> None:
         wait_for_listening(lambda: self.container_log(SERVICE, since), "the service did not listen")
 

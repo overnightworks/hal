@@ -40,7 +40,7 @@ services:
       - {name: "@", exposure: public, reason: "static legal pages without a login", ready: /impressum}
   agent-service:
     run:
-      enabled: true
+      enabled: false
       setup: agent-service/setup
       build: agent-service/image
   litellm:

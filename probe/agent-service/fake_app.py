@@ -10,7 +10,7 @@ from enum import StrEnum
 from pathlib import Path
 
 from egress import expect
-from scratch_secrets import issue_certificate
+from litellm_ca import issue_certificate
 
 APP_SERVICE = "agent-app"
 APP_PORT = 8444
