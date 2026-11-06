@@ -7,7 +7,7 @@ requires-python = ">=3.14"
 dependencies = [
     "pyyaml>=6",
     "overnightworks-appkit @ https://github.com/overnightworks/appkit/releases/download/v0.14.0/overnightworks_appkit-0.14.0-py3-none-any.whl#sha256=fc88979e819d7ca5b0608072156b6be93ee9f6f7bfc2a3e8292c6c5b02aee189",
-    "overnightworks-agent-runtime-client @ https://github.com/overnightworks/agent-runtime/releases/download/v0.20.0/overnightworks_agent_runtime_client-0.20.0-py3-none-any.whl#sha256=f43aed7225c13eee56a4597fc5735474e229489fade57aa42da482b70443601e",
+    "overnightworks-agent-runtime-client @ git+https://github.com/overnightworks/agent-runtime@v0.20.0#subdirectory=packages/client",
 ]
 
 [project.scripts]
@@ -25,6 +25,13 @@ dev = [
 [build-system]
 requires = ["uv_build>=0.10,<0.11"]
 build-backend = "uv_build"
+
+[tool.uv]
+# The overnightworks client library is built from its git tag; a named package
+# overrides a global --no-build, so every other package still installs as a wheel.
+no-binary-package = ["overnightworks-agent-runtime-client"]
+# Its build backend runs with these exact tools.
+build-constraint-dependencies = ["setuptools==84.2.1", "wheel==0.48.0"]
 
 [tool.uv.build-backend]
 module-name = "hal"
