@@ -148,52 +148,6 @@ def test_a_size_is_binary_units_rounded_with_one_decimal_below_ten(size: int, sh
     assert format_bytes(size) == shown
 
 
-def test_the_run_time_stands_after_the_counts_and_before_the_hint(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """#500: every verdict that knows its run time ends its counts with it."""
-
-    write_verdict(Verdict(Glyph.CHANGE, "setup plan", ((2, Event.CHANGED),), "run hal setup", 3.2))
-    write_verdict(Verdict(Glyph.DONE, "setup done", ((1, Event.CHANGED),), elapsed_seconds=47.9))
-
-    assert capsys.readouterr().out.splitlines() == [
-        "~ setup plan · 2 changed · 3s · run hal setup",
-        "✓ setup done · 1 changed · 47s",
-    ]
-
-
-def test_on_a_terminal_the_run_time_is_dim(monkeypatch: pytest.MonkeyPatch) -> None:
-    """#500: the run time is dim like the counts."""
-
-    out, _err = put_on_terminals(monkeypatch)
-    write_verdict(Verdict(Glyph.DONE, "setup", ((1, Event.CHANGED),), elapsed_seconds=65))
-
-    assert out.getvalue() == (
-        "\x1b[1m✓ setup\x1b[0m · \x1b[2m1 changed\x1b[0m · \x1b[2m1m05s\x1b[0m\n"
-    )
-
-
-def test_a_verdict_is_a_glyph_the_summary_its_counts_and_its_hint_flush_left(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """#296 invariant 3: the run ends in one verdict line; the renderer leaves a zero count out."""
-
-    write_verdict(
-        Verdict(
-            Glyph.CHANGE,
-            "setup plan",
-            ((2, Event.CHANGED), (0, Event.SKIPPED), (2, Event.UNCHANGED)),
-            "run hal setup",
-        )
-    )
-    write_verdict(Verdict(Glyph.DONE, "setup done", ((1, Event.CHANGED),)))
-
-    assert capsys.readouterr().out.splitlines() == [
-        "~ setup plan · 2 changed, 2 unchanged · run hal setup",
-        "✓ setup done · 1 changed",
-    ]
-
-
 def test_an_error_pair_goes_to_stderr_with_both_lines_escaped(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -249,28 +203,63 @@ def test_on_a_terminal_an_unchanged_row_is_dim_as_a_whole(
         (Glyph.FAILED, "1;31"),
     ],
 )
-def test_on_a_terminal_a_verdict_is_bold_in_its_glyphs_colour_with_dim_counts(
+def test_on_a_terminal_a_verdict_headline_is_bold_in_its_glyphs_colour_and_the_tail_is_dim(
     monkeypatch: pytest.MonkeyPatch, glyph: Glyph, style: str
 ) -> None:
-    """#495: the glyph and summary are bold, the counts dim, the hint default."""
+    """#495, #1079: the glyph and summary are bold; everything from the first separator is dim."""
 
     out, _err = put_on_terminals(monkeypatch)
     write_verdict(Verdict(glyph, "setup", ((2, Event.CHANGED),), "run hal"))
 
     assert out.getvalue() == (
-        f"\x1b[{style}m{glyph.value} setup\x1b[0m · \x1b[2m2 changed\x1b[0m · run hal\n"
+        f"\x1b[{style}m{glyph.value} setup\x1b[0m\x1b[2m · 2 changed · run hal\x1b[0m\n"
     )
 
 
-def test_on_a_terminal_a_verdict_without_counts_carries_no_empty_dim_escape(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize(
+    ("verdict", "plain", "dimmed"),
+    [
+        pytest.param(
+            Verdict(Glyph.DONE, "setup done", ((1, Event.CHANGED),), elapsed_seconds=47.9),
+            "✓ setup done · 1 changed · 47s",
+            "\x1b[1m✓ setup done\x1b[0m\x1b[2m · 1 changed · 47s\x1b[0m",
+            id="counts with the run time",
+        ),
+        pytest.param(
+            Verdict(Glyph.NEEDS_YOU, "88 findings", ((0, Event.CHANGED),), "hal secrets -v"),
+            "! 88 findings · hal secrets -v",
+            "\x1b[1;33m! 88 findings\x1b[0m\x1b[2m · hal secrets -v\x1b[0m",
+            id="a hint alone",
+        ),
+        pytest.param(
+            Verdict(Glyph.NEEDS_YOU, "2 findings", (), "--json lists each", None, ("272 ports",)),
+            "! 2 findings · 272 ports · --json lists each",
+            "\x1b[1;33m! 2 findings\x1b[0m\x1b[2m · 272 ports · --json lists each\x1b[0m",
+            id="details with a hint",
+        ),
+        pytest.param(
+            Verdict(Glyph.DONE, "done", ()),
+            "✓ done",
+            "\x1b[1m✓ done\x1b[0m",
+            id="no tail gets no dim span",
+        ),
+    ],
+)
+def test_a_verdicts_whole_tail_is_one_dim_span_on_a_terminal_and_plain_without_colour(
+    monkeypatch: pytest.MonkeyPatch, verdict: Verdict, plain: str, dimmed: str
 ) -> None:
-    """#495: a verdict without counts has no empty dim escape."""
+    """#1079: picture A dims counts, details, the run time and the hint as one span from the
+    first separator; under NO_COLOR every byte stays as it was."""
 
     out, _err = put_on_terminals(monkeypatch)
-    write_verdict(Verdict(Glyph.DONE, "setup", ((0, Event.CHANGED),), "run hal"))
+    write_verdict(verdict)
+    terminal = out.getvalue()
+    out.truncate(0)
+    out.seek(0)
+    monkeypatch.setenv("NO_COLOR", "1")
+    write_verdict(verdict)
 
-    assert out.getvalue() == "\x1b[1m✓ setup\x1b[0m · run hal\n"
+    assert (terminal, out.getvalue()) == (dimmed + "\n", plain + "\n")
 
 
 @pytest.mark.parametrize("failure", [AttributeError, ValueError])
