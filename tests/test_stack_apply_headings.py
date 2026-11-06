@@ -193,7 +193,7 @@ def test_failed_and_switched_units_print_in_switch_order_before_the_key_rows_eac
     assert err.count("error: partial,") == 1
 
 
-@pytest.mark.usefixtures("headed_from_one_row")
+@pytest.mark.usefixtures("headed_from_one_row")  # failing_verb="run" leaves a 5-row plan
 def test_a_failed_unit_row_stands_under_units_before_the_realm_row(
     keys,
     realm_unit,  # noqa: F811
@@ -219,7 +219,7 @@ def test_a_failed_unit_row_stands_under_units_before_the_realm_row(
     assert outline(out).count(PlanGroup.UNITS) == 1
 
 
-@pytest.mark.usefixtures("headed_from_one_row")
+@pytest.mark.usefixtures("headed_from_one_row")  # app_world holds no other unit
 def test_a_failed_unit_row_stands_under_units_before_the_apps_heading_and_its_row(
     keys,
     app_world,  # noqa: F811
@@ -328,15 +328,18 @@ def test_a_failed_recreate_stands_under_the_heading_of_the_step_that_failed(
 
     assert exit_code == 1
     assert outline(out)[:2] == [group, failed(subject)]
-    assert headings_of(outline(out))[0] == group
+    assert headings_of(outline(out)) == [group]
 
 
-@pytest.mark.usefixtures("headed_from_one_row", "realm_unit")
 def test_the_waiting_row_of_a_stopped_hal_is_the_first_row_under_units(
+    keys,
+    realm_unit,  # noqa: F811
     switch,  # noqa: F811
     repository,  # noqa: F811
     monkeypatch,
 ):
+    write_fleet(repository, KEYCLOAK_ENABLED + LITELLM_ON)
+    keys.admin_budget = None
     monkeypatch.setattr("hal.stack.pre_apply.BACKUP_SECONDS", 1)
     monkeypatch.setattr("hal.stack.pre_apply.STOP_GRACE_SECONDS", 0.2)
     hal = repository / ".venv/bin/hal"
