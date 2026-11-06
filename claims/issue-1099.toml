@@ -1,0 +1,8 @@
+claim_id = "32ccacf83fe240269377017949cee05f"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "e15da11c3b64aa8d7c182c875ea991b4027e94a7"
+branch = "claude/issue-1099-own-tunnel-by-id"
+scope = ["docs/external.md", "external", "src/hal/stack/external", "tests/support/stack_external.py", "tests/test_hal_check.py", "tests/test_stack_cloudflare_read.py", "tests/test_stack_external.py", "tests/test_stack_host_check.py"]
+opened_commit = "6e94eb30fface34d835ce897727120795b4831dd"
+whole_reason = "One lookup, hal's own tunnel by its runtime id, in the two places that look it up, with their tests and the doc line."
