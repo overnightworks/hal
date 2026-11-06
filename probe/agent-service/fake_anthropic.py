@@ -13,9 +13,10 @@ matched, and counts of what must not arrive here. It prints a verdict and no oth
 request, and its answer holds only values it builds itself. The `pictures` role answers OpenAI's
 picture call (https://platform.openai.com/docs/api-reference/images/create) with the marker as
 `b64_json` and the `usage` the control file steers (mode `hold` holds it as above, mode
-`moderation` refuses it as OpenAI's safety system does), and prints one JSON line per request: the
-path, the model, the `user` that arrived (None when none did), whether `Authorization` carried the
-key, and the same counts.
+`moderation` refuses it as OpenAI's safety system does, mode `status` with `status` 401 refuses
+the key as OpenAI does, naming it masked to its first 3 and last 4 characters), and prints one
+JSON line per request: the path, the model, the `user` that arrived (None when none did), whether
+`Authorization` carried the key, and the same counts.
 
 The `provider` role re-reads `/fake/control.json` on every request, so one container serves every
 cell of the failure probe (probe/agent-service/litellm_failures.py). The file holds `mode`:
@@ -40,10 +41,10 @@ server-sent events, ended by closing the connection: `message_start`, `content_b
 `content_block_delta` per text of `texts` (else the marker), `content_block_stop`, `message_delta`
 with the usage and `message_stop`. `stream_hold` writes up to the first delta, then holds as `hold`
 does while the control file says `stream_hold`, logs the same `held` line, and writes the rest.
-The error bodies are Anthropic's own shapes, https://docs.anthropic.com/en/api/errors: 500
-`api_error`, 529 `overloaded_error`, 402 `billing_error`; `low_credit` is the other answer a
-used-up balance gets, as clients report it: 400 `invalid_request_error` saying the credit balance
-is too low.
+The error bodies are Anthropic's own shapes, https://docs.anthropic.com/en/api/errors: 401
+`authentication_error`, 500 `api_error`, 529 `overloaded_error`, 402 `billing_error`;
+`low_credit` is the other answer a used-up balance gets, as clients report it: 400
+`invalid_request_error` saying the credit balance is too low.
 """
 
 import contextlib
@@ -69,8 +70,11 @@ STREAM_MODES = frozenset({"answer", STREAM_HOLD})
 FIRST_DELTA = 3  # message_start, content_block_start and the first delta
 TEXT_BLOCK = {"type": "text", "text": ""}
 ERRORS = {
-    400: "invalid_request_error", 402: "billing_error", 500: "api_error", 529: "overloaded_error",
+    400: "invalid_request_error", 401: "authentication_error", 402: "billing_error",
+    500: "api_error", 529: "overloaded_error",
 }  # fmt: skip
+# OpenAI's refusal of a key it does not know: https://platform.openai.com/docs/guides/error-codes
+OPENAI_ERRORS = {401: ("invalid_request_error", "invalid_api_key")}
 # OpenAI's refusal of a picture prompt by its safety system, as clients report it: a 400 whose
 # error code is `moderation_blocked`.
 MODERATION = json.dumps({"error": {
@@ -219,12 +223,25 @@ def message(expect: dict, body: bytes) -> bytes:
     }).encode()  # fmt: skip
 
 
+def openai_error(status: int, key: str) -> bytes:
+    """OpenAI's error body of `status`, which names the key as OpenAI masks it."""
+    kind, code = OPENAI_ERRORS[status]
+    masked = f"{key[:3]}{'*' * max(len(key) - 7, 0)}{key[-4:]}"
+    return json.dumps({"error": {
+        "message": f"Incorrect API key provided: {masked}. You can find your API key at "
+                   "https://platform.openai.com/account/api-keys.",
+        "type": kind, "param": None, "code": code,
+    }}).encode()  # fmt: skip
+
+
 def picture_answer(connection: socket.socket, steering: dict) -> tuple[int, bytes]:
-    """`moderation` refuses as OpenAI's safety system does; `hold` holds as the provider's does,
-    then answers the picture."""
+    """`moderation` refuses as OpenAI's safety system does, `status` as OpenAI refuses a key;
+    `hold` holds as the provider's does, then answers the picture."""
     mode = steering.get("mode", "answer")
     if mode == "moderation":
         return 400, MODERATION
+    if mode == "status":
+        return steering["status"], openai_error(steering["status"], steering["provider_key"])
     if mode == "hold":
         seconds = steering.get("hold_seconds", HOLD_SECONDS)
         print(f"held {wait_for_disconnect(connection, seconds)}", flush=True)  # noqa: T201 - this in-container program prints its own request log

@@ -10,7 +10,7 @@ import pytest
 from support.workstation_support import write_hal_config
 
 from hal import config as hal_config
-from hal.stack.api_limits import ApiSettings, AppNumbers
+from hal.stack.api_limits import ApiSettings, AppNumbers, LogDepth
 from hal.workstation.alarm import AlarmSettings
 from hal.workstation.check import CheckSettings
 
@@ -49,6 +49,7 @@ def test_the_api_tables_load_as_written_with_dollars_as_floats(tmp_path: Path) -
     write_hal_config(
         tmp_path,
         "[api]\nbudget_dollars = 4\nmax_parallel_requests = 3\nperson_budget_dollars = 1.5\n"
+        'log_depth = "everything"\n'
         "[api.hopin]\nbudget_dollars = 6\n[api.songmaker]\nmax_parallel_requests = 1\n",
     )
 
@@ -58,6 +59,7 @@ def test_the_api_tables_load_as_written_with_dollars_as_floats(tmp_path: Path) -
         AppNumbers(4.0, 3),
         {"hopin": AppNumbers(6.0, None), "songmaker": AppNumbers(None, 1)},
         1.5,
+        LogDepth.EVERYTHING,
     )
     assert {type(api.every_app.budget_dollars), type(api.apps["hopin"].budget_dollars)} == {float}
 
@@ -102,7 +104,7 @@ def test_zero_and_a_large_number_are_accepted(
         ),
     ],
 )
-def test_every_number_of_the_api_records_is_a_known_key(
+def test_every_setting_of_the_api_records_is_a_known_key(
     known: set[str], record_fields: set[str]
 ) -> None:
     assert known == record_fields
@@ -110,6 +112,7 @@ def test_every_number_of_the_api_records_is_a_known_key(
 
 DOLLARS = "a finite number of at least 0"
 COUNT = "a whole number of at least 0"
+LOG_DEPTH = '"metadata" or "everything"'
 HUGE_WHOLE_NUMBER = 10**400
 DIGIT_LIMIT = sys.get_int_max_str_digits()
 PAST_THE_DIGIT_LIMIT = DIGIT_LIMIT + 1
@@ -177,6 +180,15 @@ TOO_LONG = f"an integer of more than {DIGIT_LIMIT} digits"
             f"budget_dollars must be {DOLLARS}, got {{'hopin': 1}}",
         ),
         ("api = 5\n", "[api] must be a table"),
+        ('[api]\nlog_depth = "verbose"\n', f"log_depth must be {LOG_DEPTH}, got 'verbose'"),
+        ('[api]\nlog_depth = "Everything"\n', f"log_depth must be {LOG_DEPTH}, got 'Everything'"),
+        ("[api]\nlog_depth = true\n", f"log_depth must be {LOG_DEPTH}, got True"),
+        ('[api]\nlog_depth = ["metadata"]\n', f"log_depth must be {LOG_DEPTH}, got ['metadata']"),
+        (
+            '[api.log_depth]\nhopin = "everything"\n',
+            f"log_depth must be {LOG_DEPTH}, got {{'hopin': 'everything'}}",
+        ),
+        ('[api.hopin]\nlog_depth = "everything"\n', "unknown key(s) or table(s): log_depth"),
     ],
 )
 def test_a_wrong_setting_fails_loud(tmp_path: Path, text: str, reason: str) -> None:

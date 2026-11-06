@@ -14,6 +14,7 @@ import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, NamedTuple, Protocol
 
 from hal.output import printable
@@ -101,10 +102,14 @@ def volume_name(config: Mapping[str, Any], key: str) -> str:
 
 
 def run_docker(
-    command: list[str], timeout: int, stdin: str | None = None
+    command: list[str],
+    timeout: int,
+    stdin: str | None = None,
+    environment: Mapping[str, str] = MappingProxyType({}),
 ) -> subprocess.CompletedProcess[str]:
-    """Runs the command with COMPOSE_COMPATIBILITY off: an app's tracked `.env` could turn it on,
-    and Compose would then name a built image `<project>_<service>`, not `<project>-<service>`."""
+    """Runs the command with `environment` added to the inherited one and COMPOSE_COMPATIBILITY
+    off: an app's tracked `.env` could turn it on, and Compose would then name a built image
+    `<project>_<service>`, not `<project>-<service>`."""
     try:
         return subprocess.run(  # noqa: S603 - argv is a docker command hal builds and no shell runs
             command,
@@ -114,7 +119,7 @@ def run_docker(
             timeout=timeout,
             cwd=REPOSITORY,
             input=stdin,
-            env={**os.environ, _COMPATIBILITY_VARIABLE: "false"},
+            env={**os.environ, **environment, _COMPATIBILITY_VARIABLE: "false"},
         )
     except subprocess.TimeoutExpired as error:
         raise ComposeError(f"`{' '.join(command[:3])}` took longer than {timeout}s") from error

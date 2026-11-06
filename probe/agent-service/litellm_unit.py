@@ -20,7 +20,8 @@ never a real key; every network a service of profile `litellm` joins must be int
 containers in `docker events` of the project during a run and names each one's mode, `--read` or
 `--write`, from a `docker` stand-in in front of the real one (U5 is its control); D digests the
 complete rows of the key table and the budget table, read by SQL in `litellm-db`, and prints the
-digest alone. Exit 0: every cell held.
+digest alone. U11 writes `[api] log_depth` into the scratch HOME's `~/.config/hal/config.toml`.
+Exit 0: every cell held.
 """
 
 from __future__ import annotations
@@ -46,6 +47,7 @@ sys.path[:0] = [str(Path(__file__).resolve().parent), str(REPO / "probe"), str(R
 import edge_copy  # noqa: E402
 from edge_copy import HAL_DECLINED, HAL_FAILURE, HAL_OK, HAL_REFUSED, expect, publish  # noqa: E402
 
+from hal import config as hal_config  # noqa: E402
 from hal.backup.settings import Settings  # noqa: E402
 from hal.output import write_line  # noqa: E402
 from hal.stack import api_limits, catalog, core, litellm_keys  # noqa: E402
@@ -614,8 +616,12 @@ class Probe:
         )
 
     def cell_u11(self) -> None:
-        self.change_setting(
-            "litellm", "LITELLM_LOG", ("ERROR", "WARNING"), "probe: litellm's log level"
+        """`[api] log_depth` switched to `everything` in the scratch HOME's settings file."""
+        depth = api_limits.LogDepth.EVERYTHING
+        settings = hal_config.config_path(self.home)
+        settings.parent.mkdir(parents=True, exist_ok=True)
+        settings.write_text(
+            f'[{hal_config.API_TABLE}]\n{hal_config.LOG_DEPTH_KEY} = "{depth.value}"\n'
         )
         output, ran = self.apply("U11", HAL_OK)
         expect(
@@ -623,7 +629,14 @@ class Probe:
             f"U11: {output[-300:]}",
         )
         expect(ran.created == 0, f"U11: E saw {ran}")
-        self.hold("U11", "litellm recreated, `keys later LiteLLM starts now`, exit 0, E empty")
+        inspected = self.run(["docker", "inspect", "--format", "{{json .Config.Env}}",
+                              self.compose("ps", "-q", "litellm").strip()]).stdout  # fmt: skip
+        values = api_limits.log_environment(depth)
+        off = api_limits.MESSAGE_LOGGING_OFF_VARIABLE
+        wanted = {f"LITELLM_LOG={values[api_limits.LOG_LEVEL_VARIABLE]}", f"{off}={values[off]}"}
+        expect(wanted <= set(json.loads(inspected)), "U11: litellm lacks the depth's settings")
+        self.hold("U11", "log_depth everything: litellm recreated, `keys later LiteLLM starts "
+                  f"now`, exit 0, E empty, litellm runs with {sorted(wanted)}")  # fmt: skip
 
 
 def prove(probe: Probe) -> int:

@@ -9,8 +9,10 @@
 # LiteLLM's own keys decide who may call: each app holds one, with its models, its routes, its
 # money budget and its bound on parallel requests. Every request names its person as `user`, whose
 # spend the budget `max_end_user_budget_id` bounds unless the person's own row links another. The
-# database holds keys, budgets and each person's fingerprint with its counters; no spend or error
-# log row is written, and no prompt reaches one. No app knows the master key, so the admin routes
+# database holds keys, budgets and each person's fingerprint with its counters, and one spend log
+# row per call, failures included, with key hash, person, model, cost, status and a failure's
+# reason, never its prompt or answer; LiteLLM deletes a row after 30 days. Message logging follows
+# the log depth compose.yaml passes in. No app knows the master key, so the admin routes
 # stay closed to apps.
 model_list:
   - model_name: text/opus
@@ -41,7 +43,7 @@ router_settings:
   num_retries: 0
 
 litellm_settings:
-  turn_off_message_logging: true
+  turn_off_message_logging: os.environ/HAL_TURN_OFF_MESSAGE_LOGGING
   redact_messages_in_exceptions: true
   max_end_user_budget_id: person-monthly
   # No request tag comes from the user agent, so a conforming request writes no daily tag row.
@@ -49,6 +51,8 @@ litellm_settings:
 
 general_settings:
   enforce_user_param: true
-  disable_spend_logs: true
-  disable_error_logs: true
+  disable_spend_logs: false
+  # A failure's spend log row: LiteLLM writes none while this is true.
+  disable_error_logs: false
   store_prompts_in_spend_logs: false
+  maximum_spend_logs_retention_period: 30d

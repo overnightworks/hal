@@ -4,13 +4,31 @@
 # global and log blocks of traefik.yml; tests/test_litellm_unit.py and the CI job `front` hold the
 # equality. The api, ping and metrics blocks stay absent. The three routes stand in
 # dynamic/route.yml. The front reads no secret file; app keys pass through its
-# memory only.
+# memory only. Its access log writes one JSON line per request to standard output with an allowlist
+# of fields: no header and no path, whose query a request could fill; the router names the route.
 global:
   checkNewVersion: false
   sendAnonymousUsage: false
 
 log:
   level: INFO
+
+accessLog:
+  format: json
+  fields:
+    defaultMode: drop
+    names:
+      StartUTC: keep
+      ClientHost: keep
+      RequestMethod: keep
+      RouterName: keep
+      ServiceName: keep
+      DownstreamStatus: keep
+      OriginStatus: keep
+      Duration: keep
+      OriginDuration: keep
+    headers:
+      defaultMode: drop
 
 entryPoints:
   api:

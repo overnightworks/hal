@@ -775,7 +775,8 @@ ungültiger Konfiguration mit `2`.
 ## Konfiguration
 
 `hal` liest seine Einstellungen aus `~/.config/hal/config.toml`, eine Tabelle je
-Timer-Job mit Einstellungen und `[api]` für die Zahlen, die LiteLLM den Apps setzt; `hal`
+Timer-Job mit Einstellungen und `[api]` für die Zahlen, die LiteLLM den Apps setzt, und die
+Log-Tiefe der API-Route; `hal`
 schreibt, verschiebt und löscht die Datei nie.
 Ohne die Datei gelten die Defaults. Eine unbekannte Tabelle, ein unbekannter
 Schlüssel, ein falscher Werttyp, eine ganze Zahl mit mehr Stellen, als Python ausgibt,
@@ -814,6 +815,7 @@ Schlüssels, wie ihn `compose.yaml` dem Schritt einbindet (etwa `hopin`).
 | `budget_dollars` | `[api]`, `[api.<app>]` | `10` | Dollar je App und Monat |
 | `max_parallel_requests` | `[api]`, `[api.<app>]` | `5` | gleichzeitige Anfragen je App; die nächste lehnt LiteLLM sofort mit 429 ab |
 | `person_budget_dollars` | `[api]` | `2` | Dollar je Person und Monat, über alle Apps |
+| `log_depth` | `[api]` | `"metadata"` | was die Logs der API-Route halten: `"metadata"` oder `"everything"` |
 
 Je Zahl gilt die Tabelle der App, sonst `[api]`, sonst der Default (`src/hal/stack/api_limits.py`).
 Dollar sind Zahlen ab 0, `max_parallel_requests` ist eine ganze Zahl ab 0. hal setzt keine
@@ -830,6 +832,13 @@ Personen-Budget erst, wenn LiteLLMs Cache es übernimmt (bis zu etwa einer Minut
 jede, `person_budget_dollars = 0` eine Person nach ihrer ersten bezahlten Antwort im Monat. Ein
 Budget unter dem schon Verbrauchten lehnt ab sofort ab, bis zur Rücksetzung; der Plan warnt nicht.
 Eine Zahl, die jemand in LiteLLM von Hand gesetzt hat, überschreibt der nächste `hal apply`.
+
+`log_depth = "metadata"` hält je Anfrage, was ein Fehler oder ein Missbrauch braucht, nie ihren
+Inhalt; `"everything"` schreibt zusätzlich jede Anfrage ganz in LiteLLMs Log
+([agent-service.md](agent-service.md), „What the route logs“). Eine geänderte Tiefe zeigt der
+nächste `hal apply` als Neuerstellung von `litellm` und setzt sie damit. Nur `hal apply` liest sie:
+`hal stop`, `hal start` und `hal update` erstellen LiteLLM nicht neu, die Tiefe hält also bis zum
+nächsten `hal apply`, und ein Tippfehler in der Datei hält keinen Notschalter auf.
 
 Ein `[api.<name>]`, dessen Name keine App mit Schlüssel ist (ein Tippfehler, eine App, die
 `compose.yaml` noch nicht oder nicht mehr einbindet), beendet `hal apply`, solange `litellm` läuft,

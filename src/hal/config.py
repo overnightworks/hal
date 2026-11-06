@@ -1,6 +1,6 @@
 """hal's one settings file, `~/.config/hal/config.toml`: a table per timer job that has settings,
 and `[api]` with its `[api.<app>]` tables, the numbers LiteLLM enforces on the apps
-(`hal.stack.api_limits` decides which of them holds).
+(`hal.stack.api_limits` decides which of them holds) and the API route's log depth.
 
 A missing file means defaults. hal only reads it; nothing here writes, moves or deletes it."""
 
@@ -14,7 +14,7 @@ from enum import Enum
 from pathlib import Path
 from types import MappingProxyType
 
-from hal.stack.api_limits import ApiSettings, AppNumbers
+from hal.stack.api_limits import ApiSettings, AppNumbers, LogDepth
 from hal.workstation.alarm import AlarmSettings
 from hal.workstation.check import CheckSettings
 
@@ -26,6 +26,7 @@ class Kind(Enum):
     AT_LEAST_ONE = "a whole number of at least 1"
     COUNT = "a whole number of at least 0"
     DOLLARS = "a finite number of at least 0"
+    LOG_DEPTH = " or ".join(f'"{depth.value}"' for depth in LogDepth)
 
 
 CONFIG_PATH_IN_HOME = Path(".config") / "hal" / "config.toml"
@@ -35,11 +36,16 @@ ALARM_TABLE = "alarm"
 ALARM_KEY_KINDS: Mapping[str, Kind] = {"interval": Kind.AT_LEAST_ONE, "runs": Kind.AT_LEAST_ONE}
 API_TABLE = "api"
 PERSON_BUDGET_KEY = "person_budget_dollars"
+LOG_DEPTH_KEY = "log_depth"
 APP_KEY_KINDS: Mapping[str, Kind] = {
     "budget_dollars": Kind.DOLLARS,
     "max_parallel_requests": Kind.COUNT,
 }
-API_KEY_KINDS: Mapping[str, Kind] = {**APP_KEY_KINDS, PERSON_BUDGET_KEY: Kind.DOLLARS}
+API_KEY_KINDS: Mapping[str, Kind] = {
+    **APP_KEY_KINDS,
+    PERSON_BUDGET_KEY: Kind.DOLLARS,
+    LOG_DEPTH_KEY: Kind.LOG_DEPTH,
+}
 
 
 class ConfigInvalid(Exception):
@@ -104,6 +110,8 @@ def _admits(kind: Kind, value: object) -> bool:
         return type(value) is int and value >= 1
     if kind is Kind.COUNT:
         return type(value) is int and value >= 0
+    if kind is Kind.LOG_DEPTH:
+        return isinstance(value, str) and value in {depth.value for depth in LogDepth}
     # Compared as written: an int past float range converts to no float, so none is converted here.
     return type(value) in (int, float) and 0 <= value <= sys.float_info.max
 
@@ -127,7 +135,7 @@ def _table_values(
 
 
 def _api_settings(path: Path, table: object) -> ApiSettings:
-    """`[api]` as written; a key that is no number of `[api]` and holds a table is an app's."""
+    """`[api]` as written; a key that is no setting of `[api]` and holds a table is an app's."""
     if not isinstance(table, dict):
         raise ConfigInvalid(path, f"[{API_TABLE}] must be a table")
     app_tables = {
@@ -138,11 +146,12 @@ def _api_settings(path: Path, table: object) -> ApiSettings:
     own = {key: value for key, value in table.items() if key not in app_tables}
     numbers = _table_values(path, API_TABLE, own, API_KEY_KINDS)
     person_budget = numbers.pop(PERSON_BUDGET_KEY, None)
+    log_depth = LogDepth(numbers.pop(LOG_DEPTH_KEY, LogDepth.METADATA.value))
     apps = {
         app: AppNumbers(**_table_values(path, f"{API_TABLE}.{app}", app_table, APP_KEY_KINDS))
         for app, app_table in app_tables.items()
     }
-    return ApiSettings(AppNumbers(**numbers), MappingProxyType(apps), person_budget)
+    return ApiSettings(AppNumbers(**numbers), MappingProxyType(apps), person_budget, log_depth)
 
 
 def load(home: Path) -> Settings:
