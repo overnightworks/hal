@@ -91,7 +91,7 @@ flowchart TB
     MON -.->|"alerts, the same channel"| OP
     OP ==>|"CHANGE: pull request, merge"| GH
 
-    CAT -->|"hal apply, run by the operator: the newest release tag"| PRES & HOP
+    CAT -->|"hal apply, run by the operator: the newest release tag"| PRES & HOP & SPE
     GH -->|"release tag, polled by songmaker's own timer"| SONG
     CAT -->|"the publish phase of hal apply"| DNS & ACC & GH
     GH -->|"CI"| SC
@@ -101,7 +101,7 @@ flowchart TB
     BAK -.->|"dumps"| KC & SONG
     BAK --> DATA
 
-    class LOOK,CAT,HOP,MON,AGT planned
+    class LOOK,MON,AGT planned
     class LOOK,ADM place
 ```
 
@@ -109,7 +109,7 @@ flowchart TB
 1. **The way in.** Every name ends in one tunnel. Cloudflare Access is planned to block every name that is not explicitly opened (`*` = operator only, X8b on #30); the operator ruled on 20.10.2026 that Zero Trust is not needed for now and can be added at any time, so today `auth` goes live as `public` and the `*` protection waits for X8b. Traefik on loopback hands each name to the container with that `edge.name` label, and the alias of that container (`edge.alias`) too.
 2. **The login.** Keycloak at `auth.hallucinai.de` is the one login page. Every app checks the ID itself through webauth and its group `/apps/<name>`. songmaker joins only through its own cutover (section 3); until then it keeps its own login. Tools without their own login will sit behind Access (X8b); no login-less tool is published before it.
 3. **PEOPLE.** People and their groups exist only in the Keycloak admin, `http://localhost:8090/admin/`, on this PC (later via Tailscale).
-4. **CHANGE.** Every change is a pull request. A release is a `vYYYY.MM.DD.N` tag: `hal apply` deploys hopin and presentator at their newest one after the operator's `yes`, and songmaker's own timer deploys songmaker (section 5); whether the service is then reachable depends on its state (section 8 state table). The platform (edge) and the external services change when the operator runs `hal apply`.
+4. **CHANGE.** Every change is a pull request. A release is a `vYYYY.MM.DD.N` tag: `hal apply` deploys hopin, presentator and speech-runtime at their newest one after the operator's `yes`, and songmaker's own timer deploys songmaker (section 5); whether the service is then reachable depends on its state (section 8 state table). The platform (edge) and the external services change when the operator runs `hal apply`.
 5. **LOOK.** One traffic-light page answers "is it OK now?" for every service, the backup, the drift checks and the secrets. Grafana answers "why, and since when?" for every service. Both send alerts through one e-mail channel.
 6. **Agents.** Today agents run as the operator's user and can do whatever he can. Every "an agent may not" in this document is a request until D14 gives them their own user.
 
@@ -125,7 +125,7 @@ Each layer has **one** owner. The order is the order of a setup: a layer needs o
 | **L1 secrets** | every token, password and key; values only in `~/.secrets`; tool logins in their tools' stores. Directories 0700. Files 0600, except a file a container user must read: 0644 inside its 0700 directory (docs/keycloak.md). Today every agent can read all of it (D14) | `src/hal/workstation/secrets_manifest.toml` (names, purpose, reader, scope, bindings, rotation; never a value) | `hal setup` (its step „Geheimnisse“): walks every missing secret page by page (home-tools#10) | `hal secrets`, part of `hal check` (today: local view; the remote check is section 4) | creating a token at the provider: a human logs in and clicks. The wizard opens the page, takes the value hidden, verifies it, stores it (HopIn's Cloudflare TURN key ID and API token: stored, not verified) |
 | **L2 platform** | Traefik, socket proxy, Keycloak and its DB, step-ca (the internal CA for the MCP origins) and `traefik-mcp` (the second Traefik, the only container on the internal networks `mcp-ca`, `mcp`, `mcp-backends` and one per app, `hal_mcp_songmaker`, and the speech service's one way to Keycloak's key set; no host port), `legal` (nginx serving the imprint, the privacy notice and the terms that `hal apply` builds from the section of every block into `legal/built/`, on its own internal network; its one catalog host is the apex, public for the pages `cloudflare.redirect.serve` names), hal-backup timers, the LOOK page (Gatus: "is it OK now?"), the monitoring stack for every service (Prometheus, Grafana, Alertmanager: "why, since when?"; moves out of songmaker, ruled 16.10.2026, edge#4), one alert channel | edge: `compose.yaml`, `traefik.yml`, `traefik-mcp.yml` and `mcp/dynamic/`, `keycloak/*.yaml` (realm as code), `legal/` (frame, edge's own sections, stylesheet, nginx config; the built pages are not in git), `step-ca/ca.json`, `backup/apps.toml`; the timers' job declaration `src/hal/workstation/jobs.py` | `hal apply --local` (start without publishing), then `hal apply` (publish), then `hal online` (open the tunnel; section 6 step 11). Proposed: one command for compose, realm apply, timers, services on/off, external | `hal check` (`hal check exposure` today; proposed: plus readiness, backup freshness, deploy state) | the Keycloak go-live once (edge#19: it creates the permanent admin from a typed name and password; TOTP and passkey in the browser) |
 | **L3 external** | Cloudflare DNS, Access apps and policies, tunnel ingress (D6), the zone's HSTS setting; GitHub repo settings, rulesets, Actions policy, org secret names and reach | edge `fleet.yaml` + OpenTofu (`ext-as-code.md`, epic E3, its slices listed in the epic's body) | the publish phase of `hal apply` (operator, TTY, the word `yes`) | `hal check hosts` → `hal check` | secret values, the tunnel object and its credential, Access identity providers, the Access group's one member, SonarCloud projects, CodeQL default setup, GitHub App installs, the registrar. Each has no provider or would put a secret into state |
-| **L4 services** | songmaker, presentator, hopin, the speech service `speech-runtime` (an app without a host, reachable only from its apps' internal networks and from `traefik-mcp`, which routes nothing to it; behind its two tokens and the group `/services/speech-service`), the agent service (its compose service and image recipe live in edge; switched on by its unit in `fleet.yaml`), LiteLLM with its front and database (in edge's `compose.yaml`, switched on by its unit `litellm`), later the aco board | each service repo's `compose.yaml` (containers) + its entry in `fleet.yaml` (where it runs, who may use it, on or off) | `hal apply` at the newest release tag, after the operator's `yes` (songmaker: its own timer, section 5) | the LOOK page (each service's health URL); Grafana for its metrics | creating a new repo's SonarCloud project (one click) |
+| **L4 services** | songmaker, presentator, hopin, the speech service `speech-runtime` (an app without a host, reachable only from its apps' internal networks and from `traefik-mcp`, which routes nothing to it; behind its two tokens and the group `/services/speech-service`), the agent service (its compose service and image recipe live in edge; switched on by its unit in `fleet.yaml`), LiteLLM with its front and database (in edge's `compose.yaml`, switched on by its unit `litellm`), later the aco board | each service repo's `compose.yaml` (containers) + its entry in `fleet.yaml` (where it runs, who may use it, on or off) | `hal apply`, after the operator's `yes`: an app at its newest release tag, an edge unit from edge's `compose.yaml` (songmaker: its own timer, section 5) | the LOOK page (each service's health URL); Grafana for its metrics | creating a new repo's SonarCloud project (one click) |
 | **L5 data** | Docker volumes (songmaker DB and audio, Keycloak DB, LiteLLM DB, presentator's `database` (its `builds` are a cache); `step-ca` ([internal-ca.md](internal-ca.md) names its backup) and `traefik-mcp-acme`, which is not: its certificates are issued again), the restic repository and its off-disk copy (D3), the encrypted OpenTofu state | edge `backup/apps.toml` | `hal restore …` (section 6) | the restore test (monthly), the clean-machine drill (section 6), and the backup's freshness on the LOOK page | the restic password, the OpenTofu passphrase and the disk's recovery key live in the password manager: without them no backup, no state and no disk can be read |
 | **People** | users, passkeys, group memberships (`/apps/<name>`, `/services/agent-service/subscription`, `/services/agent-service/api`, `/services/speech-service`, `/services/litellm/admin`, which `hal apply`'s key step reads) | the Keycloak database (managed only in the admin console); the groups themselves are code in `keycloak/realm.yaml` | first-ever: create people in the admin console; re-setup: restore the Keycloak DB | Keycloak events (login anomalies) on the LOOK page | everything: people are never code (ruled) |
 
@@ -358,7 +358,7 @@ the privacy file is no refusal there yet.
 
 - **hopin#25 first:** login through webauth (`/apps/hopin`), Impressum and Datenschutz.
 - **A `compose.yaml` and a Dockerfile** with `edge.name: hopin`, `restart: unless-stopped` and **no published port**. Hopin's container listens on 8080, which songmaker already uses on the host; Traefik reaches it by its bridge IP, so no host port is needed.
-- **Its first release:** the planned `hal release hopin` tags the green tip of `main`.
+- **Its first release:** hopin is tagged `vYYYY.MM.DD.N` on the green tip of `main` (section 5); no command cuts the tag yet (#1051).
 - **The catalog entry above;** then `hal apply`.
 - **Its SonarCloud project** already exists: hopin has `sonar-project.properties`.
 
@@ -467,10 +467,10 @@ Every app goes live from a release tag, never from a landing on `main`. A releas
 
 | Service | Goes live by |
 |---|---|
-| **hopin**, **presentator** | `hal apply`, after the operator's `yes` (below). presentator's backup is the SQLite record in `backup/apps.toml` (`docs/backup.md`) |
+| **hopin**, **presentator**, **speech-runtime** | `hal apply`, after the operator's `yes` (below). presentator's backup is the SQLite record in `backup/apps.toml` (`docs/backup.md`) |
 | **songmaker** | its own timer, outside `hal apply` (below). Its host bypasses Traefik (gap 35) |
 
-### hopin and presentator: `hal apply`
+### hopin, presentator and speech-runtime: `hal apply`
 
 - **Plan.** `hal apply` takes the newest release tag on origin's default branch (`repo.default_branch` of the catalog entry) and shows it in the plan. The operator's `yes` is the gate: whoever can put a tag on a merged commit offers code to run here (E1).
 - **Run.** The tag is checked out in `~/srv/<key>`, its compose file is held to `app_contract.py` before anything is built, and Compose runs it as project `<key>`.
@@ -486,11 +486,11 @@ Every app goes live from a release tag, never from a landing on `main`. A releas
 - **Credential.** It calls `gh api` as the operator's `gh` login.
 - **`hal apply`** does not deploy it: the entry is a host-only app (section 3), and `hal apply` only reads the checkout's HEAD for its legal text.
 
-The facts of this subsection are read at songmaker's tag `v2026.11.06.1`; songmaker owns them.
+songmaker owns the facts of this subsection.
 
 ### Who sets the tag
 
-No command cuts a release tag yet; `hal release` is planned (D5, section 9). **Version form for services:** `vYYYY.MM.DD.N` (example `v2026.10.16.1`). A service has no API consumers who need SemVer, and a date says at a glance how old the running version is. Libraries such as webauth keep SemVer and their own release, and a tag is never moved: a broken release gets the next tag.
+No command cuts a release tag yet (#1051). **Version form for services:** `vYYYY.MM.DD.N` (example `v2026.10.16.1`). A service has no API consumers who need SemVer, and a date says at a glance how old the running version is. Libraries such as webauth keep SemVer and their own release, and a tag is never moved: a broken release gets the next tag.
 
 ### What stays applied by the operator
 
@@ -532,7 +532,7 @@ That is the operator's „zumindest durchleiten zu den Seiten“, and edge#19 ru
 | 6 | `hal apply --local --platform` (`--platform` planned) | one command | **skipped**: step 7 creates the Keycloak secrets first and starts the platform itself | first restores the Keycloak dump into the empty DB (the data backup's newest complete run), then starts Keycloak, so the realm, the people and the passkeys are back | 8081 and 8090 listen on loopback, Keycloak answers; the PC is in column C |
 | 7 | `keycloak/go-live` (edge#19) | guided; runs **once ever**; never publishes (section 3, X8) | creates the Keycloak secrets, bootstrap admin, master on 8090, applies the realms; asks for the permanent admin's name and first password (hidden) and creates it; pauses for the browser step (TOTP and passkey); then deletes the bootstrap admin | **skipped**: go-live sees its done-states and changes nothing | another master admin with TOTP and a passkey exists, `temp-admin` is gone |
 | 8 | `hal apply --local` | one command; shows the plan, asks `yes` | starts every enabled service at its newest tag | the same: `hal apply` plans the newest release tag (section 5), and the restored data must fit it | each health URL answers on loopback; every enabled service is in column C |
-| 9 | Restore app data | per app `hal stop <app>`, `hal restore <app> --live --repo <off-disk repository>` (section 7; `--repo` planned), then `hal start <app>`, so step 10 finds it in C | — | loads each app's dump and files from the same data run as step 6 | the restore test's checks pass on the live data; the data's schema equals the running tag's `schema:` |
+| 9 | Restore app data | per app `hal stop <app>`, `hal restore <app> --live --repo <off-disk repository>` (section 7; `--repo` planned), then `hal start <app>`, so step 10 finds it in C | — | loads each app's dump and files from the same data run as step 6 | the restore test's checks pass on the live data; the data's schema is the one the running release expects |
 | 10 | Check it closed | `hal check`, then the operator opens each app on loopback | the apps answer, empty | he sees his songs and his people on loopback | every light green except "not published" |
 | 11 | `hal apply` (publish), then `hal online` (open) | two commands; `hal apply` shows the plan and asks `yes` | `hal apply` publishes the DNS, Access and tunnel lines (C stays C); `hal online` then moves every enabled service C → A | the same; the restored OpenTofu state plans "No changes" for what still exists. A lost state re-adopts by name (E3 rule 6). From A on, a later `hal apply` takes each app to its newest release tag | `hal check hosts` exit 0, then `hal check` exit 0 with every enabled service in A (every-service-in-A is a planned area) |
 | 12 | **PEOPLE** | guided: the planned `hal people` opens `http://localhost:8090/admin/` on the users page | create each person and put them into `/apps/<name>` | nothing: the DB came back | the person signs in to their app |
@@ -586,8 +586,8 @@ They survive a dead PC because they live at the provider.
 | 4 | App groups | `keycloak/realm.yaml` (`/apps/songmaker`, `presentator`, `hopin`) and the catalog's `login_group` | **new slice in E3**: the catalog's CI checks against `realm.yaml` and `apps.toml` (section 3) |
 | 5 | Org secret reach | home-tools#10 line 19 (repo-list drift) and E3 X5 (`fleet.yaml` org secrets) | home-tools#10 (drop its drift view) and E3 X5 (keep it) |
 | 6 | Alert channels: three today | songmaker's e-mail (`songmaker-alert@`), Alertmanager inside songmaker, `hal check`'s desktop notification | edge#4: **one e-mail channel** (ruled 24.10.2026: `msmtp`, run as the operator, over the SMTP account songmaker uses). `hal check` mails its news itself; Gatus ("is it OK now?") and Alertmanager ("why, since when?") both send into it; songmaker's own e-mail alert goes |
-| 7 | Deploy | hopin and presentator through `hal apply` from their release tag; songmaker by its own timer from its release tag (section 5) | [#1016](https://github.com/overnightworks/hal/issues/1016): one release rule for all apps |
-| 8 | Deploy checkout = work clone | songmaker's deploy checkout is `~/srv/songmaker` (section 5); whether its installed unit points there is not read here. `aco land` must not run in a deploy checkout, so landing runs from `~/git/songmaker-land` | songmaker |
+| 7 | Deploy | hopin, presentator and speech-runtime through `hal apply` from their release tag; songmaker by its own timer from its release tag (section 5) | [#1016](https://github.com/overnightworks/hal/issues/1016): one release rule for all apps |
+| 8 | Deploy checkout = work clone | closed in songmaker: it deploys from `~/srv/songmaker` (section 5), and its `scripts/auto-deploy.sh` refuses a checkout on a branch. What is left is the former landing clone `~/git/songmaker-land` | songmaker |
 | 9 | Monitoring stack | Prometheus, Grafana and Alertmanager live in songmaker's compose, though they serve the platform | edge#4: **ruled 16.10.2026:** they move into edge and serve every service. songmaker keeps only its metrics endpoint and its dashboards as files edge loads |
 | 10 | Two publishers | E3 X8 lets `keycloak/go-live` call `edge external apply`; section 6 publishes in `edge apply` | E3 X8, changed once (section 3): go-live never publishes |
 | 11 | The zone name | `fleet.yaml` `cloudflare.zone` only: `hal apply --local` writes it to `.env`, and CI derives `EDGE_DOMAIN` from the same key | landed: edge#136 |
@@ -610,7 +610,7 @@ They survive a dead PC because they live at the provider.
 | 23 | The remote secret check | section 4: token self-checks, SonarCloud, the compose scan with `bound_as`, Keycloak | **new home-tools item** after E3 X5 (the GitHub and Cloudflare parts come from X5) |
 | 24 | Agents held org admin | The `gh` login keeps `admin:org` until E3's D6 (removing `admin:org`) removes it after X3c (kept on purpose for edge#29); its live scopes are read from the `X-OAuth-Scopes` header of `gh api -i user`. `delete_repo` is removed (16.10.2026). songmaker's timer still uses that login. The bigger reach remains: row 31 | the `github/deploy-read` token (D8) |
 | 26 | hopin cannot run beside songmaker | default port 8080, no container | hopin#25 or a new hopin item "container with `edge.name`" |
-| 27 | No release command | no command cuts a release tag | `hal release` (planned, D5) |
+| 27 | No release command | no command cuts a release tag | #1051 |
 | 28 | Dead unit link | `agent-telegram.service` points to a moved file | claudebot#19 (the bot stays off) |
 | 29 | No emergency commands | `hal status` and `hal lock`, the boot guard and its drift finding do not exist | **new item in edge**: "one operator CLI (`hal`) with emergency switches" (section 8). The daily check, backup and restore are the ruled `hal check`, `hal backup` and `hal restore`. The section 8 state table becomes this item's test table: one parametrised test per cell |
 | 30 | The polkit rule for cloudflared exists only where `hal setup` ran | installed on this PC (#76, #144); a PC without it needs `sudo` to stop the tunnel | `hal setup` installs the stop-only rule `tunnel/polkit/10-edge-cloudflared-stop.rules` from edge (section 8) |
