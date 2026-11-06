@@ -197,7 +197,7 @@ error text, which may quote part of a request and is logged word for word:
   as the operator ruled; OpenAI's 401 names the key masked to 3 + 4 characters, and a provider
   that quotes part of a request puts that part in the line and the row below. A served call logs no line,
   and a bearer that is no virtual key (not `sk-…`) is refused with 401 without a line of its own.
-- **A spend log row** per call with a valid app key, a failure included (`LiteLLM_SpendLogs`): the key's hash and
+- **A spend log row** per call with a valid app key, a failure at the provider included (`LiteLLM_SpendLogs`): the key's hash and
   alias, the person's fingerprint, model, tokens, cost, times, status and a failure's error;
   never the prompt, answer or picture (`store_prompts_in_spend_logs: false`). LiteLLM deletes a
   row, and the tool index it feeds, after 30 days (`maximum_spend_logs_retention_period`).
@@ -205,8 +205,7 @@ error text, which may quote part of a request and is logged word for word:
   front's, and not in LiteLLM's at `metadata` (a refused key, a refused plain bearer, both providers'
   refusals and a served call).
 
-At `everything` LiteLLM logs at `DEBUG` with message logging on, so each request stands whole
-in its log, its fingerprint included, and in its spend row, and in no line of the front (probe L6); the front's line stays as above, so the one thing it does not show is the path and
+At `everything` LiteLLM logs at `DEBUG` with message logging on. Each request stands whole in LiteLLM's log, including its fingerprint. The fingerprint appears in that log and its spend row, never in the front's lines (probe L6); the front's line stays as above, so the one thing it does not show is the path and
 query of a request the front itself refuses before LiteLLM sees it. `hal apply` passes the
 depth's variables to Compose (`src/hal/stack/api_limits.py`), so a changed depth is a recreate of
 `litellm`; without them compose.yaml's defaults are `metadata`'s. `probe/agent-service/litellm_logs.py`
