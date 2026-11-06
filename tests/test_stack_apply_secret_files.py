@@ -77,7 +77,7 @@ def test_a_unit_switched_on_whose_service_lacks_its_secret_file_is_refused_befor
 def test_a_live_service_with_a_changed_definition_whose_file_is_missing_is_refused(
     step_ca_applied, switch, scripted, tmp_path
 ):
-    """C2, a recreate of a service that is not the unit's built one."""
+    """C2, a recreate of a live service whose definition changed."""
     path = needs(scripted, "step-ca", "ca_secret", tmp_path)
     scripted.change_definition("step-ca")
 
@@ -85,20 +85,6 @@ def test_a_live_service_with_a_changed_definition_whose_file_is_missing_is_refus
 
     refused_before_the_yes(exit_code, out, err, scripted, path)
     assert f"step-ca needs {path}" in err
-
-
-def test_a_built_service_recreated_onto_a_new_image_whose_file_is_missing_is_refused(
-    agent_service_unit, switch, scripted
-):
-    """C3."""
-    assert switch()[0] == 0
-    scripted.calls.clear()
-    scripted.change_image("agent-service", "edge-agent-service:9.9.9-2.1.302")
-    path = lose(scripted, SIGNING_KEY)
-
-    exit_code, out, err = switch()
-
-    refused_before_the_yes(exit_code, out, err, scripted, path)
 
 
 def test_a_changed_follower_whose_file_is_missing_is_refused(

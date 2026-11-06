@@ -23,7 +23,7 @@ from urllib.parse import urlsplit
 import yaml
 
 FLEET_FILE = "fleet.yaml"
-_RUN_KEYS = {"enabled", "setup", "build"}
+_RUN_KEYS = {"enabled", "setup"}
 _APP_RUN_KEYS = {"enabled"}
 _REPO_KEYS = {"default_branch"}
 _BOOL_TAG = "tag:yaml.org,2002:bool"
@@ -88,7 +88,6 @@ class Unit:
     enabled: bool
     setup: str | None
     hosts: tuple[str, ...] = ()
-    build: str | None = None  # the recipe directory of the unit's one built image; None: pulled
     served_elsewhere: tuple[Host, ...] = ()  # the hosts another tunnel serves
 
 
@@ -280,7 +279,6 @@ def _unit(
         enabled,
         _setup(key, run.get("setup"), repository),
         _names(entered),
-        _build(key, run.get("build"), repository),
         _served_elsewhere(entered, enabled),
     )
 
@@ -310,19 +308,6 @@ def _setup(key: str, setup: Any, repository: Path) -> str | None:
     if not (isinstance(setup, str) and inside and path.is_file() and os.access(path, os.X_OK)):
         raise CatalogError(f"services.{key}.run.setup: {setup!r} is not an executable file")
     return setup
-
-
-def _build(key: str, build: Any, repository: Path) -> str | None:
-    if build is None:
-        return None
-    path = (repository / str(build)).resolve()
-    inside = path.is_relative_to(repository.resolve())
-    if not (isinstance(build, str) and inside and (path / "Dockerfile").is_file()):
-        raise CatalogError(
-            f"services.{key}.run.build: {build!r} is not a directory of this repository "
-            "that holds a Dockerfile"
-        )
-    return build
 
 
 class Exposure(StrEnum):

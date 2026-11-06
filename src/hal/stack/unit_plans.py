@@ -8,7 +8,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, NamedTuple, Protocol
 
-from hal.stack import barrier, built_image, catalog, compose, core, switches
+from hal.stack import barrier, catalog, compose, core, switches
 
 
 class Action(StrEnum):
@@ -205,20 +205,14 @@ def plan_kept_images(
 ) -> list[KeptImage]:
     """Each live service of a unit whose container's image is not the exact reference its
     resolved definition names, in catalog and file order (#91 rules 2, 3). The core has no
-    profile, the services in `planned_elsewhere` (the followers and the built services) have their
-    own plan, a unit planned off loses its containers, a built unit that stays stopped is edge's to
-    build and only shown as stopped, and a service whose definition names no image has no pin to
+    profile, the services in `planned_elsewhere` (the followers) have their own plan, a unit
+    planned off loses its containers, and a service whose definition names no image has no pin to
     compare. `plan_recreates` moves those of a database unit's app or database service (#995)."""
     planned_off = {plan.unit.key for plan in plans if plan.action is Action.OFF}
-    built_and_stopped = {
-        plan.unit.key
-        for plan in plans
-        if plan.action is Action.STAYS_STOPPED and plan.unit.build is not None
-    }
     live = [container for container in containers if container.live]
     kept: dict[KeptImage, None] = {}
     for unit in units:
-        if unit.key not in planned_off | built_and_stopped:
+        if unit.key not in planned_off:
             services = [
                 service
                 for service in profile_services[unit.key]
@@ -426,7 +420,6 @@ def _swapped_image(
 
 
 class UnitServicePlans(NamedTuple):
-    built: list[built_image.BuiltRecreate]
     recreates: list[Recreate]
     images: list[KeptImage]
 
@@ -437,21 +430,14 @@ def plan_unit_services(
     hashes: Mapping[str, str],
     plans: Sequence[UnitPlan],
     followers: Collection[str],
-    gates: Mapping[str, core.Gate],
     engine: compose.Compose,
     database_units: Collection[DatabaseUnit],
 ) -> UnitServicePlans:
-    """What the services of the units need besides their switch: the built service is recreated
-    onto its image, every other live service whose definition changed is recreated, the app or
-    database service of a database unit whose image differs is recreated onto it after the
-    unit's snapshot, and every other whose image differs is named (#91, #995)."""
-    built_services = built_image.built_services(
-        fleet.units, fleet.profile_services, fleet.config, gates
-    )
-    built = built_image.plan_built_images(
-        built_services, fleet.config, containers, hashes, engine.built_image_id
-    )
-    planned_elsewhere = {*followers, *built_services.values()}
+    """What the services of the units need besides their switch: every live service whose definition
+    changed is recreated, the app or database service of a database unit whose image differs is
+    recreated onto it after the unit's snapshot, and every other whose image differs is named
+    (#91, #995)."""
+    planned_elsewhere = set(followers)
     images = plan_kept_images(
         fleet.units, fleet.profile_services, fleet.config, containers, plans, planned_elsewhere
     )
@@ -469,7 +455,7 @@ def plan_unit_services(
     )
     moving = {recreate.service for recreate in recreates if recreate.moved}
     named = [image for image in images if image.service not in moving]
-    return UnitServicePlans(built, recreates, [*named, *moved])
+    return UnitServicePlans(recreates, [*named, *moved])
 
 
 type Show = Callable[[str, str], None]  # the live line's `show(subject, text)`
