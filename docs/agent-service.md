@@ -233,8 +233,8 @@ fingerprint. The front's constant user agent lands in the tool rows, beside each
 tag from the user agent (`disable_add_user_agent_to_request_tags`), so a conforming request writes no tag row. A key holder who does not
 conform can send a tag in the body: a root `tags` list, `metadata.tags` and `litellm_metadata.tags` each land in `LiteLLM_DailyTagSpend`
 with LiteLLM's own request id and in the call's spend log row, and so in the database's volume, in no other table, log or mount, and `metadata` as a JSON string lands
-in no sink at all; none reaches the provider. Those rows are outside the
-four tables `hal expire` prunes, so the 90 days above do not cover them. `logging.lastResort` and
+in no sink at all; none reaches the provider. The daily label rows are in the
+tables `hal expire` prunes, so the 90 days above cover them; the spend log rows go with their 30 days. `logging.lastResort` and
 `warnings.warn` reach LiteLLM's standard error too, and whether a real path sends request content
 through them is not measured. Memory holds the content
 while a run is in flight, and tmpfs may be paged to swap. The Docker log driver's retention is the daemon's
@@ -412,8 +412,8 @@ and the admin budget with its customer rows (the key step below).
   wrong it ends non-zero after Prisma's retries. The database password is an environment value
   of the proxy and its Prisma processes, the same holders as the provider keys.
 - **What expires.** `hal expire`, run daily at 04:00 by `hal-expire.timer` (`Persistent=true`
-  catches up a missed run), deletes in one statement, all or nothing, the daily person and tool rows
-  (`LiteLLM_DailyEndUserSpend`, `LiteLLM_DailyToolSpend`) dated more than 90 UTC days back, the tool
+  catches up a missed run), deletes in one statement, all or nothing, the daily person, tool and label
+  rows (`LiteLLM_DailyEndUserSpend`, `LiteLLM_DailyToolSpend`, `LiteLLM_DailyTagSpend`) dated more than 90 UTC days back, the tool
   rows (`LiteLLM_ToolTable`) not used for 90 days, and the customer rows (`LiteLLM_EndUserTable`)
   whose fingerprint has had no request for 90 days and whose spend is 0. A customer row linked to
   a budget, as an admin's is, stays, and so do keys, budgets and every other table. The period is

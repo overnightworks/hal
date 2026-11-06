@@ -114,16 +114,17 @@ def test_without_a_ready_litellm_db_the_run_deletes_nothing_and_exits_0(
 def test_a_run_shows_one_row_per_kind_and_the_total(
     litellm_host: LitellmHost, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    litellm_host.answer = b"41|12|0|2\n"
+    litellm_host.answer = b"41|12|7|0|2\n"
 
     assert expire(capsys) == (
         ExitCode.OK,
         [
             f"  ✓ person days     deleted        41 rows · older than {DAYS} days",
             f"  ✓ tool days       deleted        12 rows · older than {DAYS} days",
+            f"  ✓ label days      deleted        7 rows · older than {DAYS} days",
             f"  · tools           deleted        0 rows · unused for {DAYS} days",
             f"  ✓ people          deleted        2 rows · idle for {DAYS} days",
-            "✓ expire done · 55 rows · <1s",
+            "✓ expire done · 62 rows · <1s",
         ],
         [],
     )

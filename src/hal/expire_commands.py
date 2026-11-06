@@ -18,6 +18,7 @@ DAYS = litellm_expiry.RETENTION_DAYS
 SUBJECTS = {
     Kind.PERSON_DAYS: ("person days", f"older than {DAYS} days"),
     Kind.TOOL_DAYS: ("tool days", f"older than {DAYS} days"),
+    Kind.TAG_DAYS: ("label days", f"older than {DAYS} days"),
     Kind.TOOLS: ("tools", f"unused for {DAYS} days"),
     Kind.PEOPLE: ("people", f"idle for {DAYS} days"),
 }
