@@ -322,3 +322,9 @@ reason = "it binds the loopback entrypoints of traefik.yml in the host's own nam
 file = "probe/agent-service/compose.probe.yaml"
 service = "capture-host"
 reason = "it captures in the host's own network namespace, loopback included"
+
+[[gate.loosened]]
+what = 'clone baseline adds probe/agent-service/litellm_stack.py Client.main <-> probe/agent-service/unit.py Inside.main'
+item = "overnightworks/hal#1087"
+date = 2026-11-06
+reason = "the pair moved with Client from egress.py to litellm_stack.py while egress.py stays; it goes when #1086 deletes unit.py"
