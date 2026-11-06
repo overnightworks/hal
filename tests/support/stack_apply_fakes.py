@@ -72,6 +72,12 @@ STEP_CA_IMAGE = (
 )
 
 
+def container_name(service: str) -> str:
+    """The name `ps` gives a service's container: deliberately not Compose's own pattern, so a
+    test that passes read it from `ps` and did not derive it."""
+    return f"ctr-{service}-7"
+
+
 def definition_hash(service: str, version: int = 1) -> str:
     """A `docker compose config --hash` value: 64 hex digits per service definition."""
     return hashlib.sha256(f"{service} v{version}".encode()).hexdigest()
@@ -345,7 +351,7 @@ class ScriptedCompose:
         return ""
 
     def ps_line(self, service: str, state: str) -> dict:
-        line = {"Name": f"hal-{service}-1", "Service": service, "State": state, "ExitCode": 0}
+        line = {"Name": container_name(service), "Service": service, "State": state, "ExitCode": 0}
         if (image := self.image_of(service)) is not None:
             line["Image"] = image
         return line | {"Labels": self.labels_of(service)}
@@ -366,6 +372,10 @@ class ScriptedCompose:
             self.images[service] = self.image_of(service)
         self.config["services"][service]["image"] = reference
         self.definitions[service] = hashlib.sha256(f"{service} {reference}".encode()).hexdigest()
+
+    def exits_after_up(self, service: str) -> None:
+        """The container of `service` is found exited once `up` returned."""
+        self.after_up = lambda: self.containers.update({service: "exited"})
 
     def change_definition(self, service: str) -> None:
         """The checkout now defines the service otherwise than its container was created."""

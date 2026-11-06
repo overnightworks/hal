@@ -73,6 +73,7 @@ from support.stack_apply_fakes import (
     STEP_CA_IMAGE,
     InterruptedWaitForLock,
     ScriptedGit,
+    container_name,
     definition_hash,
     resolved_configuration,
 )
@@ -2358,20 +2359,19 @@ def test_a_record_that_cannot_be_written_is_partial_names_the_step_and_touches_n
 
 
 @pytest.mark.parametrize(
-    ("arrange", "planned_again"),
+    ("arrange", "left_as", "planned_again"),
     [
+        (lambda scripted: scripted.exits_after_up("traefik"), "exited", (PlanEvent.NOT_STARTED,)),
         (
-            lambda scripted: setattr(
-                scripted, "after_up", lambda: scripted.containers.update(traefik="exited")
-            ),
-            PlanEvent.NOT_STARTED,
+            lambda scripted: scripted.crash_loops.add("traefik"),
+            "restarting",
+            (PlanEvent.RECREATE, "the last recreate did not finish"),
         ),
-        (lambda scripted: scripted.crash_loops.add("traefik"), PlanEvent.RECREATE),
     ],
     ids=["U8 it exits", "it restarts on every start"],
 )
 def test_a_traefik_not_running_after_the_recreate_is_partial_and_the_next_run_recreates_again(
-    arrange, planned_again, core_files, switch, scripted, state
+    arrange, left_as, planned_again, core_files, switch, scripted, state
 ):
     """#85 rules 3, 5, cell U8: not observed running, also when it restarts on every start;
     partial, exit 1, the record says unfinished and the next run plans traefik again."""
@@ -2381,10 +2381,11 @@ def test_a_traefik_not_running_after_the_recreate_is_partial_and_the_next_run_re
 
     assert exit_code == 1
     assert seen_down(out, err, "traefik")
+    assert scripted.containers["traefik"] == left_as
     assert applied(state) == UNFINISHED
     assert not find_row(out, *TRAEFIK_RECREATED)
     _, again, _ = switch("no")
-    assert find_row(again, "traefik", planned_again)
+    assert find_row(again, "traefik", *planned_again)
 
 
 def test_an_unproven_barrier_after_the_recreate_is_partial_and_the_next_run_recreates_again(
@@ -2694,8 +2695,7 @@ def test_a_crash_looping_socket_proxy_is_partial_and_the_next_run_is_partial_aga
 def test_a_core_left_down_whole_after_the_traefik_recreate_names_both_in_start_order(
     applied_core, switch, scripted, repository, state
 ):
-    """#89 rule 7, cell F17 (#34 finding 57): both down at one look are named socket-proxy first,
-    and the way on reads the log of the first."""
+    """#89 rule 7, cell F17 (#34 finding 57): both down at one look are named socket-proxy first."""
     edit_traefik_yml(repository)
     scripted.after_up = lambda: scripted.containers.update(
         {"socket-proxy": "exited", "traefik": "exited"}
@@ -2929,7 +2929,7 @@ def failed_recreate(out, err, service) -> bool:
 
 def seen_down(out, err, service, recreated=None) -> bool:
     fact = f"of the {recreated or service} recreate"
-    logs = f"docker logs --tail 50 hal-{service}-1"
+    logs = f"docker logs --tail 50 {container_name(service)}"
     return stopped_with(out, err, service, ResultEvent.NOT_RUNNING, fact, logs)
 
 

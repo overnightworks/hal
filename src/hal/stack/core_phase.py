@@ -59,6 +59,7 @@ class CorePhase:
         marks: switches.Switches,
         progress: Progress,
     ) -> CoreFailure | None:
+        progress.unit = ""
         config = planned.fleet.config
         recreator = ServiceRecreator(
             engine, marks, planned.read, config, self.watch, progress, _say_recreated, self.backup

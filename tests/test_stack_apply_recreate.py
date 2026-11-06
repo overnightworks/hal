@@ -375,7 +375,7 @@ FAILING_RECREATES = {
     ),
     "a container that crashes in the watch": (
         lambda world: world.crash_loops.add("step-ca"),
-        (ResultEvent.NOT_RUNNING, "seen down within 5s of the step-ca recreate"),
+        (ResultEvent.NOT_RUNNING, "of the step-ca recreate"),
         "partial, step-ca not running · no unit switched",
     ),
     "a Ctrl-C": (

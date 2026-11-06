@@ -284,7 +284,7 @@ class Compose:
         while True:
             containers = self.containers()
             for service in not_up(states_of(containers), config, services):
-                seen_down[service] = _name_of(containers, service) or seen_down.get(service)
+                seen_down[service] = _name_of(containers, service)
             if watch.clock() >= deadline:
                 return tuple(
                     DownService(name, seen_down[name]) for name in services if name in seen_down
