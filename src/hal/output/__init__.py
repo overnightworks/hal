@@ -623,13 +623,24 @@ def write_table(headers: Sequence[str], rows: Sequence[Sequence[str]]) -> None:
         print(line)
 
 
+def _verdict_tail(verdict: Verdict, shown_counts: str) -> list[str]:
+    """What follows a verdict's headline: its counts when a summary leads, the details, the run
+    time and the hint, each only when there is one."""
+    run_time = [] if verdict.elapsed_seconds is None else [format_duration(verdict.elapsed_seconds)]
+    return [
+        *([shown_counts] if shown_counts and verdict.summary else []),
+        *(printable(detail) for detail in verdict.details),
+        *run_time,
+        *([printable(verdict.hint)] if verdict.hint else []),
+    ]
+
+
 def write_verdict(verdict: Verdict) -> None:
     """The last line of a command on stdout: the summary, its non-zero counts, the run time, then
-    the hint. On a terminal the glyph and summary are bold in the glyph's colour, the counts and
-    the run time dim; a `next:` line follows when the verdict has a next step."""
+    the hint. On a terminal the glyph and summary are bold in the glyph's colour and everything
+    from the first ` · ` on is one dim span; a `next:` line follows when there is a next step."""
     stdout = sys.stdout
     shown_counts = ", ".join(counted(number, label) for number, label in verdict.counts if number)
-    hint = [printable(verdict.hint)] if verdict.hint else []
     headline_text = printable(verdict.summary) or shown_counts
     if _json_on():
         counts = {_label(0, label): number for number, label in verdict.counts if number}
@@ -652,14 +663,11 @@ def write_verdict(verdict: Verdict) -> None:
     headline = _styled(
         f"{verdict.glyph.value} {headline_text}", verdict.glyph.verdict_style, stdout
     )
-    counts = [_styled(shown_counts, _DIM, stdout)] if shown_counts and verdict.summary else []
-    details = [_styled(printable(detail), _DIM, stdout) for detail in verdict.details]
-    run_time = (
-        [_styled(format_duration(verdict.elapsed_seconds), _DIM, stdout)]
-        if verdict.elapsed_seconds is not None
-        else []
+    tail = _verdict_tail(verdict, shown_counts)
+    dim_tail = (
+        _styled(f"{_FACT_SEPARATOR}{_FACT_SEPARATOR.join(tail)}", _DIM, stdout) if tail else ""
     )
-    print(_FACT_SEPARATOR.join([headline, *counts, *details, *run_time, *hint]))
+    print(f"{headline}{dim_tail}")
     if verdict.next_step:
         print(f"{_styled('next:', _CYAN, stdout)} {printable(verdict.next_step)}")
 
