@@ -345,11 +345,9 @@ def test_litellm_retries_nothing_and_has_no_callback_or_cache(config):
     }
 
 
-def test_litellm_keeps_a_row_per_call_without_its_prompt_and_deletes_it_after_a_period(config):
+def test_litellm_stores_no_prompt_in_a_row_and_deletes_it_after_a_period(config):
     general = config["general_settings"]
 
-    assert general["disable_spend_logs"] is False
-    assert general["disable_error_logs"] is False
     assert general["store_prompts_in_spend_logs"] is False
     assert re.fullmatch(r"[1-9]\d*d", general["maximum_spend_logs_retention_period"])
 

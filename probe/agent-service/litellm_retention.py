@@ -109,13 +109,13 @@ SETTINGS_SECTIONS = {
     },
     "general_settings": {
         "enforce_user_param": True,
-        "disable_spend_logs": False,
-        "disable_error_logs": False,
         "store_prompts_in_spend_logs": False,
         "maximum_spend_logs_retention_period": NonEmptyId(),
     },
     "router_settings": {"num_retries": 0},
 }
+# Switches whose effect the spend rows of litellm_logs.py L2 to L4 judge, not B11 their value.
+CONSUMER_SWITCHES = {"disable_spend_logs", "disable_error_logs"}
 DEPLOYMENT_KEYS = {"model_name", "litellm_params"}
 DEPLOYMENT_PARAMS = {"model", "api_key", "max_retries", "max_tokens"}
 # The tables of LiteLLM's database that may name a tool (D9), those that may name a fingerprint
@@ -766,6 +766,7 @@ class RetentionProbe(FailureProbe, KeyFiles, PictureCalls):
         config = self.run(["docker", "exec", litellm, "cat", "/etc/litellm/config.yaml"]).stdout
         for section, wanted in SETTINGS_SECTIONS.items():
             found = settings_of(config, section)
+            found = {key: value for key, value in found.items() if key not in CONSUMER_SWITCHES}
             expect(found == wanted, f"B11: {section} holds {found}, not {wanted}")
         top = set(yaml.safe_load(config))
         expect(top == {"model_list", *SETTINGS_SECTIONS}, f"B11: LiteLLM's sections {sorted(top)}")

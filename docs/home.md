@@ -834,7 +834,7 @@ Budget unter dem schon Verbrauchten lehnt ab sofort ab, bis zur Rücksetzung; de
 Eine Zahl, die jemand in LiteLLM von Hand gesetzt hat, überschreibt der nächste `hal apply`.
 
 `log_depth = "metadata"` hält je Anfrage, was ein Fehler oder ein Missbrauch braucht, nie ihren
-Inhalt; `"everything"` schreibt zusätzlich jede Anfrage ganz in LiteLLMs Log
+Inhalt, außer wo die Fehlermeldung eines Anbieters ihn zitiert und wörtlich im Log steht; `"everything"` schreibt zusätzlich jede Anfrage ganz in LiteLLMs Log
 ([agent-service.md](agent-service.md), „What the route logs“). Eine geänderte Tiefe zeigt der
 nächste `hal apply` als Neuerstellung von `litellm` und setzt sie damit. Nur `hal apply` liest sie:
 `hal stop`, `hal start` und `hal update` erstellen LiteLLM nicht neu, die Tiefe hält also bis zum

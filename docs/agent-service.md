@@ -185,7 +185,8 @@ The content of
 a turn leaves this PC for Anthropic, which generates the answer.
 
 **What the route logs depends on `[api] log_depth`** (`~/.config/hal/config.toml`, home.md
-„Konfiguration“). At the default `metadata` a call leaves these records, none with its content:
+„Konfiguration“). At the default `metadata` a call leaves these records, none with its content except a provider's
+error text, which may quote part of a request and is logged word for word:
 
 - **The front's access line**, one JSON line per request on its standard output: start time,
   client address (the app's network), method, router (the route), service, its and LiteLLM's
@@ -194,19 +195,25 @@ a turn leaves this PC for Anthropic, which generates the answer.
   key logs `Invalid proxy server token passed` with the key's hash, a provider's refusal its
   class (a 401 is `litellm.AuthenticationError`) with the provider's error text word for word,
   as the operator ruled; OpenAI's 401 names the key masked to 3 + 4 characters, and a provider
-  that quotes part of a request puts that part in the line and the row below. A served call logs no line.
+  that quotes part of a request puts that part in the line and the row below. A served call logs no line,
+  and a bearer that is no virtual key (not `sk-…`) is refused with 401 without a line of its own.
 - **A spend log row** per call, a failure included (`LiteLLM_SpendLogs`): the key's hash and
   alias, the person's fingerprint, model, tokens, cost, times, status and a failure's error;
   never the prompt, answer or picture (`store_prompts_in_spend_logs: false`). LiteLLM deletes a
   row, and the tool index it feeds, after 30 days (`maximum_spend_logs_retention_period`).
+- **The person's fingerprint**, the ruled pseudonym, stands in that row and in no line: not in the
+  front's, and not in LiteLLM's at `metadata` (a refused key, a refused plain bearer, both providers'
+  refusals and a served call).
 
 At `everything` LiteLLM logs at `DEBUG` with message logging on, so each request stands whole
-in its log; the front's line stays as above, so the one thing it does not show is the path and
+in its log, its fingerprint included (probe L6); the front's line stays as above, so the one thing it does not show is the path and
 query of a request the front itself refuses before LiteLLM sees it. `hal apply` passes the
 depth's variables to Compose (`src/hal/stack/api_limits.py`), so a changed depth is a recreate of
 `litellm`; without them compose.yaml's defaults are `metadata`'s. `probe/agent-service/litellm_logs.py`
-drives both refusals, a served call and the switch on the fake-only stack and finds no prompt,
-answer, bearer or whole key in any line or row at `metadata`.
+drives both refusals, a served call and the switch on the fake-only stack, finds no prompt, answer,
+bearer or whole key in any line or row at `metadata` and each fingerprint it sent only in the spend
+rows, and drives LiteLLM's cleanup (period 1h, interval 5 s) against a backdated row and its
+tool-index row.
 
 **The API route keeps no content at `metadata`, as evidence for the paths exercised only.**
 LiteLLM logs no message and redacts the `Messages:` suffix of its exceptions, and neither it nor
@@ -221,7 +228,9 @@ hit sits in. The canaries sit in the message, the tool description, the tool-cal
 answer, `User-Agent` and `x-litellm-tags`. After a success, an upstream 500, a refused
 model, a refusal of LiteLLM's guard, a tool call and a streamed answer it finds none, and each search is proven by a control that plants
 a canary where it must be found; an upstream error body that echoes the request lands in LiteLLM's error line and the call's spend log row alone. The tool names
-also land in the daily tool spend and the spend log's tool index. The front's constant user agent lands in the tool rows, beside each tool name. LiteLLM writes no request
+also land in the daily tool spend, which holds no fingerprint, and in the spend log's tool index,
+whose request id joins to the spend row, so for its 30 days a tool name is attributable to the
+fingerprint. The front's constant user agent lands in the tool rows, beside each tool name. LiteLLM writes no request
 tag from the user agent (`disable_add_user_agent_to_request_tags`), so a conforming request writes no tag row. A key holder who does not
 conform can send a tag in the body: a root `tags` list, `metadata.tags` and `litellm_metadata.tags` each land in `LiteLLM_DailyTagSpend`
 with LiteLLM's own request id and in the call's spend log row, and so in the database's volume, in no other table, log or mount, and `metadata` as a JSON string lands

@@ -146,12 +146,13 @@ def _api_settings(path: Path, table: object) -> ApiSettings:
     own = {key: value for key, value in table.items() if key not in app_tables}
     numbers = _table_values(path, API_TABLE, own, API_KEY_KINDS)
     person_budget = numbers.pop(PERSON_BUDGET_KEY, None)
-    log_depth = LogDepth(numbers.pop(LOG_DEPTH_KEY, LogDepth.METADATA.value))
+    depth = numbers.pop(LOG_DEPTH_KEY, None)
+    chosen_depth = {} if depth is None else {"log_depth": LogDepth(depth)}
     apps = {
         app: AppNumbers(**_table_values(path, f"{API_TABLE}.{app}", app_table, APP_KEY_KINDS))
         for app, app_table in app_tables.items()
     }
-    return ApiSettings(AppNumbers(**numbers), MappingProxyType(apps), person_budget, log_depth)
+    return ApiSettings(AppNumbers(**numbers), MappingProxyType(apps), person_budget, **chosen_depth)
 
 
 def load(home: Path) -> Settings:
