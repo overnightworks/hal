@@ -21,15 +21,11 @@ class Manifest:
     """None for a DB-only app."""
     rows: int | None = None
     """The restore test's table count in the staged copy; only a SQLite app has one."""
-    files: int | None = None
-    """The files in a SQLite app's kept volume; absent when it declares none."""
 
     def as_json(self) -> str:
         document = {"schema": MANIFEST_SCHEMA, "app": self.app, "audio_files": self.audio_files}
         if self.rows is not None:
             document["rows"] = self.rows
-        if self.files is not None:
-            document["files"] = self.files
         return json.dumps(document) + "\n"
 
     @classmethod
@@ -39,12 +35,10 @@ class Manifest:
             if document["schema"] != MANIFEST_SCHEMA:
                 raise ValueError(document["schema"])
             audio_files, rows = document["audio_files"], document.get("rows")
-            files = document.get("files")
             return cls(
                 app=document["app"],
                 audio_files=None if audio_files is None else int(audio_files),
                 rows=None if rows is None else int(rows),
-                files=None if files is None else int(files),
             )
         except (ValueError, KeyError, TypeError) as error:
             raise VerificationError("the snapshot's manifest is unreadable") from error
