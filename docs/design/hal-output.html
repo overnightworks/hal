@@ -745,8 +745,8 @@ Type <span class="w">yes</span> to set up 1 open row: yes
 <pre class="term"><span class="p">$</span> <span class="u">hal setup</span>
 <span class="n">… Plan, dann das yes</span>
 <span class="d">  …</span>
-<span class="y">  !</span> secrets         2 missing      <span class="d">github/fleet-admin, opentofu/passphrase</span>
-<span class="c">  ›</span> github/fleet-admin  new token  <span class="d">the link fills name, owner, expiry and rights</span>
+<span class="y">  !</span> secrets         2 missing      <span class="d">cloudflare/fleet-write, opentofu/passphrase</span>
+<span class="c">  ›</span> cloudflare/fleet-write  new token  <span class="d">Cloudflare fills in nothing</span>
     why: the deploy job reads and writes the fleet's repositories
     prefilled: Contents read and write, Metadata read, Workflows read and write
     [ ] Repository access: All repositories
@@ -755,7 +755,7 @@ Type <span class="w">yes</span> to set up 1 open row: yes
     Enter opens the page in your browser:
 <span class="d">    opened github.com/settings/personal-access-tokens/new?…</span>
     paste the token, then an empty line (hidden, empty skips):
-<span class="g">  ✓</span> github/fleet-admin  verified   <span class="d">~/.secrets/github/fleet-admin (600)</span>
+<span class="g">  ✓</span> cloudflare/fleet-write  verified   <span class="d">~/.secrets/cloudflare/fleet-write (600)</span>
 <span class="g">  ✓</span> opentofu/passphrase  generated  <span class="d">~/.secrets/opentofu/passphrase (600) · never shown</span>
 <span class="g">  ✓</span> secrets         stored
 <span class="w">✓ setup done</span> <span class="d">· 1 changed, 4 unchanged · 2m14s</span>
