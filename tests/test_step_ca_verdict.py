@@ -3,23 +3,26 @@
 import json
 import os
 import signal
-import sys
 from collections.abc import Iterator
 from pathlib import Path
 from types import ModuleType
 from typing import Any
 
 import pytest
-from support.script_module import loaded_script
+from support.script_module import loaded_script, script_module
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "probe"))
-sys.path.insert(0, str(ROOT / "probe" / "step-ca"))
-sys.path.insert(0, str(ROOT / "src"))
+STEP_CA = ROOT / "probe" / "step-ca"
+PROBE = STEP_CA / "probe.py"
 
-import mcp_networks  # noqa: E402
 
-PROBE = ROOT / "probe" / "step-ca" / "probe.py"
+def load_mcp_networks() -> ModuleType:
+    """At collection: the parameters of the tests read its exit code."""
+    with script_module("mcp_networks", STEP_CA / "mcp_networks.py", STEP_CA) as module:
+        return module
+
+
+mcp_networks = load_mcp_networks()
 
 
 @pytest.fixture(scope="module")

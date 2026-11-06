@@ -41,17 +41,13 @@ background-image:linear-gradient(var(--grid-line) 1px,transparent 1px),linear-gr
 body::after{content:&quot;&quot;;position:fixed;z-index:-1;pointer-events:none;width:400px;height:400px;top:-100px;right:-100px;border-radius:50%;background:var(--primary);filter:blur(80px);opacity:.15}
 .glow2{position:fixed;z-index:-1;pointer-events:none;width:300px;height:300px;bottom:-50px;left:-50px;border-radius:50%;background:var(--accent);filter:blur(80px);opacity:.15}
 a{color:var(--text);text-decoration-color:var(--accent);text-underline-offset:3px}
-a:hover{color:var(--text)}
+a:hover:not(:where(.legal a)){color:var(--text)}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .wrap{max-width:980px;margin:0 auto;padding:28px 16px 32px}
 .mark{font:400 34px/1.1 var(--display);text-transform:uppercase;letter-spacing:.15em;text-align:center;margin:0 0 20px;
 -webkit-text-fill-color:transparent;background-image:linear-gradient(to bottom,color-mix(in srgb,var(--primary) 80%,var(--text)) 0 35%,var(--text) 35% 65%,color-mix(in srgb,var(--accent) 80%,var(--text)) 65% 100%);
 -webkit-background-clip:text;background-clip:text;filter:drop-shadow(0 0 20px color-mix(in srgb,var(--primary) 30%,transparent))}
 .mark a{text-decoration:none;-webkit-text-fill-color:transparent}
-nav.tabs{display:flex;flex-wrap:wrap;gap:4px 18px;justify-content:center;margin:0 0 22px;padding-bottom:10px;border-bottom:1px solid var(--border)}
-nav.tabs a{font:400 12px var(--display);text-transform:uppercase;letter-spacing:.5px;color:var(--muted);text-decoration:none;padding:8px 0;border-bottom:2px solid transparent;min-height:40px}
-nav.tabs a:hover{color:var(--text)}
-nav.tabs a[aria-current]{color:var(--primary);border-image:linear-gradient(90deg,var(--primary),var(--accent)) 1}
 .layout{display:block}
 aside.toc{margin:0 0 18px}
 aside.toc details{border:1px solid var(--border);border-radius:8px;background:var(--surface)}
@@ -77,10 +73,9 @@ section.app&gt;h2{margin-top:6px}
 .badge{display:inline-block;font:400 11px var(--display);letter-spacing:1px;text-transform:uppercase;color:var(--on-accent);
 background:linear-gradient(90deg,var(--primary),var(--accent));border-radius:4px;padding:2px 8px;vertical-align:middle;margin-left:8px}
 .stand{margin-top:26px;color:var(--muted);font-size:14px}
-footer{margin-top:26px;padding-top:16px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:6px 20px;justify-content:center;font:400 12px var(--display);text-transform:uppercase;letter-spacing:.5px}
-footer a{color:var(--muted);text-decoration:none;padding:8px 0;min-height:40px}
-footer a:hover{color:var(--text)}
-footer a[aria-current]{color:var(--primary)}
+.legal-place{margin-top:26px;padding-top:16px;border-top:1px solid var(--border)}
+.legal{position:relative;z-index:1;display:flex;flex-wrap:wrap;justify-content:center;gap:4px 16px;font-size:12px}
+.legal a{color:var(--muted);text-decoration:none;border-bottom:1px solid var(--border)}
 @media (min-width:900px){
 .wrap{padding:44px 24px 40px}
 .mark{font-size:40px}
@@ -103,7 +98,6 @@ h1{font-size:34px}
 &lt;div class=&quot;glow2&quot;&gt;&lt;/div&gt;
 &lt;div class=&quot;wrap&quot;&gt;
 &lt;p class=&quot;mark&quot;&gt;&lt;a href=&quot;https://hallucinai.de/&quot;&gt;Hallucinai&lt;/a&gt;&lt;/p&gt;
-&lt;nav class=&quot;tabs&quot; aria-label=&quot;Rechtliches&quot;&gt;&lt;a href=&quot;/impressum&quot; aria-current=&quot;page&quot;&gt;Impressum&lt;/a&gt;&lt;a href=&quot;/datenschutz&quot;&gt;Datenschutz&lt;/a&gt;&lt;a href=&quot;/nutzungsbedingungen&quot;&gt;Nutzungsbedingungen&lt;/a&gt;&lt;/nav&gt;
 &lt;div class=&quot;layout&quot;&gt;&lt;article&gt;&lt;div class=&quot;measure&quot;&gt;
 &lt;h1&gt;Impressum&lt;/h1&gt;
 &lt;p&gt;Angaben gemäß § 18 Abs. 1 MStV&lt;/p&gt;
@@ -112,7 +106,7 @@ h1{font-size:34px}
 &lt;h2 id=&quot;kontakt&quot;&gt;Kontakt&lt;a class=&quot;anchor&quot; href=&quot;#kontakt&quot; aria-label=&quot;Link zu diesem Abschnitt&quot;&gt;#&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;E-Mail: legal@hallucinai.de&lt;/p&gt;
 &lt;/div&gt;&lt;/article&gt;&lt;/div&gt;
-&lt;footer&gt;&lt;a href=&quot;/impressum&quot; aria-current=&quot;page&quot;&gt;Impressum&lt;/a&gt;&lt;a href=&quot;/datenschutz&quot;&gt;Datenschutz&lt;/a&gt;&lt;a href=&quot;/nutzungsbedingungen&quot;&gt;Nutzungsbedingungen&lt;/a&gt;&lt;/footer&gt;
+&lt;div class=&quot;legal-place&quot;&gt;&lt;nav class=&quot;legal&quot; aria-label=&quot;Legal&quot;&gt;&lt;a href=&quot;/impressum&quot;&gt;Impressum&lt;/a&gt;&lt;a href=&quot;/datenschutz&quot;&gt;Datenschutz&lt;/a&gt;&lt;a href=&quot;/nutzungsbedingungen&quot;&gt;Nutzungsbedingungen&lt;/a&gt;&lt;/nav&gt;&lt;/div&gt;
 &lt;/div&gt;
 &lt;script&gt;document.addEventListener(&#x27;click&#x27;,e=&gt;{const a=e.target.closest(&#x27;a[href^=&quot;/&quot;]&#x27;);if(a)e.preventDefault()});&lt;/script&gt;&lt;/body&gt;
 &lt;/html&gt;
@@ -134,17 +128,13 @@ background-image:linear-gradient(var(--grid-line) 1px,transparent 1px),linear-gr
 body::after{content:&quot;&quot;;position:fixed;z-index:-1;pointer-events:none;width:400px;height:400px;top:-100px;right:-100px;border-radius:50%;background:var(--primary);filter:blur(80px);opacity:.15}
 .glow2{position:fixed;z-index:-1;pointer-events:none;width:300px;height:300px;bottom:-50px;left:-50px;border-radius:50%;background:var(--accent);filter:blur(80px);opacity:.15}
 a{color:var(--text);text-decoration-color:var(--accent);text-underline-offset:3px}
-a:hover{color:var(--text)}
+a:hover:not(:where(.legal a)){color:var(--text)}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .wrap{max-width:980px;margin:0 auto;padding:28px 16px 32px}
 .mark{font:400 34px/1.1 var(--display);text-transform:uppercase;letter-spacing:.15em;text-align:center;margin:0 0 20px;
 -webkit-text-fill-color:transparent;background-image:linear-gradient(to bottom,color-mix(in srgb,var(--primary) 80%,var(--text)) 0 35%,var(--text) 35% 65%,color-mix(in srgb,var(--accent) 80%,var(--text)) 65% 100%);
 -webkit-background-clip:text;background-clip:text;filter:drop-shadow(0 0 20px color-mix(in srgb,var(--primary) 30%,transparent))}
 .mark a{text-decoration:none;-webkit-text-fill-color:transparent}
-nav.tabs{display:flex;flex-wrap:wrap;gap:4px 18px;justify-content:center;margin:0 0 22px;padding-bottom:10px;border-bottom:1px solid var(--border)}
-nav.tabs a{font:400 12px var(--display);text-transform:uppercase;letter-spacing:.5px;color:var(--muted);text-decoration:none;padding:8px 0;border-bottom:2px solid transparent;min-height:40px}
-nav.tabs a:hover{color:var(--text)}
-nav.tabs a[aria-current]{color:var(--primary);border-image:linear-gradient(90deg,var(--primary),var(--accent)) 1}
 .layout{display:block}
 aside.toc{margin:0 0 18px}
 aside.toc details{border:1px solid var(--border);border-radius:8px;background:var(--surface)}
@@ -170,10 +160,9 @@ section.app&gt;h2{margin-top:6px}
 .badge{display:inline-block;font:400 11px var(--display);letter-spacing:1px;text-transform:uppercase;color:var(--on-accent);
 background:linear-gradient(90deg,var(--primary),var(--accent));border-radius:4px;padding:2px 8px;vertical-align:middle;margin-left:8px}
 .stand{margin-top:26px;color:var(--muted);font-size:14px}
-footer{margin-top:26px;padding-top:16px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:6px 20px;justify-content:center;font:400 12px var(--display);text-transform:uppercase;letter-spacing:.5px}
-footer a{color:var(--muted);text-decoration:none;padding:8px 0;min-height:40px}
-footer a:hover{color:var(--text)}
-footer a[aria-current]{color:var(--primary)}
+.legal-place{margin-top:26px;padding-top:16px;border-top:1px solid var(--border)}
+.legal{position:relative;z-index:1;display:flex;flex-wrap:wrap;justify-content:center;gap:4px 16px;font-size:12px}
+.legal a{color:var(--muted);text-decoration:none;border-bottom:1px solid var(--border)}
 @media (min-width:900px){
 .wrap{padding:44px 24px 40px}
 .mark{font-size:40px}
@@ -196,7 +185,6 @@ h1{font-size:34px}
 &lt;div class=&quot;glow2&quot;&gt;&lt;/div&gt;
 &lt;div class=&quot;wrap&quot;&gt;
 &lt;p class=&quot;mark&quot;&gt;&lt;a href=&quot;https://hallucinai.de/&quot;&gt;Hallucinai&lt;/a&gt;&lt;/p&gt;
-&lt;nav class=&quot;tabs&quot; aria-label=&quot;Rechtliches&quot;&gt;&lt;a href=&quot;/impressum&quot; aria-current=&quot;page&quot;&gt;Impressum&lt;/a&gt;&lt;a href=&quot;/datenschutz&quot;&gt;Datenschutz&lt;/a&gt;&lt;a href=&quot;/nutzungsbedingungen&quot;&gt;Nutzungsbedingungen&lt;/a&gt;&lt;/nav&gt;
 &lt;div class=&quot;layout&quot;&gt;&lt;article&gt;&lt;div class=&quot;measure&quot;&gt;
 &lt;h1&gt;Impressum&lt;/h1&gt;
 &lt;p&gt;Angaben gemäß § 18 Abs. 1 MStV&lt;/p&gt;
@@ -205,7 +193,7 @@ h1{font-size:34px}
 &lt;h2 id=&quot;kontakt&quot;&gt;Kontakt&lt;a class=&quot;anchor&quot; href=&quot;#kontakt&quot; aria-label=&quot;Link zu diesem Abschnitt&quot;&gt;#&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;E-Mail: legal@hallucinai.de&lt;/p&gt;
 &lt;/div&gt;&lt;/article&gt;&lt;/div&gt;
-&lt;footer&gt;&lt;a href=&quot;/impressum&quot; aria-current=&quot;page&quot;&gt;Impressum&lt;/a&gt;&lt;a href=&quot;/datenschutz&quot;&gt;Datenschutz&lt;/a&gt;&lt;a href=&quot;/nutzungsbedingungen&quot;&gt;Nutzungsbedingungen&lt;/a&gt;&lt;/footer&gt;
+&lt;div class=&quot;legal-place&quot;&gt;&lt;nav class=&quot;legal&quot; aria-label=&quot;Legal&quot;&gt;&lt;a href=&quot;/impressum&quot;&gt;Impressum&lt;/a&gt;&lt;a href=&quot;/datenschutz&quot;&gt;Datenschutz&lt;/a&gt;&lt;a href=&quot;/nutzungsbedingungen&quot;&gt;Nutzungsbedingungen&lt;/a&gt;&lt;/nav&gt;&lt;/div&gt;
 &lt;/div&gt;
 &lt;script&gt;document.addEventListener(&#x27;click&#x27;,e=&gt;{const a=e.target.closest(&#x27;a[href^=&quot;/&quot;]&#x27;);if(a)e.preventDefault()});&lt;/script&gt;&lt;/body&gt;
 &lt;/html&gt;
@@ -231,17 +219,13 @@ background-image:linear-gradient(var(--grid-line) 1px,transparent 1px),linear-gr
 body::after{content:&quot;&quot;;position:fixed;z-index:-1;pointer-events:none;width:400px;height:400px;top:-100px;right:-100px;border-radius:50%;background:var(--primary);filter:blur(80px);opacity:.15}
 .glow2{position:fixed;z-index:-1;pointer-events:none;width:300px;height:300px;bottom:-50px;left:-50px;border-radius:50%;background:var(--accent);filter:blur(80px);opacity:.15}
 a{color:var(--text);text-decoration-color:var(--accent);text-underline-offset:3px}
-a:hover{color:var(--text)}
+a:hover:not(:where(.legal a)){color:var(--text)}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .wrap{max-width:980px;margin:0 auto;padding:28px 16px 32px}
 .mark{font:400 34px/1.1 var(--display);text-transform:uppercase;letter-spacing:.15em;text-align:center;margin:0 0 20px;
 -webkit-text-fill-color:transparent;background-image:linear-gradient(to bottom,color-mix(in srgb,var(--primary) 80%,var(--text)) 0 35%,var(--text) 35% 65%,color-mix(in srgb,var(--accent) 80%,var(--text)) 65% 100%);
 -webkit-background-clip:text;background-clip:text;filter:drop-shadow(0 0 20px color-mix(in srgb,var(--primary) 30%,transparent))}
 .mark a{text-decoration:none;-webkit-text-fill-color:transparent}
-nav.tabs{display:flex;flex-wrap:wrap;gap:4px 18px;justify-content:center;margin:0 0 22px;padding-bottom:10px;border-bottom:1px solid var(--border)}
-nav.tabs a{font:400 12px var(--display);text-transform:uppercase;letter-spacing:.5px;color:var(--muted);text-decoration:none;padding:8px 0;border-bottom:2px solid transparent;min-height:40px}
-nav.tabs a:hover{color:var(--text)}
-nav.tabs a[aria-current]{color:var(--primary);border-image:linear-gradient(90deg,var(--primary),var(--accent)) 1}
 .layout{display:block}
 aside.toc{margin:0 0 18px}
 aside.toc details{border:1px solid var(--border);border-radius:8px;background:var(--surface)}
@@ -267,10 +251,9 @@ section.app&gt;h2{margin-top:6px}
 .badge{display:inline-block;font:400 11px var(--display);letter-spacing:1px;text-transform:uppercase;color:var(--on-accent);
 background:linear-gradient(90deg,var(--primary),var(--accent));border-radius:4px;padding:2px 8px;vertical-align:middle;margin-left:8px}
 .stand{margin-top:26px;color:var(--muted);font-size:14px}
-footer{margin-top:26px;padding-top:16px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:6px 20px;justify-content:center;font:400 12px var(--display);text-transform:uppercase;letter-spacing:.5px}
-footer a{color:var(--muted);text-decoration:none;padding:8px 0;min-height:40px}
-footer a:hover{color:var(--text)}
-footer a[aria-current]{color:var(--primary)}
+.legal-place{margin-top:26px;padding-top:16px;border-top:1px solid var(--border)}
+.legal{position:relative;z-index:1;display:flex;flex-wrap:wrap;justify-content:center;gap:4px 16px;font-size:12px}
+.legal a{color:var(--muted);text-decoration:none;border-bottom:1px solid var(--border)}
 @media (min-width:900px){
 .wrap{padding:44px 24px 40px}
 .mark{font-size:40px}
@@ -293,7 +276,6 @@ h1{font-size:34px}
 &lt;div class=&quot;glow2&quot;&gt;&lt;/div&gt;
 &lt;div class=&quot;wrap&quot;&gt;
 &lt;p class=&quot;mark&quot;&gt;&lt;a href=&quot;https://hallucinai.de/&quot;&gt;Hallucinai&lt;/a&gt;&lt;/p&gt;
-&lt;nav class=&quot;tabs&quot; aria-label=&quot;Rechtliches&quot;&gt;&lt;a href=&quot;/impressum&quot;&gt;Impressum&lt;/a&gt;&lt;a href=&quot;/datenschutz&quot; aria-current=&quot;page&quot;&gt;Datenschutz&lt;/a&gt;&lt;a href=&quot;/nutzungsbedingungen&quot;&gt;Nutzungsbedingungen&lt;/a&gt;&lt;/nav&gt;
 &lt;div class=&quot;layout&quot;&gt;&lt;aside class=&quot;toc&quot; aria-label=&quot;Inhalt&quot;&gt;&lt;details&gt;&lt;summary&gt;Inhalt&lt;/summary&gt;&lt;ol&gt;&lt;li&gt;&lt;a href=&quot;#verantwortlicher&quot;&gt;Verantwortlicher&lt;/a&gt;&lt;/li&gt;&lt;li&gt;&lt;a href=&quot;#cloudflare&quot;&gt;Cloudflare&lt;/a&gt;&lt;/li&gt;&lt;li&gt;&lt;a href=&quot;#rechte&quot;&gt;Ihre Rechte&lt;/a&gt;&lt;/li&gt;&lt;li&gt;&lt;a href=&quot;#widerspruch&quot;&gt;Ihr Widerspruchsrecht&lt;/a&gt;&lt;/li&gt;&lt;li&gt;&lt;a href=&quot;#kein-tracking&quot;&gt;Kein Tracking&lt;/a&gt;&lt;/li&gt;&lt;li&gt;&lt;a href=&quot;#automatisierte-entscheidungen&quot;&gt;Keine automatisierten Entscheidungen&lt;/a&gt;&lt;/li&gt;&lt;li&gt;&lt;a href=&quot;#pseudonym&quot;&gt;Nutzung unter Pseudonym&lt;/a&gt;&lt;/li&gt;&lt;li&gt;&lt;a href=&quot;#anmeldung&quot;&gt;Anmeldung (Keycloak)&lt;/a&gt;&lt;/li&gt;&lt;li&gt;&lt;a href=&quot;#songmaker&quot;&gt;songmaker&lt;/a&gt;&lt;ol&gt;&lt;li&gt;&lt;a href=&quot;#songmaker-daten&quot;&gt;Welche Daten wir verarbeiten&lt;/a&gt;&lt;/li&gt;&lt;li&gt;&lt;a href=&quot;#songmaker-server&quot;&gt;Verarbeitung auf unserem Server&lt;/a&gt;&lt;/li&gt;&lt;li&gt;&lt;a href=&quot;#songmaker-ki&quot;&gt;KI-Funktionen mit externen Anbietern&lt;/a&gt;&lt;/li&gt;&lt;li&gt;&lt;a href=&quot;#songmaker-freigaben&quot;&gt;Freigaben&lt;/a&gt;&lt;/li&gt;&lt;li&gt;&lt;a href=&quot;#songmaker-geraet&quot;&gt;Speicherung auf Ihrem Gerät&lt;/a&gt;&lt;/li&gt;&lt;li&gt;&lt;a href=&quot;#songmaker-speicherdauer&quot;&gt;Speicherdauer&lt;/a&gt;&lt;/li&gt;&lt;li&gt;&lt;a href=&quot;#songmaker-empfaenger&quot;&gt;Empfänger&lt;/a&gt;&lt;/li&gt;&lt;/ol&gt;&lt;/li&gt;&lt;/ol&gt;&lt;/details&gt;&lt;/aside&gt;&lt;article&gt;&lt;div class=&quot;measure&quot;&gt;
 &lt;h1&gt;Datenschutzerklärung&lt;/h1&gt;
 &lt;h2 id=&quot;verantwortlicher&quot;&gt;Verantwortlicher&lt;a class=&quot;anchor&quot; href=&quot;#verantwortlicher&quot; aria-label=&quot;Link zu diesem Abschnitt&quot;&gt;#&lt;/a&gt;&lt;/h2&gt;
@@ -317,7 +299,7 @@ h1{font-size:34px}
 &lt;p&gt;Sie können unsere Apps unter einem Pseudonym nutzen (§ 19 Abs. 2 TDDDG): Benutzername und Namen in Ihrem Konto dürfen Sie frei wählen. Anonym ist die Nutzung nicht, soweit eine App eine Anmeldung verlangt: Konten legen wir nur auf Einladung an und wissen daher, wen wir eingeladen haben.&lt;/p&gt;
 &lt;h2 id=&quot;anmeldung&quot;&gt;Anmeldung (Keycloak)&lt;a class=&quot;anchor&quot; href=&quot;#anmeldung&quot; aria-label=&quot;Link zu diesem Abschnitt&quot;&gt;#&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;Die Anmeldung bei unseren Apps läuft über Keycloak, einen Anmeldedienst, den wir auf unserem eigenen Server betreiben (auth.hallucinai.de). Er ist für alle Apps derselbe; die Apps speichern keine Passwörter. Keycloak speichert:&lt;/p&gt;
-&lt;ul&gt;&lt;li&gt;&lt;strong&gt;Konto:&lt;/strong&gt; Benutzername, E-Mail-Adresse, Vor- und Nachname, die Spracheinstellung Ihres Kontos, Ihre Gruppenzugehörigkeiten und Ihr Anmeldemittel (der öffentliche Schlüssel eines Passkeys oder der Hash eines Passworts, nicht das Passwort selbst). Benutzername und Namen dürfen Sie frei wählen (siehe „Nutzung unter Pseudonym“). Die Daten bleiben bis zur Löschung Ihres Kontos; wir löschen es auf Ihre Anfrage an legal@hallucinai.de. Um sich bei einer unserer Apps anzumelden, brauchen Sie ein Konto; darüber hinaus müssen Sie uns nichts bereitstellen. Rechtsgrundlage: Art. 6 Abs. 1 lit. b DSGVO (Vertragserfüllung).&lt;/li&gt;&lt;li&gt;&lt;strong&gt;Sitzung und Cookies:&lt;/strong&gt; Nach der Anmeldung merkt sich Keycloak Ihre Sitzung in seiner Datenbank, mit Ihrer IP-Adresse sowie Browser und Betriebssystem. Sie endet nach 7 Tagen ohne Aktivität, spätestens nach 30 Tagen. Dafür setzt Keycloak Cookies, die für die Anmeldung unbedingt erforderlich sind (§ 25 Abs. 2 Nr. 2 TDDDG; die Verarbeitung danach beruht auf Art. 6 Abs. 1 lit. b DSGVO): &lt;code&gt;AUTH_SESSION_ID&lt;/code&gt; und &lt;code&gt;KC_RESTART&lt;/code&gt; für den Ablauf einer laufenden Anmeldung oder Abmeldung (Sitzungs-Cookies, die der Browser beim Schließen verwirft), &lt;code&gt;KC_AUTH_SESSION_HASH&lt;/code&gt; (60 Sekunden; lädt eine geöffnete Anmeldeseite neu, wenn im selben Browser inzwischen eine neue Anmeldung begonnen wurde, etwa in einem anderen Tab), &lt;code&gt;KC_STATE_CHECKER&lt;/code&gt; (5 Minuten; erhält die Meldung einer Hinweis- oder Fehlerseite außerhalb einer laufenden Anmeldung beim Neuladen oder Sprachwechsel), &lt;code&gt;KEYCLOAK_IDENTITY&lt;/code&gt; für die angemeldete Sitzung (Sitzungs-Cookie) und &lt;code&gt;KEYCLOAK_SESSION&lt;/code&gt; (bis zu 30 Tage) sowie &lt;code&gt;KEYCLOAK_LOCALE&lt;/code&gt;, wenn Sie auf der Anmeldeseite die Sprache wählen (Sitzungs-Cookie). In der Kontoverwaltung legt Keycloak außerdem kurzlebige Einträge &lt;code&gt;kc-callback-…&lt;/code&gt; im lokalen Speicher Ihres Browsers an, die für die Anmeldung dort unbedingt erforderlich sind und nach Gebrauch gelöscht werden; ist der lokale Speicher gesperrt, legt Keycloak stattdessen gleichnamige Cookies &lt;code&gt;kc-callback-…&lt;/code&gt; an (bis zu 60 Minuten). Eine Einwilligung ist dafür nicht nötig.&lt;/li&gt;&lt;li&gt;&lt;strong&gt;Anmeldeereignisse:&lt;/strong&gt; erfolgreiche und fehlgeschlagene Anmeldungen mit Zeitpunkt, Konto und IP-Adresse, bei einer fehlgeschlagenen Anmeldung auch mit dem eingegebenen Benutzernamen, 90 Tage lang. Andere Ereignisarten nimmt Keycloak in diese Liste nicht auf. Rechtsgrundlage: Art. 6 Abs. 1 lit. f DSGVO (berechtigtes Interesse am Schutz vor Missbrauch).&lt;/li&gt;&lt;li&gt;&lt;strong&gt;Verwaltungsereignisse:&lt;/strong&gt; Änderungen, die ein Administrator an Konten und Einstellungen vornimmt, mit der IP-Adresse des Administrators, 1 Jahr lang. Rechtsgrundlage: Art. 6 Abs. 1 lit. f DSGVO (Nachvollziehbarkeit von Verwaltungsvorgängen und Schutz vor Missbrauch).&lt;/li&gt;&lt;li&gt;&lt;strong&gt;Container-Log:&lt;/strong&gt; Keycloak schreibt fehlgeschlagene Vorgänge, etwa fehlgeschlagene Anmeldungen, Abmeldungen oder Token-Abrufe, mit Konto- und Sitzungskennung, IP-Adresse und dem eingegebenen Benutzernamen außerdem in das Log seines Containers auf unserem Server. Dieses Log wird derzeit ohne feste Höchstdauer gespeichert; es bleibt bestehen, bis der Container neu erstellt wird, etwa bei einem Update. Rechtsgrundlage: Art. 6 Abs. 1 lit. f DSGVO (berechtigtes Interesse an Fehlersuche und Schutz vor Missbrauch).&lt;/li&gt;&lt;li&gt;&lt;strong&gt;Schutz vor Passwortraten:&lt;/strong&gt; Je Konto merkt sich Keycloak in seiner Datenbank die IP-Adresse des letzten Fehlversuchs sowie die Zahl der Fehlversuche und den Zeitpunkt des letzten Fehlversuchs. Der Eintrag wird nach einer erfolgreichen Anmeldung gelöscht, sonst 12 Stunden nach dem letzten Fehlversuch. Bei vielen Fehlversuchen kann er ein Konto kurzzeitig sperren. Rechtsgrundlage: Art. 6 Abs. 1 lit. f DSGVO (berechtigtes Interesse am Schutz vor dem Erraten von Passwörtern).&lt;/li&gt;&lt;li&gt;&lt;strong&gt;Sicherungskopien:&lt;/strong&gt; Die Datenbank von Keycloak ist Teil der wöchentlichen, verschlüsselten Sicherung auf unserem Server, damit wir sie nach einem Datenverlust wiederherstellen können (Art. 6 Abs. 1 lit. f DSGVO, berechtigtes Interesse an der Wiederherstellung). Sicherungen werden in der Regel höchstens etwa drei Monate aufbewahrt; Konto-, Sitzungs-, Ereignis- und Fehlversuchsdaten können deshalb länger in einer Sicherung enthalten sein, als oben angegeben. Vor Updates legt der Betreiber zusätzlich Sicherungen an, für die keine feste Löschfrist besteht; es bleiben die letzten zehn.&lt;/li&gt;&lt;/ul&gt;
+&lt;ul&gt;&lt;li&gt;&lt;strong&gt;Konto:&lt;/strong&gt; Benutzername, E-Mail-Adresse, Vor- und Nachname, die Spracheinstellung Ihres Kontos, Ihre Gruppenzugehörigkeiten und Ihr Anmeldemittel (der öffentliche Schlüssel eines Passkeys oder der Hash eines Passworts, nicht das Passwort selbst). Benutzername und Namen dürfen Sie frei wählen (siehe „Nutzung unter Pseudonym“). Die Daten bleiben bis zur Löschung Ihres Kontos; wir löschen es auf Ihre Anfrage an legal@hallucinai.de. Um sich bei einer unserer Apps anzumelden, brauchen Sie ein Konto; darüber hinaus müssen Sie uns nichts bereitstellen. Rechtsgrundlage: Art. 6 Abs. 1 lit. b DSGVO (Vertragserfüllung).&lt;/li&gt;&lt;li&gt;&lt;strong&gt;Sitzung und Cookies:&lt;/strong&gt; Nach der Anmeldung merkt sich Keycloak Ihre Sitzung in seiner Datenbank, mit Ihrer IP-Adresse sowie Browser und Betriebssystem. Sie endet nach 7 Tagen ohne Aktivität, spätestens nach 30 Tagen. Dafür setzt Keycloak Cookies, die für die Anmeldung unbedingt erforderlich sind (§ 25 Abs. 2 Nr. 2 TDDDG; die Verarbeitung danach beruht auf Art. 6 Abs. 1 lit. b DSGVO): &lt;code&gt;AUTH_SESSION_ID&lt;/code&gt; und &lt;code&gt;KC_RESTART&lt;/code&gt; für den Ablauf einer laufenden Anmeldung oder Abmeldung (Sitzungs-Cookies, die der Browser beim Schließen verwirft), &lt;code&gt;KC_AUTH_SESSION_HASH&lt;/code&gt; (60 Sekunden; lädt eine geöffnete Anmeldeseite neu, wenn im selben Browser inzwischen eine neue Anmeldung begonnen wurde, etwa in einem anderen Tab), &lt;code&gt;KC_STATE_CHECKER&lt;/code&gt; (5 Minuten; erhält die Meldung einer Hinweis- oder Fehlerseite außerhalb einer laufenden Anmeldung beim Neuladen oder Sprachwechsel), &lt;code&gt;KEYCLOAK_IDENTITY&lt;/code&gt; für die angemeldete Sitzung (Sitzungs-Cookie) und &lt;code&gt;KEYCLOAK_SESSION&lt;/code&gt; (bis zu 30 Tage) sowie &lt;code&gt;KEYCLOAK_LOCALE&lt;/code&gt;, wenn Sie auf der Anmeldeseite die Sprache wählen (Sitzungs-Cookie). In der Kontoverwaltung legt Keycloak außerdem kurzlebige Einträge &lt;code&gt;kc-callback-…&lt;/code&gt; im lokalen Speicher Ihres Browsers an, die für die Anmeldung dort unbedingt erforderlich sind und nach Gebrauch gelöscht werden; ist der lokale Speicher gesperrt, legt Keycloak stattdessen gleichnamige Cookies &lt;code&gt;kc-callback-…&lt;/code&gt; an (bis zu 60 Minuten). Eine Einwilligung ist dafür nicht nötig.&lt;/li&gt;&lt;li&gt;&lt;strong&gt;Anmeldeereignisse:&lt;/strong&gt; erfolgreiche und fehlgeschlagene Anmeldungen mit Zeitpunkt, Konto und IP-Adresse, bei einer fehlgeschlagenen Anmeldung auch mit dem eingegebenen Benutzernamen, 90 Tage lang. Andere Ereignisarten nimmt Keycloak in diese Liste nicht auf. Rechtsgrundlage: Art. 6 Abs. 1 lit. f DSGVO (berechtigtes Interesse am Schutz vor Missbrauch).&lt;/li&gt;&lt;li&gt;&lt;strong&gt;Verwaltungsereignisse:&lt;/strong&gt; Änderungen, die ein Administrator an Konten und Einstellungen vornimmt, mit der IP-Adresse des Administrators, 1 Jahr lang. Rechtsgrundlage: Art. 6 Abs. 1 lit. f DSGVO (Nachvollziehbarkeit von Verwaltungsvorgängen und Schutz vor Missbrauch).&lt;/li&gt;&lt;li&gt;&lt;strong&gt;Container-Log:&lt;/strong&gt; Keycloak schreibt fehlgeschlagene Vorgänge, etwa fehlgeschlagene Anmeldungen, Abmeldungen oder Token-Abrufe, mit Konto- und Sitzungskennung, IP-Adresse und dem eingegebenen Benutzernamen außerdem in das Log seines Containers auf unserem Server. Wir löschen jeden Eintrag, bevor er 30 Tage alt ist; war der Server ausgeschaltet, kurz nach seinem nächsten Start. Rechtsgrundlage: Art. 6 Abs. 1 lit. f DSGVO (berechtigtes Interesse an Fehlersuche und Schutz vor Missbrauch).&lt;/li&gt;&lt;li&gt;&lt;strong&gt;Schutz vor Passwortraten:&lt;/strong&gt; Je Konto merkt sich Keycloak in seiner Datenbank die IP-Adresse des letzten Fehlversuchs sowie die Zahl der Fehlversuche und den Zeitpunkt des letzten Fehlversuchs. Der Eintrag wird nach einer erfolgreichen Anmeldung gelöscht, sonst 12 Stunden nach dem letzten Fehlversuch. Bei vielen Fehlversuchen kann er ein Konto kurzzeitig sperren. Rechtsgrundlage: Art. 6 Abs. 1 lit. f DSGVO (berechtigtes Interesse am Schutz vor dem Erraten von Passwörtern).&lt;/li&gt;&lt;li&gt;&lt;strong&gt;Sicherungskopien:&lt;/strong&gt; Die Datenbank von Keycloak ist Teil der wöchentlichen, verschlüsselten Sicherung auf unserem Server, damit wir sie nach einem Datenverlust wiederherstellen können (Art. 6 Abs. 1 lit. f DSGVO, berechtigtes Interesse an der Wiederherstellung). Sicherungen werden in der Regel höchstens etwa drei Monate aufbewahrt; Konto-, Sitzungs-, Ereignis- und Fehlversuchsdaten können deshalb länger in einer Sicherung enthalten sein, als oben angegeben. Vor Updates legt der Betreiber zusätzlich Sicherungen an, für die keine feste Löschfrist besteht; es bleiben die letzten zehn.&lt;/li&gt;&lt;/ul&gt;
 &lt;section class=&quot;app&quot; id=&quot;songmaker&quot;&gt;&lt;h2&gt;songmaker&lt;span class=&quot;badge&quot;&gt;App&lt;/span&gt;&lt;a class=&quot;anchor&quot; href=&quot;#songmaker&quot; aria-label=&quot;Link zu diesem Abschnitt&quot;&gt;#&lt;/a&gt;&lt;/h2&gt;
 &lt;h3 id=&quot;songmaker-daten&quot;&gt;Welche Daten wir verarbeiten&lt;a class=&quot;anchor&quot; href=&quot;#songmaker-daten&quot; aria-label=&quot;Link zu diesem Abschnitt&quot;&gt;#&lt;/a&gt;&lt;/h3&gt;
 &lt;p&gt;Wir verarbeiten folgende personenbezogene Daten:&lt;/p&gt;
@@ -346,7 +328,7 @@ h1{font-size:34px}
 &lt;/section&gt;
 &lt;p class=&quot;stand&quot;&gt;Stand: 22. Oktober 2026&lt;/p&gt;
 &lt;/div&gt;&lt;/article&gt;&lt;/div&gt;
-&lt;footer&gt;&lt;a href=&quot;/impressum&quot;&gt;Impressum&lt;/a&gt;&lt;a href=&quot;/datenschutz&quot; aria-current=&quot;page&quot;&gt;Datenschutz&lt;/a&gt;&lt;a href=&quot;/nutzungsbedingungen&quot;&gt;Nutzungsbedingungen&lt;/a&gt;&lt;/footer&gt;
+&lt;div class=&quot;legal-place&quot;&gt;&lt;nav class=&quot;legal&quot; aria-label=&quot;Legal&quot;&gt;&lt;a href=&quot;/impressum&quot;&gt;Impressum&lt;/a&gt;&lt;a href=&quot;/datenschutz&quot;&gt;Datenschutz&lt;/a&gt;&lt;a href=&quot;/nutzungsbedingungen&quot;&gt;Nutzungsbedingungen&lt;/a&gt;&lt;/nav&gt;&lt;/div&gt;
 &lt;/div&gt;
 &lt;script&gt;document.addEventListener(&#x27;click&#x27;,e=&gt;{const a=e.target.closest(&#x27;a[href^=&quot;/&quot;]&#x27;);if(a)e.preventDefault()});&lt;/script&gt;&lt;/body&gt;
 &lt;/html&gt;
@@ -368,17 +350,13 @@ background-image:linear-gradient(var(--grid-line) 1px,transparent 1px),linear-gr
 body::after{content:&quot;&quot;;position:fixed;z-index:-1;pointer-events:none;width:400px;height:400px;top:-100px;right:-100px;border-radius:50%;background:var(--primary);filter:blur(80px);opacity:.15}
 .glow2{position:fixed;z-index:-1;pointer-events:none;width:300px;height:300px;bottom:-50px;left:-50px;border-radius:50%;background:var(--accent);filter:blur(80px);opacity:.15}
 a{color:var(--text);text-decoration-color:var(--accent);text-underline-offset:3px}
-a:hover{color:var(--text)}
+a:hover:not(:where(.legal a)){color:var(--text)}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .wrap{max-width:980px;margin:0 auto;padding:28px 16px 32px}
 .mark{font:400 34px/1.1 var(--display);text-transform:uppercase;letter-spacing:.15em;text-align:center;margin:0 0 20px;
 -webkit-text-fill-color:transparent;background-image:linear-gradient(to bottom,color-mix(in srgb,var(--primary) 80%,var(--text)) 0 35%,var(--text) 35% 65%,color-mix(in srgb,var(--accent) 80%,var(--text)) 65% 100%);
 -webkit-background-clip:text;background-clip:text;filter:drop-shadow(0 0 20px color-mix(in srgb,var(--primary) 30%,transparent))}
 .mark a{text-decoration:none;-webkit-text-fill-color:transparent}
-nav.tabs{display:flex;flex-wrap:wrap;gap:4px 18px;justify-content:center;margin:0 0 22px;padding-bottom:10px;border-bottom:1px solid var(--border)}
-nav.tabs a{font:400 12px var(--display);text-transform:uppercase;letter-spacing:.5px;color:var(--muted);text-decoration:none;padding:8px 0;border-bottom:2px solid transparent;min-height:40px}
-nav.tabs a:hover{color:var(--text)}
-nav.tabs a[aria-current]{color:var(--primary);border-image:linear-gradient(90deg,var(--primary),var(--accent)) 1}
 .layout{display:block}
 aside.toc{margin:0 0 18px}
 aside.toc details{border:1px solid var(--border);border-radius:8px;background:var(--surface)}
@@ -404,10 +382,9 @@ section.app&gt;h2{margin-top:6px}
 .badge{display:inline-block;font:400 11px var(--display);letter-spacing:1px;text-transform:uppercase;color:var(--on-accent);
 background:linear-gradient(90deg,var(--primary),var(--accent));border-radius:4px;padding:2px 8px;vertical-align:middle;margin-left:8px}
 .stand{margin-top:26px;color:var(--muted);font-size:14px}
-footer{margin-top:26px;padding-top:16px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:6px 20px;justify-content:center;font:400 12px var(--display);text-transform:uppercase;letter-spacing:.5px}
-footer a{color:var(--muted);text-decoration:none;padding:8px 0;min-height:40px}
-footer a:hover{color:var(--text)}
-footer a[aria-current]{color:var(--primary)}
+.legal-place{margin-top:26px;padding-top:16px;border-top:1px solid var(--border)}
+.legal{position:relative;z-index:1;display:flex;flex-wrap:wrap;justify-content:center;gap:4px 16px;font-size:12px}
+.legal a{color:var(--muted);text-decoration:none;border-bottom:1px solid var(--border)}
 @media (min-width:900px){
 .wrap{padding:44px 24px 40px}
 .mark{font-size:40px}
@@ -430,7 +407,6 @@ h1{font-size:34px}
 &lt;div class=&quot;glow2&quot;&gt;&lt;/div&gt;
 &lt;div class=&quot;wrap&quot;&gt;
 &lt;p class=&quot;mark&quot;&gt;&lt;a href=&quot;https://hallucinai.de/&quot;&gt;Hallucinai&lt;/a&gt;&lt;/p&gt;
-&lt;nav class=&quot;tabs&quot; aria-label=&quot;Rechtliches&quot;&gt;&lt;a href=&quot;/impressum&quot;&gt;Impressum&lt;/a&gt;&lt;a href=&quot;/datenschutz&quot; aria-current=&quot;page&quot;&gt;Datenschutz&lt;/a&gt;&lt;a href=&quot;/nutzungsbedingungen&quot;&gt;Nutzungsbedingungen&lt;/a&gt;&lt;/nav&gt;
 &lt;div class=&quot;layout&quot;&gt;&lt;aside class=&quot;toc&quot; aria-label=&quot;Inhalt&quot;&gt;&lt;details&gt;&lt;summary&gt;Inhalt&lt;/summary&gt;&lt;ol&gt;&lt;li&gt;&lt;a href=&quot;#verantwortlicher&quot;&gt;Verantwortlicher&lt;/a&gt;&lt;/li&gt;&lt;li&gt;&lt;a href=&quot;#cloudflare&quot;&gt;Cloudflare&lt;/a&gt;&lt;/li&gt;&lt;li&gt;&lt;a href=&quot;#rechte&quot;&gt;Ihre Rechte&lt;/a&gt;&lt;/li&gt;&lt;li&gt;&lt;a href=&quot;#widerspruch&quot;&gt;Ihr Widerspruchsrecht&lt;/a&gt;&lt;/li&gt;&lt;li&gt;&lt;a href=&quot;#kein-tracking&quot;&gt;Kein Tracking&lt;/a&gt;&lt;/li&gt;&lt;li&gt;&lt;a href=&quot;#automatisierte-entscheidungen&quot;&gt;Keine automatisierten Entscheidungen&lt;/a&gt;&lt;/li&gt;&lt;li&gt;&lt;a href=&quot;#pseudonym&quot;&gt;Nutzung unter Pseudonym&lt;/a&gt;&lt;/li&gt;&lt;li&gt;&lt;a href=&quot;#anmeldung&quot;&gt;Anmeldung (Keycloak)&lt;/a&gt;&lt;/li&gt;&lt;li&gt;&lt;a href=&quot;#songmaker&quot;&gt;songmaker&lt;/a&gt;&lt;ol&gt;&lt;li&gt;&lt;a href=&quot;#songmaker-daten&quot;&gt;Welche Daten wir verarbeiten&lt;/a&gt;&lt;/li&gt;&lt;li&gt;&lt;a href=&quot;#songmaker-server&quot;&gt;Verarbeitung auf unserem Server&lt;/a&gt;&lt;/li&gt;&lt;li&gt;&lt;a href=&quot;#songmaker-ki&quot;&gt;KI-Funktionen mit externen Anbietern&lt;/a&gt;&lt;/li&gt;&lt;li&gt;&lt;a href=&quot;#songmaker-freigaben&quot;&gt;Freigaben&lt;/a&gt;&lt;/li&gt;&lt;li&gt;&lt;a href=&quot;#songmaker-geraet&quot;&gt;Speicherung auf Ihrem Gerät&lt;/a&gt;&lt;/li&gt;&lt;li&gt;&lt;a href=&quot;#songmaker-speicherdauer&quot;&gt;Speicherdauer&lt;/a&gt;&lt;/li&gt;&lt;li&gt;&lt;a href=&quot;#songmaker-empfaenger&quot;&gt;Empfänger&lt;/a&gt;&lt;/li&gt;&lt;/ol&gt;&lt;/li&gt;&lt;/ol&gt;&lt;/details&gt;&lt;/aside&gt;&lt;article&gt;&lt;div class=&quot;measure&quot;&gt;
 &lt;h1&gt;Datenschutzerklärung&lt;/h1&gt;
 &lt;h2 id=&quot;verantwortlicher&quot;&gt;Verantwortlicher&lt;a class=&quot;anchor&quot; href=&quot;#verantwortlicher&quot; aria-label=&quot;Link zu diesem Abschnitt&quot;&gt;#&lt;/a&gt;&lt;/h2&gt;
@@ -454,7 +430,7 @@ h1{font-size:34px}
 &lt;p&gt;Sie können unsere Apps unter einem Pseudonym nutzen (§ 19 Abs. 2 TDDDG): Benutzername und Namen in Ihrem Konto dürfen Sie frei wählen. Anonym ist die Nutzung nicht, soweit eine App eine Anmeldung verlangt: Konten legen wir nur auf Einladung an und wissen daher, wen wir eingeladen haben.&lt;/p&gt;
 &lt;h2 id=&quot;anmeldung&quot;&gt;Anmeldung (Keycloak)&lt;a class=&quot;anchor&quot; href=&quot;#anmeldung&quot; aria-label=&quot;Link zu diesem Abschnitt&quot;&gt;#&lt;/a&gt;&lt;/h2&gt;
 &lt;p&gt;Die Anmeldung bei unseren Apps läuft über Keycloak, einen Anmeldedienst, den wir auf unserem eigenen Server betreiben (auth.hallucinai.de). Er ist für alle Apps derselbe; die Apps speichern keine Passwörter. Keycloak speichert:&lt;/p&gt;
-&lt;ul&gt;&lt;li&gt;&lt;strong&gt;Konto:&lt;/strong&gt; Benutzername, E-Mail-Adresse, Vor- und Nachname, die Spracheinstellung Ihres Kontos, Ihre Gruppenzugehörigkeiten und Ihr Anmeldemittel (der öffentliche Schlüssel eines Passkeys oder der Hash eines Passworts, nicht das Passwort selbst). Benutzername und Namen dürfen Sie frei wählen (siehe „Nutzung unter Pseudonym“). Die Daten bleiben bis zur Löschung Ihres Kontos; wir löschen es auf Ihre Anfrage an legal@hallucinai.de. Um sich bei einer unserer Apps anzumelden, brauchen Sie ein Konto; darüber hinaus müssen Sie uns nichts bereitstellen. Rechtsgrundlage: Art. 6 Abs. 1 lit. b DSGVO (Vertragserfüllung).&lt;/li&gt;&lt;li&gt;&lt;strong&gt;Sitzung und Cookies:&lt;/strong&gt; Nach der Anmeldung merkt sich Keycloak Ihre Sitzung in seiner Datenbank, mit Ihrer IP-Adresse sowie Browser und Betriebssystem. Sie endet nach 7 Tagen ohne Aktivität, spätestens nach 30 Tagen. Dafür setzt Keycloak Cookies, die für die Anmeldung unbedingt erforderlich sind (§ 25 Abs. 2 Nr. 2 TDDDG; die Verarbeitung danach beruht auf Art. 6 Abs. 1 lit. b DSGVO): &lt;code&gt;AUTH_SESSION_ID&lt;/code&gt; und &lt;code&gt;KC_RESTART&lt;/code&gt; für den Ablauf einer laufenden Anmeldung oder Abmeldung (Sitzungs-Cookies, die der Browser beim Schließen verwirft), &lt;code&gt;KC_AUTH_SESSION_HASH&lt;/code&gt; (60 Sekunden; lädt eine geöffnete Anmeldeseite neu, wenn im selben Browser inzwischen eine neue Anmeldung begonnen wurde, etwa in einem anderen Tab), &lt;code&gt;KC_STATE_CHECKER&lt;/code&gt; (5 Minuten; erhält die Meldung einer Hinweis- oder Fehlerseite außerhalb einer laufenden Anmeldung beim Neuladen oder Sprachwechsel), &lt;code&gt;KEYCLOAK_IDENTITY&lt;/code&gt; für die angemeldete Sitzung (Sitzungs-Cookie) und &lt;code&gt;KEYCLOAK_SESSION&lt;/code&gt; (bis zu 30 Tage) sowie &lt;code&gt;KEYCLOAK_LOCALE&lt;/code&gt;, wenn Sie auf der Anmeldeseite die Sprache wählen (Sitzungs-Cookie). In der Kontoverwaltung legt Keycloak außerdem kurzlebige Einträge &lt;code&gt;kc-callback-…&lt;/code&gt; im lokalen Speicher Ihres Browsers an, die für die Anmeldung dort unbedingt erforderlich sind und nach Gebrauch gelöscht werden; ist der lokale Speicher gesperrt, legt Keycloak stattdessen gleichnamige Cookies &lt;code&gt;kc-callback-…&lt;/code&gt; an (bis zu 60 Minuten). Eine Einwilligung ist dafür nicht nötig.&lt;/li&gt;&lt;li&gt;&lt;strong&gt;Anmeldeereignisse:&lt;/strong&gt; erfolgreiche und fehlgeschlagene Anmeldungen mit Zeitpunkt, Konto und IP-Adresse, bei einer fehlgeschlagenen Anmeldung auch mit dem eingegebenen Benutzernamen, 90 Tage lang. Andere Ereignisarten nimmt Keycloak in diese Liste nicht auf. Rechtsgrundlage: Art. 6 Abs. 1 lit. f DSGVO (berechtigtes Interesse am Schutz vor Missbrauch).&lt;/li&gt;&lt;li&gt;&lt;strong&gt;Verwaltungsereignisse:&lt;/strong&gt; Änderungen, die ein Administrator an Konten und Einstellungen vornimmt, mit der IP-Adresse des Administrators, 1 Jahr lang. Rechtsgrundlage: Art. 6 Abs. 1 lit. f DSGVO (Nachvollziehbarkeit von Verwaltungsvorgängen und Schutz vor Missbrauch).&lt;/li&gt;&lt;li&gt;&lt;strong&gt;Container-Log:&lt;/strong&gt; Keycloak schreibt fehlgeschlagene Vorgänge, etwa fehlgeschlagene Anmeldungen, Abmeldungen oder Token-Abrufe, mit Konto- und Sitzungskennung, IP-Adresse und dem eingegebenen Benutzernamen außerdem in das Log seines Containers auf unserem Server. Dieses Log wird derzeit ohne feste Höchstdauer gespeichert; es bleibt bestehen, bis der Container neu erstellt wird, etwa bei einem Update. Rechtsgrundlage: Art. 6 Abs. 1 lit. f DSGVO (berechtigtes Interesse an Fehlersuche und Schutz vor Missbrauch).&lt;/li&gt;&lt;li&gt;&lt;strong&gt;Schutz vor Passwortraten:&lt;/strong&gt; Je Konto merkt sich Keycloak in seiner Datenbank die IP-Adresse des letzten Fehlversuchs sowie die Zahl der Fehlversuche und den Zeitpunkt des letzten Fehlversuchs. Der Eintrag wird nach einer erfolgreichen Anmeldung gelöscht, sonst 12 Stunden nach dem letzten Fehlversuch. Bei vielen Fehlversuchen kann er ein Konto kurzzeitig sperren. Rechtsgrundlage: Art. 6 Abs. 1 lit. f DSGVO (berechtigtes Interesse am Schutz vor dem Erraten von Passwörtern).&lt;/li&gt;&lt;li&gt;&lt;strong&gt;Sicherungskopien:&lt;/strong&gt; Die Datenbank von Keycloak ist Teil der wöchentlichen, verschlüsselten Sicherung auf unserem Server, damit wir sie nach einem Datenverlust wiederherstellen können (Art. 6 Abs. 1 lit. f DSGVO, berechtigtes Interesse an der Wiederherstellung). Sicherungen werden in der Regel höchstens etwa drei Monate aufbewahrt; Konto-, Sitzungs-, Ereignis- und Fehlversuchsdaten können deshalb länger in einer Sicherung enthalten sein, als oben angegeben. Vor Updates legt der Betreiber zusätzlich Sicherungen an, für die keine feste Löschfrist besteht; es bleiben die letzten zehn.&lt;/li&gt;&lt;/ul&gt;
+&lt;ul&gt;&lt;li&gt;&lt;strong&gt;Konto:&lt;/strong&gt; Benutzername, E-Mail-Adresse, Vor- und Nachname, die Spracheinstellung Ihres Kontos, Ihre Gruppenzugehörigkeiten und Ihr Anmeldemittel (der öffentliche Schlüssel eines Passkeys oder der Hash eines Passworts, nicht das Passwort selbst). Benutzername und Namen dürfen Sie frei wählen (siehe „Nutzung unter Pseudonym“). Die Daten bleiben bis zur Löschung Ihres Kontos; wir löschen es auf Ihre Anfrage an legal@hallucinai.de. Um sich bei einer unserer Apps anzumelden, brauchen Sie ein Konto; darüber hinaus müssen Sie uns nichts bereitstellen. Rechtsgrundlage: Art. 6 Abs. 1 lit. b DSGVO (Vertragserfüllung).&lt;/li&gt;&lt;li&gt;&lt;strong&gt;Sitzung und Cookies:&lt;/strong&gt; Nach der Anmeldung merkt sich Keycloak Ihre Sitzung in seiner Datenbank, mit Ihrer IP-Adresse sowie Browser und Betriebssystem. Sie endet nach 7 Tagen ohne Aktivität, spätestens nach 30 Tagen. Dafür setzt Keycloak Cookies, die für die Anmeldung unbedingt erforderlich sind (§ 25 Abs. 2 Nr. 2 TDDDG; die Verarbeitung danach beruht auf Art. 6 Abs. 1 lit. b DSGVO): &lt;code&gt;AUTH_SESSION_ID&lt;/code&gt; und &lt;code&gt;KC_RESTART&lt;/code&gt; für den Ablauf einer laufenden Anmeldung oder Abmeldung (Sitzungs-Cookies, die der Browser beim Schließen verwirft), &lt;code&gt;KC_AUTH_SESSION_HASH&lt;/code&gt; (60 Sekunden; lädt eine geöffnete Anmeldeseite neu, wenn im selben Browser inzwischen eine neue Anmeldung begonnen wurde, etwa in einem anderen Tab), &lt;code&gt;KC_STATE_CHECKER&lt;/code&gt; (5 Minuten; erhält die Meldung einer Hinweis- oder Fehlerseite außerhalb einer laufenden Anmeldung beim Neuladen oder Sprachwechsel), &lt;code&gt;KEYCLOAK_IDENTITY&lt;/code&gt; für die angemeldete Sitzung (Sitzungs-Cookie) und &lt;code&gt;KEYCLOAK_SESSION&lt;/code&gt; (bis zu 30 Tage) sowie &lt;code&gt;KEYCLOAK_LOCALE&lt;/code&gt;, wenn Sie auf der Anmeldeseite die Sprache wählen (Sitzungs-Cookie). In der Kontoverwaltung legt Keycloak außerdem kurzlebige Einträge &lt;code&gt;kc-callback-…&lt;/code&gt; im lokalen Speicher Ihres Browsers an, die für die Anmeldung dort unbedingt erforderlich sind und nach Gebrauch gelöscht werden; ist der lokale Speicher gesperrt, legt Keycloak stattdessen gleichnamige Cookies &lt;code&gt;kc-callback-…&lt;/code&gt; an (bis zu 60 Minuten). Eine Einwilligung ist dafür nicht nötig.&lt;/li&gt;&lt;li&gt;&lt;strong&gt;Anmeldeereignisse:&lt;/strong&gt; erfolgreiche und fehlgeschlagene Anmeldungen mit Zeitpunkt, Konto und IP-Adresse, bei einer fehlgeschlagenen Anmeldung auch mit dem eingegebenen Benutzernamen, 90 Tage lang. Andere Ereignisarten nimmt Keycloak in diese Liste nicht auf. Rechtsgrundlage: Art. 6 Abs. 1 lit. f DSGVO (berechtigtes Interesse am Schutz vor Missbrauch).&lt;/li&gt;&lt;li&gt;&lt;strong&gt;Verwaltungsereignisse:&lt;/strong&gt; Änderungen, die ein Administrator an Konten und Einstellungen vornimmt, mit der IP-Adresse des Administrators, 1 Jahr lang. Rechtsgrundlage: Art. 6 Abs. 1 lit. f DSGVO (Nachvollziehbarkeit von Verwaltungsvorgängen und Schutz vor Missbrauch).&lt;/li&gt;&lt;li&gt;&lt;strong&gt;Container-Log:&lt;/strong&gt; Keycloak schreibt fehlgeschlagene Vorgänge, etwa fehlgeschlagene Anmeldungen, Abmeldungen oder Token-Abrufe, mit Konto- und Sitzungskennung, IP-Adresse und dem eingegebenen Benutzernamen außerdem in das Log seines Containers auf unserem Server. Wir löschen jeden Eintrag, bevor er 30 Tage alt ist; war der Server ausgeschaltet, kurz nach seinem nächsten Start. Rechtsgrundlage: Art. 6 Abs. 1 lit. f DSGVO (berechtigtes Interesse an Fehlersuche und Schutz vor Missbrauch).&lt;/li&gt;&lt;li&gt;&lt;strong&gt;Schutz vor Passwortraten:&lt;/strong&gt; Je Konto merkt sich Keycloak in seiner Datenbank die IP-Adresse des letzten Fehlversuchs sowie die Zahl der Fehlversuche und den Zeitpunkt des letzten Fehlversuchs. Der Eintrag wird nach einer erfolgreichen Anmeldung gelöscht, sonst 12 Stunden nach dem letzten Fehlversuch. Bei vielen Fehlversuchen kann er ein Konto kurzzeitig sperren. Rechtsgrundlage: Art. 6 Abs. 1 lit. f DSGVO (berechtigtes Interesse am Schutz vor dem Erraten von Passwörtern).&lt;/li&gt;&lt;li&gt;&lt;strong&gt;Sicherungskopien:&lt;/strong&gt; Die Datenbank von Keycloak ist Teil der wöchentlichen, verschlüsselten Sicherung auf unserem Server, damit wir sie nach einem Datenverlust wiederherstellen können (Art. 6 Abs. 1 lit. f DSGVO, berechtigtes Interesse an der Wiederherstellung). Sicherungen werden in der Regel höchstens etwa drei Monate aufbewahrt; Konto-, Sitzungs-, Ereignis- und Fehlversuchsdaten können deshalb länger in einer Sicherung enthalten sein, als oben angegeben. Vor Updates legt der Betreiber zusätzlich Sicherungen an, für die keine feste Löschfrist besteht; es bleiben die letzten zehn.&lt;/li&gt;&lt;/ul&gt;
 &lt;section class=&quot;app&quot; id=&quot;songmaker&quot;&gt;&lt;h2&gt;songmaker&lt;span class=&quot;badge&quot;&gt;App&lt;/span&gt;&lt;a class=&quot;anchor&quot; href=&quot;#songmaker&quot; aria-label=&quot;Link zu diesem Abschnitt&quot;&gt;#&lt;/a&gt;&lt;/h2&gt;
 &lt;h3 id=&quot;songmaker-daten&quot;&gt;Welche Daten wir verarbeiten&lt;a class=&quot;anchor&quot; href=&quot;#songmaker-daten&quot; aria-label=&quot;Link zu diesem Abschnitt&quot;&gt;#&lt;/a&gt;&lt;/h3&gt;
 &lt;p&gt;Wir verarbeiten folgende personenbezogene Daten:&lt;/p&gt;
@@ -483,7 +459,7 @@ h1{font-size:34px}
 &lt;/section&gt;
 &lt;p class=&quot;stand&quot;&gt;Stand: 22. Oktober 2026&lt;/p&gt;
 &lt;/div&gt;&lt;/article&gt;&lt;/div&gt;
-&lt;footer&gt;&lt;a href=&quot;/impressum&quot;&gt;Impressum&lt;/a&gt;&lt;a href=&quot;/datenschutz&quot; aria-current=&quot;page&quot;&gt;Datenschutz&lt;/a&gt;&lt;a href=&quot;/nutzungsbedingungen&quot;&gt;Nutzungsbedingungen&lt;/a&gt;&lt;/footer&gt;
+&lt;div class=&quot;legal-place&quot;&gt;&lt;nav class=&quot;legal&quot; aria-label=&quot;Legal&quot;&gt;&lt;a href=&quot;/impressum&quot;&gt;Impressum&lt;/a&gt;&lt;a href=&quot;/datenschutz&quot;&gt;Datenschutz&lt;/a&gt;&lt;a href=&quot;/nutzungsbedingungen&quot;&gt;Nutzungsbedingungen&lt;/a&gt;&lt;/nav&gt;&lt;/div&gt;
 &lt;/div&gt;
 &lt;script&gt;document.addEventListener(&#x27;click&#x27;,e=&gt;{const a=e.target.closest(&#x27;a[href^=&quot;/&quot;]&#x27;);if(a)e.preventDefault()});&lt;/script&gt;&lt;/body&gt;
 &lt;/html&gt;
@@ -509,17 +485,13 @@ background-image:linear-gradient(var(--grid-line) 1px,transparent 1px),linear-gr
 body::after{content:&quot;&quot;;position:fixed;z-index:-1;pointer-events:none;width:400px;height:400px;top:-100px;right:-100px;border-radius:50%;background:var(--primary);filter:blur(80px);opacity:.15}
 .glow2{position:fixed;z-index:-1;pointer-events:none;width:300px;height:300px;bottom:-50px;left:-50px;border-radius:50%;background:var(--accent);filter:blur(80px);opacity:.15}
 a{color:var(--text);text-decoration-color:var(--accent);text-underline-offset:3px}
-a:hover{color:var(--text)}
+a:hover:not(:where(.legal a)){color:var(--text)}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .wrap{max-width:980px;margin:0 auto;padding:28px 16px 32px}
 .mark{font:400 34px/1.1 var(--display);text-transform:uppercase;letter-spacing:.15em;text-align:center;margin:0 0 20px;
 -webkit-text-fill-color:transparent;background-image:linear-gradient(to bottom,color-mix(in srgb,var(--primary) 80%,var(--text)) 0 35%,var(--text) 35% 65%,color-mix(in srgb,var(--accent) 80%,var(--text)) 65% 100%);
 -webkit-background-clip:text;background-clip:text;filter:drop-shadow(0 0 20px color-mix(in srgb,var(--primary) 30%,transparent))}
 .mark a{text-decoration:none;-webkit-text-fill-color:transparent}
-nav.tabs{display:flex;flex-wrap:wrap;gap:4px 18px;justify-content:center;margin:0 0 22px;padding-bottom:10px;border-bottom:1px solid var(--border)}
-nav.tabs a{font:400 12px var(--display);text-transform:uppercase;letter-spacing:.5px;color:var(--muted);text-decoration:none;padding:8px 0;border-bottom:2px solid transparent;min-height:40px}
-nav.tabs a:hover{color:var(--text)}
-nav.tabs a[aria-current]{color:var(--primary);border-image:linear-gradient(90deg,var(--primary),var(--accent)) 1}
 .layout{display:block}
 aside.toc{margin:0 0 18px}
 aside.toc details{border:1px solid var(--border);border-radius:8px;background:var(--surface)}
@@ -545,10 +517,9 @@ section.app&gt;h2{margin-top:6px}
 .badge{display:inline-block;font:400 11px var(--display);letter-spacing:1px;text-transform:uppercase;color:var(--on-accent);
 background:linear-gradient(90deg,var(--primary),var(--accent));border-radius:4px;padding:2px 8px;vertical-align:middle;margin-left:8px}
 .stand{margin-top:26px;color:var(--muted);font-size:14px}
-footer{margin-top:26px;padding-top:16px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:6px 20px;justify-content:center;font:400 12px var(--display);text-transform:uppercase;letter-spacing:.5px}
-footer a{color:var(--muted);text-decoration:none;padding:8px 0;min-height:40px}
-footer a:hover{color:var(--text)}
-footer a[aria-current]{color:var(--primary)}
+.legal-place{margin-top:26px;padding-top:16px;border-top:1px solid var(--border)}
+.legal{position:relative;z-index:1;display:flex;flex-wrap:wrap;justify-content:center;gap:4px 16px;font-size:12px}
+.legal a{color:var(--muted);text-decoration:none;border-bottom:1px solid var(--border)}
 @media (min-width:900px){
 .wrap{padding:44px 24px 40px}
 .mark{font-size:40px}
@@ -571,7 +542,6 @@ h1{font-size:34px}
 &lt;div class=&quot;glow2&quot;&gt;&lt;/div&gt;
 &lt;div class=&quot;wrap&quot;&gt;
 &lt;p class=&quot;mark&quot;&gt;&lt;a href=&quot;https://hallucinai.de/&quot;&gt;Hallucinai&lt;/a&gt;&lt;/p&gt;
-&lt;nav class=&quot;tabs&quot; aria-label=&quot;Rechtliches&quot;&gt;&lt;a href=&quot;/impressum&quot;&gt;Impressum&lt;/a&gt;&lt;a href=&quot;/datenschutz&quot;&gt;Datenschutz&lt;/a&gt;&lt;a href=&quot;/nutzungsbedingungen&quot; aria-current=&quot;page&quot;&gt;Nutzungsbedingungen&lt;/a&gt;&lt;/nav&gt;
 &lt;div class=&quot;layout&quot;&gt;&lt;aside class=&quot;toc&quot; aria-label=&quot;Inhalt&quot;&gt;&lt;details&gt;&lt;summary&gt;Inhalt&lt;/summary&gt;&lt;ol&gt;&lt;li&gt;&lt;a href=&quot;#recht&quot;&gt;Anwendbares Recht&lt;/a&gt;&lt;/li&gt;&lt;li&gt;&lt;a href=&quot;#songmaker&quot;&gt;songmaker&lt;/a&gt;&lt;ol&gt;&lt;li&gt;&lt;a href=&quot;#songmaker-leistung&quot;&gt;Leistungsbeschreibung&lt;/a&gt;&lt;/li&gt;&lt;li&gt;&lt;a href=&quot;#songmaker-ki&quot;&gt;KI-generierte Inhalte&lt;/a&gt;&lt;/li&gt;&lt;li&gt;&lt;a href=&quot;#songmaker-pflichten&quot;&gt;Pflichten der Nutzer&lt;/a&gt;&lt;/li&gt;&lt;li&gt;&lt;a href=&quot;#songmaker-haftung&quot;&gt;Haftung&lt;/a&gt;&lt;/li&gt;&lt;li&gt;&lt;a href=&quot;#songmaker-loeschung&quot;&gt;Löschung und Kündigung&lt;/a&gt;&lt;/li&gt;&lt;/ol&gt;&lt;/li&gt;&lt;/ol&gt;&lt;/details&gt;&lt;/aside&gt;&lt;article&gt;&lt;div class=&quot;measure&quot;&gt;
 &lt;h1&gt;Nutzungsbedingungen&lt;/h1&gt;
 &lt;h2 id=&quot;recht&quot;&gt;Anwendbares Recht&lt;a class=&quot;anchor&quot; href=&quot;#recht&quot; aria-label=&quot;Link zu diesem Abschnitt&quot;&gt;#&lt;/a&gt;&lt;/h2&gt;
@@ -591,7 +561,7 @@ h1{font-size:34px}
 &lt;/section&gt;
 &lt;p class=&quot;stand&quot;&gt;Stand: 21. Oktober 2026&lt;/p&gt;
 &lt;/div&gt;&lt;/article&gt;&lt;/div&gt;
-&lt;footer&gt;&lt;a href=&quot;/impressum&quot;&gt;Impressum&lt;/a&gt;&lt;a href=&quot;/datenschutz&quot;&gt;Datenschutz&lt;/a&gt;&lt;a href=&quot;/nutzungsbedingungen&quot; aria-current=&quot;page&quot;&gt;Nutzungsbedingungen&lt;/a&gt;&lt;/footer&gt;
+&lt;div class=&quot;legal-place&quot;&gt;&lt;nav class=&quot;legal&quot; aria-label=&quot;Legal&quot;&gt;&lt;a href=&quot;/impressum&quot;&gt;Impressum&lt;/a&gt;&lt;a href=&quot;/datenschutz&quot;&gt;Datenschutz&lt;/a&gt;&lt;a href=&quot;/nutzungsbedingungen&quot;&gt;Nutzungsbedingungen&lt;/a&gt;&lt;/nav&gt;&lt;/div&gt;
 &lt;/div&gt;
 &lt;script&gt;document.addEventListener(&#x27;click&#x27;,e=&gt;{const a=e.target.closest(&#x27;a[href^=&quot;/&quot;]&#x27;);if(a)e.preventDefault()});&lt;/script&gt;&lt;/body&gt;
 &lt;/html&gt;
@@ -613,17 +583,13 @@ background-image:linear-gradient(var(--grid-line) 1px,transparent 1px),linear-gr
 body::after{content:&quot;&quot;;position:fixed;z-index:-1;pointer-events:none;width:400px;height:400px;top:-100px;right:-100px;border-radius:50%;background:var(--primary);filter:blur(80px);opacity:.15}
 .glow2{position:fixed;z-index:-1;pointer-events:none;width:300px;height:300px;bottom:-50px;left:-50px;border-radius:50%;background:var(--accent);filter:blur(80px);opacity:.15}
 a{color:var(--text);text-decoration-color:var(--accent);text-underline-offset:3px}
-a:hover{color:var(--text)}
+a:hover:not(:where(.legal a)){color:var(--text)}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .wrap{max-width:980px;margin:0 auto;padding:28px 16px 32px}
 .mark{font:400 34px/1.1 var(--display);text-transform:uppercase;letter-spacing:.15em;text-align:center;margin:0 0 20px;
 -webkit-text-fill-color:transparent;background-image:linear-gradient(to bottom,color-mix(in srgb,var(--primary) 80%,var(--text)) 0 35%,var(--text) 35% 65%,color-mix(in srgb,var(--accent) 80%,var(--text)) 65% 100%);
 -webkit-background-clip:text;background-clip:text;filter:drop-shadow(0 0 20px color-mix(in srgb,var(--primary) 30%,transparent))}
 .mark a{text-decoration:none;-webkit-text-fill-color:transparent}
-nav.tabs{display:flex;flex-wrap:wrap;gap:4px 18px;justify-content:center;margin:0 0 22px;padding-bottom:10px;border-bottom:1px solid var(--border)}
-nav.tabs a{font:400 12px var(--display);text-transform:uppercase;letter-spacing:.5px;color:var(--muted);text-decoration:none;padding:8px 0;border-bottom:2px solid transparent;min-height:40px}
-nav.tabs a:hover{color:var(--text)}
-nav.tabs a[aria-current]{color:var(--primary);border-image:linear-gradient(90deg,var(--primary),var(--accent)) 1}
 .layout{display:block}
 aside.toc{margin:0 0 18px}
 aside.toc details{border:1px solid var(--border);border-radius:8px;background:var(--surface)}
@@ -649,10 +615,9 @@ section.app&gt;h2{margin-top:6px}
 .badge{display:inline-block;font:400 11px var(--display);letter-spacing:1px;text-transform:uppercase;color:var(--on-accent);
 background:linear-gradient(90deg,var(--primary),var(--accent));border-radius:4px;padding:2px 8px;vertical-align:middle;margin-left:8px}
 .stand{margin-top:26px;color:var(--muted);font-size:14px}
-footer{margin-top:26px;padding-top:16px;border-top:1px solid var(--border);display:flex;flex-wrap:wrap;gap:6px 20px;justify-content:center;font:400 12px var(--display);text-transform:uppercase;letter-spacing:.5px}
-footer a{color:var(--muted);text-decoration:none;padding:8px 0;min-height:40px}
-footer a:hover{color:var(--text)}
-footer a[aria-current]{color:var(--primary)}
+.legal-place{margin-top:26px;padding-top:16px;border-top:1px solid var(--border)}
+.legal{position:relative;z-index:1;display:flex;flex-wrap:wrap;justify-content:center;gap:4px 16px;font-size:12px}
+.legal a{color:var(--muted);text-decoration:none;border-bottom:1px solid var(--border)}
 @media (min-width:900px){
 .wrap{padding:44px 24px 40px}
 .mark{font-size:40px}
@@ -675,7 +640,6 @@ h1{font-size:34px}
 &lt;div class=&quot;glow2&quot;&gt;&lt;/div&gt;
 &lt;div class=&quot;wrap&quot;&gt;
 &lt;p class=&quot;mark&quot;&gt;&lt;a href=&quot;https://hallucinai.de/&quot;&gt;Hallucinai&lt;/a&gt;&lt;/p&gt;
-&lt;nav class=&quot;tabs&quot; aria-label=&quot;Rechtliches&quot;&gt;&lt;a href=&quot;/impressum&quot;&gt;Impressum&lt;/a&gt;&lt;a href=&quot;/datenschutz&quot;&gt;Datenschutz&lt;/a&gt;&lt;a href=&quot;/nutzungsbedingungen&quot; aria-current=&quot;page&quot;&gt;Nutzungsbedingungen&lt;/a&gt;&lt;/nav&gt;
 &lt;div class=&quot;layout&quot;&gt;&lt;aside class=&quot;toc&quot; aria-label=&quot;Inhalt&quot;&gt;&lt;details&gt;&lt;summary&gt;Inhalt&lt;/summary&gt;&lt;ol&gt;&lt;li&gt;&lt;a href=&quot;#recht&quot;&gt;Anwendbares Recht&lt;/a&gt;&lt;/li&gt;&lt;li&gt;&lt;a href=&quot;#songmaker&quot;&gt;songmaker&lt;/a&gt;&lt;ol&gt;&lt;li&gt;&lt;a href=&quot;#songmaker-leistung&quot;&gt;Leistungsbeschreibung&lt;/a&gt;&lt;/li&gt;&lt;li&gt;&lt;a href=&quot;#songmaker-ki&quot;&gt;KI-generierte Inhalte&lt;/a&gt;&lt;/li&gt;&lt;li&gt;&lt;a href=&quot;#songmaker-pflichten&quot;&gt;Pflichten der Nutzer&lt;/a&gt;&lt;/li&gt;&lt;li&gt;&lt;a href=&quot;#songmaker-haftung&quot;&gt;Haftung&lt;/a&gt;&lt;/li&gt;&lt;li&gt;&lt;a href=&quot;#songmaker-loeschung&quot;&gt;Löschung und Kündigung&lt;/a&gt;&lt;/li&gt;&lt;/ol&gt;&lt;/li&gt;&lt;/ol&gt;&lt;/details&gt;&lt;/aside&gt;&lt;article&gt;&lt;div class=&quot;measure&quot;&gt;
 &lt;h1&gt;Nutzungsbedingungen&lt;/h1&gt;
 &lt;h2 id=&quot;recht&quot;&gt;Anwendbares Recht&lt;a class=&quot;anchor&quot; href=&quot;#recht&quot; aria-label=&quot;Link zu diesem Abschnitt&quot;&gt;#&lt;/a&gt;&lt;/h2&gt;
@@ -695,7 +659,7 @@ h1{font-size:34px}
 &lt;/section&gt;
 &lt;p class=&quot;stand&quot;&gt;Stand: 21. Oktober 2026&lt;/p&gt;
 &lt;/div&gt;&lt;/article&gt;&lt;/div&gt;
-&lt;footer&gt;&lt;a href=&quot;/impressum&quot;&gt;Impressum&lt;/a&gt;&lt;a href=&quot;/datenschutz&quot;&gt;Datenschutz&lt;/a&gt;&lt;a href=&quot;/nutzungsbedingungen&quot; aria-current=&quot;page&quot;&gt;Nutzungsbedingungen&lt;/a&gt;&lt;/footer&gt;
+&lt;div class=&quot;legal-place&quot;&gt;&lt;nav class=&quot;legal&quot; aria-label=&quot;Legal&quot;&gt;&lt;a href=&quot;/impressum&quot;&gt;Impressum&lt;/a&gt;&lt;a href=&quot;/datenschutz&quot;&gt;Datenschutz&lt;/a&gt;&lt;a href=&quot;/nutzungsbedingungen&quot;&gt;Nutzungsbedingungen&lt;/a&gt;&lt;/nav&gt;&lt;/div&gt;
 &lt;/div&gt;
 &lt;script&gt;document.addEventListener(&#x27;click&#x27;,e=&gt;{const a=e.target.closest(&#x27;a[href^=&quot;/&quot;]&#x27;);if(a)e.preventDefault()});&lt;/script&gt;&lt;/body&gt;
 &lt;/html&gt;

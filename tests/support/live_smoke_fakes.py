@@ -3,13 +3,10 @@
 import io
 import json
 import subprocess
-import sys
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "agent-service"))
 
 from live_smoke import Secrets, Stack
 from smoke import Tokens, served_line

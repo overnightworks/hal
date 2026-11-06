@@ -219,6 +219,11 @@ rule = "test-layout"
 reason = "it tests probe/edge_copy.py and the probes' shipped scripts, outside src/hal, which no module of src/hal mirrors"
 
 [[layout.allow]]
+path = "tests/test_probe_subnets.py"
+rule = "test-layout"
+reason = "it tests probe/edge_subnets.py and the probes' copies of compose.yaml, outside src/hal, which no module of src/hal mirrors"
+
+[[layout.allow]]
 path = "tests/test_probe_run.py"
 rule = "test-layout"
 reason = "it tests probe/edge_copy.py's run loop, outside src/hal, which no module of src/hal mirrors"

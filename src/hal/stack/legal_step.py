@@ -41,7 +41,11 @@ SECTION_PAGES = ("datenschutz", "nutzungsbedingungen")
 PRIVACY_PAGE = "datenschutz"
 APP_DIRECTORY = "legal"
 # The anchor of a block of edge's own services; any other block's anchor is its catalog key.
-SERVICE_ANCHORS = {"keycloak": "anmeldung", "agent-service": "agent-dienst"}
+SERVICE_ANCHORS = {
+    "keycloak": "anmeldung",
+    "agent-service": "agent-dienst",
+    "speech-runtime": "sprachdienst",
+}
 _BUILT_MODE = 0o644  # nginx-unprivileged must read the page whatever the umask
 
 
@@ -110,18 +114,13 @@ def plan_legal(
     """What the step would write; a plan without pages while the legal unit does not run."""
     if not any(unit.key == LEGAL_UNIT and unit.enabled for unit in fleet.units):
         return LegalPlan(repository, record, {}, {})
-    document = catalog.read(repository / catalog.FLEET_FILE)
-    host_only = catalog.host_only_keys(document)
-    _refuse_two_owners(repository, {app.key for app in released.catalogued} | set(host_only))
+    release_blocks = _shown_release_blocks(repository, released)
     git = checkout.Git(repository, run_git)
     all_blocks = read_blocks(
         repository, _catalog_keys(repository), lambda path: _commit_date(git, path)
     )
-    zone = catalog.zone(document)
     tags: dict[str, str] = {}
-    shown_releases = [*released.shown, *(_head_of(key, released.runtime) for key in host_only)]
-    for shown in shown_releases:
-        app = _release_blocks(shown, zone)
+    for shown, app in release_blocks:
         all_blocks += app
         tags |= {block.path: shown.tag for block in app}
     frame = read_frame(repository)
@@ -141,6 +140,23 @@ def plan_legal(
                     one for one in block_changes(page, None, fingerprints[page], tags) if one.tag
                 )
     return LegalPlan(repository, record, pages, changed, named, fingerprints)
+
+
+def _shown_release_blocks(
+    repository: Path, released: apps.AppsPlan
+) -> list[tuple[apps.ShownRelease, list[Block]]]:
+    """Each release the pages show, with its blocks; refuses a key whose text edge holds too."""
+    document = catalog.read(repository / catalog.FLEET_FILE)
+    host_only = catalog.host_only_keys(document)
+    zone = catalog.zone(document)
+    shown_releases = [*released.shown, *(_head_of(key, released.runtime) for key in host_only)]
+    release_blocks = [(shown, _release_blocks(shown, zone)) for shown in shown_releases]
+    _refuse_two_owners(
+        repository,
+        {app.key for app in released.catalogued} | set(host_only),
+        {shown.key for shown, blocks in release_blocks if blocks},
+    )
+    return release_blocks
 
 
 def _read_built(repository: Path, page: str) -> bytes | None:
@@ -271,10 +287,14 @@ def _head_of(key: str, runtime: apps.AppRuntime) -> apps.ShownRelease:
         raise LegalError(f"{where}: cannot read its HEAD: {error}") from error
 
 
-def _refuse_two_owners(repository: Path, app_keys: Collection[str]) -> None:
-    """An app's text is its release's own; edge holding a section for the key too is refused."""
+def _refuse_two_owners(
+    repository: Path, app_keys: Collection[str], shipping: Collection[str]
+) -> None:
+    """An app's text is its release's own; edge holding a section for the key too is refused,
+    unless the key is one of edge's own services whose release has no block (is not `shipping`)."""
     for key in sorted(app_keys):
-        if (repository / SECTIONS_DIRECTORY / key).exists():
+        edge_owns = key in SERVICE_ANCHORS and key not in shipping
+        if not edge_owns and (repository / SECTIONS_DIRECTORY / key).exists():
             raise LegalError(
                 f"{SECTIONS_DIRECTORY}/{key}/ and ~/srv/{key}/{APP_DIRECTORY}/ both hold the text "
                 f"of {key}; one block has one owner, so remove {SECTIONS_DIRECTORY}/{key}/"

@@ -5,9 +5,11 @@ cannot see in one run: the three-network split, the one names list, and the life
 assumes of the CA.
 """
 
+import ipaddress
 import re
 from fnmatch import fnmatch
 from pathlib import Path
+from urllib.parse import SplitResult, urlsplit
 
 import pytest
 import yaml
@@ -17,6 +19,9 @@ NETWORKS = {"mcp-ca", "mcp", "mcp-backends"}
 ISOLATED_MODE = {"com.docker.network.bridge.gateway_mode_ipv4": "isolated"}
 ROUTER_HOST = re.compile(r"^Host\(`([^`]+)`\)")
 ROUTER_RULE = re.compile(r"^Host\(`[^`]+`\)( && Path\(`/[^`]*`\))?$")
+ROUTER_PATH = re.compile(r"Path\(`([^`]+)`\)")
+SPEECH_NETWORK_PREFIX = "hal_speech_"  # speech-runtime's compose joins these names as external
+KEY_SET_PATH = "/protocol/openid-connect/certs"  # Keycloak's JWKS path under a realm
 CA_DEFAULT_LIFETIME_HOURS = 24  # step-ca's default; ca.json sets no claims
 
 
@@ -56,9 +61,45 @@ def routers() -> dict:
     return merged_dynamic("routers")
 
 
-def test_the_ca_the_gateway_and_its_helper_start_only_with_the_step_ca_profile(compose):
+def members(compose: dict, network: str) -> list[str]:
+    return [
+        name
+        for name, service in compose["services"].items()
+        if network in (service.get("networks") or [])
+    ]
+
+
+def speech_networks(compose: dict) -> set[str]:
+    """The networks whose fixed name the speech service joins as an external network."""
+    return {
+        key
+        for key, network in compose["networks"].items()
+        if (network or {}).get("name", "").startswith(SPEECH_NETWORK_PREFIX)
+    }
+
+
+@pytest.fixture(scope="module")
+def key_set_network(compose, traefik_mcp) -> str:
+    """The one network Keycloak and traefik-mcp share."""
+    (shared,) = set(compose["services"]["keycloak"]["networks"]) & set(traefik_mcp["networks"])
+    return shared
+
+
+@pytest.fixture(scope="module")
+def key_set_router(routers, services) -> tuple[dict, SplitResult]:
+    """The router whose upstream is the Keycloak service, with that upstream's URL."""
+    (found,) = [
+        (router, upstream)
+        for router in routers.values()
+        for server in services[router["service"]]["loadBalancer"]["servers"]
+        if (upstream := urlsplit(server["url"])).hostname == "keycloak"
+    ]
+    return found
+
+
+def test_the_ca_the_gateway_and_its_helpers_start_only_with_the_step_ca_profile(compose):
     """#48 rule 2: a plain `docker compose up -d` starts none of them."""
-    services = ("step-ca", "traefik-mcp", "traefik-mcp-acme-owner")
+    services = ("step-ca", "traefik-mcp", "traefik-mcp-acme-owner", "speech-networks")
 
     assert {name: compose["services"][name].get("profiles") for name in services} == {
         name: ["step-ca"] for name in services
@@ -254,3 +295,82 @@ def test_the_acme_storage_is_a_named_volume_that_traefik_mcp_can_write(
     assert traefik_mcp["depends_on"]["traefik-mcp-acme-owner"] == {
         "condition": "service_completed_successfully"
     }
+
+
+def test_every_speech_network_is_internal_and_gets_no_address_on_the_host(compose):
+    """#872: the speech service's networks have no route out and reach no host listener."""
+    networks = speech_networks(compose)
+
+    assert networks
+    for name in networks:
+        assert compose["networks"][name]["internal"] is True
+        assert compose["networks"][name]["driver_opts"] == ISOLATED_MODE
+
+
+def test_traefik_mcp_alone_joins_one_speech_network_under_the_key_set_name_alone(
+    compose, traefik_mcp, key_set_router
+):
+    """#872: on the issuer network the speech service finds traefik-mcp by the key set's host
+    and no other name, and no other service of the stack is there."""
+    (issuer,) = speech_networks(compose) & set(traefik_mcp["networks"])
+    router, _ = key_set_router
+
+    assert members(compose, issuer) == ["traefik-mcp"]
+    assert traefik_mcp["networks"][issuer] == {"aliases": [ROUTER_HOST.match(router["rule"])[1]]}
+
+
+def test_the_other_speech_networks_are_joined_by_a_one_shot_that_traefik_mcp_waits_for(
+    compose, traefik_mcp
+):
+    """#872: each app's speech network exists while step-ca is on, and no running service of the
+    stack is on it."""
+    app_networks = speech_networks(compose) - set(traefik_mcp["networks"])
+    (helper,) = {name for network in app_networks for name in members(compose, network)}
+    one_shot = compose["services"][helper]
+
+    assert len(app_networks) >= 2
+    assert all(members(compose, network) == [helper] for network in app_networks)
+    assert traefik_mcp["depends_on"][helper] == {"condition": "service_completed_successfully"}
+    assert one_shot["restart"] == "no"
+    assert one_shot["entrypoint"] == ["true"]
+    assert "ports" not in one_shot
+    assert one_shot["cap_drop"] == ["ALL"]
+
+
+def test_keycloak_and_traefik_mcp_share_one_internal_isolated_network_alone(
+    compose, key_set_network
+):
+    """#872: no MCP backend reaches Keycloak's port; only traefik-mcp does."""
+    network = compose["networks"][key_set_network]
+
+    assert sorted(members(compose, key_set_network)) == ["keycloak", "traefik-mcp"]
+    assert network["internal"] is True
+    assert network["driver_opts"] == ISOLATED_MODE
+
+
+def test_traefik_mcp_finds_keycloak_at_its_pinned_address_never_by_dns(
+    compose, traefik_mcp, key_set_network, key_set_router
+):
+    """#872: the key set's upstream name resolves through extra_hosts to Keycloak's pinned
+    address, which the network's dynamic range never hands to another container."""
+    _, upstream = key_set_router
+    pinned = compose["services"]["keycloak"]["networks"][key_set_network]["ipv4_address"]
+    (config,) = compose["networks"][key_set_network]["ipam"]["config"]
+    address = ipaddress.ip_address(pinned)
+
+    assert traefik_mcp["extra_hosts"][upstream.hostname] == pinned
+    assert address in ipaddress.ip_network(config["subnet"])
+    assert address not in ipaddress.ip_network(config["ip_range"])
+
+
+def test_the_key_set_router_serves_only_the_realms_key_set_on_keycloaks_http_port(
+    compose, key_set_router
+):
+    """#872: one exact path, the key set of the realm hal ships, to the port Traefik reaches
+    Keycloak on."""
+    router, upstream = key_set_router
+    realm = load("keycloak/realm.yaml")["realm"]
+    labels = compose["services"]["keycloak"]["labels"]
+
+    assert ROUTER_PATH.search(router["rule"])[1] == f"/realms/{realm}{KEY_SET_PATH}"
+    assert str(upstream.port) == labels["traefik.http.services.auth.loadbalancer.server.port"]

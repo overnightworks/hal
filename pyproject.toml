@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
     "pyyaml>=6",
-    "overnightworks-appkit @ https://github.com/overnightworks/appkit/releases/download/v0.12.1/overnightworks_appkit-0.12.1-py3-none-any.whl#sha256=713041332b779dca028b240cec48ebb4ba4c085c492784dd5046e43d8c284a71",
+    "overnightworks-appkit @ https://github.com/overnightworks/appkit/releases/download/v0.14.0/overnightworks_appkit-0.14.0-py3-none-any.whl#sha256=fc88979e819d7ca5b0608072156b6be93ee9f6f7bfc2a3e8292c6c5b02aee189",
     "overnightworks-agent-runtime-client @ https://github.com/overnightworks/agent-runtime/releases/download/v0.20.0/overnightworks_agent_runtime_client-0.20.0-py3-none-any.whl#sha256=f43aed7225c13eee56a4597fc5735474e229489fade57aa42da482b70443601e",
 ]
 
@@ -65,7 +65,7 @@ exclude_also = ['if __name__ == "__main__":']
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = ["--strict-markers"]
-pythonpath = ["src", "scripts"]
+pythonpath = ["src", "scripts", "probe", "agent-service"]
 
 # hal's door modules sit above the stack, the backup runner and the workstation tool, which
 # stand apart; the exposure check sits below the stack, and hal.output, which prints for all of

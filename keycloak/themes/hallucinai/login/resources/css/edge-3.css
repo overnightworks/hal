@@ -326,30 +326,10 @@ a {
 
 /* ---------- legal links ---------- */
 
-.hallucinai-legal {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
+.hallucinai-legal-spacing {
   margin: 6px 0 0;
   padding-top: 14px;
   border-top: 1px solid var(--border);
-  font-size: 11px;
-}
-
-.hallucinai-legal a {
-  color: var(--text-muted);
-  text-decoration: none;
-}
-
-.hallucinai-legal a:hover {
-  text-decoration: underline;
-}
-
-.hallucinai-legal a + a::before {
-  content: "·";
-  margin: 0 0.35em;
-  display: inline-block;
-  text-decoration: none;
 }
 
 @media (max-width: 480px) {

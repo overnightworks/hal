@@ -1,0 +1,16 @@
+# Keycloak's key set for the speech service, which has no route out: only the hallucinai realm's
+# certs, to Keycloak on keycloak-keys. traefik-mcp finds `keycloak` at its pinned address
+# (extra_hosts in compose.yaml), never through Docker's DNS.
+http:
+  routers:
+    keycloak:
+      rule: Host(`keycloak.mcp.internal`) && Path(`/realms/hallucinai/protocol/openid-connect/certs`)
+      entryPoints: [mcp]
+      service: keycloak
+      tls:
+        certResolver: internal
+  services:
+    keycloak:
+      loadBalancer:
+        servers:
+          - url: http://keycloak:8080

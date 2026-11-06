@@ -58,8 +58,8 @@ flowchart TB
             ADM["Traefik 127.0.0.1:8090<br/>this PC only"]
             KC["Keycloak + its database<br/>auth.hallucinai.de: the login page"]
             CA["step-ca :9000, internal network mcp-ca<br/>internal CA for the MCP origins, *.mcp.internal"]
-            TMC["traefik-mcp :443, no host port<br/>the gateway to the MCP origins, certificates from step-ca"]
-            MCPN["internal networks:<br/>mcp-ca (step-ca, traefik-mcp)<br/>mcp (traefik-mcp, the agent service; isolated)<br/>mcp-backends (traefik-mcp, the MCP servers)<br/>mcp-songmaker (traefik-mcp, songmaker; isolated)<br/>agent-songmaker, agent-presentator, agent-hopin, egress (the agent service; isolated)<br/>internet, a NAT bridge: agent-egress alone"]
+            TMC["traefik-mcp :443, no host port<br/>the gateway to the MCP origins and to Keycloak's key set, certificates from step-ca"]
+            MCPN["internal networks:<br/>mcp-ca (step-ca, traefik-mcp)<br/>mcp (traefik-mcp, the agent service; isolated)<br/>mcp-backends (traefik-mcp, the MCP servers)<br/>mcp-songmaker (traefik-mcp, songmaker; isolated)<br/>keycloak-keys (Keycloak, traefik-mcp; isolated)<br/>hal_speech_issuer (traefik-mcp, the speech service; isolated)<br/>hal_speech_hopin, hal_speech_presentator (one app and the speech service; isolated)<br/>agent-songmaker, agent-presentator, agent-hopin, egress (the agent service; isolated)<br/>internet, a NAT bridge: agent-egress alone"]
             BAK["hal backup<br/>restic weekly, restore test monthly<br/>second copy off this disk (D3)"]
             LOOK["Traffic-light page, Gatus<br/>is it OK now?"]
             MON["Prometheus, Grafana, Alertmanager<br/>why, since when? every service"]
@@ -69,6 +69,7 @@ flowchart TB
             SONG["songmaker<br/>songmaker.hallucinai.de, own login until its cutover"]
             PRES["presentator<br/>deployed from its tag"]
             HOP["hopin<br/>video calls"]
+            SPE["speech-runtime<br/>the speech service from its tag: no host, no port, CPU voices only"]
         end
         DATA[("L5 data<br/>volumes and ~/backups/restic")]
     end
@@ -124,9 +125,9 @@ Each layer has **one** owner. The order is the order of a setup: a layer needs o
 |---|---|---|---|---|---|
 | **L0 PC and tools** | Ubuntu packages (Docker, with the `journald` log default, cloudflared from apt, gh, uv, restic, the pinned `tofu`, Tailscale); `/etc/docker/daemon.json` (the system step merges the log default into it); edge's `tunnel/` (the cloudflared unit, its drop-ins, the stop-only polkit rule); linger; auto-login off; the AppArmor profile; the agent user (only with D14); the `hal` and `aco` tools; the work clones in `~/git` | home-tools: the setup playbook (home-tools#9; Ansible recommended there; it installs edge's `tunnel/`) | `~/git/home-tools/bootstrap` (new, home-tools#9), then `hal setup` (asks one `yes`; `--dry-run` only shows) | `hal check` (daily timer, today) | OS install and disk encryption (the installer decides it); BIOS "power on after AC loss"; the first `gh auth login --web`, because cloning the private home-tools needs it |
 | **L1 secrets** | every token, password and key; values only in `~/.secrets`; tool logins in their tools' stores. Directories 0700. Files 0600, except a file a container user must read: 0644 inside its 0700 directory (docs/keycloak.md). Today every agent can read all of it (D14) | `src/hal/workstation/secrets_manifest.toml` (names, purpose, reader, scope, bindings, rotation; never a value) | `hal setup` (its step „Geheimnisse“): walks every missing secret page by page (home-tools#10) | `hal secrets`, part of `hal check` (today: local view; the remote check is section 4) | creating a token at the provider: a human logs in and clicks. The wizard opens the page, takes the value hidden, verifies it, stores it (HopIn's Cloudflare TURN key ID and API token: stored, not verified) |
-| **L2 platform** | Traefik, socket proxy, Keycloak and its DB, step-ca (the internal CA for the MCP origins) and `traefik-mcp` (the second Traefik, the only container on the internal networks `mcp-ca`, `mcp`, `mcp-backends` and one per app, `hal_mcp_songmaker`; no host port), `legal` (nginx serving the imprint, the privacy notice and the terms that `hal apply` builds from the section of every block into `legal/built/`, on its own internal network; its one catalog host is the apex, public for the pages `cloudflare.redirect.serve` names), hal-backup timers, the deploy watchers, the LOOK page (Gatus: "is it OK now?"), the monitoring stack for every service (Prometheus, Grafana, Alertmanager: "why, since when?"; moves out of songmaker, ruled 16.10.2026, edge#4), one alert channel | edge: `compose.yaml`, `traefik.yml`, `traefik-mcp.yml` and `mcp/dynamic/`, `keycloak/*.yaml` (realm as code), `legal/` (frame, edge's own sections, stylesheet, nginx config; the built pages are not in git), `step-ca/ca.json`, `backup/apps.toml`; the timers' job declaration `src/hal/workstation/jobs.py` | `hal apply --local` (start without publishing), then `hal apply` (publish), then `hal online` (open the tunnel; section 6 step 11). Proposed: one command for compose, realm apply, timers, services on/off, external | `hal check` (`hal check exposure` today; proposed: plus readiness, backup freshness, deploy state) | the Keycloak go-live once (edge#19: it creates the permanent admin from a typed name and password; TOTP and passkey in the browser) |
+| **L2 platform** | Traefik, socket proxy, Keycloak and its DB, step-ca (the internal CA for the MCP origins) and `traefik-mcp` (the second Traefik, the only container on the internal networks `mcp-ca`, `mcp`, `mcp-backends` and one per app, `hal_mcp_songmaker`, and the speech service's one way to Keycloak's key set; no host port), `legal` (nginx serving the imprint, the privacy notice and the terms that `hal apply` builds from the section of every block into `legal/built/`, on its own internal network; its one catalog host is the apex, public for the pages `cloudflare.redirect.serve` names), hal-backup timers, the deploy watchers, the LOOK page (Gatus: "is it OK now?"), the monitoring stack for every service (Prometheus, Grafana, Alertmanager: "why, since when?"; moves out of songmaker, ruled 16.10.2026, edge#4), one alert channel | edge: `compose.yaml`, `traefik.yml`, `traefik-mcp.yml` and `mcp/dynamic/`, `keycloak/*.yaml` (realm as code), `legal/` (frame, edge's own sections, stylesheet, nginx config; the built pages are not in git), `step-ca/ca.json`, `backup/apps.toml`; the timers' job declaration `src/hal/workstation/jobs.py` | `hal apply --local` (start without publishing), then `hal apply` (publish), then `hal online` (open the tunnel; section 6 step 11). Proposed: one command for compose, realm apply, timers, services on/off, external | `hal check` (`hal check exposure` today; proposed: plus readiness, backup freshness, deploy state) | the Keycloak go-live once (edge#19: it creates the permanent admin from a typed name and password; TOTP and passkey in the browser) |
 | **L3 external** | Cloudflare DNS, Access apps and policies, tunnel ingress (D6), the zone's HSTS setting; GitHub repo settings, rulesets, Actions policy, org secret names and reach | edge `fleet.yaml` + OpenTofu (`ext-as-code.md`, epic E3, its slices listed in the epic's body) | the publish phase of `hal apply` (operator, TTY, the word `yes`) | `hal check hosts` → `hal check` | secret values, the tunnel object and its credential, Access identity providers, the Access group's one member, SonarCloud projects, CodeQL default setup, GitHub App installs, the registrar. Each has no provider or would put a secret into state |
-| **L4 services** | songmaker, presentator, hopin, the agent service (its compose service and image recipe live in edge; switched on by its unit in `fleet.yaml`), LiteLLM with its front and database (in edge's `compose.yaml`, switched on by its unit `litellm`), later the aco board | each service repo's `compose.yaml` (containers) + its entry in `fleet.yaml` (where it runs, who may use it, on or off) | the deploy watcher (newest `v*` tag) after `hal apply` turned the service on | the LOOK page (each service's health URL); Grafana for its metrics | creating a new repo's SonarCloud project (one click) |
+| **L4 services** | songmaker, presentator, hopin, the speech service `speech-runtime` (an app without a host, reachable only from its apps' internal networks and from `traefik-mcp`, which routes nothing to it; behind its two tokens and the group `/services/speech-service`), the agent service (its compose service and image recipe live in edge; switched on by its unit in `fleet.yaml`), LiteLLM with its front and database (in edge's `compose.yaml`, switched on by its unit `litellm`), later the aco board | each service repo's `compose.yaml` (containers) + its entry in `fleet.yaml` (where it runs, who may use it, on or off) | the deploy watcher (newest `v*` tag) after `hal apply` turned the service on | the LOOK page (each service's health URL); Grafana for its metrics | creating a new repo's SonarCloud project (one click) |
 | **L5 data** | Docker volumes (songmaker DB and audio, Keycloak DB, LiteLLM DB, presentator's `database` (its `builds` are a cache); `step-ca` ([internal-ca.md](internal-ca.md) names its backup) and `traefik-mcp-acme`, which is not: its certificates are issued again), the restic repository and its off-disk copy (D3), the encrypted OpenTofu state | edge `backup/apps.toml` | `hal restore …` (section 6) | the restore test (monthly), the clean-machine drill (section 6), and the backup's freshness on the LOOK page | the restic password, the OpenTofu passphrase and the disk's recovery key live in the password manager: without them no backup, no state and no disk can be read |
 | **People** | users, passkeys, group memberships (`/apps/<name>`, `/services/agent-service/subscription`, `/services/agent-service/api`, `/services/speech-service`, `/services/litellm/admin`, which `hal apply`'s key step reads) | the Keycloak database (managed only in the admin console); the groups themselves are code in `keycloak/realm.yaml` | first-ever: create people in the admin console; re-setup: restore the Keycloak DB | Keycloak events (login anomalies) on the LOOK page | everything: people are never code (ruled) |
 
@@ -266,7 +267,7 @@ enabled. The pages are not files in git: `legal/frame/` holds the markup (one sk
 template per block kind), `legal/sections/<unit>/<page>.html` holds the texts, and `legal/built/` (git-ignored)
 holds the result, which the legal unit serves. The pages take their tokens and fonts from the installed appkit: the appkit step of `hal apply` writes its static files to `appkit-<version>/` (git-ignored; the version is the lock's) in `legal/assets/`, served at `/_rechtliches/appkit-<version>/` whether or not the legal unit is enabled, and in the `resources/` of both Keycloak themes, which Keycloak serves under `/resources/<id>/`. A unit's text is a **section**; the imprint is one whole page
 with no sections. A page's blocks stand as the general part (`allgemein`, edge's own), then the services
-(`agent-service` under `#agent-dienst`, `keycloak` under `#anmeldung`), then the apps (their catalog key
+(`agent-service` under `#agent-dienst`, `keycloak` under `#anmeldung`, `speech-runtime` under `#sprachdienst`), then the apps (their catalog key
 is the anchor), each group sorted by anchor. A section directory with no catalog entry builds no block. Edge's
 services are built while their entry is in the catalog, enabled or not. An app (an entry with `repo`) brings its own text: `legal/datenschutz.html` and,
 optionally, `legal/nutzungsbedingungen.html` of a release, read from `~/srv/<key>/.git` at the release's commit, never
@@ -274,7 +275,9 @@ from the working tree. That release is the planned one of an enabled app, the on
 stopped (`hal stop`) or disabled app last deployed, from its record; a stopped or disabled app never deployed has none (an enabled one gets its block at its planned tag), and a
 release without the privacy file has no block at all, its terms file included, yet; a terms file that is present is
 still validated. A symlink at either path refuses the run. An app's key that also has
-`legal/sections/<key>/` refuses the run, naming both, since one block has one owner; so does a stopped or disabled app
+`legal/sections/<key>/` refuses the run, naming both, since one block has one owner; for an app that is one of edge's
+services (`speech-runtime`), edge's section is its text while the release brings no block, and the run is refused only
+when the release brings one. So does a stopped or disabled app
 whose checkout or recorded commit is gone, or whose `.git` is a symlink or no repository, naming the path.
 
 A **host-only app** (an entry with neither `repo` nor `run`: songmaker, which its own watcher deploys) brings the same
@@ -337,7 +340,7 @@ edge never rewrites a text to drop the link.
 
 | Page | Stable ids |
 |---|---|
-| /datenschutz | `verantwortlicher`, `cloudflare`, `rechte`, `widerspruch`, `kein-tracking`, `automatisierte-entscheidungen`, `pseudonym`, `anmeldung`, `agent-dienst` |
+| /datenschutz | `verantwortlicher`, `cloudflare`, `rechte`, `widerspruch`, `kein-tracking`, `automatisierte-entscheidungen`, `pseudonym`, `anmeldung`, `agent-dienst`, `sprachdienst` |
 | /nutzungsbedingungen | `haftung`, `recht` |
 | /impressum | `verantwortlich`, `kontakt` |
 
@@ -407,7 +410,7 @@ Today's fields stay: `name`, `kind`, `paths`, `read_by` (= consumer), `recreate`
 | File | Mode | Who reads it | In the backup |
 |---|---|---|---|
 | `~/.secrets/step-ca/root_ca_key` | 0600 | only `step-ca/init`, in a one-off container without a network; never mounted into the running CA | planned (Block 9) |
-| `~/.secrets/step-ca/root_ca.crt` | 0644 | `traefik-mcp` (uid 65534, as the compose secret `step_ca_root_certificate`) and the agent service as the trusted root | planned (Block 9) |
+| `~/.secrets/step-ca/root_ca.crt` | 0644 | `traefik-mcp` (uid 65534, as the compose secret `step_ca_root_certificate`), the agent service and the speech service (uid 1001, as its compose secret `step_ca_root`) as the trusted root | planned (Block 9) |
 | `~/.secrets/step-ca/password` | 0644 in the 0700 directory | the CA, through `/run/secrets/step_ca_password`; it protects the root and the intermediate key alike | planned (Block 9) |
 | volume `step-ca`: `certs/`, `secrets/intermediate_ca_key`, `db/` | uid 1000 | the CA | planned (Block 9) |
 | volume `traefik-mcp-acme`: `acme.json` (the issued certificates and their keys) | uid 65534 | `traefik-mcp` | no: they are issued again |
@@ -881,7 +884,7 @@ The rules are labelled "§10 rule n", because [edge#50](https://github.com/overn
 - A call between apps carries a signed, short-lived token whose audience is the callee: an issuer token, or the agent-service capability (agent-runtime decision record 0001). Never a static secret shared between apps.
 
 **§10 rule 4: singleton by default; spreading and scaling are items.**
-- **Contracts and data handover are built scalable from the start; the mechanics follow when they are needed** (ruled 30.10.2026, [hal#755](https://github.com/overnightworks/hal/issues/755)). Every shared service (a service edge runs for several apps, as §10 rule 7 defines them; today the agent service):
+- **Contracts and data handover are built scalable from the start; the mechanics follow when they are needed** (ruled 30.10.2026, [hal#755](https://github.com/overnightworks/hal/issues/755)). Every shared service (a service edge runs for several apps, as §10 rule 7 defines them; today the agent service and the speech service):
   - is reachable over the network;
   - keeps no state that matters only in its process;
   - hands files over through its API;
@@ -913,7 +916,7 @@ The rules are labelled "§10 rule n", because [edge#50](https://github.com/overn
 
 **§10 rule 6: logs go to stdout and stderr.** No app writes a log file to a volume or a host path.
 
-**§10 rule 7: our own services speak one shape.** It binds every service edge runs for several apps whose protocol we write ourselves (today the agent service). A seam with a standard keeps it (§10 rule 5); an app's internal workers and its browser-facing API are outside.
+**§10 rule 7: our own services speak one shape.** It binds every service edge runs for several apps whose protocol we write ourselves (today the agent service and the speech service). A seam with a standard keeps it (§10 rule 5); an app's internal workers and its browser-facing API are outside.
 - **Calls:** HTTP with typed JSON. Every request body carries the contract's version `v`; an unknown version answers 400 `unsupported_version`.
 - **Streams:** events from service to app are SSE; media are a chunked HTTP body of their media type; a WebSocket only where both sides stream at once (live audio).
 - **Identity:** the app's workload token, plus the person's token when a person acts, both Keycloak tokens whose audience is the service (§10 rule 3).

@@ -8,14 +8,12 @@ the names the gateway passes. The packet windows of capture.py and the SYN verdi
 pure logic, checked here on synthetic frames.
 """
 
-import importlib.util
 import ipaddress
 import re
 import signal
 import socket
 import struct
 import subprocess
-import sys
 import tomllib
 from collections.abc import Iterator
 from pathlib import Path
@@ -24,6 +22,7 @@ from urllib.parse import urlsplit
 
 import pytest
 import yaml
+from support.script_module import loaded_script
 
 ROOT = Path(__file__).resolve().parents[1]
 PROBE = ROOT / "probe" / "agent-service"
@@ -231,19 +230,8 @@ def test_a_capture_service_runs_the_observers_pin_with_net_raw_alone(compose, ov
 # --- the packet windows' pure logic, on synthetic frames --------------------------------------
 
 
-def probe_module(name: str) -> Iterator[ModuleType]:
-    spec = importlib.util.spec_from_file_location(f"agent_probe_{name}", PROBE / f"{name}.py")
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module  # its dataclasses resolve their annotations through it
-    path_before = list(sys.path)  # egress.py inserts its own directory
-    try:
-        spec.loader.exec_module(module)
-        yield module
-    finally:
-        sys.path[:] = path_before
-        del sys.modules[spec.name]
+def probe_module(name: str, *directories: Path) -> Iterator[ModuleType]:
+    yield from loaded_script(f"agent_probe_{name}", PROBE / f"{name}.py", *directories)
 
 
 @pytest.fixture(scope="module")
@@ -712,10 +700,9 @@ def test_a_failed_listing_or_inspection_fails_the_cell_never_reads_as_down(
 
 
 @pytest.fixture
-def agent_networks(monkeypatch: pytest.MonkeyPatch) -> Iterator[ModuleType]:
-    for directory in (PROBE, ROOT / "probe", ROOT / "agent-service"):
-        monkeypatch.syspath_prepend(str(directory))  # it imports its sibling modules by name
-    yield from probe_module("agent_networks")
+def agent_networks() -> Iterator[ModuleType]:
+    # it imports its sibling modules by name
+    yield from probe_module("agent_networks", PROBE, ROOT / "probe", ROOT / "agent-service")
 
 
 def test_p36_checks_every_ordered_pair_of_the_three_agent_networks(agent_networks):

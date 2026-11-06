@@ -11,6 +11,7 @@ import yaml
 
 from hal.backup.restic import PRE_APPLY_MAX_AGE
 from hal.stack import appkit_step, catalog, legal_pages, legal_step
+from hal.workstation.system_step import LOG_RETENTION_DAYS
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -200,9 +201,7 @@ def test_a_shared_section_is_in_the_table_of_contents(section, sentence):
         "Eine Einwilligung ist dafür nicht nötig",
         "90 Tage lang",
         "1 Jahr lang",
-        "Dieses Log wird derzeit ohne feste Höchstdauer gespeichert",
         "12 Stunden nach dem letzten Fehlversuch",
-        "es bleibt bestehen, bis der Container neu erstellt wird",
         "den Zeitpunkt des letzten Fehlversuchs",
         "KC_STATE_CHECKER",
         "etwa drei Monate",
@@ -217,6 +216,11 @@ def test_the_shared_sign_in_section_names_what_keycloak_keeps_and_for_how_long(s
 def test_the_sign_in_section_states_the_age_bound_of_the_snapshots_before_an_update():
     section = read_page("datenschutz").split('id="anmeldung"')[1].split("<h2")[0]
     assert f"auch sie löschen wir nach {PRE_APPLY_MAX_AGE.days} Tagen" in section
+
+
+def test_the_sign_in_section_states_the_age_bound_of_the_container_log():
+    section = read_page("datenschutz").split('id="anmeldung"')[1].split("<h2")[0]
+    assert f"bevor er {LOG_RETENTION_DAYS} Tage alt ist" in section
 
 
 TEXT_SOURCES = [

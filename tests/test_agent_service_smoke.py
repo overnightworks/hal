@@ -5,14 +5,13 @@ The smoke against the real service is proven by probe/agent-service/unit.py (S4)
 operator's runbook (docs/agent-service.md, "Proofs").
 """
 
-import importlib.util
 import io
 import json
-import sys
 from pathlib import Path
 
 import pytest
 import yaml
+from support.script_module import script_module
 
 ROOT = Path(__file__).resolve().parents[1]
 PERSON_TOKEN = "person-token-0123456789abcdef"
@@ -21,11 +20,8 @@ BOTH_TOKENS = f"{PERSON_TOKEN}\n{WORKLOAD_TOKEN}\n"
 
 
 def load_smoke():
-    spec = importlib.util.spec_from_file_location("agent_smoke", ROOT / "agent-service/smoke.py")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
+    with script_module("agent_smoke", ROOT / "agent-service/smoke.py") as module:
+        return module
 
 
 smoke = load_smoke()
