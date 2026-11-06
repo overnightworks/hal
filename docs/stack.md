@@ -85,7 +85,7 @@ socket directory volume is tmpfs and holds nothing; remove its definition alone 
 
 ## Exception E: where the stack commands and `hal setup` deviate
 
-`hal`'s exit codes are in `src/hal/grammar.py`, its error form in `src/hal/output/__init__.py`, and `hal --help` shows both. `hal apply` ends with 0 (applied or nothing to do; a clean `--local` run after the `yes` ends on the verdict `✓ applied · N changes · <time>`, N the count the `yes` asked for), 1 when
+`hal`'s exit codes are in `src/hal/grammar.py`, its error form in `src/hal/output/__init__.py`, and `hal --help` shows both. `hal apply` ends with 0 (applied or nothing to do), 1 when
 the person declined the `yes`, 4 when a guard said no (no terminal, the apply lock is held, the
 checkout is not the live one or not a clean `main`, a unit is disabled or not set up), 2 for a usage
 error, and 3 for a cannot-plan end (also a git that cannot be asked), a failed step and a partial run;
@@ -133,7 +133,7 @@ Unterbrechung ohne festgehaltenen Exit aus ihr heraus, endet es mit Exit 3 und d
 "run `hal check hosts`". Ein SIGTERM (`kill`) vor der Publish-Phase beendet den Prozess
 wie bei `--local`: nichts wird veroeffentlicht. Nur `hal apply --local` endet nach dem `yes` sauber auf
 dem Urteil `✓ applied · N changes · <Zeit>` (N die Zahl, die das `yes` nannte); das blosse `hal apply`
-druckt es nicht und endet wie bisher mit `hal apply: done`, bis #361 Y-3 es ersetzt.
+druckt es nicht und endet mit `hal apply: done`.
 
 **Der lokale Teil.** Er bringt jede Einheit in den Zustand, den `enabled` sagt. An:
 `docker compose --profile <Einheit> up -d` fuer genau die Dienste des Profils. Aus: `stop`, dann `rm -f`

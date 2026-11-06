@@ -267,6 +267,7 @@ def test_apply_at_a_terminal_applies_the_local_part_then_publishes(hal, applying
 
     assert result.exit_code == ExitCode.OK
     assert "hal apply: done" in result.err
+    assert "✓ applied" not in result.out
     assert applying.fake_tofu.call("apply")
 
 
@@ -355,7 +356,6 @@ ASKED_PATTERN = re.compile(r"Type yes to apply (\d+) changes?")
 
 
 def test_a_clean_local_run_ends_on_the_verdict_with_the_asked_count_and_a_time(hal, applying):
-    """A5-3i: the last line is the verdict; its count is the one the yes asked for."""
     result = hal("apply", "--local", answers=("yes",))
 
     out = plain(result.out)
@@ -365,20 +365,8 @@ def test_a_clean_local_run_ends_on_the_verdict_with_the_asked_count_and_a_time(h
     assert verdict.group(1) == ASKED_PATTERN.search(out).group(1)
 
 
-def test_a_clean_composed_run_prints_no_verdict_and_keeps_its_done_line(hal, applying):
-    """A5-3i: the composed run stays as it was until it has a verdict of its own."""
-    applying.fake_tofu.configure(**CHANGING_PLAN)
-
-    result = hal("apply", answers=("yes", "yes"))
-
-    assert result.exit_code == ExitCode.OK
-    assert "✓ applied" not in result.out
-    assert "hal apply: done" in result.err
-
-
 @pytest.mark.usefixtures("failing_app")
 def test_a_failed_local_run_prints_no_verdict(hal, applying):
-    """A5-3i: only a clean end carries the verdict."""
     result = hal("apply", "--local", answers=("yes",))
 
     assert result.exit_code == ExitCode.FAILURE

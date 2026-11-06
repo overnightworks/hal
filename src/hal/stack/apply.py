@@ -454,7 +454,8 @@ def _plan_and_apply(
         marks,
         CorePhase(record, repository, collaborators.verifier, collaborators.watch, realm_backup),
         completed,
-        None if publish_follows else elapsed,
+        elapsed,
+        publish_follows,
     )
 
 
@@ -698,7 +699,8 @@ def _confirm_and_switch(
     marks: switches.Switches,
     core_phase: CorePhase,
     completed_setups: Sequence[str],
-    verdict_clock: Callable[[], float] | None,  # None: a publish follows, no verdict here
+    elapsed: Callable[[], float],
+    publish_follows: bool,
 ) -> int:
     _write_plan(planned)
     asked = changes_in(planned)
@@ -742,13 +744,17 @@ def _confirm_and_switch(
     later_failed = realm_failed or keys_failed or apps_failed
     failures = [*withheld.values(), *mismatched.values()]
     exit_code = _report_switched(failures, later_failed, snapshots)
-    return _closed_on_verdict(exit_code, asked, verdict_clock)
+    return _closed_on_verdict(exit_code, asked, elapsed, publish_follows)
 
 
-def _closed_on_verdict(exit_code: int, changes: int, clock: Callable[[], float] | None) -> int:
-    if exit_code == ApplyExit.APPLIED_OR_NOTHING and clock is not None:
+def _closed_on_verdict(
+    exit_code: int, changes: int, elapsed: Callable[[], float], publish_follows: bool
+) -> int:
+    if exit_code == ApplyExit.APPLIED_OR_NOTHING and not publish_follows:
         write_verdict(
-            Verdict(Glyph.DONE, "applied", ((changes, ChangeNoun.CHANGE),), elapsed_seconds=clock())
+            Verdict(
+                Glyph.DONE, "applied", ((changes, ChangeNoun.CHANGE),), elapsed_seconds=elapsed()
+            )
         )
     return exit_code
 
