@@ -3,6 +3,6 @@ agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
 role = "builder"
 base = "bac221a130d02c055c2fff4ba08580d4d3c0c552"
 branch = "claude/issue-1082-appkit-0-15"
-scope = ["keycloak/themes/hallucinai/account/theme.properties", "keycloak/themes/hallucinai/login/theme.properties", "legal/assets/legal-2.css", "legal/frame/datenschutz.html", "legal/frame/impressum.html", "legal/frame/nutzungsbedingungen.html", "pyproject.toml", "uv.lock"]
+scope = ["docs/design/legal-pages.html", "keycloak/themes/hallucinai/account/theme.properties", "keycloak/themes/hallucinai/login/theme.properties", "legal/assets/legal-2.css", "legal/frame/datenschutz.html", "legal/frame/impressum.html", "legal/frame/nutzungsbedingungen.html", "pyproject.toml", "uv.lock"]
 opened_commit = "9b8ad5b61e876d6de5311d67680f5499d6fae0d2"
 whole_reason = "One version bump: the wheel pin, its lock, the five files that name the served appkit directory, which the stack tests hold equal to the lock, and the one rule the bump makes redundant."
