@@ -206,8 +206,6 @@ def test_on_a_terminal_an_unchanged_row_is_dim_as_a_whole(
 def test_on_a_terminal_a_verdict_headline_is_bold_in_its_glyphs_colour_and_the_tail_is_dim(
     monkeypatch: pytest.MonkeyPatch, glyph: Glyph, style: str
 ) -> None:
-    """#495, #1079: the glyph and summary are bold; everything from the first separator is dim."""
-
     out, _err = put_on_terminals(monkeypatch)
     write_verdict(Verdict(glyph, "setup", ((2, Event.CHANGED),), "run hal"))
 
@@ -238,6 +236,18 @@ def test_on_a_terminal_a_verdict_headline_is_bold_in_its_glyphs_colour_and_the_t
             id="details with a hint",
         ),
         pytest.param(
+            Verdict(
+                Glyph.CHANGE,
+                "setup",
+                ((2, Event.CHANGED), (0, Event.UNCHANGED), (1, Event.SKIPPED)),
+                "run hal",
+                47.9,
+            ),
+            "~ setup · 2 changed, 1 skipped · 47s · run hal",
+            "\x1b[1;34m~ setup\x1b[0m\x1b[2m · 2 changed, 1 skipped · 47s · run hal\x1b[0m",
+            id="counts around a zero, the run time and the hint in order",
+        ),
+        pytest.param(
             Verdict(Glyph.DONE, "done", ()),
             "✓ done",
             "\x1b[1m✓ done\x1b[0m",
@@ -248,9 +258,6 @@ def test_on_a_terminal_a_verdict_headline_is_bold_in_its_glyphs_colour_and_the_t
 def test_a_verdicts_whole_tail_is_one_dim_span_on_a_terminal_and_plain_without_colour(
     monkeypatch: pytest.MonkeyPatch, verdict: Verdict, plain: str, dimmed: str
 ) -> None:
-    """#1079: picture A dims counts, details, the run time and the hint as one span from the
-    first separator; under NO_COLOR every byte stays as it was."""
-
     out, _err = put_on_terminals(monkeypatch)
     write_verdict(verdict)
     terminal = out.getvalue()
