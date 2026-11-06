@@ -1,0 +1,8 @@
+claim_id = "a7bb7d813f6940dfa34cb45d1c53bfa4"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "d7f5af4bb2a1a2e603c28cea572a2a3cf3ce96a7"
+branch = "claude/issue-1076-progress-begin"
+scope = ["src/hal/stack/appkit_step.py", "src/hal/stack/apply.py", "src/hal/stack/apps.py", "src/hal/stack/core_phase.py", "src/hal/stack/legal_step.py", "src/hal/stack/service_recreate.py", "src/hal/stack/unit_plans.py"]
+opened_commit = "ba09823ad50d2ac0f26ddafc4cb9c8b920228f00"
+whole_reason = "One method replaces the step assignment in every module that sets it, so no second way to set the step survives the slice."
