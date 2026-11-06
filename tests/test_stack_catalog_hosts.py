@@ -367,9 +367,10 @@ def test_a_unit_declares_its_hosts_whether_it_is_enabled_or_not(enabled, tmp_pat
 
 def test_a_run_build_key_is_refused_as_unknown(tmp_path):
     entry = {"kc": {"run": {"enabled": True, "build": "kc/image"}}}
+    catalog_document = document(entry)
 
     with pytest.raises(catalog.CatalogError) as refused:
-        catalog.units(document(entry), PROFILES, tmp_path)
+        catalog.units(catalog_document, PROFILES, tmp_path)
 
     assert str(refused.value) == "services.kc.run.build: unknown key"
 
