@@ -1,8 +1,0 @@
-claim_id = "0f7aa04bbfe44697bb93d640e04bce0e"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "c2516b57eb9a3881deac4dd2f6e12cc0daabb3f3"
-branch = "claude/issue-1073-apply-lock-module"
-scope = ["src/hal/stack/apply.py", "src/hal/stack/apply_lock.py", "src/hal/stack/update.py", "tests/support/stack_apply.py", "tests/support/stack_update.py", "tests/test_stack_apply.py", "tests/test_stack_update.py"]
-opened_commit = "410b707d2bc48f407ce7d6fde2249a23008dd48b"
-whole_reason = "One move of one shared mechanism: the new owner, its two users and every test that reaches it by module change together, or a stale name remains."
