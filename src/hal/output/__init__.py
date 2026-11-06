@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum, StrEnum
 from types import FrameType
-from typing import TextIO
+from typing import Self, TextIO
 
 from hal.output.command import PROGRAM
 
@@ -506,18 +506,52 @@ def write_row(row: Row, *, fresh_line: bool = False) -> None:
     write_detail(*row.details, tone=Tone.DIM)
 
 
+class GroupWriter:
+    """The rows of a run in the groups a plan showed, one group after another: a group's heading
+    stands once, with the group's first row, when the plan reached `HEADING_THRESHOLD` rows. A
+    step `enter`s its group before it writes; a group that writes no row prints no heading, and a
+    run of a smaller plan is flat. `write_groups` is the plan's own use of it."""
+
+    def __init__(self, *, headed: bool) -> None:
+        self._headed = headed
+        self._entered: StrEnum | None = None
+        self._printed: set[StrEnum] = set()
+
+    @classmethod
+    def for_groups(cls, groups: Sequence[Group]) -> Self:
+        return cls(headed=sum(len(group.rows) for group in groups) >= HEADING_THRESHOLD)
+
+    def enter(self, heading: StrEnum | None) -> None:
+        """The rows from here on belong to `heading`; None for rows that never stand under one."""
+        self._entered = heading
+
+    def write(self, *rows: Row, fresh_line: bool = False) -> None:
+        """The rows on stdout, the entered group's heading before them when it is not yet printed;
+        `fresh_line` first ends a line a Ctrl-C left open, before that heading if there is one."""
+        if not rows:
+            return
+        heading = self._entered
+        if self._headed and heading is not None and heading not in self._printed:
+            self._printed.add(heading)
+            if fresh_line and not _json_on():
+                print()
+                fresh_line = False
+            print(_styled(printable(str(heading)), _BOLD, sys.stdout))
+        for row in rows:
+            write_row(row, fresh_line=fresh_line)
+            fresh_line = False
+
+
 def write_groups(groups: Sequence[Group]) -> None:
     """The groups' rows on stdout in the order given, the rows without a heading first and an
     empty group not at all. Once `HEADING_THRESHOLD` rows are printed, each named group stands
-    under its lowercase heading, unindented and bold on a terminal."""
+    under its lowercase heading, unindented and bold on a terminal, as `GroupWriter` prints it."""
     shown = [group for group in groups if group.rows]
     shown.sort(key=lambda group: group.heading is not None)
-    headed = sum(len(group.rows) for group in shown) >= HEADING_THRESHOLD
+    writer = GroupWriter.for_groups(shown)
     for group in shown:
-        if headed and group.heading is not None:
-            print(_styled(printable(str(group.heading)), _BOLD, sys.stdout))
-        for row in group.rows:
-            write_row(row)
+        writer.enter(group.heading)
+        writer.write(*group.rows)
 
 
 def write_table(headers: Sequence[str], rows: Sequence[Sequence[str]]) -> None:

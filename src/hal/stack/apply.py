@@ -73,10 +73,12 @@ import sys
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from enum import IntEnum
+from functools import partial
 from pathlib import Path
 
 from hal.output import (
     Glyph,
+    GroupWriter,
     Verdict,
     confirmed,
     counted,
@@ -108,6 +110,7 @@ from hal.stack.legal_step import RECORD_FILE, plan_legal
 from hal.stack.plan import Plan
 from hal.stack.plan_rows import (
     ChangeNoun,
+    PlanGroup,
     changes_in,
     checkout_row,
     environment_row,
@@ -139,7 +142,6 @@ from hal.stack.service_recreate import SwitchOnSnapshots
 from hal.stack.terminal import NEEDS_TERMINAL, at_terminal
 from hal.stack.unit_plans import (
     Action,
-    CoreFailure,
     Interrupted,
     NotOff,
     NotWritten,
@@ -330,8 +332,8 @@ def apply_local(
         os.close(lock)
 
 
-def _say_waiting(grace_seconds: float) -> None:
-    write_row(waiting_row(grace_seconds))
+def _say_waiting(writer: GroupWriter, grace_seconds: float) -> None:
+    writer.write(waiting_row(grace_seconds))
     sys.stdout.flush()  # the wait is minutes long: the row must not sit in a pipe's buffer
 
 
@@ -411,9 +413,6 @@ def _plan_and_apply(
     repository = live.tree
     engine = collaborators.engine or compose.Compose(repository=repository)
     app_runtime = collaborators.app_runtime or AppRuntime.of(home, state_directory)
-    realm_backup = collaborators.realm_backup or pre_apply.Backup.installed(
-        repository, _say_waiting
-    )
     marks = switches.Switches(state_directory)
     record = core.Record(state_directory)
     try:
@@ -435,7 +434,7 @@ def _plan_and_apply(
         write_error(f"cannot plan, {error}")
         return ApplyExit.CANNOT_PLAN
     if planned.changes_nothing:
-        _write_plan(planned)
+        write_groups(plan_groups(planned))
         if (refused := _refused_unsettled(planned)) is not None:
             return refused
         write_verdict(
@@ -452,11 +451,24 @@ def _plan_and_apply(
         engine,
         planned,
         marks,
-        CorePhase(record, repository, collaborators.verifier, collaborators.watch, realm_backup),
+        _core_phase(planned, repository, record, collaborators),
         completed,
         elapsed,
         publish_follows,
     )
+
+
+def _core_phase(
+    planned: Plan, repository: Path, record: core.Record, collaborators: Collaborators
+) -> CorePhase:
+    """The core phase with the writer of the plan's groups; the installed backup says its wait
+    through that writer."""
+    writer = GroupWriter.for_groups(plan_groups(planned))
+    backup = collaborators.realm_backup or pre_apply.Backup.installed(
+        repository, partial(_say_waiting, writer)
+    )
+    verifier, watch = collaborators.verifier, collaborators.watch
+    return CorePhase(record, repository, verifier, watch, backup, writer)
 
 
 def _refused_unsettled(planned: Plan) -> int | None:
@@ -629,30 +641,30 @@ def _apply_realm(
 ) -> bool:
     """The realm step after the unit switches; says its lines and whether it ended partial."""
     result = _realm_step(engine, planned, marks, core_phase).run(planned.realm)
-    for row in result_rows(result):
-        write_row(row)
+    core_phase.writer.write(*result_rows(result))
     error = partial_error(result)
     if error:
         write_error(f"partial, {error}", command(Verb.APPLY))
     return error is not None
 
 
-def _apply_keys(engine: compose.Compose, planned: Plan) -> bool:
+def _apply_keys(engine: compose.Compose, planned: Plan, writer: GroupWriter) -> bool:
     """The key step after the realm step; says its lines and whether it ended partial."""
     result = litellm_keys.run_keys(planned.keys, engine)
-    for row in keys_rows(result):
-        write_row(row)
+    writer.write(*keys_rows(result))
     partial = keys_partial(result)
     if partial:
         write_error(*partial)
     return partial is not None
 
 
-def _apply_apps(planned: Plan, marks: switches.Switches, progress: Progress) -> bool:
+def _apply_apps(
+    planned: Plan, marks: switches.Switches, progress: Progress, writer: GroupWriter
+) -> bool:
     """The app step after the realm step; says its lines and whether it ended partial."""
     failed = False
     for result in planned.app_plans.run(marks, progress):
-        write_row(app_row(result))
+        writer.write(app_row(result))
         if isinstance(result, AppFailure):
             write_error(*app_partial(result))
             failed = True
@@ -667,30 +679,16 @@ def _say_aborted(completed_setups: Sequence[str]) -> None:
     )
 
 
-def _write_plan(planned: Plan) -> None:
-    """The plan as it stands: all rows."""
-    write_groups(plan_groups(planned))
-
-
-def _write_files(planned: Plan, progress: Progress) -> NotWritten | None:
+def _write_files(planned: Plan, progress: Progress, writer: GroupWriter) -> NotWritten | None:
     """Appkit, then legal; a step's rows are said once its write returned, the first failure
     stops the rest."""
     if failure := planned.appkit.write(progress):
         return failure
-    for row in appkit_rows(planned.appkit):
-        write_row(row)
+    writer.write(*appkit_rows(planned.appkit))
     if failure := planned.legal.write(progress):
         return failure
-    for row in legal_rows(planned.legal):
-        write_row(row)
+    writer.write(*legal_rows(planned.legal))
     return None
-
-
-def _say_stopped(failure: NotWritten | CoreFailure) -> None:
-    """The rows and the pair of a run stopped before any unit was switched."""
-    for row in stopped_rows(failure):
-        write_row(row)
-    write_error(*stopped_partial(failure))
 
 
 def _confirm_and_switch(
@@ -702,7 +700,7 @@ def _confirm_and_switch(
     elapsed: Callable[[], float],
     publish_follows: bool,
 ) -> int:
-    _write_plan(planned)
+    write_groups(plan_groups(planned))
     asked = changes_in(planned)
     if not confirmed(f"apply {counted(asked, ChangeNoun.CHANGE)}"):
         _say_aborted(completed_setups)
@@ -711,39 +709,43 @@ def _confirm_and_switch(
     progress = Progress()
     snapshots = SwitchOnSnapshots(core_phase.backup, progress)
     withheld: dict[str, SwitchedOffMeanwhile] = {}
+    writer = core_phase.writer
     try:
-        if failure := _write_files(planned, progress) or core_phase.run(
+        if failure := _write_files(planned, progress, writer) or core_phase.run(
             engine, planned, marks, progress
         ):
-            _say_stopped(failure)
+            writer.write(*stopped_rows(failure))  # a run stopped before any unit was switched
+            write_error(*stopped_partial(failure))
             return ApplyExit.REFUSED
+        writer.enter(PlanGroup.UNITS)
         for plan in changes:
             if failure := switch(engine, plan, progress, marks, planned.read, snapshots.first):
                 withheld[plan.unit.key] = failure
         started = [plan for plan in changes if plan.unit.key not in withheld]
         mismatched = _observe_and_record(engine, planned, core_phase, started, progress)
-        _write_switched_units(started, mismatched, snapshots)
+        _write_switched_units(changes, {**withheld, **mismatched}, snapshots, writer)
         progress.unit, progress.step = reconcile.REALM_UNIT, "apply the realm step"
         realm_failed = _apply_realm(engine, planned, marks, core_phase)
+        writer.enter(PlanGroup.LITELLM)
         progress.unit, progress.step = litellm_keys.LITELLM_SERVICE, "apply the key step"
-        keys_failed = _apply_keys(engine, planned)
-        apps_failed = _apply_apps(planned, marks, progress)
+        keys_failed = _apply_keys(engine, planned, writer)
+        writer.enter(PlanGroup.APPS)
+        apps_failed = _apply_apps(planned, marks, progress, writer)
     except (
         pre_apply.PreApplyError,
         compose.ComposeError,
         switches.SwitchError,
         core.CoreError,
     ) as error:
-        _say_failures([StepFailed.at(progress, error)], snapshots)
+        _say_failures([StepFailed.at(progress, error)], snapshots, writer)
         return ApplyExit.REFUSED
     except KeyboardInterrupt as interruption:
         interrupted = Interrupted.at(progress, interruption, way_back=snapshots.way_back())
-        write_row(interrupted_row(interrupted), fresh_line=True)
+        writer.write(interrupted_row(interrupted), fresh_line=True)
         write_error(*interrupted_error(interrupted))
         return ApplyExit.REFUSED
     later_failed = realm_failed or keys_failed or apps_failed
-    failures = [*withheld.values(), *mismatched.values()]
-    exit_code = _report_switched(failures, later_failed, snapshots)
+    exit_code = _report_switched(bool(withheld or mismatched), later_failed, snapshots)
     return _closed_on_verdict(exit_code, asked, elapsed, publish_follows)
 
 
@@ -760,32 +762,36 @@ def _closed_on_verdict(
 
 
 def _write_switched_units(
-    started: Sequence[UnitPlan],
-    mismatched: Mapping[str, SeenDown | NotOff],
+    changes: Sequence[UnitPlan],
+    failures: Mapping[str, SwitchFailure],
     snapshots: SwitchOnSnapshots,
+    writer: GroupWriter,
 ) -> None:
-    for plan in started:
-        if plan.unit.key not in mismatched:
-            write_row(unit_row(plan, snapshots.taken.get(plan.unit.key)))
+    """Each changed unit in switch order: its ✓ row, or its ✗ rows and its pair."""
+    for plan in changes:
+        if failure := failures.get(plan.unit.key):
+            _say_failures([failure], snapshots, writer)
+        else:
+            writer.write(unit_row(plan, snapshots.taken.get(plan.unit.key)))
 
 
-def _say_failures(failures: Sequence[SwitchFailure], snapshots: SwitchOnSnapshots) -> None:
+def _say_failures(
+    failures: Sequence[SwitchFailure], snapshots: SwitchOnSnapshots, writer: GroupWriter
+) -> None:
     """Each failure as its rows, then its pair; every one names the way back of the run's
     switch-on snapshots once one was proven."""
     way_back = snapshots.way_back()
     for failure in failures:
         failure = replace(failure, way_back=way_back)
-        for row in failure_rows(failure):
-            write_row(row)
+        writer.write(*failure_rows(failure))
         write_error(*switch_partial(failure))
 
 
 def _report_switched(
-    failures: Sequence[SwitchFailure], later_steps_failed: bool, snapshots: SwitchOnSnapshots
+    unit_failed: bool, later_steps_failed: bool, snapshots: SwitchOnSnapshots
 ) -> int:
-    _say_failures(failures, snapshots)
-    if later_steps_failed and not failures and snapshots.way_back():
+    if later_steps_failed and not unit_failed and snapshots.way_back():
         write_error(f"partial, {snapshots.way_back()}")  # the later steps' lines name no snapshot
-    if failures or later_steps_failed:
+    if unit_failed or later_steps_failed:
         return ApplyExit.REFUSED
     return ApplyExit.APPLIED_OR_NOTHING

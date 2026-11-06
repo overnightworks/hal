@@ -7,9 +7,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from hal.output import write_row
+from hal.output import GroupWriter
 from hal.stack import barrier, compose, core, pre_apply, switches
 from hal.stack.plan import Plan
+from hal.stack.plan_rows import PlanGroup
 from hal.stack.result_rows import recreated_row
 from hal.stack.service_recreate import Recreated, ServiceRecreator
 from hal.stack.unit_plans import (
@@ -22,21 +23,19 @@ from hal.stack.unit_plans import (
 )
 
 
-def _say_recreated(recreated: Recreated) -> None:
-    write_row(recreated_row(recreated))
-
-
 @dataclass(frozen=True)
 class CorePhase:
     """Recreate each changed core service with a live container, then each changed follower whose
     unit is on, before any unit is touched; record the followers a switch-on started. `backup`
-    takes and proves a database unit's pre-apply snapshot, here and in the realm step."""
+    takes and proves a database unit's pre-apply snapshot, here and in the realm step; `writer`
+    says the rows of the run under the group of the step that runs."""
 
     record: core.Record
     repository: Path
     verifier: barrier.Verifier
     watch: compose.Watch
     backup: pre_apply.Backup
+    writer: GroupWriter
 
     def run(
         self,
@@ -48,6 +47,7 @@ class CorePhase:
         """The core, the followers, then the services to recreate (a live service of a unit that
         runs on, the built service in any container state); the failure of the first step
         that fails."""
+        self.writer.enter(PlanGroup.CORE)
         return self._recreate_core(engine, planned, marks, progress) or self._recreate_services(
             engine, planned, marks, progress
         )
@@ -62,14 +62,27 @@ class CorePhase:
         progress.unit = ""
         config = planned.fleet.config
         recreator = ServiceRecreator(
-            engine, marks, planned.read, config, self.watch, progress, _say_recreated, self.backup
+            engine,
+            marks,
+            planned.read,
+            config,
+            self.watch,
+            progress,
+            self._say_recreated,
+            self.backup,
         )
         followers = [
             plan for plan in planned.followers if plan.action is core.FollowerAction.RECREATE
         ]
-        return recreator.followers(
+        if failure := recreator.followers(
             followers, self.record, lambda: self._followed(planned, progress)
-        ) or recreator.unit_services([*planned.built, *planned.recreates])
+        ):
+            return failure
+        self.writer.enter(PlanGroup.UNITS)
+        return recreator.unit_services([*planned.built, *planned.recreates])
+
+    def _say_recreated(self, recreated: Recreated) -> None:
+        self.writer.write(recreated_row(recreated))
 
     def _recreate_core(
         self,
@@ -146,7 +159,7 @@ class CorePhase:
         if plan.service in followed:
             progress.step = f"record {plan.service} in {core.APPLIED_FILE}"
             self.record.write(plan.service, plan.digests, followed)
-        _say_recreated(Recreated(plan.service, self.watch.clock() - started, proven))
+        self._say_recreated(Recreated(plan.service, self.watch.clock() - started, proven))
         return None
 
     def record_switched_on(

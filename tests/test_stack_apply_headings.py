@@ -1,0 +1,372 @@
+"""After the yes `hal apply --local` prints each result row under its plan group's heading, on the
+scripted boundaries of `tests/support/stack_apply.py`."""
+
+import re
+import stat
+
+import pytest
+from support.hal_stack_commands import ctrl_c
+from support.stack_apply import (
+    DISABLED,
+    ENABLED,
+    KEYCLOAK_ENABLED,
+    LITELLM_ON,
+    PROBE_ENABLED,
+    applied_core,  # noqa: F401 the fixture, requested by name below
+    at_terminal,  # noqa: F401 the fixture, requested by name below
+    core_files,  # noqa: F401 the fixture, requested by name below
+    edit_traefik_yml,
+    home,  # noqa: F401 the fixture, requested by name below
+    ingress,  # noqa: F401 the fixture, requested by name below
+    litellm_running,
+    realm_backup,  # noqa: F401 the fixture, requested by name below
+    realm_unit,  # noqa: F401 the fixture, requested by name below
+    repository,  # noqa: F401 the fixture, requested by name below
+    scripted,  # noqa: F401 the fixture, requested by name below
+    scripted_git,  # noqa: F401 the fixture, requested by name below
+    secret_files,  # noqa: F401 the fixture, requested by name below
+    setup_check,  # noqa: F401 the fixture, requested by name below
+    setup_run,  # noqa: F401 the fixture, requested by name below
+    state,  # noqa: F401 the fixture, requested by name below
+    step_ca_applied,  # noqa: F401 the fixture, requested by name below
+    switch,  # noqa: F401 the fixture, requested by name below
+    write_fleet,
+)
+from support.stack_apply_apps import (
+    RELEASE,
+    app_world,  # noqa: F401 the fixture, requested by name below
+)
+from support.stack_litellm_found import APPS, BUDGET_ID
+from support.stack_plan_rows import plain
+
+import hal.output
+from hal.output import Glyph
+from hal.stack import compose, litellm_keys
+from hal.stack.litellm_keys import ADMIN_BUDGET_ID
+from hal.stack.plan_rows import PlanGroup
+from hal.stack.realm.reconcile import REALM_UNIT
+
+VERDICT = "✓ applied"
+DETAIL_PREFIX = "    "
+ROW = re.compile(r"^  (\S) (\S+)")
+
+
+def done(subject: str) -> str:
+    return f"{Glyph.DONE.value} {subject}"
+
+
+def failed(subject: str) -> str:
+    return f"{Glyph.FAILED.value} {subject}"
+
+
+def key_rows(*extra: str) -> list[str]:
+    """The person budget and one key per app, each made."""
+    return [done(BUDGET_ID), *(done(app) for app in APPS), *extra]
+
+
+def outline(out: str) -> list[str]:
+    """What stands after the yes: each heading as its text, each row as `glyph subject`."""
+    after_the_yes = plain(out).partition("Type yes")[2].splitlines()[1:]
+    entries = []
+    for line in after_the_yes:
+        if line.startswith((VERDICT, DETAIL_PREFIX)):
+            continue
+        row = ROW.match(line)
+        entries.append(f"{row[1]} {row[2]}" if row else line)
+    return entries
+
+
+def headings_of(entries: list[str]) -> list[str]:
+    return [entry for entry in entries if entry[1:2] != " "]
+
+
+@pytest.fixture
+def keys(repository, scripted, secret_files):  # noqa: F811
+    """The unit `litellm` on beside a disabled step-ca, with no key and no budget made yet."""
+    write_fleet(repository, DISABLED + LITELLM_ON)
+    running = litellm_running(repository, scripted, secret_files)
+    running.rows = dict.fromkeys(APPS)
+    running.budget = None
+    return running
+
+
+@pytest.fixture
+def headed_from_one_row(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Plans of a few rows print their headings, for cases that route rare rows."""
+    monkeypatch.setattr(hal.output, "HEADING_THRESHOLD", 1)
+
+
+def test_a_headed_plan_prints_core_units_and_litellm_each_with_its_first_result_row(
+    applied_core,  # noqa: F811
+    keys,
+    switch,  # noqa: F811
+    repository,  # noqa: F811
+):
+    edit_traefik_yml(repository)
+    write_fleet(repository, PROBE_ENABLED + LITELLM_ON)
+
+    exit_code, out, _ = switch()
+
+    assert exit_code == 0
+    assert outline(out) == [
+        PlanGroup.CORE,
+        done("traefik"),
+        PlanGroup.UNITS,
+        done("step-ca"),
+        done("probe"),
+        PlanGroup.LITELLM,
+        *key_rows(),
+    ]
+
+
+def test_a_headed_plan_prints_apps_after_litellm_with_the_first_app_row(
+    keys,
+    app_world,  # noqa: F811
+):
+    with (app_world.repository / "fleet.yaml").open("a") as fleet:
+        fleet.write(LITELLM_ON)
+    app_world.origin.release(RELEASE)
+    keys.admin_budget = None
+
+    exit_code, out, _ = app_world.apply()
+
+    assert exit_code == 0
+    assert outline(out) == [
+        PlanGroup.LITELLM,
+        *key_rows(done(ADMIN_BUDGET_ID)),
+        PlanGroup.APPS,
+        done("hopin"),
+    ]
+
+
+def test_a_group_with_no_result_row_prints_no_heading(
+    applied_core,  # noqa: F811
+    keys,
+    switch,  # noqa: F811
+    repository,  # noqa: F811
+):
+    edit_traefik_yml(repository)
+    keys.admin_budget = None
+
+    exit_code, out, _ = switch()
+
+    assert exit_code == 0
+    assert headings_of(outline(out)) == [PlanGroup.CORE, PlanGroup.LITELLM]
+
+
+def test_a_plan_below_six_rows_prints_its_results_flat(keys, switch, repository):  # noqa: F811
+    write_fleet(repository, ENABLED + LITELLM_ON)
+
+    exit_code, out, _ = switch()
+
+    assert exit_code == 0
+    assert outline(out) == [done("step-ca"), *key_rows()]
+    assert headings_of(outline(out)) == []
+
+
+@pytest.mark.parametrize("headed", [True, False], ids=["headed", "flat"])
+@pytest.mark.parametrize(
+    ("crashing", "order"),
+    [
+        ("step-ca", [failed("step-ca"), done("probe")]),
+        ("hello", [done("step-ca"), failed("hello")]),
+    ],
+    ids=["failure first", "failure last"],
+)
+def test_failed_and_switched_units_print_in_switch_order_before_the_key_rows_each_failure_once(
+    headed,
+    crashing,
+    order,
+    keys,
+    switch,  # noqa: F811
+    scripted,  # noqa: F811
+    repository,  # noqa: F811
+):
+    write_fleet(repository, PROBE_ENABLED + (LITELLM_ON if headed else ""))
+    scripted.crash_loops = {crashing}
+
+    exit_code, out, err = switch()
+
+    assert exit_code == 1
+    expected = [PlanGroup.UNITS, *order, PlanGroup.LITELLM, *key_rows()]
+    assert outline(out) == (expected if headed else order)
+    assert err.count("error: partial,") == 1
+
+
+@pytest.mark.usefixtures("headed_from_one_row")  # failing_verb="run" leaves a 5-row plan
+def test_a_failed_unit_row_stands_under_units_before_the_realm_row(
+    keys,
+    realm_unit,  # noqa: F811
+    switch,  # noqa: F811
+    scripted,  # noqa: F811
+    repository,  # noqa: F811
+):
+    write_fleet(
+        repository, KEYCLOAK_ENABLED + PROBE_ENABLED.removeprefix("services:\n") + LITELLM_ON
+    )
+    scripted.crash_loops = {"step-ca"}
+    scripted.failing_verb = "run"  # the realm observer reads through `compose run`
+
+    exit_code, out, _ = switch()
+
+    assert exit_code == 1
+    assert outline(out)[:4] == [
+        PlanGroup.UNITS,
+        failed("step-ca"),
+        done("probe"),
+        f"{Glyph.NEEDS_YOU.value} {REALM_UNIT}",
+    ]
+    assert outline(out).count(PlanGroup.UNITS) == 1
+
+
+@pytest.mark.usefixtures("headed_from_one_row")  # app_world holds no other unit
+def test_a_failed_unit_row_stands_under_units_before_the_apps_heading_and_its_row(
+    keys,
+    app_world,  # noqa: F811
+):
+    with (app_world.repository / "fleet.yaml").open("a") as fleet:
+        fleet.write(LITELLM_ON)
+    app_world.origin.release(RELEASE)
+    for container in ("litellm", "litellm-db", "litellm-front"):
+        app_world.scripted.containers.pop(container)  # the unit has to be switched on
+    app_world.scripted.crash_loops = {"litellm"}
+
+    exit_code, out, _ = app_world.apply()
+
+    assert exit_code == 1
+    shown = outline(out)
+    assert shown[0] == PlanGroup.UNITS
+    assert shown[1] == failed("litellm")
+    assert shown[-2:] == [PlanGroup.APPS, done("hopin")]
+    assert shown.count(PlanGroup.UNITS) == 1
+
+
+def test_an_injected_compose_error_in_the_key_step_leaves_the_failed_unit_rows_already_printed(
+    keys,
+    switch,  # noqa: F811
+    scripted,  # noqa: F811
+    repository,  # noqa: F811
+    monkeypatch,
+):
+    write_fleet(repository, PROBE_ENABLED + LITELLM_ON)
+    scripted.crash_loops = {"step-ca"}
+
+    def refuse(*_: object) -> None:
+        raise compose.ComposeError("the key step could not run")
+
+    monkeypatch.setattr(litellm_keys, "run_keys", refuse)
+
+    exit_code, out, err = switch()
+
+    assert exit_code == 1
+    assert outline(out)[:3] == [PlanGroup.UNITS, failed("step-ca"), done("probe")]
+    assert err.count("error: partial, step-ca") == 1
+
+
+def test_a_failed_key_result_stands_under_litellm(
+    keys,
+    switch,  # noqa: F811
+    repository,  # noqa: F811
+):
+    write_fleet(repository, PROBE_ENABLED + LITELLM_ON)
+    keys.fail_at, keys.cause = 1, "name taken"
+
+    _, out, _ = switch()
+
+    shown = outline(out)
+    assert shown.count(PlanGroup.LITELLM) == 1
+    assert shown[shown.index(PlanGroup.LITELLM) + 1 :] == [
+        done(BUDGET_ID),
+        failed(APPS[0]),
+        *(f"{Glyph.UNCHANGED.value} {app}" for app in APPS[1:]),
+    ]
+
+
+@pytest.mark.usefixtures("headed_from_one_row")  # a skipped key step is one plan row
+def test_a_skipped_key_result_stands_under_litellm(
+    keys,
+    switch,  # noqa: F811
+    repository,  # noqa: F811
+):
+    write_fleet(repository, ENABLED + LITELLM_ON)
+    keys.read_fails = True
+
+    _, out, _ = switch()
+
+    assert outline(out)[-2:] == [PlanGroup.LITELLM, f"{Glyph.NEEDS_YOU.value} litellm"]
+
+
+RECREATES = [
+    pytest.param(PlanGroup.CORE, "traefik", id="core"),
+    pytest.param(PlanGroup.UNITS, "step-ca", id="unit service"),
+]
+
+
+def drift(group: PlanGroup, tree, compose_script) -> None:
+    """The service of `group` that a recreate changes."""
+    if group is PlanGroup.CORE:
+        edit_traefik_yml(tree)
+    else:
+        compose_script.change_definition("step-ca")
+
+
+@pytest.mark.parametrize(("group", "subject"), RECREATES)
+def test_a_failed_recreate_stands_under_the_heading_of_the_step_that_failed(
+    group,
+    subject,
+    step_ca_applied,  # noqa: F811
+    keys,
+    switch,  # noqa: F811
+    scripted,  # noqa: F811
+    repository,  # noqa: F811
+):
+    write_fleet(repository, PROBE_ENABLED + LITELLM_ON)
+    drift(group, repository, scripted)
+    scripted.crash_loops = {subject}
+
+    exit_code, out, _ = switch()
+
+    assert exit_code == 1
+    assert outline(out)[:2] == [group, failed(subject)]
+    assert headings_of(outline(out)) == [group]
+
+
+def test_the_waiting_row_of_a_stopped_hal_is_the_first_row_under_units(
+    keys,
+    realm_unit,  # noqa: F811
+    switch,  # noqa: F811
+    repository,  # noqa: F811
+    monkeypatch,
+):
+    write_fleet(repository, KEYCLOAK_ENABLED + LITELLM_ON)
+    keys.admin_budget = None
+    monkeypatch.setattr("hal.stack.pre_apply.BACKUP_SECONDS", 1)
+    monkeypatch.setattr("hal.stack.pre_apply.STOP_GRACE_SECONDS", 0.2)
+    hal = repository / ".venv/bin/hal"
+    hal.parent.mkdir(parents=True)
+    hal.write_text("#!/bin/sh\nexec sleep 30\n")
+    hal.chmod(hal.stat().st_mode | stat.S_IXUSR)
+
+    _, out, _ = switch(installed_backup=True)
+
+    assert outline(out)[:2] == [PlanGroup.UNITS, f"{Glyph.ANNOUNCE.value} {REALM_UNIT}"]
+
+
+@pytest.mark.parametrize(("group", "subject"), RECREATES)
+def test_a_ctrl_c_row_ends_the_open_line_then_stands_under_the_heading_of_its_step(
+    group,
+    subject,
+    step_ca_applied,  # noqa: F811
+    keys,
+    switch,  # noqa: F811
+    scripted,  # noqa: F811
+    repository,  # noqa: F811
+):
+    write_fleet(repository, PROBE_ENABLED + LITELLM_ON)
+    drift(group, repository, scripted)
+    scripted.verb_up = ctrl_c
+
+    exit_code, out, _ = switch()
+
+    assert exit_code == 1
+    assert outline(out) == ["", group, failed(subject)]
