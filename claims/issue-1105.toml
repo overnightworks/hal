@@ -3,6 +3,6 @@ agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
 role = "builder"
 base = "641e072e2155c8e82128fb3c3cd5e0ad56ea2337"
 branch = "claude/issue-1105-probes-of-retired-service"
-scope = ["docs/agent-service.md", "docs/internal-ca.md", "probe/agent-service", "quality/baseline.toml", "quality/config.toml", "sonar-project.properties", "tests/support/probe_support.py", "tests/support/script_module.py", "tests/test_agent_egress.py", "tests/test_agent_service_cells_12b.py", "tests/test_agent_service_census_client.py", "tests/test_agent_service_containment.py", "tests/test_agent_service_fake_app.py", "tests/test_agent_service_login_checks.py", "tests/test_agent_service_run_client.py"]
+scope = ["agent-service/egress_observe.py", "compose.yaml", "docs/agent-service.md", "docs/internal-ca.md", "probe/agent-service", "quality/baseline.toml", "quality/config.toml", "sonar-project.properties", "tests/support/probe_support.py", "tests/support/script_module.py", "tests/test_agent_egress.py", "tests/test_agent_service_cells_12b.py", "tests/test_agent_service_census_client.py", "tests/test_agent_service_containment.py", "tests/test_agent_service_fake_app.py", "tests/test_agent_service_login_checks.py", "tests/test_agent_service_run_client.py"]
 opened_commit = "1d7cac087ebbdb4b3efa7338e8c469bf714e9084"
 whole_reason = "One deletion of the probes of one retired process, with their tests, config entries and doc paragraphs, none of which works without the others."
