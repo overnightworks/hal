@@ -3,6 +3,6 @@ agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
 role = "builder"
 base = "171c02b4e12af39111be7bbc726973529e7324cf"
 branch = "claude/issue-1084-gateway-logs"
-scope = ["agent-service/litellm/config.yaml", "agent-service/litellm/front/traefik.yml", "compose.yaml", "docs/agent-service.md", "docs/home.md", "legal/sections/agent-service/datenschutz.html", "legal/sections/litellm/datenschutz.html", "probe/agent-service", "src/hal/config.py", "src/hal/litellm_expiry.py", "src/hal/stack/api_limits.py", "src/hal/stack/apply.py", "src/hal/stack/compose.py", "tests/test_litellm_expiry.py"]
+scope = ["agent-service/litellm/config.yaml", "agent-service/litellm/front/traefik.yml", "compose.yaml", "docs/agent-service.md", "docs/home.md", "legal/sections/agent-service/datenschutz.html", "legal/sections/litellm/datenschutz.html", "probe/agent-service", "src/hal/config.py", "src/hal/expire_commands.py", "src/hal/litellm_expiry.py", "src/hal/stack/api_limits.py", "src/hal/stack/apply.py", "src/hal/stack/compose.py", "tests/test_expire_commands.py", "tests/test_litellm_expiry.py"]
 opened_commit = "f50dca17ee32acefe23e02190e0804cfef194c5e"
 whole_reason = "One logging decision for one route: the front's access log, LiteLLM's error level and their rotation, its probe, and the document that states it."
