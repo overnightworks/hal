@@ -175,10 +175,8 @@ def test_the_verdict_line_marks_a_delivery_that_retries_next_run_and_every_other
         runner.notify_delivers = False
     if scenario == "no_mail_and_no_session":
         runner.session_active = False
-    if scenario == "notifications_off":
-        write_hal_config(clean_home, "[check]\nnotify = false\n")
-    alarm()
-    capsys.readouterr()
+    notify = "false" if scenario == "notifications_off" else "true"
+    write_hal_config(clean_home, f"[alarm]\nruns = 1\n[check]\nnotify = {notify}\n")
 
     alarm()
 
