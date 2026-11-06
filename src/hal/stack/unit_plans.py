@@ -1,6 +1,7 @@
 """What each unit needs to become what the catalog says, and how one unit is switched."""
 
 import dataclasses
+import shutil
 from collections.abc import Callable, Collection, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
@@ -487,7 +488,12 @@ class NotWritten:
 
     @classmethod
     def from_error(cls, subject: str, path: Path, error: OSError) -> NotWritten:
-        """A `shutil.Error` has no `strerror`; its text is the reason then."""
+        """A `shutil.Error` has no `strerror` and carries the failed entries as (source,
+        destination, reason): a full disk fails them all alike, so the first reason is the
+        cause."""
+        entries = error.args[0] if isinstance(error, shutil.Error) and error.args else None
+        if isinstance(entries, list) and entries:
+            return cls(subject, path, entries[0][2])
         return cls(subject, path, error.strerror or str(error))
 
     @property
@@ -500,12 +506,13 @@ CORE_SUBJECT = "core"
 
 @dataclass(frozen=True)
 class SeenDown:
-    """Services found not running within the watch of the recreate of `recreated`, in start
-    order; `way_back` is the unit snapshot's way back once one was proven."""
+    """Services found not running within the watch of the recreate of `recreated`, or of the
+    unit's start when that is None, in start order; `way_back` is the unit snapshot's way back
+    once one was proven."""
 
     services: tuple[compose.DownService, ...]
     watch_seconds: float
-    recreated: str
+    recreated: str | None
     way_back: str | None = None
 
 
@@ -516,20 +523,34 @@ class StoppedMeanwhile:
     service: str
 
 
+class NotDone(StrEnum):
+    RECREATED = "recreated"
+    STARTED = "started"
+
+
 @dataclass(frozen=True)
 class SwitchedOffMeanwhile:
-    """`unit` was switched off since the plan was read (`since`), so `service` is not recreated."""
+    """`unit` was switched off since the plan was read (`since`), so `service` is `left` undone."""
 
     unit: str
     since: str
     service: str
     way_back: str | None = None
+    left: NotDone = NotDone.RECREATED
+
+
+@dataclass(frozen=True)
+class NotOff:
+    """A unit switched off that still has a container of its services."""
+
+    unit: str
+    way_back: str | None = None
 
 
 @dataclass(frozen=True)
 class StepFailed:
-    """A step of the core phase that failed with `cause`; `subject` is the service or unit it
-    worked on, `core` while none is set."""
+    """A step of the apply that failed with `cause`; `subject` is the service or unit it worked
+    on, `core` while none is set."""
 
     subject: str
     step: str
@@ -543,6 +564,7 @@ class StepFailed:
 
 type RecreateFailure = SeenDown | SwitchedOffMeanwhile | StepFailed
 type CoreFailure = RecreateFailure | StoppedMeanwhile | barrier.BarriersUnproven
+type SwitchFailure = RecreateFailure | NotOff
 
 
 type Begin = Callable[[], None]  # told under the switch lock, right before the start
@@ -562,28 +584,39 @@ def switch(
     marks: switches.Switches,
     read: Mapping[str, switches.Mark | None],
     snapshot_first: SnapshotFirst,
-) -> str | None:
-    """Switch one unit; the time of a switch that appeared meanwhile when the unit stays down. A
-    switch-on with a snapshot starts the unit's database alone for it, then the rest."""
+) -> SwitchedOffMeanwhile | None:
+    """Switch one unit; the services of a switch-on that a switch appeared meanwhile withheld,
+    with its time, when the unit stays down. A switch-on with a snapshot starts the unit's
+    database alone for it, then the rest."""
     progress.unit = plan.unit.key
     if plan.action is Action.ON:
         starter = _Starter(engine, plan, progress, marks, read[plan.unit.key])
         if plan.snapshot is None:
-            return starter.start(plan.services, "start")
+            return _withheld(plan, starter.start(plan.services, "start"), plan.services)
         database = plan.snapshot.database
         if since := starter.start((database,), f"start {database} alone"):
-            return since
-        return snapshot_first(
+            return _withheld(plan, since, plan.services)
+        rest = tuple(service for service in plan.services if service != database)
+        since = snapshot_first(
             plan.snapshot,
             lambda begin: starter.start(
                 plan.services, "start", begin if plan.creates_app else None
             ),
         )
+        return _withheld(plan, since, rest)
     progress.step = "stop"
     engine.stop(plan.unit.key, plan.services)
     progress.step = "remove the containers"
     engine.remove_containers(plan.unit.key, plan.services)
     return None
+
+
+def _withheld(
+    plan: UnitPlan, since: str | None, not_started: tuple[str, ...]
+) -> SwitchedOffMeanwhile | None:
+    if since is None:
+        return None
+    return SwitchedOffMeanwhile(plan.unit.key, since, ", ".join(not_started), left=NotDone.STARTED)
 
 
 @dataclass(frozen=True)
@@ -617,19 +650,18 @@ def unobserved(
     plans: Sequence[UnitPlan],
     config: Mapping[str, Any],
     watch: compose.Watch,
-) -> list[UnitPlan]:
-    """The plans whose result is not observed: a unit switched on counts only when its services
-    stay up through the watch, the way a recreated core service does."""
+) -> dict[str, SeenDown | NotOff]:
+    """The plans whose result is not observed, by unit, in plan order: a unit switched on counts
+    only when its services stay up through the watch, the way a recreated core service does."""
     switched_on = [plan for plan in plans if plan.action is Action.ON]
     watched = tuple(dict.fromkeys(service for plan in switched_on for service in plan.services))
-    down = set(engine.down_while_watched(config, watched, watch)) if watched else set()
+    down = engine.containers_down_while_watched(config, watched, watch) if watched else ()
     states = engine.states()
-    return [
-        plan
-        for plan in plans
-        if (
-            down.intersection(plan.services)
-            if plan.action is Action.ON
-            else not compose.is_gone(states, plan.services)
-        )
-    ]
+    failures: dict[str, SeenDown | NotOff] = {}
+    for plan in plans:
+        if plan.action is Action.ON:
+            if seen := tuple(found for found in down if found.service in plan.services):
+                failures[plan.unit.key] = SeenDown(seen, watch.seconds, None)
+        elif not compose.is_gone(states, plan.services):
+            failures[plan.unit.key] = NotOff(plan.unit.key)
+    return failures

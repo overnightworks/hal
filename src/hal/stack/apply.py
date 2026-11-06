@@ -71,7 +71,7 @@ import fcntl
 import os
 import sys
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import IntEnum
 from pathlib import Path
 
@@ -121,6 +121,7 @@ from hal.stack.result_rows import (
     app_partial,
     app_row,
     appkit_rows,
+    failure_rows,
     keys_partial,
     keys_rows,
     legal_rows,
@@ -128,6 +129,7 @@ from hal.stack.result_rows import (
     result_rows,
     stopped_partial,
     stopped_rows,
+    switch_partial,
     unit_row,
     waiting_row,
 )
@@ -136,8 +138,13 @@ from hal.stack.terminal import NEEDS_TERMINAL, at_terminal
 from hal.stack.unit_plans import (
     Action,
     CoreFailure,
+    NotOff,
     NotWritten,
     Progress,
+    SeenDown,
+    StepFailed,
+    SwitchedOffMeanwhile,
+    SwitchFailure,
     UnitPlan,
     plan_switch_on_snapshots,
     plan_switches,
@@ -581,12 +588,14 @@ def _observe_and_record(
     core_phase: CorePhase,
     started: Sequence[UnitPlan],
     progress: Progress,
-) -> list[UnitPlan]:
-    """The started plans not observed as planned; each unit observed on records the followers
-    that started with it (#89, P15)."""
+) -> dict[str, SeenDown | NotOff]:
+    """The failure of each started plan not observed as planned, by unit; each unit observed on
+    records the followers that started with it (#89, P15)."""
     progress.step = "observe the result"
     mismatched = unobserved(engine, started, planned.fleet.config, core_phase.watch)
-    switched_on = [plan for plan in started if plan.action is Action.ON and plan not in mismatched]
+    switched_on = [
+        plan for plan in started if plan.action is Action.ON and plan.unit.key not in mismatched
+    ]
     core_phase.record_switched_on(planned, switched_on, progress)
     return mismatched
 
@@ -708,7 +717,7 @@ def _confirm_and_switch(
     changes = [plan for plan in planned.plans if plan.action is not Action.STAYS_STOPPED]
     progress = Progress()
     snapshots = SwitchOnSnapshots(core_phase.backup, progress)
-    withheld: dict[str, str] = {}
+    withheld: dict[str, SwitchedOffMeanwhile] = {}
     try:
         if failure := _write_files(planned, progress) or core_phase.run(
             engine, planned, marks, progress
@@ -716,8 +725,8 @@ def _confirm_and_switch(
             _say_stopped(failure)
             return ApplyExit.REFUSED
         for plan in changes:
-            if since := switch(engine, plan, progress, marks, planned.read, snapshots.first):
-                withheld[plan.unit.key] = since
+            if failure := switch(engine, plan, progress, marks, planned.read, snapshots.first):
+                withheld[plan.unit.key] = failure
         started = [plan for plan in changes if plan.unit.key not in withheld]
         mismatched = _observe_and_record(engine, planned, core_phase, started, progress)
         _write_switched_units(started, mismatched, snapshots)
@@ -726,49 +735,49 @@ def _confirm_and_switch(
         progress.unit, progress.step = litellm_keys.LITELLM_SERVICE, "apply the key step"
         keys_failed = _apply_keys(engine, planned)
         apps_failed = _apply_apps(planned, marks, progress)
-    except pre_apply.PreApplyError as error:
-        write_error(f"partial, {_with_way_back(str(error), snapshots)}", command(Verb.APPLY))
-        return ApplyExit.REFUSED
-    except (compose.ComposeError, switches.SwitchError, core.CoreError) as error:
-        failure = f"{progress.unit}: could not {progress.step}, {error}"
-        write_error(f"partial, {_with_way_back(failure, snapshots)}")
+    except (
+        pre_apply.PreApplyError,
+        compose.ComposeError,
+        switches.SwitchError,
+        core.CoreError,
+    ) as error:
+        _say_failures([StepFailed.at(progress, error)], snapshots)
         return ApplyExit.REFUSED
     except KeyboardInterrupt as interruption:
         _say_interrupted(progress, interruption, snapshots.way_back())
         return ApplyExit.REFUSED
     later_failed = realm_failed or keys_failed or apps_failed
-    return _report_switched(withheld, mismatched, later_failed, snapshots)
+    failures = [*withheld.values(), *mismatched.values()]
+    return _report_switched(failures, later_failed, snapshots)
 
 
 def _write_switched_units(
-    started: Sequence[UnitPlan], mismatched: Sequence[UnitPlan], snapshots: SwitchOnSnapshots
+    started: Sequence[UnitPlan],
+    mismatched: Mapping[str, SeenDown | NotOff],
+    snapshots: SwitchOnSnapshots,
 ) -> None:
     for plan in started:
-        if plan not in mismatched:
+        if plan.unit.key not in mismatched:
             write_row(unit_row(plan, snapshots.taken.get(plan.unit.key)))
 
 
-def _with_way_back(failure: str, snapshots: SwitchOnSnapshots) -> str:
-    """The failure, with every switch-on snapshot of the run and its way back once one was
-    proven."""
+def _say_failures(failures: Sequence[SwitchFailure], snapshots: SwitchOnSnapshots) -> None:
+    """Each failure as its rows, then its pair; every one names the way back of the run's
+    switch-on snapshots once one was proven."""
     way_back = snapshots.way_back()
-    return f"{failure}; {way_back}" if way_back else failure
+    for failure in failures:
+        failure = replace(failure, way_back=way_back)
+        for row in failure_rows(failure):
+            write_row(row)
+        write_error(*switch_partial(failure))
 
 
 def _report_switched(
-    withheld: Mapping[str, str],
-    mismatched: Sequence[UnitPlan],
-    later_steps_failed: bool,
-    snapshots: SwitchOnSnapshots,
+    failures: Sequence[SwitchFailure], later_steps_failed: bool, snapshots: SwitchOnSnapshots
 ) -> int:
-    for unit, since in withheld.items():
-        failure = f"{unit} was switched off meanwhile (since {switches.describe_since(since)})"
-        write_error(f"partial, {_with_way_back(failure, snapshots)}; not started")
-    for plan in mismatched:
-        failure = f"{plan.unit.key} is not {plan.action} after the change"
-        write_error(f"partial, {_with_way_back(failure, snapshots)}")
-    if later_steps_failed and not (mismatched or withheld) and snapshots.way_back():
+    _say_failures(failures, snapshots)
+    if later_steps_failed and not failures and snapshots.way_back():
         write_error(f"partial, {snapshots.way_back()}")  # the later steps' lines name no snapshot
-    if mismatched or withheld or later_steps_failed:
+    if failures or later_steps_failed:
         return ApplyExit.REFUSED
     return ApplyExit.APPLIED_OR_NOTHING

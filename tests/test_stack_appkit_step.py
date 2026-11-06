@@ -2,6 +2,7 @@
 `appkit-<version>/` in `legal/assets/` (served by the legal unit) and in each Keycloak theme's
 `resources/`, on the scripted boundaries of `tests/support/stack_apply.py`."""
 
+import errno
 import os
 import shutil
 import stat
@@ -27,7 +28,7 @@ from support.stack_apply import (
     state,  # noqa: F401 the fixture, requested by name below
     switch,  # noqa: F401 the fixture, requested by name below
 )
-from support.stack_plan_rows import find_row
+from support.stack_plan_rows import find_row, plain
 
 from hal.stack import appkit_step, apply
 from hal.stack.plan_rows import PlanEvent
@@ -222,7 +223,7 @@ def test_a_failed_removal_of_a_stale_directory_names_that_directory(world):
     assert "no unit switched" in err
 
 
-def test_a_failed_copy_without_an_error_text_has_a_reason_on_one_line(world, monkeypatch):
+def test_a_failed_copy_of_many_entries_names_the_first_reason_once(world, monkeypatch):
     for target in world.targets:
         shutil.rmtree(target)
     monkeypatch.setattr(appkit_step.shutil, "copytree", _failing_copy)
@@ -230,12 +231,24 @@ def test_a_failed_copy_without_an_error_text_has_a_reason_on_one_line(world, mon
     exit_code, out, _ = world.switch()
 
     assert exit_code == 1
-    assert find_row(out, "appkit", ResultEvent.NOT_WRITTEN, "No space left on device")
+    row = next(line for line in plain(out).splitlines() if "appkit" in line and "could not" in line)
+    assert row.count(_full_disk("first", "first-copy")) == 1
+    assert "second" not in row
     assert "(None)" not in out
 
 
+def _full_disk(source: str, destination: str) -> str:
+    """The reason `shutil.copytree` stores for an entry it could not copy."""
+    return str(OSError(errno.ENOSPC, os.strerror(errno.ENOSPC), source, None, destination))
+
+
 def _failing_copy(*_arguments, **_keywords):
-    raise shutil.Error([("source", "destination", "No space left on device")])
+    raise shutil.Error(
+        [
+            ("first", "first-copy", _full_disk("first", "first-copy")),
+            ("second", "second-copy", _full_disk("second", "second-copy")),
+        ]
+    )
 
 
 def test_a_missing_appkit_is_one_cannot_plan_error(repository):  # noqa: F811

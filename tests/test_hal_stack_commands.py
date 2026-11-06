@@ -325,7 +325,7 @@ def test_apply_whose_compose_up_fails_is_partial_and_publishes_nothing(hal, appl
     result = hal("apply", answers=("yes",))
 
     assert result.exit_code == ExitCode.FAILURE
-    assert "partial, step-ca: could not" in result.err
+    assert "error: partial, step-ca failed\nnext: hal apply" in result.err
     assert "nothing published" in result.err
     assert applying.publish_never_began()
 

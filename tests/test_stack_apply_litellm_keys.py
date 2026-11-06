@@ -38,7 +38,7 @@ from support.stack_apply_apps import (
     RELEASE,
     app_world,  # noqa: F401 the fixture, requested by name below
 )
-from support.stack_apply_fakes import ScriptedCompose
+from support.stack_apply_fakes import ScriptedCompose, container_name
 from support.stack_core import bind, sha256
 from support.stack_litellm_found import APPS, BUDGET_ID
 from support.stack_plan_rows import find_row, plain
@@ -564,7 +564,10 @@ def test_a_litellm_that_restarts_in_a_loop_after_it_was_on_ends_partial_without_
     assert find_row(plan, LITELLM.key, PlanEvent.SWITCH_ON)
     assert find_row(plan, LITELLM.key, KeysEvent.LATER, "LiteLLM starts now")
     assert one_offs(scripted) == []
-    assert lines_of(err) == ["error: partial, litellm is not on after the change"]
+    assert lines_of(err) == [
+        "error: partial, litellm not running",
+        f"next: docker logs --tail 50 {container_name(LITELLM.service)}",
+    ]
 
 
 @pytest.mark.parametrize("missing", [MASTER_KEY, APP_KEYS[0]], ids=["master key", "app key"])
