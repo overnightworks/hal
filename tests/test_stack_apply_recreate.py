@@ -380,8 +380,8 @@ FAILING_RECREATES = {
     ),
     "a Ctrl-C": (
         lambda world: setattr(world, "after_up", interrupted_at_the_prompt),
-        None,
-        "interrupted while changing step-ca (recreate step-ca); its state may be partial",
+        (ResultEvent.INTERRUPTED, "recreate step-ca · its state may be partial"),
+        "error: interrupted at step-ca",
     ),
 }
 
@@ -405,7 +405,7 @@ def test_a_recreate_that_fails_is_partial_and_no_unit_is_switched(
     exit_code, out, err = switch()
 
     assert exit_code == 1
-    assert row is None or find_row(out, "step-ca", *row)
+    assert find_row(out, "step-ca", *row)
     assert line in err
 
 

@@ -137,6 +137,23 @@ def test_the_first_apply_names_and_writes_the_three_pages_readable_by_the_unit(w
     assert re.search(r'<p class="stand">Stand: \d{1,2}\. [A-Za-zä]+ 20\d\d</p>', privacy)
 
 
+def test_a_ctrl_c_in_the_legal_write_names_legal(world, monkeypatch):
+    rename = os.replace
+
+    def interrupted_into_built(source: os.PathLike[str], destination: os.PathLike[str]) -> None:
+        if Path(destination).is_relative_to(world.built):
+            raise KeyboardInterrupt
+        rename(source, destination)
+
+    monkeypatch.setattr(os, "replace", interrupted_into_built)
+
+    exit_code, out, err = world.switch()
+
+    assert exit_code == apply.ApplyExit.REFUSED
+    assert find_row(out, "legal", ResultEvent.INTERRUPTED, "write the legal pages · its state")
+    assert err.splitlines()[-2:] == ["error: interrupted at legal", "next: hal apply"]
+
+
 def test_the_second_apply_changes_nothing_and_says_so(world):
     """L3."""
     world.switch()

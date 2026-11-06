@@ -28,7 +28,7 @@ from support.stack_apply import (
     state,  # noqa: F401 the fixture, requested by name below
     switch,  # noqa: F401 the fixture, requested by name below
 )
-from support.stack_plan_rows import find_row, plain
+from support.stack_plan_rows import detail_lines, find_row, plain
 
 from hal.stack import appkit_step, apply
 from hal.stack.plan_rows import PlanEvent
@@ -331,11 +331,12 @@ def test_an_interrupted_restore_shows_the_operator_where_the_previous_copy_is(wo
             raise KeyboardInterrupt
         os.rename(source, destination)
 
-    exit_code, _, err = world.switch(rename=rename)
+    exit_code, out, err = world.switch(rename=rename)
 
     assert exit_code == 1
-    assert "interrupted while changing" in err
-    assert "the previous copy is kept in " in err
+    assert find_row(out, "appkit", ResultEvent.INTERRUPTED, "write the appkit files")
+    assert any("the previous copy is kept in " in line for line in detail_lines(out))
+    assert "error: interrupted at appkit" in err
 
 
 @pytest.mark.parametrize("which", range(3), ids=["legal assets", "login theme", "account theme"])

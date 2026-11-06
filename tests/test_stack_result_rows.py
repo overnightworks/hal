@@ -41,6 +41,8 @@ from hal.stack.result_rows import (
     app_partial,
     app_row,
     appkit_rows,
+    interrupted_error,
+    interrupted_row,
     keys_partial,
     keys_rows,
     legal_rows,
@@ -54,7 +56,7 @@ from hal.stack.result_rows import (
     waiting_row,
 )
 from hal.stack.service_recreate import Recreated
-from hal.stack.unit_plans import NotWritten
+from hal.stack.unit_plans import Interrupted, NotWritten
 
 SNAPSHOT = "37c2a56056d17297895e58c1ff98493754064280352422f136596266498fe056"
 REMOVAL = realm_lines.Change("hallucinai", realm_lines.Kind.REMOVAL, "group", "/console", members=0)
@@ -388,6 +390,37 @@ def test_the_path_and_the_reason_of_a_failed_write_are_escaped_in_the_row() -> N
     row = not_written_row(NotWritten("legal", Path("a\nb"), "x\x1b[31m"))
 
     assert row.fact == "could not write a\\nb (x\\x1b[31m)"
+
+
+def test_an_interrupted_rows_notes_come_first_and_the_way_back_last_as_details() -> None:
+    row = interrupted_row(
+        Interrupted("keycloak", "recreate keycloak", ("kept in /srv/a",), "restore it")
+    )
+
+    assert (row.glyph, row.subject, str(row.event)) == (Glyph.FAILED, "keycloak", "interrupted")
+    assert row.fact == "recreate keycloak · its state may be partial"
+    assert row.details == ("kept in /srv/a", "restore it")
+
+
+def test_an_interrupted_row_without_a_step_says_only_that_its_state_may_be_partial() -> None:
+    row = interrupted_row(Interrupted("core", "", (), None))
+
+    assert row.fact == "its state may be partial"
+    assert row.details == ()
+
+
+def test_the_step_and_the_notes_of_an_interrupted_row_are_escaped() -> None:
+    row = interrupted_row(Interrupted("core", "a\nb", ("x\x1b[31m",), None))
+
+    assert row.fact.startswith("a\\nb · ")
+    assert row.details == ("x\\x1b[31m",)
+
+
+def test_an_interrupt_ends_with_the_subject_and_apply_as_the_next_step() -> None:
+    assert interrupted_error(Interrupted("traefik", "recreate traefik", (), None)) == (
+        "interrupted at traefik",
+        command(Verb.APPLY),
+    )
 
 
 TWO_UNPROVEN = BarriersUnproven((Unproven("probe", "no route"), Unproven("echo", "cannot write")))
