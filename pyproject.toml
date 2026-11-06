@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
     "pyyaml>=6",
-    "overnightworks-appkit @ https://github.com/overnightworks/appkit/releases/download/v0.14.0/overnightworks_appkit-0.14.0-py3-none-any.whl#sha256=fc88979e819d7ca5b0608072156b6be93ee9f6f7bfc2a3e8292c6c5b02aee189",
+    "overnightworks-appkit @ https://github.com/overnightworks/appkit/releases/download/v0.15.0/overnightworks_appkit-0.15.0-py3-none-any.whl#sha256=710bed31c5b3fa693e401dfd77b6ac6305b91a1c16b2cc52836e05cd3b516ec2",
     "overnightworks-agent-runtime-client @ git+https://github.com/overnightworks/agent-runtime@v0.20.0#subdirectory=packages/client",
 ]
 
