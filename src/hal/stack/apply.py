@@ -291,6 +291,7 @@ def apply_local(
     home: Path | None = None,
     collaborators: Collaborators = PRODUCTION,
     api: api_limits.ApiSettings = api_limits.NONE_SET,
+    publish_follows: bool = False,
 ) -> int:
     started = collaborators.verifier.clock()
     if not at_terminal():
@@ -323,6 +324,7 @@ def apply_local(
             collaborators,
             api,
             lambda: collaborators.verifier.clock() - started,
+            publish_follows,
         )
     finally:
         os.close(lock)
@@ -404,6 +406,7 @@ def _plan_and_apply(
     collaborators: Collaborators,
     api: api_limits.ApiSettings,
     elapsed: Callable[[], float],
+    publish_follows: bool,
 ) -> int:
     repository = live.tree
     engine = collaborators.engine or compose.Compose(repository=repository)
@@ -451,6 +454,7 @@ def _plan_and_apply(
         marks,
         CorePhase(record, repository, collaborators.verifier, collaborators.watch, realm_backup),
         completed,
+        None if publish_follows else elapsed,
     )
 
 
@@ -694,9 +698,11 @@ def _confirm_and_switch(
     marks: switches.Switches,
     core_phase: CorePhase,
     completed_setups: Sequence[str],
+    verdict_clock: Callable[[], float] | None,  # None: a publish follows, no verdict here
 ) -> int:
     _write_plan(planned)
-    if not confirmed(f"apply {counted(changes_in(planned), ChangeNoun.CHANGE)}"):
+    asked = changes_in(planned)
+    if not confirmed(f"apply {counted(asked, ChangeNoun.CHANGE)}"):
         _say_aborted(completed_setups)
         return ApplyExit.DECLINED
     changes = [plan for plan in planned.plans if plan.action is not Action.STAYS_STOPPED]
@@ -735,7 +741,16 @@ def _confirm_and_switch(
         return ApplyExit.REFUSED
     later_failed = realm_failed or keys_failed or apps_failed
     failures = [*withheld.values(), *mismatched.values()]
-    return _report_switched(failures, later_failed, snapshots)
+    exit_code = _report_switched(failures, later_failed, snapshots)
+    return _closed_on_verdict(exit_code, asked, verdict_clock)
+
+
+def _closed_on_verdict(exit_code: int, changes: int, clock: Callable[[], float] | None) -> int:
+    if exit_code == ApplyExit.APPLIED_OR_NOTHING and clock is not None:
+        write_verdict(
+            Verdict(Glyph.DONE, "applied", ((changes, ChangeNoun.CHANGE),), elapsed_seconds=clock())
+        )
+    return exit_code
 
 
 def _write_switched_units(

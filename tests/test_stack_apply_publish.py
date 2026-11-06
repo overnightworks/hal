@@ -316,7 +316,7 @@ def interrupting(phase, *, after_running: bool):
 
 
 def local_part_returns(monkeypatch, exit_code: int) -> None:
-    monkeypatch.setattr(apply, "apply_local", lambda _state, *, api: exit_code)
+    monkeypatch.setattr(apply, "apply_local", lambda _state, *, api, publish_follows: exit_code)
 
 
 def publish_returns(monkeypatch, exit_code: int) -> list[tuple]:
