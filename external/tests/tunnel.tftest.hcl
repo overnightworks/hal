@@ -19,6 +19,7 @@ mock_provider "cloudflare" {
 
 variables {
   catalog_file = "tests/fixtures/hosts-plain.yaml"
+  tunnel_id    = "tunnel-id"
 }
 
 run "t1_the_plain_catalog_gets_one_line_per_host_and_the_404_rule_last" {

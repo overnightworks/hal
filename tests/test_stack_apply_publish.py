@@ -322,7 +322,7 @@ def local_part_returns(monkeypatch, exit_code: int) -> None:
 def publish_returns(monkeypatch, exit_code: int) -> list[tuple]:
     entries: list[tuple] = []
 
-    def publish(*arguments):
+    def publish(*arguments, **_keywords):
         entries.append(arguments)
         return exit_code
 
@@ -396,7 +396,7 @@ def test_the_composer_installs_no_sigterm_handler(world, monkeypatch):
     def at_the_local_prompt() -> None:
         seen.setdefault("local part", signal.getsignal(signal.SIGTERM))
 
-    def at_the_publish_entry(*_arguments):
+    def at_the_publish_entry(*_arguments, **_keywords):
         seen["publish entry"] = signal.getsignal(signal.SIGTERM)
         return 0
 

@@ -226,6 +226,7 @@ def print_interrupted_output(interrupted: tofu.Interrupted, token_values: dict[s
 def apply_plan(
     home: Path,
     token_values: dict[str, str],
+    tunnel_id: str,
     plan_file_scope: Callable[[Path], AbstractContextManager[Path]] = private_plan_file,
     progress: Progress | None = None,
     hosts: Sequence[catalog.Host] = (),
@@ -236,7 +237,8 @@ def apply_plan(
     returned is decided from it, since the outcome is lost with the raise. `hosts` are the enabled
     hosts of the catalog tofu was started on, those that declare `ready` are asked; `prober_for`
     makes the prober that asks one target; `catalog_bytes` are the bytes `hosts` came from, which
-    tofu is handed to plan on, so what is probed and what is published rest on the same read."""
+    tofu is handed to plan on, so what is probed and what is published rest on the same read;
+    `tunnel_id` names hal's tunnel, the one tofu looks up."""
     progress = progress or Progress()
     try:
         with (
@@ -245,7 +247,14 @@ def apply_plan(
             plan_file_scope(home) as plan_file,
         ):
             result = _recording_interrupts(
-                session, plan_file, token_values, progress, hosts, prober_for, catalog_bytes
+                session,
+                plan_file,
+                token_values,
+                progress,
+                hosts,
+                prober_for,
+                tunnel_id,
+                catalog_bytes,
             )
             progress.step = Step.CLEANUP
     except tofu.Interrupted, KeyboardInterrupt:
@@ -278,13 +287,14 @@ def _recording_interrupts(
     progress: Progress,
     hosts: Sequence[catalog.Host],
     prober_for: Callable[[str], host_probe.Prober],
+    tunnel_id: str,
     catalog_bytes: bytes | None,
 ) -> ApplyExit:
     """The interrupt is recorded here, before the cleanup runs, so the cleanup's own failure
     cannot be mistaken for it."""
     try:
         return _show_confirm_apply(
-            session, plan_file, token_values, progress, hosts, prober_for, catalog_bytes
+            session, plan_file, token_values, progress, hosts, prober_for, tunnel_id, catalog_bytes
         )
     except tofu.Interrupted as interrupted:
         progress.interrupted = True
@@ -379,11 +389,10 @@ def _show_confirm_apply(
     progress: Progress,
     hosts: Sequence[catalog.Host],
     prober_for: Callable[[str], host_probe.Prober],
+    tunnel_id: str,
     catalog_bytes: bytes | None,
 ) -> ApplyExit:
-    plan_arguments = (
-        tofu.PLAN_ARGUMENTS if catalog_bytes is None else session.plan_arguments_on(catalog_bytes)
-    )
+    plan_arguments = session.plan_arguments(tunnel_id, catalog_bytes)
     planned = tofu.run(session.tofu, [*plan_arguments, f"-out={plan_file}"], session.environment)
     if (ended := _print_plan(planned, plan_file, session, token_values, progress)) is not None:
         return ended

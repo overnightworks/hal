@@ -210,9 +210,9 @@ def live_checkout(home) -> Path:
 def publish(home, live_checkout, monkeypatch) -> Callable[[], int]:
     """`apply_command` in process: terminal refusal lifted, host check clean, hosts answering."""
     monkeypatch.setattr(external_apply, "refusal_without_terminal", lambda: None)
-    monkeypatch.setattr(external_cli, "check_command", lambda _home: 0)
+    monkeypatch.setattr(external_cli, "check_command", lambda _home, **_keywords: 0)
     ready = RecordingReadyProber()
-    return lambda: external_cli.apply_command(home, live_checkout, prober_for=ready)
+    return lambda: publish_on_stand_in(home, live_checkout, prober_for=ready)
 
 
 @dataclass
@@ -275,6 +275,7 @@ import functools, json, socket, sys, time
 from pathlib import Path
 from hal.stack.external import cli as external_cli
 from hal.stack.external import host_probe, tofu
+from hal.stack.external.cloudflare_read import OwnTunnel
 
 config = json.loads(Path(sys.argv.pop(1)).read_text())
 scratch = Path(config["scratch"])
@@ -343,7 +344,8 @@ if not config["real_ready_prober"]:
         external_cli.apply_command, prober_for=RecordingReadyProber
     )
 
-sys.exit(external_cli.apply_command(Path.home()))
+own_tunnel = OwnTunnel(config["own_tunnel"][0], Path(config["own_tunnel"][1]))
+sys.exit(external_cli.apply_command(Path.home(), own_tunnel=lambda: own_tunnel))
 """
 
 
@@ -371,6 +373,7 @@ def write_child_configuration(
                 "real_ready_prober": real_ready_prober,
                 "ready_hangs": ready_hangs,
                 "connect_attempt": connect_attempt,
+                "own_tunnel": [OWN_TUNNEL.id, str(OWN_TUNNEL.config)],
             }
         )
     )
@@ -458,16 +461,34 @@ def commit_catalog(tree: Path, text: str) -> None:
     plain_git(tree, "commit", "--quiet", "--all", "--message", "catalog")
 
 
-TUNNEL_TARGET = "t-1.cfargotunnel.com"
+OWN_TUNNEL = cloudflare_read.OwnTunnel("t-1", Path("/scenario/cloudflared/config.yml"))
+
+
+def stand_in_tunnel() -> cloudflare_read.OwnTunnel:
+    """Reads hal's tunnel in place of the machine's tunnel config."""
+    return OWN_TUNNEL
+
+
+def publish_on_stand_in(*arguments, **keywords) -> int:
+    """`apply_command` with hal's tunnel read from the stand-in."""
+    return external_cli.apply_command(*arguments, own_tunnel=stand_in_tunnel, **keywords)
+
+
+def check_on_stand_in(home: Path, **keywords) -> external_cli.HostCheckOutcome:
+    """`run_host_check` with hal's tunnel read from the stand-in."""
+    return external_cli.run_host_check(home, own_tunnel=stand_in_tunnel, **keywords)
+
+
+TUNNEL_TARGET = f"{OWN_TUNNEL.id}.cfargotunnel.com"
 
 
 CLEAN_SNAPSHOT = cloudflare_read.Snapshot(
-    "t-1", (cloudflare_read.Record("example.test", "CNAME", TUNNEL_TARGET, True),), (), ()
+    OWN_TUNNEL.id, (cloudflare_read.Record("example.test", "CNAME", TUNNEL_TARGET, True),), (), ()
 )
 
 
 STRAY_SNAPSHOT = cloudflare_read.Snapshot(
-    "t-1",
+    OWN_TUNNEL.id,
     (
         cloudflare_read.Record("example.test", "A", "192.0.2.1", True),
         cloudflare_read.Record("stray.example.test", "CNAME", TUNNEL_TARGET, True),
@@ -485,7 +506,7 @@ class FakeReader:
         self.tokens: list[str] = []
         self.reads = 0
 
-    def __call__(self, token: str):
+    def __call__(self, token: str, _tunnel: cloudflare_read.OwnTunnel):
         self.tokens.append(token)
         return self
 

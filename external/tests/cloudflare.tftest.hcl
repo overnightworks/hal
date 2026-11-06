@@ -19,6 +19,7 @@ mock_provider "cloudflare" {
 
 variables {
   catalog_file = "tests/fixtures/hosts-plain.yaml"
+  tunnel_id    = "tunnel-id"
 }
 
 run "c1_public_hosts_get_proxied_cnames_to_the_tunnel_and_no_app" {
@@ -45,6 +46,41 @@ run "c1_public_hosts_get_proxied_cnames_to_the_tunnel_and_no_app" {
   assert {
     condition     = length(cloudflare_zero_trust_access_application.host) == 0 && length(cloudflare_zero_trust_access_policy.bypass) == 0 && length(cloudflare_zero_trust_access_policy.allow_operator) == 0
     error_message = "public hosts got an app or a policy"
+  }
+}
+
+# A second tunnel in the account is never asked for: the lookup names hal's id among the live
+# tunnels, and the mock answers as the provider does for that filter, with exactly that tunnel.
+run "c13_records_and_ingress_follow_the_live_tunnel_with_hals_id" {
+  command = plan
+
+  variables {
+    tunnel_id = "hal-tunnel-id"
+  }
+
+  override_data {
+    target = data.cloudflare_zero_trust_tunnel_cloudflared.this
+    values = { id = "hal-tunnel-id" }
+  }
+
+  assert {
+    condition = (
+      data.cloudflare_zero_trust_tunnel_cloudflared.this.filter.uuid == "hal-tunnel-id"
+      && data.cloudflare_zero_trust_tunnel_cloudflared.this.filter.is_deleted == false
+    )
+    error_message = "the tunnel is not looked up as the live one with hal's id"
+  }
+
+  assert {
+    condition = alltrue([
+      for record in cloudflare_dns_record.host : record.content == "hal-tunnel-id.cfargotunnel.com"
+    ])
+    error_message = "a record does not point at hal's tunnel"
+  }
+
+  assert {
+    condition     = cloudflare_zero_trust_tunnel_cloudflared_config.this.tunnel_id == "hal-tunnel-id"
+    error_message = "the ingress is not planned on hal's tunnel"
   }
 }
 

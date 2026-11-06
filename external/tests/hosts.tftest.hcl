@@ -17,6 +17,10 @@ mock_provider "cloudflare" {
   }
 }
 
+variables {
+  tunnel_id = "tunnel-id"
+}
+
 run "the_wildcard_catalog_yields_the_expected_hosts" {
   command = plan
 

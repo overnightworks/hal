@@ -45,15 +45,16 @@ locals {
   }
 }
 
-# The provider itself fails on no or several matching zones and tunnels (C13). Both are looked up
-# with no host too: the tunnel's configuration outlives the last host.
+# The provider itself fails on no or several matching zones and tunnels (C13); the tunnel is the
+# live one with hal's id. Both are looked up with no host too: the tunnel's configuration outlives
+# the last host.
 data "cloudflare_zone" "this" {
   filter = { name = local.fleet.cloudflare.zone }
 }
 
 data "cloudflare_zero_trust_tunnel_cloudflared" "this" {
   account_id = local.account_id
-  filter     = { is_deleted = false }
+  filter     = { uuid = var.tunnel_id, is_deleted = false }
 }
 
 data "cloudflare_dns_records" "host" {

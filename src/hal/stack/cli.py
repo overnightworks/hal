@@ -2,6 +2,7 @@
 tunnel. `hal` is their one door."""
 
 import os
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -10,6 +11,7 @@ from hal.output import Stream, write_line
 from hal.output.command import Verb, command
 from hal.stack import api_limits, apply, emergency, switches, tunnel, update
 from hal.stack.external import cli as external_cli
+from hal.stack.external.cloudflare_read import OwnTunnel
 
 COMMAND = command(Verb.APPLY)
 
@@ -69,13 +71,15 @@ def update_checkout() -> update.UpdateEnd:
     return update.update_checkout(switches.default_state_directory())
 
 
-def apply_units(local: bool, api: api_limits.ApiSettings) -> int:
-    if local:
+def apply_units(api: api_limits.ApiSettings, own_tunnel: Callable[[], OwnTunnel] | None) -> int:
+    """`own_tunnel` reads hal's tunnel, which the publish after the local part goes through;
+    without it the local part runs alone."""
+    if own_tunnel is None:
         return apply.apply_local(switches.default_state_directory(), api=api)
-    return _apply_then_publish(api)
+    return _apply_then_publish(api, own_tunnel)
 
 
-def _apply_then_publish(api: api_limits.ApiSettings) -> int:
+def _apply_then_publish(api: api_limits.ApiSettings, own_tunnel: Callable[[], OwnTunnel]) -> int:
     """The local part, then the publish only if the local part ended clean. The exit is the local
     one unless it is 0, then the publish's with its 2 ("cannot plan") made 1: a 2 from here means
     the local part could not finish planning, and nothing was published. No signal handler is
@@ -93,7 +97,9 @@ def _apply_then_publish(api: api_limits.ApiSettings) -> int:
             write_line(f"{COMMAND}: nothing published", stream=Stream.STDERR)
             return local_exit
         run.publish_started = True
-        run.publish_exit = _published_exit(external_cli.apply_command(Path.home()))
+        run.publish_exit = _published_exit(
+            external_cli.apply_command(Path.home(), own_tunnel=own_tunnel)
+        )
         _say_summary(run.publish_exit)
         return run.publish_exit
     except KeyboardInterrupt:

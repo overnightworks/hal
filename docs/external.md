@@ -94,6 +94,11 @@ Allowlist-Umgebung, dieselbe State-Passphrase).
 
 ## Was `apply` ausserdem setzt
 
+**Welcher Tunnel.** `hal apply` und `hal check hosts` suchen hals Tunnel ueber die ID in
+`/etc/cloudflared/config.yml`, die Datei, die der laufende Tunnel liest; weitere Tunnel im Konto
+spielen keine Rolle. Fehlt die Datei oder nennt sie keine ID, oder hat kein lebender Tunnel die ID,
+endet der Lauf mit einem Fehler.
+
 **Die Tunnel-Zeilen.** Eine je Host aus dem Katalog, die 404-Regel zuletzt. Die Konfiguration des
 Tunnels gehoert ganz dem Katalog: eine Zeile von anderswo zeigt `plan` als entfernt, und sie
 verschwindet nach `yes` (anders als undeklarierte Records und Apps). Das gilt, **solange Cloudflare den
