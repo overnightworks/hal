@@ -111,3 +111,14 @@ def test_a_one_off_that_never_exited_is_named_by_the_failure_itself() -> None:
         one_offs.run_once("litellm-keys", ["--write"])
 
     assert raised.value.one_off_cause("litellm-keys") == str(raised.value)
+
+
+def test_every_one_shot_starts_in_the_profile_of_the_service_that_waits_for_it(monkeypatch):
+    services = resolved(monkeypatch)["services"]
+    differing = sorted(
+        one_shot
+        for service in services.values()
+        for one_shot in compose.one_shot_services({"services": {"waiting": service}})
+        if services[one_shot].get("profiles") != service.get("profiles")
+    )
+    assert differing == []

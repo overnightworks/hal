@@ -258,7 +258,10 @@ def _failed_event(subject: AppPlan | OffPlan) -> ResultEvent:
 
 def unit_row(plan: UnitPlan, snapshot: str | None) -> Row:
     """A unit switched on and observed up, or switched off with the volumes an off never touches;
-    a switch-on that proved a pre-apply snapshot names it dim under the row."""
+    a switch-on that proved a pre-apply snapshot names it dim under the row.
+
+    A switched-on unit is `up` once observed because compose up waits for its one-shots, which
+    share the profile of the service that waits for them."""
     if plan.action is Action.OFF:
         fact = f"volumes {', '.join(plan.volumes)} kept" if plan.volumes else ""
         return Row(Glyph.DONE, plan.unit.key, ResultEvent.SWITCHED_OFF, fact)

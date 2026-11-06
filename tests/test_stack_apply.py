@@ -205,7 +205,7 @@ def test_switching_off_removes_the_containers_and_names_the_volumes_that_stay(
 
     assert exit_code == 0
     assert scripted.containers == {}
-    assert find_row(out, "step-ca", SWITCHED_OFF, "volumes step-ca, traefik-mcp-acme")
+    assert find_row(out, "step-ca", SWITCHED_OFF, "volumes step-ca, traefik-mcp-acme kept")
     assert find_row(out, "step-ca", PlanEvent.SWITCH_OFF, "volumes step-ca, traefik-mcp-acme kept")
 
 
