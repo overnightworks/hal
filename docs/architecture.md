@@ -63,7 +63,6 @@ flowchart TB
             BAK["hal backup<br/>restic weekly, restore test monthly<br/>second copy off this disk (D3)"]
             LOOK["Traffic-light page, Gatus<br/>is it OK now?"]
             MON["Prometheus, Grafana, Alertmanager<br/>why, since when? every service"]
-            DEP["Deploy watcher per service<br/>follows the newest v* tag"]
         end
         subgraph l4["L4 Services: each repo owns its compose.yaml"]
             SONG["songmaker<br/>songmaker.hallucinai.de, own login until its cutover"]
@@ -92,9 +91,8 @@ flowchart TB
     MON -.->|"alerts, the same channel"| OP
     OP ==>|"CHANGE: pull request, merge"| GH
 
-    GH -->|"hal release sets a v* tag"| DEP
-    DEP --> SONG & PRES & HOP
-    CAT -->|"hal apply, run by the operator"| DEP
+    CAT -->|"hal apply, run by the operator: the newest release tag"| PRES & HOP & SPE
+    GH -->|"release tag, polled by songmaker's own timer"| SONG
     CAT -->|"the publish phase of hal apply"| DNS & ACC & GH
     GH -->|"CI"| SC
 
@@ -103,7 +101,7 @@ flowchart TB
     BAK -.->|"dumps"| KC & SONG
     BAK --> DATA
 
-    class LOOK,DEP,CAT,HOP,MON,AGT planned
+    class LOOK,MON,AGT planned
     class LOOK,ADM place
 ```
 
@@ -111,7 +109,7 @@ flowchart TB
 1. **The way in.** Every name ends in one tunnel. Cloudflare Access is planned to block every name that is not explicitly opened (`*` = operator only, X8b on #30); the operator ruled on 20.10.2026 that Zero Trust is not needed for now and can be added at any time, so today `auth` goes live as `public` and the `*` protection waits for X8b. Traefik on loopback hands each name to the container with that `edge.name` label, and the alias of that container (`edge.alias`) too.
 2. **The login.** Keycloak at `auth.hallucinai.de` is the one login page. Every app checks the ID itself through webauth and its group `/apps/<name>`. songmaker joins only through its own cutover (section 3); until then it keeps its own login. Tools without their own login will sit behind Access (X8b); no login-less tool is published before it.
 3. **PEOPLE.** People and their groups exist only in the Keycloak admin, `http://localhost:8090/admin/`, on this PC (later via Tailscale).
-4. **CHANGE.** Every change is a pull request. A release (the planned `hal release` sets a `v*` tag) is deployed by the service's watcher; whether the service is then reachable depends on its state (section 8 state table). The platform (edge) and the external services change when the operator runs `hal apply`.
+4. **CHANGE.** Every change is a pull request. A release is a `vYYYY.MM.DD.N` tag: `hal apply` deploys hopin, presentator and speech-runtime at their newest one after the operator's `yes`, and songmaker's own timer deploys songmaker (section 5); whether the service is then reachable depends on its state (section 8 state table). The platform (edge) and the external services change when the operator runs `hal apply`.
 5. **LOOK.** One traffic-light page answers "is it OK now?" for every service, the backup, the drift checks and the secrets. Grafana answers "why, and since when?" for every service. Both send alerts through one e-mail channel.
 6. **Agents.** Today agents run as the operator's user and can do whatever he can. Every "an agent may not" in this document is a request until D14 gives them their own user.
 
@@ -125,9 +123,9 @@ Each layer has **one** owner. The order is the order of a setup: a layer needs o
 |---|---|---|---|---|---|
 | **L0 PC and tools** | Ubuntu packages (Docker, with the `journald` log default, cloudflared from apt, gh, uv, restic, the pinned `tofu`, Tailscale); `/etc/docker/daemon.json` (the system step merges the log default into it); edge's `tunnel/` (the cloudflared unit, its drop-ins, the stop-only polkit rule); linger; auto-login off; the AppArmor profile; the agent user (only with D14); the `hal` and `aco` tools; the work clones in `~/git` | home-tools: the setup playbook (home-tools#9; Ansible recommended there; it installs edge's `tunnel/`) | `~/git/home-tools/bootstrap` (new, home-tools#9), then `hal setup` (asks one `yes`; `--dry-run` only shows) | `hal check` (daily timer, today) | OS install and disk encryption (the installer decides it); BIOS "power on after AC loss"; the first `gh auth login --web`, because cloning the private home-tools needs it |
 | **L1 secrets** | every token, password and key; values only in `~/.secrets`; tool logins in their tools' stores. Directories 0700. Files 0600, except a file a container user must read: 0644 inside its 0700 directory (docs/keycloak.md). Today every agent can read all of it (D14) | `src/hal/workstation/secrets_manifest.toml` (names, purpose, reader, scope, bindings, rotation; never a value) | `hal setup` (its step „Geheimnisse“): walks every missing secret page by page (home-tools#10) | `hal secrets`, part of `hal check` (today: local view; the remote check is section 4) | creating a token at the provider: a human logs in and clicks. The wizard opens the page, takes the value hidden, verifies it, stores it (HopIn's Cloudflare TURN key ID and API token: stored, not verified) |
-| **L2 platform** | Traefik, socket proxy, Keycloak and its DB, step-ca (the internal CA for the MCP origins) and `traefik-mcp` (the second Traefik, the only container on the internal networks `mcp-ca`, `mcp`, `mcp-backends` and one per app, `hal_mcp_songmaker`, and the speech service's one way to Keycloak's key set; no host port), `legal` (nginx serving the imprint, the privacy notice and the terms that `hal apply` builds from the section of every block into `legal/built/`, on its own internal network; its one catalog host is the apex, public for the pages `cloudflare.redirect.serve` names), hal-backup timers, the deploy watchers, the LOOK page (Gatus: "is it OK now?"), the monitoring stack for every service (Prometheus, Grafana, Alertmanager: "why, since when?"; moves out of songmaker, ruled 16.10.2026, edge#4), one alert channel | edge: `compose.yaml`, `traefik.yml`, `traefik-mcp.yml` and `mcp/dynamic/`, `keycloak/*.yaml` (realm as code), `legal/` (frame, edge's own sections, stylesheet, nginx config; the built pages are not in git), `step-ca/ca.json`, `backup/apps.toml`; the timers' job declaration `src/hal/workstation/jobs.py` | `hal apply --local` (start without publishing), then `hal apply` (publish), then `hal online` (open the tunnel; section 6 step 11). Proposed: one command for compose, realm apply, timers, services on/off, external | `hal check` (`hal check exposure` today; proposed: plus readiness, backup freshness, deploy state) | the Keycloak go-live once (edge#19: it creates the permanent admin from a typed name and password; TOTP and passkey in the browser) |
+| **L2 platform** | Traefik, socket proxy, Keycloak and its DB, step-ca (the internal CA for the MCP origins) and `traefik-mcp` (the second Traefik, the only container on the internal networks `mcp-ca`, `mcp`, `mcp-backends` and one per app, `hal_mcp_songmaker`, and the speech service's one way to Keycloak's key set; no host port), `legal` (nginx serving the imprint, the privacy notice and the terms that `hal apply` builds from the section of every block into `legal/built/`, on its own internal network; its one catalog host is the apex, public for the pages `cloudflare.redirect.serve` names), hal-backup timers, the LOOK page (Gatus: "is it OK now?"), the monitoring stack for every service (Prometheus, Grafana, Alertmanager: "why, since when?"; moves out of songmaker, ruled 16.10.2026, edge#4), one alert channel | edge: `compose.yaml`, `traefik.yml`, `traefik-mcp.yml` and `mcp/dynamic/`, `keycloak/*.yaml` (realm as code), `legal/` (frame, edge's own sections, stylesheet, nginx config; the built pages are not in git), `step-ca/ca.json`, `backup/apps.toml`; the timers' job declaration `src/hal/workstation/jobs.py` | `hal apply --local` (start without publishing), then `hal apply` (publish), then `hal online` (open the tunnel; section 6 step 11). Proposed: one command for compose, realm apply, timers, services on/off, external | `hal check` (`hal check exposure` today; proposed: plus readiness, backup freshness, deploy state) | the Keycloak go-live once (edge#19: it creates the permanent admin from a typed name and password; TOTP and passkey in the browser) |
 | **L3 external** | Cloudflare DNS, Access apps and policies, tunnel ingress (D6), the zone's HSTS setting; GitHub repo settings, rulesets, Actions policy, org secret names and reach | edge `fleet.yaml` + OpenTofu (`ext-as-code.md`, epic E3, its slices listed in the epic's body) | the publish phase of `hal apply` (operator, TTY, the word `yes`) | `hal check hosts` → `hal check` | secret values, the tunnel object and its credential, Access identity providers, the Access group's one member, SonarCloud projects, CodeQL default setup, GitHub App installs, the registrar. Each has no provider or would put a secret into state |
-| **L4 services** | songmaker, presentator, hopin, the speech service `speech-runtime` (an app without a host, reachable only from its apps' internal networks and from `traefik-mcp`, which routes nothing to it; behind its two tokens and the group `/services/speech-service`), the agent service (its compose service and image recipe live in edge; switched on by its unit in `fleet.yaml`), LiteLLM with its front and database (in edge's `compose.yaml`, switched on by its unit `litellm`), later the aco board | each service repo's `compose.yaml` (containers) + its entry in `fleet.yaml` (where it runs, who may use it, on or off) | the deploy watcher (newest `v*` tag) after `hal apply` turned the service on | the LOOK page (each service's health URL); Grafana for its metrics | creating a new repo's SonarCloud project (one click) |
+| **L4 services** | songmaker, presentator, hopin, the speech service `speech-runtime` (an app without a host, reachable only from its apps' internal networks and from `traefik-mcp`, which routes nothing to it; behind its two tokens and the group `/services/speech-service`), the agent service (its compose service and image recipe live in edge; switched on by its unit in `fleet.yaml`), LiteLLM with its front and database (in edge's `compose.yaml`, switched on by its unit `litellm`), later the aco board | each service repo's `compose.yaml` (containers) + its entry in `fleet.yaml` (where it runs, who may use it, on or off) | `hal apply`, after the operator's `yes`: an app at its newest release tag, an edge unit from edge's `compose.yaml` (songmaker: its own timer, section 5) | the LOOK page (each service's health URL); Grafana for its metrics | creating a new repo's SonarCloud project (one click) |
 | **L5 data** | Docker volumes (songmaker DB and audio, Keycloak DB, LiteLLM DB, presentator's `database` (its `builds` are a cache); `step-ca` ([internal-ca.md](internal-ca.md) names its backup) and `traefik-mcp-acme`, which is not: its certificates are issued again), the restic repository and its off-disk copy (D3), the encrypted OpenTofu state | edge `backup/apps.toml` | `hal restore …` (section 6) | the restore test (monthly), the clean-machine drill (section 6), and the backup's freshness on the LOOK page | the restic password, the OpenTofu passphrase and the disk's recovery key live in the password manager: without them no backup, no state and no disk can be read |
 | **People** | users, passkeys, group memberships (`/apps/<name>`, `/services/agent-service/subscription`, `/services/agent-service/api`, `/services/speech-service`, `/services/litellm/admin`, which `hal apply`'s key step reads) | the Keycloak database (managed only in the admin console); the groups themselves are code in `keycloak/realm.yaml` | first-ever: create people in the admin console; re-setup: restore the Keycloak DB | Keycloak events (login anomalies) on the LOOK page | everything: people are never code (ruled) |
 
@@ -137,8 +135,7 @@ Each layer has **one** owner. The order is the order of a setup: a layer needs o
 - `hal setup` installs the tools and clones edge. It creates the agent user only after D14 is ordered; until then the user is D14's step, not setup's. It installs cloudflared disabled and never starts a service.
 - `hal setup` (its step „Geheimnisse“, the wizard) creates secrets. Nothing else writes into `~/.secrets`, except `keycloak/go-live` for the three Keycloak service passwords and one secret per confidential app client (edge#19 rule 2, edge#106), `step-ca/init` for `~/.secrets/step-ca/` (edge#38), `agent-service/setup` for `~/.secrets/agent-service/` (edge#234), which also creates `~/.secrets` itself and narrows it to 0700, as `secrets_view.LOOSEST_DIRECTORY_MODE` judges and `hal restore` on a re-setup.
 - `hal apply` is **the one publisher**. `hal apply --local` runs only the local part: the platform and the enabled services. `hal apply` without `--local` runs the local part, then its publish phase: the OpenTofu publish and its check of each host against the catalog (built, edge#171). The two run one after the other and each asks its own `yes` only when it has changes (ruled 20.10.2026); with nothing to change `hal apply` asks nothing. A local part that does not end clean publishes nothing, and `hal apply` then exits 3, the same as for a publish that does not end clean (3 for every outcome of the stack that is not "applied or nothing to do"); the finer split of the stack's outcomes waits for [edge#50](https://github.com/overnightworks/edge/issues/50). It never creates a secret: when a service's setup is missing it asks **separately** ("step-ca has no keys yet. Create them now? (yes)") and then delegates to the existing owner, `step-ca/init` or `keycloak/go-live`, which keep the key generation, and the operator runs `hal apply` himself. For `--local` this is built ([edge#69](https://github.com/overnightworks/edge/issues/69)): the question comes before the plan, the setup runs in the operator's terminal with its output uncaptured, `--check` runs again, and a fresh plan follows with its own `yes` (R2, ruled 16.10.2026, [edge#50](https://github.com/overnightworks/edge/issues/50)). `keycloak/go-live` never publishes.
-- The deploy watcher deploys newer tags and nothing else.
-- What `hal apply`, `hal start` and the watcher may do in each state: section 8 state table.
+- What `hal apply` and `hal start` may do in each state: section 8 state table.
 - `hal check` only reads. It runs the checks secrets, hook, logs, backup and platform (containers, the pending reboot and free disk space).
 
 ### The agent service (A1d) in the layers
@@ -189,7 +186,7 @@ services:
         # target: http://127.0.0.1:8081   # optional; this is the default (Traefik)
 ```
 
-Planned and not accepted by `catalog.py` yet: `run.login_group` (a group of `keycloak/realm.yaml`, checked by CI), `run.health` (the LOOK page's path) and `run.deploy: tags` (the watcher, section 5). An app's `run` takes only `enabled` (no `setup`, no `build`), its `repo` only `default_branch`, and `github.org` names the organisation of its repository.
+Planned and not accepted by `catalog.py` yet: `run.login_group` (a group of `keycloak/realm.yaml`, checked by CI) and `run.health` (the LOOK page's path). An app's `run` takes only `enabled` (no `setup`, no `build`), its `repo` only `default_branch`, and `github.org` names the organisation of its repository.
 
 `src/hal/stack/catalog.py` (`hosts()`) owns the host shape. The publish phase of `hal apply` refuses an invalid catalog before any token is read; `external/hosts.tf` reads the valid shape.
 
@@ -215,8 +212,7 @@ The apex and `www` are hosts only as the catalog's `cloudflare.redirect` (the ap
 | What to back up | `backup/apps.toml` | says nothing. No check compares `apps.toml` with the catalog |
 | DNS, Access app, tunnel line, repo settings | the catalog itself (rendered by OpenTofu) | is the owner |
 | The LOOK page's service lights, Prometheus's scrape targets | the catalog | `hal apply` renders the Gatus endpoint list and the scrape list from the enabled entries |
-| The deploy watchers | the catalog | `hal apply` installs one watcher per enabled entry with `deploy: tags` |
-| The release branch | the catalog (`repo.default_branch`) | the planned `hal release` tags that branch |
+| The release branch | the catalog (`repo.default_branch`) | `hal apply` takes the newest release tag on that branch (section 5) |
 
 **Why the catalog does not generate `realm.yaml`.** keycloak-config-cli adds and changes and deletes no undeclared top-level object or person: every `IMPORT_MANAGED_*` type is `no-delete` (`compose.yaml`), so a group missing from the YAML stays with its members (docs/keycloak.md). Even so, `realm.yaml` stays the group owner. Switching off never touches a group. Deleting a group is done in the admin console, after a backup, with the operator's yes.
 
@@ -225,7 +221,6 @@ The apex and `www` are hosts only as the catalog's `cloudflare.redirect` (the ap
 **Off** (example: hopin):
 1. **CHANGE.** The operator, or an agent on his word, opens a PR in edge: `enabled: false`. CI checks the catalog rules. He merges.
 2. **He runs `hal apply`.** It shows the plan and asks for `yes`:
-   - hopin's watcher is removed;
    - hopin's services are stopped and removed, exactly the services the unit resolves to (P13, [edge#50](https://github.com/overnightworks/edge/issues/50)): never a project-wide `down`, which would also take shared services such as Traefik, and never `--volumes`, so the named volumes stay;
    - the LOOK page drops its light, Prometheus drops its target;
    - the publish phase of `hal apply`: the DNS record, Access app and tunnel line go.
@@ -253,7 +248,7 @@ What the file declares belongs to the file: a console change to a declared objec
 
 ### The deployed record: a read-only interface
 
-A program of another repository may read the record of `hal apply`: the last deployment of an app that settled. It is not the watcher model's `deployed.tag` and `deployed.sha` of section 5. Today the file is `~/.local/state/edge/deployed/<key>`, with `<key>` the catalog key; the state directory is renamed by #207 H5h, which carries this subsection and the path across.
+A program of another repository may read the record of `hal apply`: the last deployment of an app that settled. Today the file is `~/.local/state/edge/deployed/<key>`, with `<key>` the catalog key; the state directory is renamed by #207 H5h, which carries this subsection and the path across.
 
 - **Shape.** One JSON object with the keys `tag` (a release tag `vYYYY.MM.DD.N`), `sha` (the full 40-character commit of that tag, lowercase hex) and `time` (ISO 8601 with a UTC offset). The file has mode 0600, so only the operator's user reads it. A rule for readers, held by policy and by no test (the exact-key assert in `tests/test_stack_apps.py` only trips when the keys change): new keys may appear, and none of these three is renamed or removed without asking the readers first.
 - **When it is written.** Only after every container of the app is settled: running, and healthy where it has a healthcheck. So it names the last deployment that settled, never a newer tag that failed, and it says nothing about what runs now: a stop or a failed update leaves it as it was.
@@ -280,7 +275,7 @@ services (`speech-runtime`), edge's section is its text while the release brings
 when the release brings one. So does a stopped or disabled app
 whose checkout or recorded commit is gone, or whose `.git` is a symlink or no repository, naming the path.
 
-A **host-only app** (an entry with neither `repo` nor `run`: songmaker, which its own watcher deploys) brings the same
+A **host-only app** (an entry with neither `repo` nor `run`: songmaker, which its own timer deploys) brings the same
 two files, read through the same reader from its checkout `~/srv/<key>` at `git rev-parse HEAD`, taken at plan time. The
 plan names the block with the short sha where a tagged app names its tag, and a missing checkout or an invalid `.git`
 refuses before the question, naming the path. A text that reaches that checkout's HEAD goes live only at the next `hal apply`
@@ -363,7 +358,7 @@ the privacy file is no refusal there yet.
 
 - **hopin#25 first:** login through webauth (`/apps/hopin`), Impressum and Datenschutz.
 - **A `compose.yaml` and a Dockerfile** with `edge.name: hopin`, `restart: unless-stopped` and **no published port**. Hopin's container listens on 8080, which songmaker already uses on the host; Traefik reaches it by its bridge IP, so no host port is needed.
-- **Its first release:** the planned `hal release hopin` tags the green tip of `main`.
+- **Its first release:** hopin is tagged `vYYYY.MM.DD.N` on a commit of `main` (section 5); no command cuts the tag yet (#1051).
 - **The catalog entry above;** then `hal apply`.
 - **Its SonarCloud project** already exists: hopin has `sonar-project.properties`.
 
@@ -466,84 +461,42 @@ Every finding names the subject and a page to fix it, never a value.
 
 ---
 
-## 5. Deploy: a version tag triggers it
+## 5. Deploy: how a release goes live today
 
-**Today** there is no watcher: `hal apply` takes the newest release tag on origin's default branch at the next run, after its plan and the operator's `yes` (section 3, "On"). The model below is the target.
+Every app goes live from a release tag, never from a landing on `main`. A release is a tag `vYYYY.MM.DD.N` on the app's default branch; `src/hal/stack/releases.py` owns the grammar and the order, and every other `v*` tag is skipped and named. The org ruleset 25224012 "release tags are immutable" blocks deletion, update and force-push of `refs/tags/v*` in every repo. One way for all apps is ruled in [#1016](https://github.com/overnightworks/hal/issues/1016) and not built; this section says what runs.
 
-### The model, the same for every service
-
-| Branch or tag | Role |
+| Service | Goes live by |
 |---|---|
-| the default branch (`main`) | the always-green integration branch; a landing never deploys by itself |
-| `v*` tag | a release. It is immutable: org ruleset 25224012 "release tags are immutable" blocks deletion, update and force-push of `refs/tags/v*` in every repo (checked 16.10.2026) |
+| **hopin**, **presentator**, **speech-runtime** | `hal apply`, after the operator's `yes` (below). presentator's backup is the SQLite record in `backup/apps.toml` (`docs/backup.md`) |
+| **songmaker** | its own timer, outside `hal apply` (below). Its host bypasses Traefik (gap 35) |
 
-**What each deploy watcher does** (one per service, a systemd timer every 2 minutes):
-1. **Find the newest release.** It fetches tags and takes the newest `v*` tag whose commit is on `origin/<default branch>` and that is not in the skip list (see rollback). Guards: section 8 state table.
-2. **Gate it.** songmaker's gate, carried over as it is and named (`auto-deploy.sh` from line 147):
-   - only check runs from GitHub Actions count;
-   - every Actions job must end `success`, `skipped` or `neutral`, and at least one must end `success`;
-   - the job `SonarCloud scan` is advisory: its result never blocks a deploy.
-   `hal release` uses the same rule, so "green" means one thing.
-3. **Back up first if the schema changes.** If the tag's database schema differs from the running one (see rollback), the watcher runs the app's backup before it deploys. That backup is the way back.
-4. **Deploy it.** It accepts only a tag from step 1 (see "What a deploy accepts"). `git checkout --detach <tag>` in the deploy checkout `~/srv/<name>`, then `docker compose build`, then a busy check (songmaker: no running job), then `docker compose up -d --wait`. songmaker's `migrate` service runs `alembic upgrade head` as part of this (`docker-compose.yml` line 49).
-5. **Book it.** After `--wait` succeeds it reads the live database's schema version and compares it with the tag's `schema:`. Only an equal version writes the deployed tag to its state; songmaker's `deployed.sha` rule carries over as `deployed.tag`. A migration that succeeded but a health check or schema comparison that failed leaves the state `migrated, not healthy` with the live schema recorded, never the old tag; the LOOK page shows it red. The state is backed up, so a re-setup knows which version wrote the data.
-6. **Alert.** After 3 failed ticks in a row, the LOOK page turns red and an alert goes out (songmaker's counters, unchanged).
+### hopin, presentator and speech-runtime: `hal apply`
 
-**What a deploy accepts, and who may write it (D14).**
-- **Only a release tag.** The deploy input is a `v*` tag fetched from the forge (step 1), protected by ruleset 25224012. Never a local working tree, branch or path.
-- **Root-owned, not agent-writable:** the `hal` command and the `hal check` executable (installed by `hal setup` under `/usr/local`), the watcher units, and the deployment checkouts (`~/srv/<name>`, songmaker's auto-deploy checkout, the live edge checkout). The agent user cannot write them. Agents work in their own worktrees and reach a deploy only through a pushed, gated tag.
-- **The proof:** `hal check` fails when any path on a deploy path (those executables, units, checkouts and the paths the watchers read) is writable by the agent user or by a group it is in.
+- **Plan.** `hal apply` takes the newest release tag on origin's default branch (`repo.default_branch` of the catalog entry) and shows it in the plan. The operator's `yes` is the gate: whoever can put a tag on a merged commit offers code to run here (E1).
+- **Run.** The tag is checked out in `~/srv/<key>`, its compose file is held to `app_contract.py` before anything is built, and Compose runs it as project `<key>`.
+- **Record.** The last deployment that settled is the record of "The deployed record: a read-only interface" (section 3); it is written only once every container runs and is healthy where it has a healthcheck.
+- **A tag that fails** stays checked out; the run is partial and the fix is a newer tag.
+- **A stopped app** (`hal stop`, section 8) is never planned: no fetch, no checkout, no build.
 
-**The watcher's GitHub credential** becomes a read-only token: Contents read and Checks read on the service repos (`github/deploy-read` in the manifest). Today songmaker's watcher calls `gh api`, so it runs with the operator's `gh` login (`repo`, `workflow`). A read token is needed at all because three watchers polling every 2 minutes make 90 calls an hour, above the 60 an unauthenticated client gets.
+### songmaker: its own timer
 
-**Rollback: only when the old code fits the data.**
-- **Why a rule.** songmaker migrates its database on every deploy. Code from the tag before may not understand the new schema. A blind rollback can break the app or the data.
-- **The schema is declared.** `hal release` writes the schema into the annotated tag message: `schema: <alembic head>`, or `schema: none` for a service without a database, and optionally `schema-min: <head>` for the oldest schema this code still reads. The compatibility evidence for a rollback is the live database's version (read as in step 5, not taken from the state file) lying between the target tag's `schema-min` (default: its `schema`) and its `schema`.
-- **The planned `hal rollback hopin`** deploys the tag before the current one only when that tag's declared schema fits the live database. It writes the bad tag into the skip list, `skipped` in `~/.local/state/edge/<service>.toml` (the watcher's state file). The watcher never deploys a skipped tag; it follows the newest tag that is not skipped. A newer tag deploys normally, and the entry stays until the operator removes it with the planned `hal unskip <service> <tag>`. The planned `hal restore <app> --tag <tag>` writes the same entry (below). While a skip is active, the LOOK page shows hopin yellow with "rolled back to vX, vY skipped".
-- **When the live schema is outside that range, it refuses.** It says: "vY changed the database. Stop the service (`hal stop hopin`) and ask the operator." The way back is then `hal restore hopin --tag vX` (planned flag). It restores the backup the watcher took before vY (step 3), then deploys the chosen tag, which must be schema-compatible with that data (the same range check as above). It writes the bad tag into the same skip list; a newer tag is still picked up. The full walk is the incident table's row "A bad release" (section 8).
-- This is a kill switch (ruling 12), not a change: the tags stay as they are.
-- In which states rollback and restore may run, and when the service opens again: section 8 state table. Who may run them: section 8's command table.
+- **Unit.** The system timer `songmaker-autodeploy.timer` runs every 2 minutes. `scripts/install-autodeploy.sh` of songmaker installs it under `/etc/systemd/system` with the operator's user as `User=`, pointed at the checkout the script is run from. The deploy checkout is `~/srv/songmaker`.
+- **Release.** `scripts/auto-deploy.sh` reads release tags from origin and takes the newest whose commit is on `origin/main` and whose GitHub Actions check runs have all ended `success`, `skipped` or `neutral`, with at least one `success`. A landing on `main` deploys nothing by itself.
+- **Deploy.** It checks the tag out detached in the deploy checkout, builds, defers while a job runs, and recreates the containers. Before a release that may change the database schema it runs `hal backup songmaker --pre-apply`.
+- **Credential.** It calls `gh api` as the operator's `gh` login.
+- **`hal apply`** does not deploy it: the entry is a host-only app (section 3), and `hal apply` only reads the checkout's HEAD for its legal text.
 
-### Who sets the tag, and when
+songmaker owns the facts of this subsection.
 
-**The release step is the head's, delegated like webauth's releases today.** webauth tags `v*` and never moves a tag: a broken release gets the next patch tag. It cut v0.12.0 and v0.13.0 on 15.10.2026. The operator never tags by hand.
+### Who sets the tag
 
-**Why not tag every landing.** songmaker had 95 first-parent commits on main in the last 14 days, about 7 a day. One tag per landing would be main-deploy under another name. One release step per landing would add 95 extra agent dispatches.
-
-**The rhythm (proposed default, D5):**
-- **One batch release per service per working session,** after the last landing of a session, or when the operator asks ("release songmaker"). That is about 1–2 a day for songmaker, against 7 landings.
-- **A fix for something broken in production** gets its own release right after its landing.
-- **One release implementation, not one per repo: `hal release <service>` (planned).** It reads the service's repo and default branch from the catalog. It refuses unless that branch's tip passes the gate above. It picks the next version, writes the PR titles since the last tag and the `schema:` line into an annotated tag on that tip, and pushes it. The head runs it as a mechanical step (the cheapest routing row, low effort); no review, because the tag adds no code.
-- **Version form for services:** `vYYYY.MM.DD.N` (example `v2026.10.16.1`). A service has no API consumers who need SemVer, and a date says at a glance how old the running version is. Libraries such as webauth keep SemVer and their own release. Both match `v*`.
-- **aco's landing brief names the freed release.** "Landed, not released" is visible on the LOOK page as "the default branch is N landings ahead of the running tag", so nothing waits silently.
+No command cuts a release tag yet (#1051). **Version form for services:** `vYYYY.MM.DD.N` (example `v2026.10.16.1`). A service has no API consumers who need SemVer, and a date says at a glance how old the running version is. Libraries such as webauth keep SemVer and their own release, and a tag is never moved: a broken release gets the next tag.
 
 ### What stays applied by the operator
 
 - **edge itself** (L2): `hal update` after his merge fast-forwards edge's live checkout after one `yes` and syncs its dependencies; then `hal apply` shows the plan and asks its own `yes`. Changing the gatekeeper, Keycloak or the backup is never automatic.
 - **External** (L3): the publish phase of `hal apply`. Only the operator holds the write tokens (E3 rule 3).
 - **Why not automatic.** Agents run as his user today, so any token on a timer would be an admin credential in an agent's reach. Automatic apply becomes possible only after D14.
-
-### How each service joins
-
-| Service | Today | Joins by |
-|---|---|---|
-| **songmaker** | system timer `songmaker-autodeploy.timer` (every 2 min) runs the 1,253-line `scripts/auto-deploy.sh` on `~/git/songmaker`, following `origin/main` once CI is green. The checkout is also the place `aco land` must not run (memory: land from `~/git/songmaker-land`) | the migration below |
-| **presentator** | `hal apply` deploys it from its newest `v*` tag, like hopin; its compose release carries no host unit and no `docker.sock` mount. The old `~/presentator-live` instance and its user units are retired by presentator's own `scripts/cutover.py` | its backup is the SQLite record in `backup/apps.toml` (`docs/backup.md`); it goes public after the first green `hal restore --test presentator` |
-| **hopin** | deployed from its tag `v2026.10.26.1` as `hopin-hopin-1` | section 3's example: a compose file, then its first tag |
-
-Every service that holds people's data also offers the export and erase routes of `docs/people.md`.
-
-### Migrating songmaker off main-deploy
-
-1. **The first tag.** The head tags the commit in songmaker's `deployed.sha` as `v2026.MM.DD.1`, with its `schema:` line, so the switch deploys nothing new.
-2. **Its watcher follows tags.** In `scripts/auto-deploy.sh`, the deploy target changes from "newest green commit on `origin/main`" to "newest green `v*` tag on `main`". Everything else stays: the gate, busy check, base-image rebuild, Prometheus reload, the counters, the alert. It gains the backup before a schema change. This is a songmaker item; its tests already pin the script.
-3. **A deploy checkout of its own.** `~/srv/songmaker`, cloned fresh. The `.env` moves with it (its secret files also lie in `~/.secrets/songmaker/` now, and its compose still reads the `.env` until songmaker mounts them, section 7). `install-autodeploy.sh` points the unit there.
-4. **`~/git/songmaker` becomes a plain work clone again.** `aco land` there is harmless, `~/git/songmaker-land` can go, and the memory note about it is retired.
-5. **Later, once presentator needs a watcher.** The tag watcher moves from songmaker into edge as the one generic `edge-deploy@<service>` unit. songmaker keeps its busy check as its own health URL (`/deploy/ready` answers whether a job runs). Building the generic watcher before a second service needs it would be building for an imagined caller.
-
-### On a re-setup
-
-Section 6 step 8 starts every enabled service at the tag its backup recorded; from there the watchers above take over (when they run: section 8 state table). There is no separate "install-autodeploy" per repo.
 
 ---
 
@@ -578,10 +531,10 @@ That is the operator's „zumindest durchleiten zu den Seiten“, and edge#19 ru
 | 5 | Tool logins: Tailscale, Claude, Codex (for the agent user, once D14 is done) | guided (part of step 4: the wizard runs each official login command) | same | the same; tool logins are not restored, because they expire and rebind | each `verify` passes |
 | 6 | `hal apply --local --platform` (`--platform` planned) | one command | **skipped**: step 7 creates the Keycloak secrets first and starts the platform itself | first restores the Keycloak dump into the empty DB (the data backup's newest complete run), then starts Keycloak, so the realm, the people and the passkeys are back | 8081 and 8090 listen on loopback, Keycloak answers; the PC is in column C |
 | 7 | `keycloak/go-live` (edge#19) | guided; runs **once ever**; never publishes (section 3, X8) | creates the Keycloak secrets, bootstrap admin, master on 8090, applies the realms; asks for the permanent admin's name and first password (hidden) and creates it; pauses for the browser step (TOTP and passkey); then deletes the bootstrap admin | **skipped**: go-live sees its done-states and changes nothing | another master admin with TOTP and a passkey exists, `temp-admin` is gone |
-| 8 | `hal apply --local` | one command; shows the plan, asks `yes` | starts every enabled service at its newest tag | starts every enabled service at the tag its backup recorded as running (`deployed.tag`), so code and data fit | each health URL answers on loopback; every enabled service is in column C |
-| 9 | Restore app data | per app `hal stop <app>`, `hal restore <app> --live --repo <off-disk repository>` (section 7; `--repo` planned), then `hal start <app>`, so step 10 finds it in C | — | loads each app's dump and files from the same data run as step 6 | the restore test's checks pass on the live data; the data's schema equals the running tag's `schema:` |
+| 8 | `hal apply --local` | one command; shows the plan, asks `yes` | starts every enabled service at its newest tag | the same: `hal apply` plans the newest release tag (section 5), and the restored data must fit it | each health URL answers on loopback; every enabled service is in column C |
+| 9 | Restore app data | per app `hal stop <app>`, `hal restore <app> --live --repo <off-disk repository>` (section 7; `--repo` planned), then `hal start <app>`, so step 10 finds it in C | — | loads each app's dump and files from the same data run as step 6 | the restore test's checks pass on the live data |
 | 10 | Check it closed | `hal check`, then the operator opens each app on loopback | the apps answer, empty | he sees his songs and his people on loopback | every light green except "not published" |
-| 11 | `hal apply` (publish), then `hal online` (open) | two commands; `hal apply` shows the plan and asks `yes` | `hal apply` publishes the DNS, Access and tunnel lines (C stays C); `hal online` then moves every enabled service C → A | the same; the restored OpenTofu state plans "No changes" for what still exists. A lost state re-adopts by name (E3 rule 6). From A on, section 5's watchers take each service from its recorded tag to its newest one | `hal check hosts` exit 0, then `hal check` exit 0 with every enabled service in A (every-service-in-A is a planned area) |
+| 11 | `hal apply` (publish), then `hal online` (open) | two commands; `hal apply` shows the plan and asks `yes` | `hal apply` publishes the DNS, Access and tunnel lines (C stays C); `hal online` then moves every enabled service C → A | the same; the restored OpenTofu state plans "No changes" for what still exists. A lost state re-adopts by name (E3 rule 6). From A on, a later `hal apply` takes each app to its newest release tag | `hal check hosts` exit 0, then `hal check` exit 0 with every enabled service in A (every-service-in-A is a planned area) |
 | 12 | **PEOPLE** | guided: the planned `hal people` opens `http://localhost:8090/admin/` on the users page | create each person and put them into `/apps/<name>` | nothing: the DB came back | the person signs in to their app |
 | 13 | **LOOK** | open the traffic-light page | every light green | every light green | — |
 
@@ -633,8 +586,8 @@ They survive a dead PC because they live at the provider.
 | 4 | App groups | `keycloak/realm.yaml` (`/apps/songmaker`, `presentator`, `hopin`) and the catalog's `login_group` | **new slice in E3**: the catalog's CI checks against `realm.yaml` and `apps.toml` (section 3) |
 | 5 | Org secret reach | home-tools#10 line 19 (repo-list drift) and E3 X5 (`fleet.yaml` org secrets) | home-tools#10 (drop its drift view) and E3 X5 (keep it) |
 | 6 | Alert channels: three today | songmaker's e-mail (`songmaker-alert@`), Alertmanager inside songmaker, `hal check`'s desktop notification | edge#4: **one e-mail channel** (ruled 24.10.2026: `msmtp`, run as the operator, over the SMTP account songmaker uses). `hal check` mails its news itself; Gatus ("is it OK now?") and Alertmanager ("why, since when?") both send into it; songmaker's own e-mail alert goes |
-| 7 | Deploy | songmaker's watcher only; presentator from its tag; hopin none | **new item in edge**: "one deploy model: tag watcher and `hal release`". Its first slice is in songmaker (section 5) |
-| 8 | Deploy checkout = work clone | `~/git/songmaker` is both; the workaround is the extra `~/git/songmaker-land` | the songmaker migration item (section 5, step 3) |
+| 7 | Deploy | hopin, presentator and speech-runtime through `hal apply` from their release tag; songmaker by its own timer from its release tag (section 5) | [#1016](https://github.com/overnightworks/hal/issues/1016): one release rule for all apps |
+| 8 | Deploy checkout = work clone | closed in songmaker: it deploys from `~/srv/songmaker` (section 5), and its `scripts/auto-deploy.sh` refuses a checkout on a branch. What is left is the landing clone `~/git/songmaker-land`, which songmaker may retire now that it deploys from `~/srv/songmaker` | songmaker |
 | 9 | Monitoring stack | Prometheus, Grafana and Alertmanager live in songmaker's compose, though they serve the platform | edge#4: **ruled 16.10.2026:** they move into edge and serve every service. songmaker keeps only its metrics endpoint and its dashboards as files edge loads |
 | 10 | Two publishers | E3 X8 lets `keycloak/go-live` call `edge external apply`; section 6 publishes in `edge apply` | E3 X8, changed once (section 3): go-live never publishes |
 | 11 | The zone name | `fleet.yaml` `cloudflare.zone` only: `hal apply --local` writes it to `.env`, and CI derives `EDGE_DOMAIN` from the same key | landed: edge#136 |
@@ -655,9 +608,9 @@ They survive a dead PC because they live at the provider.
 | 21 | App secrets in checkout `.env` | both apps' `.env` still carry their secret keys (7 in songmaker's, 1 in presentator's); their secret files under `~/.secrets/<app>/` are declared in the manifest, and no entry binds a compose key yet (`bound_as`) | **new item per app** (songmaker: songmaker#2206, presentator): compose `secrets:` from `~/.secrets/<app>/`, like edge does; plus `bound_as` on their manifest entries (home-tools#21 can take the entries) |
 | 22 | No LOOK page | Gatus proposed 15.10.2026; no item | edge#4: pull it as "LOOK: the traffic-light page, the platform's monitoring stack and one alert channel"; agent-coordination#24 (PC-Zentrale) folds into it or names it as its neighbour |
 | 23 | The remote secret check | section 4: token self-checks, SonarCloud, the compose scan with `bound_as`, Keycloak | **new home-tools item** after E3 X5 (the GitHub and Cloudflare parts come from X5) |
-| 24 | Agents held org admin | The `gh` login keeps `admin:org` until E3's D6 (removing `admin:org`) removes it after X3c (kept on purpose for edge#29); its live scopes are read from the `X-OAuth-Scopes` header of `gh api -i user`. `delete_repo` is removed (16.10.2026). songmaker's deploy watcher still uses that login. The bigger reach remains: row 31 | the `github/deploy-read` token in the songmaker migration item |
+| 24 | Agents held org admin | The `gh` login keeps `admin:org` until E3's D6 (removing `admin:org`) removes it after X3c (kept on purpose for edge#29); its live scopes are read from the `X-OAuth-Scopes` header of `gh api -i user`. `delete_repo` is removed (16.10.2026). songmaker's timer still uses that login. The bigger reach remains: row 31 | the `github/deploy-read` token (D8) |
 | 26 | hopin cannot run beside songmaker | default port 8080, no container | hopin#25 or a new hopin item "container with `edge.name`" |
-| 27 | No release step | no service repo has tags; only webauth releases | `hal release` in the new deploy item (row 7) |
+| 27 | No release command | no command cuts a release tag | #1051 |
 | 28 | Dead unit link | `agent-telegram.service` points to a moved file | claudebot#19 (the bot stays off) |
 | 29 | No emergency commands | `hal status` and `hal lock`, the boot guard and its drift finding do not exist | **new item in edge**: "one operator CLI (`hal`) with emergency switches" (section 8). The daily check, backup and restore are the ruled `hal check`, `hal backup` and `hal restore`. The section 8 state table becomes this item's test table: one parametrised test per cell |
 | 30 | The polkit rule for cloudflared exists only where `hal setup` ran | installed on this PC (#76, #144); a PC without it needs `sudo` to stop the tunnel | `hal setup` installs the stop-only rule `tunnel/polkit/10-edge-cloudflared-stop.rules` from edge (section 8) |
@@ -682,15 +635,15 @@ The operator asked: „wer verwaltet das Home / die Dienste? ggf eine UI-Seite, 
 
 ### The state table: the one owner of every guard
 
-Every other section points here ("guards: section 8 state table") and restates none of it. The table owns *when* a command may act and which state it leaves behind; *what* a deploy, a rollback or a restore does to code and data is section 5's. Each state describes one service S; the global stop applies to the whole PC.
+Every other section points here ("guards: section 8 state table") and restates none of it. The table owns *when* a command may act and which state it leaves behind; *what* a deploy does to code and data is section 5's. Each state describes one service S; the global stop applies to the whole PC.
 
-| State | Recorded | cloudflared | S's ingress barrier | S's watcher | S's containers |
-|---|---|---|---|---|---|
-| **A · running** | nothing | running | absent | runs | up |
-| **B · switched off** | S's switch | running | present: Traefik answers 404 for every host S declares or routes | paused | stopped, or up behind the barrier after a restore |
-| **C · global stop** | the global stop | stopped | absent | paused | up, reachable on loopback only |
-| **D · global stop + switched off** | both | stopped | present | paused | as in B |
-| **E · disabled in the catalog** | the applied catalog says `enabled: false`; a marker may remain from B or D | as the PC: running, or stopped under the global stop | absent, or S's barrier while its marker remains: either way every host S declares or routes answers 404 | none: not installed | removed; volumes kept (R1, section 3 "Off") |
+| State | Recorded | cloudflared | S's ingress barrier | S's containers |
+|---|---|---|---|---|
+| **A · running** | nothing | running | absent | up |
+| **B · switched off** | S's switch | running | present: Traefik answers 404 for every host S declares or routes | stopped, or up behind the barrier after a restore |
+| **C · global stop** | the global stop | stopped | absent | up, reachable on loopback only |
+| **D · global stop + switched off** | both | stopped | present | as in B |
+| **E · disabled in the catalog** | the applied catalog says `enabled: false`; a marker may remain from B or D | as the PC: running, or stopped under the global stop | absent, or S's barrier while its marker remains: either way every host S declares or routes answers 404 | removed; volumes kept (R1, section 3 "Off") |
 
 **E takes precedence over A–D.** "Applied" means the live edge checkout, which only `hal update` fast-forwards: a merged `enabled: false` changes nothing until `hal apply` runs, and from then on S is in E whatever its marker says. A marker that remains keeps a re-enabled S closed; see "How the states are held". The global stop still governs cloudflared for the PC; E does not touch it.
 
@@ -702,24 +655,21 @@ A cell names what changes; everything it does not name stays as it is. "→ B" m
 
 | Command | A · running | B · switched off | C · global stop | D · global stop + switched off | E · disabled in the catalog |
 |---|---|---|---|---|---|
-| `hal apply`, local part (alone: `--local`) | allowed: applies S's changed entry; when the catalog now says `enabled: false`, → E (steps: section 3, "Off") | allowed: never starts S; the plan says "S stays stopped" (a `·` row, "switched off since …" or "barrier stands"). When the catalog now says `enabled: false`, → E: S goes down for good; its marker and barrier stay, so a re-enabled S stays closed until `hal start S` | allowed: as A; cloudflared stays off | allowed: as B; cloudflared stays off | allowed: while the catalog says `enabled: false`, no change. When it says `enabled: true`: → B (→ D under the global stop) while S's marker remains; without a marker → A (steps: section 3, "On"), or → C under the global stop, where the new watcher stays paused |
+| `hal apply`, local part (alone: `--local`) | allowed: applies S's changed entry; when the catalog now says `enabled: false`, → E (steps: section 3, "Off") | allowed: never starts S; the plan says "S stays stopped" (a `·` row, "switched off since …" or "barrier stands"). When the catalog now says `enabled: false`, → E: S goes down for good; its marker and barrier stay, so a re-enabled S stays closed until `hal start S` | allowed: as A; cloudflared stays off | allowed: as B; cloudflared stays off | allowed: while the catalog says `enabled: false`, no change. When it says `enabled: true`: → B (→ D under the global stop) while S's marker remains; without a marker → A (steps: section 3, "On"), or → C under the global stop |
 | the publish phase of `hal apply` | allowed: writes DNS, Access, tunnel lines and GitHub settings; refuses a plan with changes, before `yes`, while an enabled host's `ready` path does not answer on its target; then checks each host against its declaration (protected by Access with the declared policy, public, or bypass) and fails on any mismatch or undeclared host ("fails" = the publish phase exits 1, also when the check cannot run; after an interrupt past `tofu apply` the check is skipped and the message names `hal check hosts`) | refused with changes while S declares `ready`: its unit is stopped, so its path does not answer (`hal start S` or `enabled: false` ends that); otherwise as A; S's names stay published and the barrier keeps answering 404 | allowed: as A; only the provider side changes, cloudflared stays off | as B: refused with changes while S declares `ready`; otherwise as C | allowed: as A; it removes S's names (section 3, "Off"), which answer 404 until then |
-| deploy watcher (timer) | runs: deploys the newest green tag that is not skipped (section 5) | paused: does nothing | paused: does nothing | paused: does nothing | none: S has no watcher |
-| `hal rollback S` | allowed: the rollback of section 5, which refuses itself when the live schema does not fit; S stays in A | refused | refused | refused | refused: "S is disabled in the catalog" |
-| `hal restore S --tag T` (operator; `--tag` planned) | refused: "stop it first: `hal stop S`; for a host that bypasses Traefik, `hal offline`" | allowed: the restore of section 5. Containers run behind the barrier; barrier stays, watcher stays paused. S opens at `hal start S` | allowed (the only way for a host that bypasses Traefik): the same; containers run on loopback, cloudflared stays off, watchers stay paused. Opens at `hal online` | allowed: the same; barrier stays, cloudflared stays off, watchers stay paused. Opens only after both `hal start S` and `hal online` | refused, as rollback |
-| `hal restore S --live` (operator; a record with audio is planned, gap 18) | refused: "stop it first: `hal stop S`" | allowed: starts S's Postgres container alone, then under `switch.lock` re-checks the switch (for SQLite also that no container uses its volume) and loads the snapshot in one transaction; S's other containers stay stopped, barrier stays, watcher stays paused. S opens at `hal start S` | refused, as in A | allowed: as B; cloudflared stays off. S opens after `hal start S` and `hal online` | refused, as rollback |
-| `hal stop S` | → B: stops S's containers (`docker compose -p S stop`; volumes stay), renders the barrier, pauses S's watcher, records the switch. Refused for a host that bypasses Traefik: "`<host>` bypasses Traefik; migrate it first (gap 35). Until then use `hal offline`." | no change | → D: as A → B; cloudflared stays off | no change | no change: nothing runs |
-| `hal offline` | → C: stops cloudflared, pauses S's watcher, records the global stop; containers keep running | → D: the same; S's switch, barrier and containers stay | no change | no change | S stays in E; the global stop is recorded for the PC |
-| `hal start S` (operator) | no change | → A: clears the switch, removes the barrier, starts the containers when stopped, resumes S's watcher. Exception: for Keycloak and LiteLLM, when its start would create the app or the database over an existing database volume, it starts nothing and only clears the switch and the barrier; the unit then starts at `hal apply`, after a snapshot | no change | → C: clears the switch, removes the barrier, starts the containers on loopback. Exception: for Keycloak and LiteLLM, when its start would create the app or the database over an existing database volume, it starts nothing and only clears the switch and the barrier; the unit then starts on loopback at `hal apply`, after a snapshot. The watcher stays paused and cloudflared stays off until `hal online` | refused: "S is disabled in the catalog; enable it by PR and `hal apply`" |
-| `hal online` (operator) | no change | no change: S's switch stays | → A: repeats the host check of the publish phase and refuses on any failure; then starts cloudflared (asks the operator's password); then resumes S's watcher | → B: the same check and the same cloudflared start; S's watcher stays paused, so S stays closed: barrier, paused watcher, containers as they are | S stays in E; the global stop ends for the PC |
-| `hal unskip S T` (operator) | allowed: removes T from S's skip list; the watcher may pick T at its next tick | allowed: the same; the watcher stays paused | allowed: the same; the watcher stays paused | allowed: the same; the watcher stays paused | allowed: the same; it matters once S is enabled again |
+| `hal rollback S` | allowed (planned): one tag back, refused when the live schema does not fit; S stays in A | refused | refused | refused | refused: "S is disabled in the catalog" |
+| `hal restore S --tag T` (operator; `--tag` planned) | refused: "stop it first: `hal stop S`; for a host that bypasses Traefik, `hal offline`" | allowed: the restore to a tag. Containers run behind the barrier; barrier stays. S opens at `hal start S` | allowed (the only way for a host that bypasses Traefik): the same; containers run on loopback, cloudflared stays off. Opens at `hal online` | allowed: the same; barrier stays, cloudflared stays off. Opens only after both `hal start S` and `hal online` | refused, as rollback |
+| `hal restore S --live` (operator; a record with audio is planned, gap 18) | refused: "stop it first: `hal stop S`" | allowed: starts S's Postgres container alone, then under `switch.lock` re-checks the switch (for SQLite also that no container uses its volume) and loads the snapshot in one transaction; S's other containers stay stopped, barrier stays. S opens at `hal start S` | refused, as in A | allowed: as B; cloudflared stays off. S opens after `hal start S` and `hal online` | refused, as rollback |
+| `hal stop S` | → B: stops S's containers (`docker compose -p S stop`; volumes stay), renders the barrier, records the switch. Refused for a host that bypasses Traefik: "`<host>` bypasses Traefik; migrate it first (gap 35). Until then use `hal offline`." | no change | → D: as A → B; cloudflared stays off | no change | no change: nothing runs |
+| `hal offline` | → C: stops cloudflared, records the global stop; containers keep running | → D: the same; S's switch, barrier and containers stay | no change | no change | S stays in E; the global stop is recorded for the PC |
+| `hal start S` (operator) | no change | → A: clears the switch, removes the barrier, starts the containers when stopped. Exception: for Keycloak and LiteLLM, when its start would create the app or the database over an existing database volume, it starts nothing and only clears the switch and the barrier; the unit then starts at `hal apply`, after a snapshot | no change | → C: clears the switch, removes the barrier, starts the containers on loopback. Exception: for Keycloak and LiteLLM, when its start would create the app or the database over an existing database volume, it starts nothing and only clears the switch and the barrier; the unit then starts on loopback at `hal apply`, after a snapshot. cloudflared stays off until `hal online` | refused: "S is disabled in the catalog; enable it by PR and `hal apply`" |
+| `hal online` (operator) | no change | no change: S's switch stays | → A: repeats the host check of the publish phase and refuses on any failure; then starts cloudflared (asks the operator's password) | → B: the same check and the same cloudflared start; S stays closed: barrier and containers as they are | S stays in E; the global stop ends for the PC |
 | `hal secrets --rotate <name>` (operator; `--rotate` planned) | allowed: stores the new value, restarts S if S reads it | allowed: stores the value; restarts S only if its containers run after a restore, else they read it at their next start | allowed: as A; never starts cloudflared, even when it reads the secret | allowed: as B; cloudflared stays off | allowed: stores the value; nothing restarts |
 | `hal check`, the planned `hal status` | allowed, read-only | allowed, read-only | allowed, read-only | allowed, read-only | allowed, read-only |
-| boot | Docker restarts S (`restart: unless-stopped`), cloudflared starts, the watcher runs | Docker does not restart S, because it was stopped explicitly; barrier and paused watcher stay | cloudflared's drop-in keeps it stopped; S restarts on loopback; its watcher stays paused | both: S stopped, cloudflared off | nothing of S starts |
+| boot | Docker restarts S (`restart: unless-stopped`), cloudflared starts | Docker does not restart S, because it was stopped explicitly; the barrier stays | cloudflared's drop-in keeps it stopped; S restarts on loopback | both: S stopped, cloudflared off | nothing of S starts |
 
 **How the planned state check of `hal check` proves the table.** It places every service in its column (E when the applied catalog says `enabled: false`, otherwise A–D from the markers) and checks that column's facts against reality:
 - S's barrier file present, and a request to Traefik on 8081 with the `Host` of any host S declares or routes answers 404 from the deny service (B, D); no barrier file (A, C; E without a marker);
-- S's watcher timer active (A), paused (B, C, D) or not installed (E);
 - cloudflared active when no global stop is recorded (A, B, E), inactive when it is (C, D, E);
 - S's containers up (A, C), stopped unless a restore started them (B, D), or absent (E).
 
@@ -729,7 +679,7 @@ Each mismatch is a red finding, for example a recorded switch without its barrie
 - **The markers (P7, [edge#50](https://github.com/overnightworks/edge/issues/50)).** One persistent marker per service and one global marker under `~/.local/state/edge/` record every switch and the global stop. They are written **before** anything stops, so the intent exists first. They replace the single state file for switches.
 - **The ingress barrier.** Stopping containers is not enough, because cloudflared keeps running and a redeploy would bring the route back. So `hal stop S` renders a barrier for S directly under `<edge checkout>/dynamic/`, derived from S's marker. It is a flat file, never in a subdirectory, because the pinned Traefik does not watch subdirectories. It is generated and git-ignored, written atomically, and the deny route is verified before success is reported. The `./dynamic` directory is the one `compose.yaml` mounts as `/dynamic` and `traefik.yml` watches. The file holds a top-priority router for each host S declares in `fleet.yaml`, enabled or not (the apex included, as the router `switch-S-_apex`), and for each `edge.name` and `edge.alias` Traefik routes for S, each answering 404 from a deny service and beating the container's label router. A wildcard (`*`) line has no router of its own: the `edge.name` and `edge.alias` of the services it reaches stand for it. It covers only hostnames routed through Traefik; a planned `hal check` finding reports each hostname that bypasses it (gap 35).
 - **The applied record ([edge#85](https://github.com/overnightworks/edge/issues/85), [edge#87](https://github.com/overnightworks/edge/issues/87)).** `~/.local/state/edge/applied.json`, beside the markers, holds for each service edge follows through a file it binds from the checkout the sha256 of each such file, as last fully applied: today `traefik.yml` (traefik), `traefik-mcp.yml` (traefik-mcp) and `agent-service/egress/traefik.yml` (agent-egress). A core service's compose definition (what `compose.yaml` runs without a profile) needs no record: it changed when `docker compose config --hash` differs from its container's `com.docker.compose.config-hash` label, which is Compose's own fact. `hal apply --local` recreates each running core service whose definition or file differs, and the core services that depend on it, socket-proxy before traefik; it empties the recreated services' entries first, observes each running with what it depends on, proves every active barrier after each recreate, and only then writes the entries, with the digests read at plan time, so a recreate that did not finish is planned again even after `traefik.yml` is reverted; a missing, unreadable or malformed record, a missing entry, or an entry naming a file the service does not mount counts as changed, and an entry for a service that binds no file from the checkout is dropped at the next write. A core container found created and never started is edge's unfinished recreate, recreated again, only while the entry of a recreate that took it in is empty: its own, or for socket-proxy, which keeps none, that of traefik, which every live socket-proxy recreate pulls in; one created by hand is a stopped service and is not started. A core service a recreate pulls in that has no live container is named and never started, so it prints no recreated row (scenario R3e). A follower ([edge#89](https://github.com/overnightworks/edge/issues/89)), a profile service binding a file at Traefik's static-config path (today `traefik-mcp` with `traefik-mcp.yml` and `agent-egress` with `agent-service/egress/traefik.yml`, started by the unit `agent-service`), follows its file and definition the same way after the core: while its unit is enabled and not switched off it alone is recreated, under the switch lock, and recorded once observed running, or recorded at the switch-on that starts it; while its unit is off or switched off it is named and nothing starts; a live service of a unit not planned off whose container runs another image than its resolved `image` names is named after the unit lines and never swapped, so its upgrade stays the operator's ([edge#91](https://github.com/overnightworks/edge/issues/91)), except for two kinds. The app or database service of a unit whose service reads its own database (Keycloak, LiteLLM; their fronts and step-ca keep the rule) is recreated onto its pinned image in the same pass, its plan line ending `snapshot first`: before the unit's first recreate `hal backup <unit> --pre-apply` takes a snapshot and `hal restore --test <unit> --snapshot <id>` proves it (`src/hal/stack/pre_apply.py`, the realm step's owner too); a failure leaves the old container running and ends the run partial, and a recreate that fails after it names the snapshot and `hal restore <unit> --live` (overnightworks/hal#995). A switch-on of such a unit that would create its app or database service over an existing database volume starts the database alone, takes and proves the same snapshot, and only then starts the rest; its plan line ends `snapshot first` too, and a snapshot that fails starts nothing more (overnightworks/hal#1006). `hal start` creates nothing in that case and ends the switch (section 8). The other is the built service of a unit with `run.build` (`agent-service`): whatever state its container is in, it is recreated alone after the followers when its `ps` image differs from the reference, its definition-hash label from `config --hash`, or its image-id label from the id its tag has now, one plan line that names every reason and ends with the end of its in-flight requests, covered by the same `yes` ([edge#482](https://github.com/overnightworks/edge/issues/482)). Any other live service of a unit that is enabled and not switched off or switching on, whose container's definition-hash label differs from `docker compose config --hash` (a container without the label cannot be planned), is recreated alone with `--no-deps` under the switch lock after the followers and before the unit switches, one plan line each and one `yes`; its image is never swapped (but for the two kinds above) and its volumes are kept ([edge#376](https://github.com/overnightworks/edge/issues/376)); `hal start` and a switch-on keep `--no-recreate` ([edge#75](https://github.com/overnightworks/edge/issues/75)).
-- **Every start path honours the markers:** `hal apply`, `hal start`, the setup commands (`keycloak/go-live`'s plain `up -d` included) and later watchers. `hal apply` never clears a marker; only the operator's `hal start S` clears S's marker.
+- **Every start path honours the markers:** `hal apply`, `hal start` and the setup commands (`keycloak/go-live`'s plain `up -d` included). `hal apply` never clears a marker; only the operator's `hal start S` clears S's marker.
 - **The global stop** writes its marker first, then stops cloudflared. The cloudflared drop-in (see Reboots) keeps the tunnel down at boot; after a reboot the tunnel reopens only once the barriers are verified.
 - **Honest results (P15, [edge#50](https://github.com/overnightworks/edge/issues/50)).** A partial failure is reported as partial, never as "applied"; a closed state is reported only after it was observed; a second `hal apply` with nothing changed changes nothing.
 - **Reboots.** The boot row rests on three pieces: `restart: unless-stopped` on every long-running service (section 3's catalog check flags any other policy); Docker's rule that an explicitly stopped container stays stopped (a switched-off unit is stopped that way, #60 rule 7; no boot service exists); and the cloudflared drop-in from `hal setup`, which tests the global marker (`ConditionPathExists=!<marker>`).
@@ -737,7 +687,7 @@ Each mismatch is a red finding, for example a recorded switch without its barrie
 Example: `hal stop hopin` at 22:10 records the switch, and `hal check` no longer reports hopin's stopped containers as a failure; the switch stays recorded until `hal start`.
 
 **Who owns what.**
-- **edge** owns everything that serves or guards a service: the tunnel, Traefik, Keycloak, the services, the deploy watchers, backup, monitoring.
+- **edge** owns everything that serves or guards a service: the tunnel, Traefik, Keycloak, the services, backup, monitoring.
 - **home-tools** owns the PC, the agent user and the secrets.
 - **aco** owns agent sessions.
 
@@ -750,9 +700,8 @@ Each command exists in exactly one tool; every `hal` verb here that `hal --help`
 | `hal offline` | edge | the global stop: takes the whole PC off the internet; Tailscale stays up for diagnosis | `hal online` | **yes**, pre-approved and reversible. `hal setup` installs one polkit rule: it allows the verb **stop** on `cloudflared.service`, and nothing else, without a password; `start` is not covered. edge's `tunnel/` owns its content: `cloudflared.service`, its drop-ins `20-nonroot.conf` and `30-edge-global-stop.conf` (the boot skip while the global marker exists) and `polkit/10-edge-cloudflared-stop.rules`, with `@HOME@`, `@OPERATOR_USER@` and `@TUNNEL_ID@` for `hal setup` to fill |
 | `hal apply` | edge | brings the catalog live: the local part, then the publish phase (section 3) | — (set the entry back and apply again) | **no**: it brings things live, and only the operator does (D12) |
 | `hal start <service>` / `hal online` | edge | ends a switch or the global stop | — | **no**: opening a door after an incident is the operator's call (D12) |
-| `hal restore <service> --tag <tag>` (`--tag` planned) | edge | **operator-only recovery:** the restore of section 5 | — | **no**: a data restore (D12) |
-| `hal rollback <service>` | edge | the rollback of section 5: one tag back, when the schema allows | the next tag | yes, within its state-table cell |
-| `hal unskip <service> <tag>` | edge | removes one tag from the service's skip list (section 5) | `hal rollback` / `hal restore --tag` (planned) | **no**: it re-admits a release known to be bad (D12) |
+| `hal restore <service> --tag <tag>` (`--tag` planned) | edge | **operator-only recovery:** the restore to a tag | — | **no**: a data restore (D12) |
+| `hal rollback <service>` | edge | one tag back, when the schema allows | the next tag | yes, within its state-table cell |
 | `hal lock <user>` | edge | in Keycloak: sets the user `enabled=false`, then ends all their sessions (`POST /admin/realms/hallucinai/users/{id}/logout`). Then it asks each app in the user's groups for evidence and prints per app: `ended`, `still active` (red) or `unverified` (the app cannot answer). It never says "locked everywhere" unless every app says `ended`. It asks for the operator's own admin login **with TOTP** on every call | `hal unlock <user>` | **no** (rights). **Not enforced today:** the stored `config-cli` secret is master admin without TOTP, readable by every agent (D14) |
 | `hal lock --everyone` | edge | ends every session in the `hallucinai` realm (`logout-all`); accounts stay enabled; the same per-app evidence | — (people sign in again) | **no** (rights) |
 | `hal secrets --emergency` | home-tools (ruled: home-tools#10 line 16) | the revoke guide: per entry it opens the revoke or sign-out page (GitHub tokens and sessions, SonarCloud, Cloudflare tokens and Access sessions, Telegram BotFather, Google), says what to click, and is checked off with Enter. It never claims a revocation happened | — | **no** (key rotation and revocation are the operator's own) |
@@ -760,7 +709,7 @@ Each command exists in exactly one tool; every `hal` verb here that `hal --help`
 
 **No `hal revoke`:** revoking is about secrets, so it lives once, in the planned `hal secrets --emergency`. The planned `hal status` prints "secrets: run `hal secrets --emergency`" as a hint, nothing more.
 
-**One tool name per owner.** `edge` gets subcommands, the way `home` did: `edge check` (today `edge-check`), `edge external` (E3's separate external script, not built yet), `edge apply`, `edge release`, `edge status`, `edge stop/start`, `edge restore`, `edge rollback`, `edge unskip`, `edge lock`, `edge people`. One command to remember (D11).
+**One tool name per owner.** `edge` gets subcommands, the way `home` did: `edge check` (today `edge-check`), `edge external` (E3's separate external script, not built yet), `edge apply`, `edge release`, `edge status`, `edge stop/start`, `edge restore`, `edge rollback`, `edge lock`, `edge people`. One command to remember (D11).
 
 ### LOOK and Grafana: two pages, two questions (ruled 16.10.2026)
 
@@ -949,7 +898,7 @@ Health: `run.health` (section 3).
 - backup and the restore test: section 2, L5, and `backup/apps.toml`;
 - health: `run.health` in the catalog (section 3);
 - secrets: section 2, L1, and section 4, owned by home-tools;
-- deploy and schema: section 5;
+- deploy: section 5;
 - names: `docs/naming.md`.
 
 ### The swap table: the real cost of swapping each component
@@ -966,7 +915,7 @@ Health: `run.health` (section 3).
 | step-ca | one trusted root file | edge |
 | Prometheus, Grafana, Gatus, ntfy | `/metrics`, stdout | edge (edge#4) |
 | restic | per-app dumps | edge |
-| Docker Compose | OCI and compose | low for apps; high for edge (apply, check, backup labels, barrier, watchers and the Traefik provider all speak Compose). |
+| Docker Compose | OCI and compose | low for apps; high for edge (apply, check, backup labels, barrier and the Traefik provider all speak Compose). |
 | `~/.secrets` | files | home-tools (L1). Apps stay unchanged only once gap 21 (section 7) has moved their secrets to files |
 | GitHub | git | not a swap goal (accepted) |
 
