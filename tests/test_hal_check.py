@@ -9,6 +9,7 @@ import shutil
 import signal
 import subprocess
 import sys
+from collections.abc import Collection
 from pathlib import Path
 
 import pytest
@@ -283,12 +284,14 @@ class FakeCloudflare:
     def __init__(self, outcome) -> None:
         self.outcome = outcome
         self.tunnels_asked: list[cloudflare_read.OwnTunnel] = []
+        self.tunnel_names_asked: list[set[str]] = []
 
     def __call__(self, _token: str, tunnel: cloudflare_read.OwnTunnel) -> FakeCloudflare:
         self.tunnels_asked.append(tunnel)
         return self
 
-    def read(self, _zone: str):
+    def read(self, _zone: str, tunnel_names: Collection[str]):
+        self.tunnel_names_asked.append(set(tunnel_names))
         if isinstance(self.outcome, BaseException):
             raise self.outcome
         if callable(self.outcome):
@@ -381,6 +384,45 @@ def test_findings_exit_1_and_never_print_the_token_in_text(run_hosts):
     assert (exit_code, err) == (1, "")
     assert out.splitlines()[0].startswith("record-wrong example.test: ")
     assert SENTINEL not in out
+
+
+MOVED_HOSTS = (
+    DECLARED_HOSTS
+    + """\
+  moved:
+    hosts:
+      - {name: there, exposure: public, reason: moved, tunnel: platform}
+      - {name: back, exposure: public, reason: moved, tunnel: platform}
+      - {name: own, exposure: public, reason: not moved}
+"""
+)
+
+
+def record_to(name: str, target: str) -> cloudflare_read.Record:
+    return cloudflare_read.Record(name, "CNAME", target, True)
+
+
+def test_each_record_is_held_to_the_tunnel_its_host_names_which_is_looked_up_once(run_hosts):
+    """A moved host on its tunnel is clean; one on hal's, or an own host on the other, is wrong."""
+    (tofu.PROJECT_ROOT / "fleet.yaml").write_text(MOVED_HOSTS)
+    other = "platform-id.cfargotunnel.com"
+    records = (
+        record_to("example.test", ZONE_TARGET),
+        record_to("there.example.test", other),
+        record_to("back.example.test", ZONE_TARGET),
+        record_to("own.example.test", other),
+    )
+    reads = cloudflare_read.Snapshot("t-1", records, (), (), {"platform": "platform-id"})
+    cloudflare = FakeCloudflare(reads)
+
+    exit_code, out, _ = run_hosts("--json", cloudflare=cloudflare)
+
+    assert exit_code == 1
+    assert [(item["problem"], item["subject"]) for item in json.loads(out)["hosts"]] == [
+        ("record-wrong", "back.example.test"),
+        ("record-wrong", "own.example.test"),
+    ]
+    assert cloudflare.tunnel_names_asked == [{"platform"}]
 
 
 def test_findings_in_json_are_one_object_keyed_by_the_area_without_the_token(run_hosts):

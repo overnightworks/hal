@@ -44,6 +44,7 @@ def as_expectation(found: tuple[catalog.Host, ...]) -> dict:
             "ready": one.ready,
             "target": one.target,
             "deny_public": list(one.deny_public),
+            "tunnel": one.tunnel,
         }
         for one in found
     }
@@ -177,6 +178,40 @@ def test_a_target_is_loopback_http_and_only_gap_35_hosts_may_leave_traefik(
         assert found.target == target
     else:
         assert refusal(catalog_document).startswith(f"services.{service}.hosts[0].target:")
+
+
+def test_a_host_names_the_tunnel_that_serves_it_and_without_the_key_hals_own_serves_it():
+    moved, own = catalog.hosts(document(hosted(host("app", tunnel="platform"), host("www"))))
+    assert (moved.tunnel, own.tunnel) == ("platform", None)
+
+
+@pytest.mark.parametrize(
+    ("listed", "message"),
+    [
+        pytest.param(
+            host("app", tunnel="platform", target=catalog.DEFAULT_TARGET),
+            f"services.app.hosts[0].tunnel: app.{ZONE} takes no target on another tunnel",
+            id="with-target",
+        ),
+        pytest.param(
+            {"name": "*", "exposure": "protected", "tunnel": "platform"},
+            f"services.app.hosts[0].tunnel: the wildcard *.{ZONE} stays on hal's tunnel",
+            id="on-the-wildcard",
+        ),
+    ],
+)
+def test_a_tunnel_beside_a_target_or_on_the_wildcard_is_refused_naming_the_host(listed, message):
+    assert refusal(document(hosted(listed))) == message
+    assert refusal(document(hosted(listed, run={"enabled": False}))) == message
+
+
+@pytest.mark.parametrize(
+    "name", ["Platform", "", "-platform", "platform-", "plat.form", "a b", "a" * 64, 3, None]
+)
+def test_a_tunnel_name_outside_the_closed_pattern_is_refused(name):
+    assert refusal(document(hosted(host(tunnel=name)))).startswith(
+        "services.app.hosts[0].tunnel: must be one lowercase"
+    )
 
 
 @pytest.mark.parametrize(
@@ -526,9 +561,10 @@ def test_the_apex_serves_publicly_only_its_legal_pages_and_the_files_prefix():
     }
 
 
-def test_b6_an_app_host_without_ready_is_refused_and_with_ready_is_read():
+@pytest.mark.parametrize("tunnel", [{}, {"tunnel": "platform"}], ids=["own", "other-tunnel"])
+def test_b6_an_app_host_without_ready_is_refused_and_with_ready_is_read(tunnel):
     app = {"repo": {"default_branch": "master"}, "run": {"enabled": True}}
-    unready = document(hosted(host("app"), key="app", **app))
+    unready = document(hosted(host("app", **tunnel), key="app", **app))
 
     assert (
         refusal(unready)
@@ -545,6 +581,19 @@ def test_an_app_knows_the_names_of_its_hosts():
     [found] = catalog.apps(entry, {}, "edge")
 
     assert found.hosts == ("app", "www")
+
+
+def test_an_app_keeps_every_host_and_knows_which_another_tunnel_serves():
+    app = {"repo": {"default_branch": "master"}, "run": {"enabled": True}}
+    moved = host("app", ready="/h", tunnel="platform")
+    entry = document(hosted(moved, host("www", ready="/h"), key="app", **app))
+
+    [found] = catalog.apps(entry, {}, "edge")
+
+    assert found.hosts == ("app", "www")
+    assert [(one.fqdn, one.tunnel) for one in found.served_elsewhere] == [
+        (f"app.{ZONE}", "platform")
+    ]
 
 
 def test_an_app_host_without_ready_is_refused_when_the_apps_are_read():

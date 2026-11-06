@@ -1,0 +1,20 @@
+{
+  "hopin.edge-fixture.invalid": {
+    "service": "hopin",
+    "exposure": "bypass",
+    "reason": "own login",
+    "ready": "/health",
+    "target": "http://127.0.0.1:8081",
+    "deny_public": [],
+    "tunnel": "platform"
+  },
+  "www.edge-fixture.invalid": {
+    "service": "hopin",
+    "exposure": "public",
+    "reason": "the alias",
+    "ready": null,
+    "target": "http://127.0.0.1:8081",
+    "deny_public": [],
+    "tunnel": null
+  }
+}

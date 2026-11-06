@@ -125,6 +125,21 @@ def test_stop_of_a_unit_behind_traefik_says_the_barrier_is_up(hal, fakes):  # no
     assert result.err == ""
 
 
+def test_stop_of_a_unit_names_each_host_another_tunnel_still_serves(hal, fakes):  # noqa: F811
+    probe_running(fakes)
+    moved = "{name: probe, exposure: public, reason: elsewhere, tunnel: platform}"
+    hosts = f"    hosts: [{moved}, {{name: own, exposure: public, reason: here}}]\n"
+    write_fleet(fakes.repository, f"cloudflare: {{zone: {ZONE}}}\n{PROBE_ENABLED}{hosts}")
+
+    result = hal("stop", "probe")
+
+    assert result.exit_code == ExitCode.OK
+    assert squeezed(result.out) == (
+        "✓ probe switched off barrier up · stopped · volumes kept"
+        f" · probe.{ZONE} stays served by tunnel platform"
+    )
+
+
 def test_stop_of_a_switched_off_unit_says_since_when_and_changes_nothing(hal, fakes):  # noqa: F811
     fakes.unit_in("B")
 

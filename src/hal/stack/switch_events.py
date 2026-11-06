@@ -6,13 +6,14 @@ row and the error pair. The glyph follows from the event alone, so a partial sta
 built with a `✓`.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Self
 
 from hal.output import Glyph, Row, write_error, write_row
 from hal.output.command import Verb, command
-from hal.stack import switches
+from hal.stack import catalog, switches
 
 COMMAND = command(Verb.STOP)
 NOTHING_CHANGED = "nothing changed"
@@ -125,13 +126,17 @@ def _write(key: str, event: SwitchEvent, fact: str) -> None:
     write_row(Row(_GLYPH_OF_EVENT[event], key, event, fact))
 
 
-def report_closing(key: str, closing: Closing) -> None:
+def report_closing(key: str, closing: Closing, served_elsewhere: Sequence[catalog.Host]) -> None:
+    """The barrier stands on hal's Traefik only, so the row names each host another tunnel still
+    serves."""
+    still_served = [
+        f"{host.fqdn} stays served by tunnel {host.tunnel}" for host in served_elsewhere
+    ]
     if closing.complete:
-        _write(
-            key, SwitchEvent.SWITCHED_OFF, f"{closing.barrier} · {StopPart.STOPPED} · volumes kept"
-        )
+        parts = [f"{closing.barrier}", StopPart.STOPPED, "volumes kept", *still_served]
+        _write(key, SwitchEvent.SWITCHED_OFF, " · ".join(parts))
         return
-    _write(key, SwitchEvent.PARTIAL, closing.what_holds)
+    _write(key, SwitchEvent.PARTIAL, " · ".join([closing.what_holds, *still_served]))
     cause = "; ".join(closing.causes)
     write_error(f"{key} is only partly off · {cause}", f"{COMMAND} {key}")
 

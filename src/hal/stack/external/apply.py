@@ -329,10 +329,11 @@ def _unanswered(
     hosts: Sequence[catalog.Host], prober_for: Callable[[str], host_probe.Prober]
 ) -> list[str]:
     """One line for each host with a `ready` path whose target does not answer it with a 2xx; every
-    host is asked, and no answer body is quoted."""
+    host is asked, and no answer body is quoted. A host another tunnel serves is not asked: its
+    readiness belongs to that tunnel's owner."""
     lines = []
     for host in hosts:
-        if host.ready is None:
+        if host.ready is None or host.tunnel is not None:
             continue
         answer = prober_for(host.target).ask(host.fqdn, host.ready)
         if isinstance(answer, host_probe.Unreachable):

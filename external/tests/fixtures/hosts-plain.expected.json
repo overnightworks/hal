@@ -5,7 +5,8 @@
     "reason": "own login",
     "ready": null,
     "target": "http://127.0.0.1:8081",
-    "deny_public": []
+    "deny_public": [],
+    "tunnel": null
   },
   "www.edge-fixture.invalid": {
     "service": "songmaker",
@@ -13,6 +14,7 @@
     "reason": "the apex's alias",
     "ready": null,
     "target": "http://127.0.0.1:8081",
-    "deny_public": []
+    "deny_public": [],
+    "tunnel": null
   }
 }

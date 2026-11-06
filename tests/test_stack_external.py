@@ -1883,14 +1883,14 @@ services:
     hosts:
       - {{name: auth, exposure: public, reason: sign in, ready: {READY_PATH}}}
 """
-TWO_READY_CATALOG = (
-    READY_CATALOG
-    + """\
+TWO_READY_CATALOG = f"""{READY_CATALOG}\
   docs:
     hosts:
-      - {name: docs, exposure: public, reason: the docs, ready: /ready}
+      - {{name: docs, exposure: public, reason: the docs, ready: /ready}}
+  moved:
+    hosts:
+      - {{name: moved, exposure: public, reason: elsewhere, ready: /health, tunnel: platform}}
 """
-)
 DISABLED_READY_CATALOG = """\
 cloudflare: {zone: example.test}
 services:
@@ -2009,7 +2009,7 @@ def test_only_the_host_that_does_not_answer_is_named_and_the_whole_plan_is_refus
 def test_every_ready_host_is_asked_and_every_one_that_fails_is_named_once_in_one_refusal(
     home, fake_tofu, apply_in_process, confirmations, capsys
 ):
-    """R17."""
+    """R17; the host on another tunnel is its tunnel owner's to prove, so it is not asked."""
     fake_tofu.configure(**CHANGING_PLAN)
     reader = FakeReader(CLEAN_SNAPSHOT)
     prober = RecordingReadyProber({AUTH: NOT_OK, DOCS: REFUSED})

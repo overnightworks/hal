@@ -114,7 +114,7 @@ def check_hosts(document: Any, cloudflare: CloudflareRead, prober: host_probe.Pr
     """Read the account once, ask the declared hosts once each, and compare with the catalog."""
     zone = catalog.zone(document)
     hosts = catalog.hosts(document)
-    snapshot = cloudflare.read(zone)
+    snapshot = cloudflare.read(zone, {host.tunnel for host in hosts if host.tunnel is not None})
     answers = {name: prober.ask(name) for name in names_to_probe(hosts, snapshot)}
     return compare(zone, hosts, snapshot, answers, catalog.redirected_fqdns(document))
 
@@ -148,10 +148,14 @@ def compare(
     redirected: frozenset[str] = frozenset(),
 ) -> HostCheck:
     declared = {host.fqdn: host for host in hosts}
+    # A record's tunnel is its host's; a redirect-only name has no host and keeps hal's.
+    record_tunnels = {host.fqdn: host.tunnel for host in hosts} | dict.fromkeys(
+        sorted(redirected - declared.keys())
+    )
     findings = [
         finding
-        for fqdn in [host.fqdn for host in hosts] + sorted(redirected - declared.keys())
-        for finding in _record_findings(fqdn, snapshot)
+        for fqdn, tunnel in record_tunnels.items()
+        for finding in _record_findings(fqdn, snapshot.tunnel_id_of(tunnel), snapshot)
     ]
     hosts_without_record = {f.subject for f in findings if f.problem is Problem.RECORD_MISSING}
     findings += _undeclared_records(declared.keys() | redirected, snapshot.records)
@@ -180,11 +184,11 @@ def compare(
     return HostCheck(tuple(ordered), len(hosts), access_unused)
 
 
-def _record_findings(fqdn: str, snapshot: Snapshot) -> list[Finding]:
+def _record_findings(fqdn: str, tunnel_id: str, snapshot: Snapshot) -> list[Finding]:
     records = [record for record in _address_records(snapshot.records) if record.name == fqdn]
     if not records:
         return [Finding(Problem.RECORD_MISSING, fqdn, "no A, AAAA or CNAME record")]
-    target = f"{snapshot.tunnel_id}{TUNNEL_TARGET_SUFFIX}"
+    target = f"{tunnel_id}{TUNNEL_TARGET_SUFFIX}"
     if len(records) == 1 and _is_proxied_cname_to(records[0], target):
         return []
     held = ", ".join(_describe_record(record) for record in sorted(records, key=_describe_record))

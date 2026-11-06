@@ -12,7 +12,7 @@ marker cleared. A start that would create Keycloak or LiteLLM over its data only
 """
 
 import os
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from contextlib import ExitStack
 from dataclasses import dataclass, replace
 from datetime import datetime
@@ -97,8 +97,7 @@ class Target:
     """What a stop switches off: a unit of the compose project, or an app, which is one of its
     own."""
 
-    key: str
-    enabled: bool
+    subject: catalog.Unit | catalog.App
     ingress: barrier.Barrier
     running: Callable[[], bool]
     stop: Callable[[], None]
@@ -119,16 +118,14 @@ def _target_of(
     if isinstance(subject, catalog.App):
         project = _project_of(subject, runtime)
         return Target(
-            subject.key,
-            subject.enabled,
+            subject,
             barrier.Barrier.of_app(fleet.config, repository, subject, verifier),
             lambda: any(compose.is_live(one.state) for one in project.containers()),
             project.stop,
         )
     key, services = subject.key, fleet.profile_services[subject.key]
     return Target(
-        key,
-        subject.enabled,
+        subject,
         barrier.Barrier.of_unit(fleet.config, services, repository, subject, verifier),
         lambda: compose.has_running_container(engine.states(), services),
         lambda: engine.stop(key, services),
@@ -158,7 +155,7 @@ def stop_unit(
         switch_events.report_cannot_plan(key, planned, recorded)
         return ApplyExit.CANNOT_PLAN
     target, running = planned
-    if not running and not target.enabled:
+    if not running and not target.subject.enabled:
         switch_events.report_disabled(key)
         return ApplyExit.APPLIED_OR_NOTHING
     try:
@@ -167,6 +164,7 @@ def stop_unit(
         return _report_close(
             key,
             Closing(record_failure=_recorded(marks, key, now), interruption=Interruption.WAITING),
+            target.subject.served_elsewhere,
         )
     if off:
         since, repaired = off
@@ -231,7 +229,7 @@ def _report_early_interrupt(
     if mark is None:
         switch_events.report_interrupted_early(key, step)
         return ApplyExit.REFUSED
-    return _report_close(key, Closing(interruption=step))
+    return _report_close(key, Closing(interruption=step), ())
 
 
 def _confirmed_off(
@@ -248,7 +246,7 @@ def _confirmed_off(
     None when it is not switched off, or when anything stops us from being sure: then the
     stop closes it, and reports the record itself.
     """
-    key = target.key
+    key = target.subject.key
     try:
         if marks.since(key) is None:
             return None  # nothing is recorded yet: the stop records first, then waits for the lock
@@ -296,7 +294,7 @@ def _stop_target(target: Target, closing: Closing) -> Closing:
 
 
 def _close(marks: switches.Switches, target: Target, now: datetime) -> int:
-    key = target.key
+    key = target.subject.key
     try:
         closing = Closing(record_failure=_recorded(marks, key, now))
     except KeyboardInterrupt:
@@ -314,11 +312,11 @@ def _close(marks: switches.Switches, target: Target, now: datetime) -> int:
             closing = _close_ingress(target.ingress, closing)
         if closing.interruption is None:
             closing = _stop_target(target, closing)
-    return _report_close(key, closing)
+    return _report_close(key, closing, target.subject.served_elsewhere)
 
 
-def _report_close(key: str, closing: Closing) -> int:
-    switch_events.report_closing(key, closing)
+def _report_close(key: str, closing: Closing, served_elsewhere: Sequence[catalog.Host]) -> int:
+    switch_events.report_closing(key, closing, served_elsewhere)
     return ApplyExit.APPLIED_OR_NOTHING if closing.complete else ApplyExit.REFUSED
 
 
@@ -347,7 +345,7 @@ def start_unit(
     except (compose.ComposeError, switches.SwitchError, barrier.BarrierError) as error:
         _complain(START, f"cannot plan, {error}")
         return ApplyExit.CANNOT_PLAN
-    if not target.enabled:
+    if not target.subject.enabled:
         _complain(
             START,
             f"refused, {key} is disabled in the catalog; enable it by PR and "
@@ -400,7 +398,7 @@ def _start_app(
     """The app's stopped containers started under the lock and waited for outside it, then, under
     it again and only if no stop came in meanwhile, the barrier removed and proven open and the
     marker cleared; a stop that came in wins and stops the containers again, under the lock."""
-    key = target.key
+    key = target.subject.key
     _say(START, f"{key}: start its containers; {_ending(read)}")
     if not confirmed(f"start {key}"):
         _complain(START, ABORTED_UNCHANGED)
@@ -456,7 +454,7 @@ def _end_app_switch(
     unhealthy: str | None,
 ) -> int:
     """Under the lock, with the marker as `start` read it."""
-    key = target.key
+    key = target.subject.key
     if unhealthy:
         _complain(
             START, f"partial, {key} is not healthy after the start ({unhealthy}); its switch stays"
@@ -480,16 +478,16 @@ def _end_app_switch(
 def _stopped_again(target: Target, current: switches.Mark | None) -> int:
     """A stop came in while `start` waited: it wins, and, under the lock, what `start` started is
     stopped again."""
+    key = target.subject.key
     if current is not None:
         try:
             target.stop()
         except compose.ComposeError as error:
             _complain(
-                START,
-                f"partial: {target.key} was switched off again, but could not stop it, {error}",
+                START, f"partial: {key} was switched off again, but could not stop it, {error}"
             )
             return ApplyExit.REFUSED
-    return _refused_before_up(target.key, current)
+    return _refused_before_up(key, current)
 
 
 def _switched_off_again_line(key: str, current: switches.Mark | None) -> str:
