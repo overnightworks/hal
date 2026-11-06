@@ -1,7 +1,0 @@
-claim_id = "5f1f9f1b0371433190aa954a83a1f145"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "bac221a130d02c055c2fff4ba08580d4d3c0c552"
-branch = "claude/issue-1079-verdict-dim"
-scope = ["src/hal/output/__init__.py", "tests/test_hal_output.py"]
-opened_commit = "b0a2df7d960e9f4f73a0765d7d6018775ebd2a2f"
