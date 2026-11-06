@@ -59,7 +59,7 @@ flowchart TB
             KC["Keycloak + its database<br/>auth.hallucinai.de: the login page"]
             CA["step-ca :9000, internal network mcp-ca<br/>internal CA for the MCP origins, *.mcp.internal"]
             TMC["traefik-mcp :443, no host port<br/>the gateway to the MCP origins and to Keycloak's key set, certificates from step-ca"]
-            MCPN["internal networks:<br/>mcp-ca (step-ca, traefik-mcp)<br/>mcp (traefik-mcp, the agent service; isolated)<br/>mcp-backends (traefik-mcp, the MCP servers)<br/>mcp-songmaker (traefik-mcp, songmaker; isolated)<br/>keycloak-keys (Keycloak, traefik-mcp; isolated)<br/>hal_speech_issuer (traefik-mcp, the speech service; isolated)<br/>hal_speech_hopin, hal_speech_presentator (one app and the speech service; isolated)<br/>agent-songmaker, agent-presentator, agent-hopin, egress (the agent service; isolated)<br/>internet, a NAT bridge: agent-egress alone"]
+            MCPN["internal networks:<br/>mcp-ca (step-ca, traefik-mcp)<br/>mcp (traefik-mcp, the agent service; isolated)<br/>mcp-backends (traefik-mcp, the MCP servers)<br/>mcp-songmaker (traefik-mcp, songmaker; isolated)<br/>keycloak-keys (Keycloak, traefik-mcp; isolated)<br/>hal_speech_issuer (traefik-mcp, the speech service; isolated)<br/>hal_speech_hopin, hal_speech_presentator (one app and the speech service; isolated)<br/>agent-songmaker, agent-presentator, agent-hopin (the agent service; isolated)<br/>internet, a NAT bridge: agent-egress alone"]
             BAK["hal backup<br/>restic weekly, restore test monthly<br/>second copy off this disk (D3)"]
             LOOK["Traffic-light page, Gatus<br/>is it OK now?"]
             MON["Prometheus, Grafana, Alertmanager<br/>why, since when? every service"]
@@ -153,7 +153,7 @@ The agent service is an L4 service: the one place that holds the subscription lo
 - The realm carries the callers' identity (#183): the realm role `agent-workload` held only by the service accounts of the songmaker, presentator and hopin clients, whose default scopes add the `agent-service` audience, so an app's workload token has the same `azp` as its people's tokens. Whoever holds such a client secret can get that token, which is why the secret stays the app's own file.
 - The container mounts only one directory bind per provider (its login, read-only except the Codex directory, which the service renews and so binds read-write), its configuration file and two tmpfs mounts: `cli_working_directory_root` and `/tmp` (section 4).
 - Its AppArmor/Bubblewrap policy permits writes only below that root.
-- Its egress is exactly two names, through `agent-egress` ([edge#189](https://github.com/overnightworks/edge/issues/189)): an SNI-allowlisting TLS passthrough to the provider endpoint `api.anthropic.com` and the issuer host for the JWKS fetch. The service sits on internal, isolated networks with no route out, no host address and no DNS forwarding. MCP origins stay internal over `mcp`. The API route of the agent service reaches its provider through LiteLLM (`docs/agent-service.md`, "The API route"); `api.openai.com`, for pictures, is open to LiteLLM alone, through the gateway's `litellm` entrypoint.
+- The service sits on internal, isolated networks with no route out, no host address and no DNS forwarding. MCP origins stay internal over `mcp`. `agent-egress` ([edge#189](https://github.com/overnightworks/edge/issues/189)), the SNI-allowlisting TLS passthrough to the providers, belongs to the unit `litellm`: LiteLLM alone reaches `api.anthropic.com` and `api.openai.com` through its `litellm` entrypoint (`docs/agent-service.md`, "The API route").
 
 ---
 
@@ -262,7 +262,7 @@ enabled. The pages are not files in git: `legal/frame/` holds the markup (one sk
 template per block kind), `legal/sections/<unit>/<page>.html` holds the texts, and `legal/built/` (git-ignored)
 holds the result, which the legal unit serves. The pages take their tokens and fonts from the installed appkit: the appkit step of `hal apply` writes its static files to `appkit-<version>/` (git-ignored; the version is the lock's) in `legal/assets/`, served at `/_rechtliches/appkit-<version>/` whether or not the legal unit is enabled, and in the `resources/` of both Keycloak themes, which Keycloak serves under `/resources/<id>/`. A unit's text is a **section**; the imprint is one whole page
 with no sections. A page's blocks stand as the general part (`allgemein`, edge's own), then the services
-(`agent-service` under `#agent-dienst`, `keycloak` under `#anmeldung`, `speech-runtime` under `#sprachdienst`), then the apps (their catalog key
+(`litellm` under `#agent-dienst`, `keycloak` under `#anmeldung`, `speech-runtime` under `#sprachdienst`), then the apps (their catalog key
 is the anchor), each group sorted by anchor. A section directory with no catalog entry builds no block. Edge's
 services are built while their entry is in the catalog, enabled or not. An app (an entry with `repo`) brings its own text: `legal/datenschutz.html` and,
 optionally, `legal/nutzungsbedingungen.html` of a release, read from `~/srv/<key>/.git` at the release's commit, never

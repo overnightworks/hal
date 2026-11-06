@@ -107,7 +107,7 @@ jobs:
           docker compose --profile litellm config -q
           docker compose --profile litellm config --services | grep -x litellm
           docker compose --profile litellm config --services | grep -x litellm-front
-          docker compose --profile agent-service config --services | grep -x agent-egress
+          docker compose --profile litellm config --services | grep -x agent-egress
           docker compose --profile agent-probe config --services | grep -x agent-probe
           docker compose --profile step-ca config --services | grep -x step-ca
           docker compose --profile step-ca config --services | grep -x traefik-mcp
@@ -127,7 +127,7 @@ jobs:
             --file probe/step-ca/compose.probe.yaml --profile probe --profile step-ca config -q
           PROBE_EGRESS_STATIC=/nonexistent docker compose --file compose.yaml \
             --file probe/agent-service/compose.probe.yaml \
-            --profile agent-service --profile agent-probe config -q
+            --profile litellm config -q
 
       - name: YAML files parse
         run: |

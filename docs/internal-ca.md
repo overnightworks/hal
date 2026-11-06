@@ -2,7 +2,7 @@
 
 Reference for the operator and for an engineer changing the MCP gateway. Three services, two
 switches in `fleet.yaml`: `step-ca` (and with it `traefik-mcp`), and `agent-egress` (with the unit
-`agent-service`). Their commands are `step-ca/init [--check]` and `hal apply`; the probes under
+`litellm`). Their commands are `step-ca/init [--check]` and `hal apply`; the probes under
 `probe/step-ca/` and `probe/agent-service/` hold the proofs. The recreate rules for the followers are in
 [stack.md](stack.md); the platform picture is [architecture.md](architecture.md).
 
@@ -99,6 +99,30 @@ docstring gives the command line). Re-run it for every step-ca or Traefik upgrad
 
 ## agent-egress
 
+A third Traefik, the one way out of LiteLLM: a TLS passthrough that reads the SNI of the
+ClientHello and dials only the text provider's and the picture provider's names on port 443. It holds no key and has no API, ping or metrics. Any other name, or none, matches no router
+and `sniStrict` ends the handshake in the gateway; `agent-service/egress/dynamic/allowed.yml` is the one
+owner of the names. LiteLLM finds the gateway through `extra_hosts` (`compose.yaml`), not through DNS: the networks
+`litellm-backend` and `litellm-egress` are internal and isolated (`gateway_mode_ipv4: isolated`), so a member has no route out, no host address
+and no DNS forwarding. Only `agent-egress` sits on `internet`, a plain NAT bridge. It listens on one TCP
+entrypoint, `litellm` (`172.31.239.10:443` of `litellm-egress`), and every router of `allowed.yml` is bound to it. LiteLLM reaches the front
+and, beyond it, only the providers' names; the front reaches LiteLLM. Like `traefik-mcp` it is a follower: its static file is bound at Traefik's static-config
+path, so `hal apply` recreates it alone while the unit `litellm` is on; no plain
+`docker compose up -d` starts it.
+
+**Proof:** `probe/step-ca/probe.py` starts a throwaway project under a throwaway `HOME` and holds the
+proofs of the CA (init modes and silence, the ACME directory, no root key in the volume, restart and
+partial-state behaviour) and of the gateway (reachable only with the root, 24-hour certificates, plain
+http refused, the network split as ruled, songmaker's route (exactly `/mcp`, no other path or
+name reaches the stand-in), no new host listener, renewal without restart, apply on and off
+keeping both volumes, the emergency switch, setup asked by apply, the follower recreate rules). Its
+compose calls and `step-ca/init` run from a copy of `compose.yaml` whose fixed network and volume names are moved into the
+probe's project, and each checks first that it resolves no other network or volume, so it never touches a live
+one. It takes 13 to 20 minutes and, like every probe stack, runs under `/tmp/probe-stack.lock` with a time cap (its
+docstring gives the command line). Re-run it for every step-ca or Traefik upgrade.
+
+## agent-egress
+
 A third Traefik, the one way out of the agent service: a TLS passthrough that reads the SNI of the
 ClientHello and dials only `api.anthropic.com:443` (the provider CLI), `api.openai.com:443` (LiteLLM's
 pictures) and `auth.hallucinai.de:443` (the JWKS fetch). It holds no key and has no API, ping or metrics. Any other name, or none, matches no router
@@ -119,9 +143,7 @@ reaches LiteLLM. Like `traefik-mcp` it is a follower: its static file is bound a
 path, so `hal apply` recreates it alone while the unit `litellm` is on; no plain
 `docker compose up -d` starts it.
 
-**Proof:** `probe/agent-service/egress.py` (with `--target service` for the real service and a dummy
-login) starts a throwaway project on a free /24 for each gateway network, never a live subnet, drives the cells
-for allowed and refused names, observed through the packet windows of `probe/agent-service/capture.py`
-each with a positive control, and removes everything. `probe/agent-service/litellm_network.py` proves
-the exclusions of the API route on a fake-only stack, each with its control. CI holds the static facts in
+**Proof:** `probe/agent-service/litellm_network.py` starts a throwaway fake-only stack on free /24s, never a live subnet,
+drives the cells for allowed and refused names, observed through the packet windows of `probe/agent-service/capture.py`,
+and proves the exclusions of the API route, each with a positive control, and removes everything. CI holds the static facts in
 `tests/test_agent_egress.py`.
