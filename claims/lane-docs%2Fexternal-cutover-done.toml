@@ -1,7 +1,0 @@
-claim_id = "e6c2340f10a843cd9012e0bc453d0d8b"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "dde80c765b1389c04b21cff8c8783757c6c0cee4"
-branch = "docs/external-cutover-done"
-scope = ["docs/external.md"]
-opened_commit = "67c023453a812780eefe8b4430f2d636f6bae231"
