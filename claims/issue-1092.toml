@@ -1,0 +1,7 @@
+claim_id = "74b77af0a89645718da98dbe20d82be2"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "b6ae0bed475a33459f92ed4b021b018372a34cbd"
+branch = "claude/issue-1092-licence-codeql"
+scope = [".github/workflows/codeql.yml", "LICENSE", "quality/config.toml"]
+opened_commit = "b824b0329ed60d611801c1fcfe5ff4f7f32b77c2"
