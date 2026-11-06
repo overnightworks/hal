@@ -1,0 +1,7 @@
+claim_id = "a231c4caf0b545788194d188f0f98bbc"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "c2f8ccf2383feaf3be0251228aff6e202fd513be"
+branch = "fix/aco-board-noop-keys"
+scope = [".aco/board.toml"]
+opened_commit = "cfb7458b7f8f5b8db2e5cff958b8277b2cbe0eb8"
