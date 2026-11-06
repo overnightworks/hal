@@ -690,7 +690,9 @@ class RetentionProbe(FailureProbe, KeyFiles, PictureCalls):
                 write_line(f"{form} FAILED: {figures}, outside the database {outside}", flush=True)
             else:
                 self.hold(form, figures if sinks else f"{figures}: lands nowhere")
-        expect(not failed, f"T3: {failed}")
+        rows = self.count(f'SELECT count(*) FROM "{TAG_TABLE}"')  # noqa: S608 - the table name is this probe's literal
+        expect(not failed and rows == 0, f"T3: {failed}, {rows} {TAG_TABLE} rows")
+        self.hold("T3 tag table", f"{TAG_TABLE} still empty after the body tag requests")
 
     def tag_rows(self, tags: list[str]) -> int:
         named = ", ".join(f"'{tag}'" for tag in tags)

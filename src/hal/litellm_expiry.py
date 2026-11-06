@@ -1,7 +1,8 @@
-"""What LiteLLM keeps per person or per tool, deleted once it has gone `RETENTION_DAYS` without
-use: the daily person, tool and label rows, the tool rows and the customer rows of idle
-fingerprints. One statement in the one `litellm-db` container of a compose project deletes all of
-it or nothing, and writes no other table. Days are UTC days, as LiteLLM writes them."""
+"""What LiteLLM keeps per person, per tool or per label, deleted once it has gone
+`RETENTION_DAYS` without use: the daily person, tool and label rows, the tool rows and the
+customer rows of idle fingerprints. One statement in the one `litellm-db` container of a compose
+project deletes all of it or nothing, and writes no other table. Days are UTC days, as LiteLLM
+writes them."""
 
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta

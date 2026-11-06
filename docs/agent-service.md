@@ -218,7 +218,7 @@ tool-index row.
 LiteLLM logs no message and redacts the `Messages:` suffix of its exceptions, and neither it nor
 the front configures a callback or cache; LiteLLM's database holds keys, budgets, tool names, each
 person's fingerprint with its counters and the spend log rows above, but no prompt. What the
-database keeps per person or per tool in its other tables goes after 90 days without use
+database keeps per person, per tool or per label in its other tables goes after 90 days without use
 ([The API route](#the-api-route), What expires).
 The retention census (`agent-service/retention_census.py`, driven by
 `probe/agent-service/litellm_retention.py` on the fake-only stack with hopin's key) searches its canaries in every writable mount and every log of

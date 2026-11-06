@@ -24,7 +24,7 @@ class LitellmHost:
 
     containers: list[str] = field(default_factory=lambda: [CONTAINER])
     state: bytes = b"running healthy\n"
-    answer: bytes | int | type[BaseException] | Callable[[], None] = b"0|0|0|0\n"
+    answer: bytes | int | type[BaseException] | Callable[[], None] = b"0|0|0|0|0\n"
     """What psql prints, the exit it ends with, what interrupts it, or what it does first."""
     settings: bytes = b"litellm\nlitellm\n"
     docker_silent: bool = False
@@ -66,7 +66,7 @@ class LitellmHost:
                 raise self.answer()
             case _:
                 self.answer()
-                return b"0|0|0|0\n"
+                return b"0|0|0|0|0\n"
 
 
 class NoExit(host.HostCommandError):
