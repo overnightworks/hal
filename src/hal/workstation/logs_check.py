@@ -37,7 +37,7 @@ class LogReading:
 def _container_findings(run: CommandRunner) -> LogReading:
     identifiers = run(DOCKER_CONTAINER_IDS)
     if identifiers is None:
-        return LogReading([Finding("docker-unreadable", "docker", "`docker ps -a` lässt sich nicht ausführen")], [])
+        return LogReading([Finding("docker-unreadable", "docker", "`docker ps -a` cannot be run")], [])
     findings = []
     inspected = 0
     failed_inspections = []
@@ -49,25 +49,25 @@ def _container_findings(run: CommandRunner) -> LogReading:
         inspected += 1
         name, driver, project = listing.rstrip("\n").split("\t")
         if driver == JSON_FILE_DRIVER:
-            where = f"Projekt {project}" if project else "ohne Compose-Projekt"
-            findings.append(Finding("container-json-file", name.removeprefix("/"), f"Treiber {JSON_FILE_DRIVER}, {where}"))
+            where = f"project {project}" if project else "no Compose project"
+            findings.append(Finding("container-json-file", name.removeprefix("/"), f"driver {JSON_FILE_DRIVER}, {where}"))
     if failed_inspections:
         still_listed = run(DOCKER_CONTAINER_IDS)  # an id that is gone from a second listing was removed; any other failure is unread
         if still_listed is None or set(failed_inspections) & set(still_listed.split()):
-            findings.append(Finding("docker-unreadable", "docker", "`docker inspect` lässt sich nicht ausführen"))
+            findings.append(Finding("docker-unreadable", "docker", "`docker inspect` cannot be run"))
             return LogReading(findings, [])
-    return LogReading(findings, [f"Container: {inspected}, davon {len(findings)} mit {JSON_FILE_DRIVER}"])
+    return LogReading(findings, [f"Containers: {inspected}, {len(findings)} with {JSON_FILE_DRIVER}"])
 
 
 def _default_driver_findings(run: CommandRunner) -> LogReading:
     output = run(DOCKER_DEFAULT_DRIVER)
     if output is None:
-        return LogReading([Finding("docker-unreadable", "docker", "`docker info` lässt sich nicht ausführen")], [])
+        return LogReading([Finding("docker-unreadable", "docker", "`docker info` cannot be run")], [])
     driver = output.strip()
-    status_lines = [f"Docker-Standardtreiber: {driver}"]
+    status_lines = [f"Docker default driver: {driver}"]
     if driver == DOCKER_LOG_DRIVER:
         return LogReading([], status_lines)
-    return LogReading([Finding("docker-default-driver", driver, f"Standardtreiber ist {driver}, erwartet {DOCKER_LOG_DRIVER}")], status_lines)
+    return LogReading([Finding("docker-default-driver", driver, f"default driver is {driver}, expected {DOCKER_LOG_DRIVER}")], status_lines)
 
 
 def _oldest_journal_entry(boots_json: str) -> datetime | None:
@@ -87,14 +87,14 @@ def _oldest_entry_or_none(output: str | None) -> datetime | None:
 def _journal_findings(run: CommandRunner, now: datetime) -> LogReading:
     oldest = _oldest_entry_or_none(run(JOURNAL_BOOTS))
     if oldest is None:
-        return LogReading([Finding("journal-unreadable", "journal", "`journalctl --list-boots` liefert kein lesbares Ergebnis")], [])
+        return LogReading([Finding("journal-unreadable", "journal", "`journalctl --list-boots` gave no readable result")], [])
     findings = []
     if _oldest_entry_or_none(run(SYSTEM_JOURNAL_BOOTS)) is None:
-        findings.append(Finding("journal-unreadable", "journal", "Systemjournal nicht lesbar, nur Teilansicht"))
+        findings.append(Finding("journal-unreadable", "journal", "system journal not readable, partial view only"))
     age = now.astimezone() - oldest
-    status_lines = [f"Journal: ältester Eintrag {oldest:%d.%m.%Y}, {age.days} Tage alt"]
+    status_lines = [f"Journal: oldest entry {oldest:%Y-%m-%d}, {age.days} days old"]
     if age > timedelta(days=LOG_RETENTION_DAYS):
-        detail = f"ältester Eintrag {oldest:%d.%m.%Y}, {age.days} Tage alt, erlaubt {LOG_RETENTION_DAYS}"
+        detail = f"oldest entry {oldest:%Y-%m-%d}, {age.days} days old, allowed {LOG_RETENTION_DAYS}"
         findings.append(Finding("journal-age", "journal", detail))
     return LogReading(findings, status_lines)
 
@@ -106,8 +106,8 @@ def _rsyslog_findings(log_directory: Path) -> LogReading:
         for path in (log_directory.iterdir() if log_directory.is_dir() else [])
         if any(path.name == name or path.name.startswith(f"{name}.") for name in RSYSLOG_FILE_NAMES)
     )
-    findings = [Finding("rsyslog-file", str(path), "rsyslog schreibt hier mit; das Journal ist der einzige Speicher") for path in found]
-    return LogReading(findings, [f"rsyslog-Dateien in {log_directory}: {len(found)}"])
+    findings = [Finding("rsyslog-file", str(path), "rsyslog writes here; the journal must be the only store") for path in found]
+    return LogReading(findings, [f"rsyslog files in {log_directory}: {len(found)}"])
 
 
 def collect(run: CommandRunner, now: datetime, log_directory: Path) -> LogReading:

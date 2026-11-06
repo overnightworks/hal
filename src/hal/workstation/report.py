@@ -108,7 +108,7 @@ def read_state_file(home: Path, path: Path, *, create_directories: bool = True) 
         os.close(directory)
     with open(descriptor) as state_file:
         if not stat.S_ISREG(os.fstat(descriptor).st_mode):
-            raise ValueError(f"{path} ist keine reguläre Datei")
+            raise ValueError(f"{path} is not a regular file")
         return state_file.read()
 
 
