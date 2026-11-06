@@ -51,8 +51,8 @@ from litellm import (
     run_scratch_probe,
     shipped_config,
 )
+from litellm_ca import write_new
 from litellm_key_files import APP_KEYS_FOLDER, APPS, KeyFiles
-from scratch_secrets import write_new
 
 from hal.output import Row, write_line, write_row
 from hal.output.command import Verb, command

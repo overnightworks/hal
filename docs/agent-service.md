@@ -1,9 +1,9 @@
 # The agent service
 
 Reference and runbook for the operator and for an engineer changing the agent service. The code is
-the truth: `compose.yaml` (the `agent-service` service, its `agent-songmaker`, `agent-presentator`, `agent-hopin`, `egress` and `mcp` networks),
+the truth: `compose.yaml` (the `agent-service` service, its `agent-songmaker`, `agent-presentator`, `agent-hopin` and `mcp` networks),
 `agent-service/service.toml`, `agent-service/image/` (the image recipe), `agent-service/live_smoke.py`,
-`agent-service/live_signer.py`, `agent-service/live_canary.py` and the probes under `probe/agent-service/`. The egress gateway it leaves through is in
+`agent-service/live_signer.py`, `agent-service/live_canary.py` and the probes under `probe/agent-service/`. The egress gateway of LiteLLM is in
 [internal-ca.md](internal-ca.md); the platform picture is [architecture.md](architecture.md).
 
 ## The image
@@ -35,15 +35,15 @@ container, one worker, no published port. It runs as `1000:1000` with `init`, a 
 capability, `no-new-privileges`, no core dump and `restart: unless-stopped`; `/tmp` (its `HOME`) and
 the working root `/run/agent-service/cli` are size-bounded tmpfs mounts owned by 1000 with mode 0700
 (the service refuses to start on a working root that is not owned by its user with exactly that
-mode), all `nosuid,nodev,noexec`. The unit `agent-service` of `fleet.yaml` starts it with
-`agent-egress`: `hal apply` brings both up. A missing image or login directory stops the start
+mode), all `nosuid,nodev,noexec`. The unit `agent-service` of `fleet.yaml` is switched off
+(`enabled: false`): `hal apply` stops and removes its container, and a switched-on unit starts only the service. A missing image or login directory stops the start
 (`pull_policy: never`, `create_host_path: false`), so apply reports the unit partial and never on. A missing signing key or CA root file is
 asked of its unit's setup first (`agent-service/setup`, `step-ca/init`); a file still missing after the
 setups, such as the root while `step-ca` is off or stopped, refuses `hal apply` before its `yes`,
 naming the path and `next: hal setup`, with nothing switched.
 
 It signs for songmaker's origin, `https://songmaker.mcp.internal`, the name `traefik-mcp` answers to on `mcp`, which it joins
-beside the per-app agent networks and `egress` (never `mcp-songmaker`). The key reaches it as the compose secret
+beside the per-app agent networks (never `mcp-songmaker`). The key reaches it as the compose secret
 `agent_service_signing_key`, the one file `~/.secrets/agent-service/signing/private.pem` and never its folder, read through
 `[signing] key_file`; the step-ca root reaches it as `step_ca_root_certificate` through `[mcp] ca_file`, because the service
 trusts that file alone and ignores `SSL_CERT_FILE`. A file secret binds the inode, so a new key reaches the service only
@@ -222,7 +222,7 @@ privacy section, which owns it.
 Claude subscription serves only his own use. Every other person reaches the provider only through the
 API route, under Anthropic's commercial API terms: an app's own key at LiteLLM, not the service
 (see „The API route“). No app takes that route yet. The privacy section `agent-dienst` in
-`legal/sections/agent-service/datenschutz.html` describes only that route as an app takes it, through the
+`legal/sections/litellm/datenschutz.html` describes only that route as an app takes it, through the
 front, LiteLLM with its database and the gateway to Anthropic: what a request carries, what LiteLLM keeps
 per app and per person, when that is deleted, how long the backup keeps it and the legal basis of the budget per person (Art. 6 Abs. 1 lit. f DSGVO, with the right to object in the general part). The Keycloak section states the same backup bound for a snapshot before an update. hal writes it itself
 (operator, 03.11.2026, [#110](https://github.com/overnightworks/hal/issues/110)); by the operator's ruling
@@ -263,7 +263,7 @@ pictures. The path starts on the app's own
 agent network, `hal_agent_<app>`, and is `litellm-front`, `litellm`, `agent-egress`, the provider,
 over the internal, isolated networks `litellm-backend` and `litellm-egress`; `litellm` also reaches its own Postgres, `litellm-db`, over
 `litellm-db`, a network with those two members. The unit `litellm` of `fleet.yaml` runs the front,
-LiteLLM and its database. While the unit is on, `hal apply` makes each app's key, the person budget
+LiteLLM, its database and `agent-egress`. While the unit is on, `hal apply` makes each app's key, the person budget
 and the admin budget with its customer rows (the key step below).
 
 - **The boundary.** `litellm-front` is the same pinned Traefik as the gateway with three routers,
@@ -405,7 +405,7 @@ and the admin budget with its customer rows (the key step below).
   those app networks with the front but sends it nothing, and has no address on `litellm-backend` or
   `litellm-egress`. LiteLLM reaches
   only the front, its database and, through the gateway's `litellm` entrypoint, the providers'
-  names; `api.openai.com` is open to that entrypoint alone, so the agent service cannot reach it.
+  names.
 - **The bound.** Each app key's `max_parallel_requests` bounds its requests in flight; LiteLLM
   refuses the next one at once with 429 and `Retry-After`, before the provider, and another key's
   requests are not counted against it. The operator sets it per app through `config.toml` (the key
@@ -432,7 +432,7 @@ and the admin budget with its customer rows (the key step below).
   password `~/.secrets/litellm/db-password` come from `hal setup` alone: it generates each (a
   `service-password`, never shown) and creates only a missing file.
 - **Proof:** `probe/agent-service/litellm.py` runs the whole path on a fake-only stack (its
-  docstring gives the command line): the fake Anthropic and a fake issuer sit on `internet`, made
+  docstring gives the command line): the fake Anthropic sits on `internet`, made
   internal, and the probe refuses to start otherwise. Its caller is a throwaway on HopIn's agent
   network that posts agent-runtime's wire body with an app key the probe made through the master
   key; `litellm_apps.py` puts one fake app with a key of its own on each app network and proves

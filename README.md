@@ -85,7 +85,7 @@ container environment values; review evidence must not dump those payloads.
 `compose.yaml`, `traefik.yml` and `fleet.yaml` (the service catalog: which units run, and the
 OpenTofu inputs) hold the stack; `dynamic/` holds routes for host processes and the emergency
 barriers `hal stop` writes. `keycloak/` is the realms as code, `step-ca/` and `traefik-mcp.yml` the
-internal CA and the MCP gateway, `agent-service/` the agent service and its egress gateway,
+internal CA and the MCP gateway, `agent-service/` the agent service, LiteLLM and its egress gateway,
 `legal/` the legal unit's frame and sections (imprint, privacy notice, terms; `hal apply` builds the pages into `legal/built/`), stylesheet and nginx config, `tunnel/` the cloudflared unit and its polkit rule, `backup/` the declared backups (their timers are declared in `src/hal/workstation/jobs.py`). The commands are Python under `src/` (`edge`, `hal`;
 a bare `hal check` is the daily check (it also mails and pops up what is new), `hal check exposure` reports what reaches beyond loopback and `hal check hosts` compares Cloudflare with `fleet.yaml`, `hal backup` and `hal restore` run the backup runner; `bin/hal` is the launcher), the OpenTofu
 root is `external/`, the probes that prove each service on a throwaway stack are under `probe/`, and

@@ -26,7 +26,7 @@ IPV4 = re.compile(r"\b\d+\.\d+\.\d+\.\d+\b")
 # The Keycloak probe's module and the docker host it runs on, and the probes this file loads: the
 # support modules' fixtures.
 keycloak_probe, docker_host = keycloak_support.probe, keycloak_support.docker_host
-step_ca_probe, egress_probe = probe_modules.step_ca_probe, probe_modules.egress_probe
+step_ca_probe, litellm_stack = probe_modules.step_ca_probe, probe_modules.litellm_stack
 
 
 def subnets_of(compose: dict) -> list[ipaddress.IPv4Network]:
@@ -105,17 +105,17 @@ def in_copy_install(request: pytest.FixtureRequest, _: Path) -> tuple[str, str]:
     return isolation.isolated_compose(SHIPPED_COMPOSE, stand), PROJECT
 
 
-def egress_copy(request: pytest.FixtureRequest, scratch: Path) -> tuple[str, str]:
-    egress = request.getfixturevalue("egress_probe")
+def litellm_stack_copy(request: pytest.FixtureRequest, scratch: Path) -> tuple[str, str]:
+    stack = request.getfixturevalue("litellm_stack")
     scratch.mkdir()
-    probe = egress.Probe(scratch)
-    probe.write_on_probe_subnet(egress.COMPOSE_FILE, probe.compose_file)
-    return probe.compose_file.read_text(), egress.PROJECT
+    probe = stack.StackProbe(scratch)
+    probe.write_on_probe_subnet(stack.COMPOSE_FILE, probe.compose_file)
+    return probe.compose_file.read_text(), stack.PROJECT
 
 
 @pytest.mark.parametrize(
-    "write_copy", [step_ca_copy, repository_copy_compose, in_copy_install, egress_copy],
-    ids=["step-ca", "repository_copy", "in_copy install", "egress"],
+    "write_copy", [step_ca_copy, repository_copy_compose, in_copy_install, litellm_stack_copy],
+    ids=["step-ca", "repository_copy", "in_copy install", "litellm stack"],
 )  # fmt: skip
 def test_a_probes_copy_of_compose_takes_free_subnets_and_the_same_again_beside_its_own(
     request, tmp_path, monkeypatch, write_copy

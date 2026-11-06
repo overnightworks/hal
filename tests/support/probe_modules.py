@@ -22,8 +22,8 @@ def step_ca_probe() -> Iterator[ModuleType]:
 
 
 @pytest.fixture(scope="module")
-def egress_probe() -> Iterator[ModuleType]:
-    yield from loaded_script("egress_probe", PROBES / "agent-service" / "egress.py")
+def litellm_stack() -> Iterator[ModuleType]:
+    yield from loaded_script("litellm_stack", PROBES / "agent-service" / "litellm_stack.py")
 
 
 @pytest.fixture(scope="module")

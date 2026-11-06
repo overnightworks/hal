@@ -36,7 +36,6 @@ from litellm import (
     APP_BUDGET,
     FAKE_PICTURES,
     FAKE_PROVIDER,
-    LISTENING,
     LITELLM,
     MODELS_ROUTE,
     OPERATOR_BUDGET,
@@ -47,7 +46,6 @@ from litellm import (
     PROJECT,
     REPO,
     ROUTE,
-    SERVICE,
     TOO_MANY,
     error_of,
     expect,
@@ -160,7 +158,6 @@ class AdmissionProbe(PictureCalls):
     # --- the cells ----------------------------------------------------------------------------
 
     def drive(self) -> None:
-        self.wait_until(SERVICE, LISTENING)
         self.wait_until_listening()
         self.admin("POST", "/budget/new", person_budget())
         self.admin("POST", "/budget/new", {"budget_id": OPERATOR_BUDGET})

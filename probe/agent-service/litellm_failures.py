@@ -1,6 +1,6 @@
 """Probe of the API route's failures, keys and rotation (#807 S1b cells F6-F11, F13-F17, F19, D6,
-and K10): the stack of litellm.py (the service, the front, LiteLLM and the
-gateway's second entrypoint, against a fake Anthropic) with the fake steered through its control
+and K10): the stack of litellm.py (the front, LiteLLM, its database and the gateway, against a
+fake Anthropic) with the fake steered through its control
 file and the caller of litellm.py, a throwaway with an app key. Nothing live and nothing paid: the
 probe refuses to start unless `internet` is internal and holds only the fakes.
 
@@ -35,14 +35,12 @@ from litellm import (
     DATABASE_PASSWORD_FILE,
     FAKE_PROVIDER,
     LABEL,
-    LISTENING,
     LITELLM,
     PROJECT,
     PROVIDER_HOST,
     PROVIDER_KEY_FILE,
     REPO,
     ROUTE,
-    SERVICE,
     LitellmProbe,
     ProbeFailed,
     error_of,
@@ -52,7 +50,7 @@ from litellm import (
     run_scratch_probe,
     wire_body,
 )
-from scratch_secrets import ScratchSecrets, issue_certificate, write_new, write_scratch_secrets
+from litellm_ca import ScratchCa, issue_certificate, write_new, write_scratch_ca
 
 HOLD_END_SECONDS = 150
 CACHE_SECONDS = 300
@@ -135,8 +133,8 @@ class FailureProbe(LitellmProbe):
         ]).stdout.split()  # fmt: skip
 
     def every_container(self) -> list[str]:
-        """Every container of the probe, stopped ones included: the project's, the issuers' among
-        them, and the ones it labels."""
+        """Every container of the probe, stopped ones included: the project's and the ones it
+        labels."""
         found: list[str] = []
         for label in (f"com.docker.compose.project={PROJECT}", LABEL):
             found += self.run(["docker", "ps", "-aq", "--filter", f"label={label}"]).stdout.split()
@@ -194,7 +192,6 @@ class FailureProbe(LitellmProbe):
     # --- the cells ----------------------------------------------------------------------------
 
     def drive(self) -> None:
-        self.wait_until(SERVICE, LISTENING)
         self.wait_until_listening()
         self.admin("POST", "/budget/new", person_budget())
         self.key = self.make_key()
@@ -226,7 +223,7 @@ class FailureProbe(LitellmProbe):
             self.hold(cell, f"{how}: F 1 per answer, the caller got {statuses}")
         self.steer()
 
-    def serve_provider_certificate_of(self, authority: ScratchSecrets) -> None:
+    def serve_provider_certificate_of(self, authority: ScratchCa) -> None:
         """The fake provider recreated with a certificate of `authority`, once it listens."""
         folder = self.fake / PROVIDER_HOST
         issue_certificate(authority, PROVIDER_HOST, folder)
@@ -243,13 +240,12 @@ class FailureProbe(LitellmProbe):
     def cell_f9(self) -> None:
         """A provider certificate from a CA LiteLLM does not trust: refused before any request
         reaches F, and served again once the trusted certificate is back."""
-        (self.scratch / "other-home").mkdir()
-        other = write_scratch_secrets(self.scratch / "other-home", self.scratch / "other-ca")
+        other = write_scratch_ca(self.scratch / "other-ca")
         self.serve_provider_certificate_of(other)
         answer = self.complete(self.key, user=self.fingerprint())
         expect(answer["status"] != 200, "F9: an untrusted certificate was answered 200")
         expect(not self.provider_requests(), "F9: a request reached the untrusted provider")
-        self.serve_provider_certificate_of(self.scratch_secrets)
+        self.serve_provider_certificate_of(self.scratch_ca)
         recovered = self.complete(self.key, user=self.fingerprint())
         self.served("F9", recovered, self.provider_requests())
         self.hold("F9", f"a provider certificate of an untrusted CA: {answer['status']} "

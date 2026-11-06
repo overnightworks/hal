@@ -1,7 +1,6 @@
 # The static configuration of agent-egress (compose.yaml): the SNI-allowlisting TLS passthrough
-# gateway between the agent service, LiteLLM and the two hosts they may reach. Two TCP entrypoints,
-# each on the gateway's address on its own network: `egress` for the agent service and `litellm`
-# for LiteLLM (compose.yaml's x-egress-address and x-litellm-egress-address;
+# gateway between LiteLLM and the two hosts it may reach. One TCP entrypoint, `litellm`, on the
+# gateway's address on `litellm-egress` (compose.yaml's x-litellm-egress-address;
 # tests/test_agent_egress.py holds them equal), no UDP. The global and log blocks are copies of traefik.yml's; the api,
 # ping and metrics blocks stay absent. The allowed names stand in dynamic/allowed.yml.
 global:
@@ -12,8 +11,6 @@ log:
   level: INFO
 
 entryPoints:
-  egress:
-    address: "172.31.252.10:443"
   litellm:
     address: "172.31.239.10:443"
 

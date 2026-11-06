@@ -12,8 +12,7 @@ seconds (K 30 s, CAP 1800 s).
 
 The throwaway runs on the agent-service image's pinned base (the first `FROM` of its Dockerfile)
 with this interpreter's site-packages mounted read-only, so the wheel is exactly the one hal's lock
-pins, and as the service's user. That user reads the mounted files where the host user's uid is the
-service's (1000 here), which owns the venv's files; on another host a read error stops the run.
+pins, and as the host's own user and group, which own the venv's files; the probe refuses root.
 Its program builds the turn from the wheel's own types; the tool's handler answers with the result
 canary. The fake calls the steered tool only while no tool result came back, so the turn ends with
 the answer canary.
@@ -25,6 +24,7 @@ its planted row, Q an SQL count. Exit 0: K0, W models and W held.
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 import sysconfig
@@ -33,7 +33,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from agent_runtime_client.turn import Principal, person_fingerprint
-from issuer import SERVICE
 from litellm import (
     DEFAULT_MODEL,
     FRONT,
@@ -151,16 +150,16 @@ class WheelProbe(RetentionProbe):
         self.cell_w()
 
     def wheel_command(self) -> list[str]:
-        """The throwaway's argv: hopin's network only, the venv and the key file read-only, as
-        the service's user. That user reads the mounted files only where the host user's uid is
-        the service's, which owns the venv's files."""
+        """The throwaway's argv: hopin's network only, the venv and the key file read-only, as the
+        host's own user, which owns the venv's files."""
+        expect(os.getuid() != 0, "the wheel's throwaway would run as root")
         self.throwaways += 1
         site_packages = sysconfig.get_path("purelib")
         hopin_key = Path(self.environment["HOME"]) / APP_KEYS_FOLDER / "hopin"
         return [
             "docker", "run", "--rm", "-i", "--name", f"{PROJECT}-wheel-{self.throwaways}",
             "--label", LABEL, f"--network={PROJECT}_{self.caller_network}", "--read-only",
-            "--user", self.resolved_services()[SERVICE]["user"], "--cap-drop", "ALL",
+            "--user", f"{os.getuid()}:{os.getgid()}", "--cap-drop", "ALL",
             "--security-opt", "no-new-privileges:true",
             "--volume", f"{site_packages}:{WHEEL}:ro", "--volume", f"{hopin_key}:{KEY_FILE}:ro",
             base_image(), "python", "-I", "-B", "-",

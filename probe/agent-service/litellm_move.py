@@ -1,6 +1,6 @@
 """Probe of #995's cell: the copy's real `hal apply` moves LiteLLM from the image it runs to the one
 compose.yaml pins, after the unit's pre-apply snapshot is taken and proven. Nothing live and nothing
-paid: no provider key, no egress, no app.
+paid: no provider key, no route out, no app.
 
     flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \\
         uv run --frozen python3 probe/agent-service/litellm_move.py --scratch DIR
@@ -11,13 +11,14 @@ shipped record would point the pre-apply backup at the live `litellm-db`. The re
 its password are the scratch HOME's. The copy starts LiteLLM, and its database
 where a local image of the pinned major exists, on an image `docker image ls` shows locally with
 another digest than the pin; publishing the shipped pin is then the move. The fake provider is
-litellm.py's `fake_anthropic.py` at the address compose.yaml gives api.anthropic.com, on the
-internal `litellm-egress`, with a certificate of a scratch CA that the copy's LiteLLM trusts through
-SSL_CERT_FILE. C is every docker call, behind its caller's command line (litellm_unit.py's stand-in
-writes it): the order of the backup's dump, the restore test's server and the recreate, and the
-proof that no call of `hal backup` or `hal restore` names the live project. M7 (#1006) switches
-LiteLLM off, re-pins it to its local image and switches it on over the kept volume: the database
-starts alone and the snapshot is taken and proven before the unit starts. Exit 0: every cell held.
+litellm.py's `fake_anthropic.py` behind the copy's gateway, as api.anthropic.com on the copy's
+`internet`, which litellm_unit.py marks internal, with a certificate of a scratch CA that the
+copy's LiteLLM trusts through SSL_CERT_FILE. C is every docker call, behind its caller's command
+line (litellm_unit.py's stand-in writes it): the order of the backup's dump, the restore test's
+server and the recreate, and the proof that no call of `hal backup` or `hal restore` names the
+live project. M7 (#1006) switches LiteLLM off, re-pins it to its local image and switches it on
+over the kept volume: the database starts alone and the snapshot is taken and proven before the
+unit starts. Exit 0: every cell held.
 """
 
 from __future__ import annotations
@@ -46,6 +47,7 @@ from litellm import (  # noqa: E402
     shipped_models,
     wire_body,
 )
+from litellm_ca import write_scratch_ca  # noqa: E402
 from litellm_caller import CALL_PROGRAM, caller_input  # noqa: E402
 from litellm_unit import (  # noqa: E402
     APPS,
@@ -61,7 +63,6 @@ from litellm_unit import (  # noqa: E402
     Probe,
     run,
 )
-from scratch_secrets import write_scratch_secrets  # noqa: E402
 
 from hal.backup.docker import RESTORE_SERVER_PREFIX  # noqa: E402
 from hal.output import write_line  # noqa: E402
@@ -119,8 +120,7 @@ class MoveProbe(Probe):
 
     def trust_the_fake(self) -> None:
         """litellm.py's fake files for a scratch CA, and LiteLLM trusting that CA alone."""
-        (self.scratch / "ca-home").mkdir()
-        authority = write_scratch_secrets(self.scratch / "ca-home", self.scratch / "ca")
+        authority = write_scratch_ca(self.scratch / "ca")
         authority.ca_certificate.chmod(0o644)
         LitellmProbe.write_fakes(
             SimpleNamespace(
@@ -128,7 +128,7 @@ class MoveProbe(Probe):
                 picture_key=self.files[PICTURES],
                 identity={},
                 marker=self.marker,
-                scratch_secrets=authority,
+                scratch_ca=authority,
             ),
             self.scratch / "fake",
         )
@@ -196,12 +196,7 @@ class MoveProbe(Probe):
         ).stdout.strip()
 
     def start_fake(self) -> None:
-        resolved = json.loads(self.compose("config", "--format", "json"))["services"][LITELLM]
-        hosts = resolved["extra_hosts"]
-        entries = hosts if isinstance(hosts, list) else [f"{k}={v}" for k, v in hosts.items()]
-        (address,) = (
-            re.split("[=:]", e, maxsplit=1)[1] for e in entries if e.startswith(PROVIDER_HOST)
-        )
+        """The fake provider behind the copy's gateway, as the name LiteLLM asks it for."""
         self.run(
             [
                 "docker",
@@ -212,9 +207,9 @@ class MoveProbe(Probe):
                 "--label",
                 LABEL,
                 "--network",
-                f"{PROJECT}_litellm-egress",
-                "--ip",
-                address,
+                f"{PROJECT}_internet",
+                "--network-alias",
+                PROVIDER_HOST,
                 "--user",
                 "65534:65534",
                 "--read-only",

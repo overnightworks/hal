@@ -1,4 +1,4 @@
-# Probe overlay (probe/agent-service/egress.py), laid over a copy of compose.yaml whose networks
+# Probe overlay (probe/agent-service/litellm_stack.py), laid over a copy of compose.yaml whose networks
 # that pin a /24 (edge_subnets) the probe moved to free /24s, so it never
 # collides with the live stack's: the gateway's static file from that copy, and the two
 # packet windows. Never used live. The copy also names the fixed networks `<project>_...`
@@ -8,11 +8,11 @@ services:
     volumes:
       # The gateway's static file with its entrypoint addresses moved to the probe subnets; the
       # dynamic directory is the real one.
-      - ${PROBE_EGRESS_STATIC:?run through probe/agent-service/egress.py}:/etc/traefik/traefik.yml:ro
+      - ${PROBE_EGRESS_STATIC:?run through probe/agent-service/litellm_stack.py}:/etc/traefik/traefik.yml:ro
 
   # The gateway's own namespace: the SYNs that leave it (capture.py syn).
   capture-egress: &capture
-    profiles: [agent-probe]
+    profiles: [litellm]
     # The realm observer's pin (compose.yaml); tests/test_agent_egress.py holds the two equal.
     image: python:3.14.10-alpine@sha256:eb2c62658b8d51bff0acc408504b76521d02030de56a8a3c1e830083e89b89d2
     # Root in the container, but NET_RAW alone: it opens a packet socket and writes nothing.

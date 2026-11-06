@@ -26,7 +26,7 @@ def checkout(tmp_path) -> Path:
     (repository / "legal/sections").mkdir(parents=True)
     shutil.copy(ROOT / "fleet.yaml", repository)
     shutil.copytree(ROOT / "legal/frame", repository / "legal/frame")
-    for unit in ("allgemein", "keycloak", "agent-service"):
+    for unit in ("allgemein", "keycloak", "litellm"):
         shutil.copytree(ROOT / "legal/sections" / unit, repository / "legal/sections" / unit)
     return repository
 

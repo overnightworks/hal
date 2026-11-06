@@ -27,7 +27,7 @@ from litellm import (
     expect,
     shipped_config,
 )
-from scratch_secrets import write_new
+from litellm_ca import write_new
 
 from hal.stack import api_limits, compose, core, litellm_keys
 from hal.stack.litellm_keys import KeysPlan, KeysStep, NotRead
@@ -50,8 +50,7 @@ class Seen:
 
 
 class KeyFiles(LitellmProbe):
-    """litellm.py's stack without the service and the issuer, with the app key files and the key
-    step against it."""
+    """litellm.py's stack with the app key files and the key step against it."""
 
     def __init__(self, scratch: Path) -> None:
         super().__init__(scratch)
