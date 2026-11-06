@@ -1,0 +1,7 @@
+claim_id = "4785813a2c8443c0a787ba8d404a57eb"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "dde80c765b1389c04b21cff8c8783757c6c0cee4"
+branch = "claude/issue-1046-legal-check-two-owners"
+scope = ["src/hal/stack/legal_step.py", "tests/test_hal_legal.py", "tests/test_stack_legal_apps.py"]
+opened_commit = "f3a8462badc24912cc38e9e2588c87c3d4c2e896"
