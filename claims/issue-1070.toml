@@ -1,0 +1,7 @@
+claim_id = "cdf39b24e6f746469ab8ceb8e39debcc"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "4ca7e2e6e7b7edd3652a784dc018ee36e1e4d433"
+branch = "claude/issue-1070-alarm-verdict"
+scope = ["src/hal/workstation/alarm.py", "src/hal/workstation/check.py", "tests/test_workstation_alarm.py"]
+opened_commit = "5b8f8430c011ec4f0977cd84ce8dece8f58387b9"
