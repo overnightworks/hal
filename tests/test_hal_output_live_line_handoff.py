@@ -181,8 +181,8 @@ class CtrlCAfterTheErase(FrameStream):
 
 
 class LockThatReportsTheWait:
-    """The line's lock, which says when the main thread, once `armed`, goes to wait for it, and
-    when the redraw thread comes to a lock that is held."""
+    """The line's lock, which says when the main thread or, once `armed`, the redraw thread goes to
+    wait for it."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -194,7 +194,7 @@ class LockThatReportsTheWait:
         if threading.current_thread() is threading.main_thread():
             if self.armed:
                 self.main_waits.set()
-        elif self._lock.locked():
+        elif self.armed and self._lock.locked():
             self.redraw_waits.set()
         self._lock.acquire()
 
@@ -219,6 +219,7 @@ def test_a_ctrl_c_in_a_writers_erase_owes_one_newline_which_the_next_writer_pays
     def block() -> None:
         with live_line() as show:
             show(SUBJECT, "Restart Docker")
+            lock.armed = True
             assert shared.reached.wait(timeout=10)
             a_row()
 
