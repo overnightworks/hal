@@ -1,0 +1,8 @@
+claim_id = "895fe7717b6b4b0ca28dbf51cc6be241"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "641e072e2155c8e82128fb3c3cd5e0ad56ea2337"
+branch = "claude/issue-1106-run-build-leaves-apply"
+scope = ["docs/stack.md", "fleet.yaml", "quality/baseline.toml", "src/hal/stack/apply.py", "src/hal/stack/built_image.py", "src/hal/stack/catalog.py", "src/hal/stack/compose.py", "src/hal/stack/plan.py", "src/hal/stack/plan_rows.py", "src/hal/stack/service_recreate.py", "src/hal/stack/unit_plans.py", "tests/support/stack_apply.py", "tests/test_stack_apply.py", "tests/test_stack_apply_built_image.py", "tests/test_stack_apply_secret_files.py", "tests/test_stack_plan_rows.py"]
+opened_commit = "3f45039ad81a1a84bf1204b5b421fc24cee4fd0c"
+whole_reason = "One mechanism with one caller, the built-image recreate, removed from every place its type threads through the plan."
