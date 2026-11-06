@@ -44,6 +44,8 @@ from urllib.parse import urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # the helper of the probes
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # the stack of the LiteLLM probes
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))  # hal, which edge_copy imports
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "agent-service"))  # egress_observe
 
 from agent_networks import cell_p36, gateway_listeners, service_networks
 from egress_observe import (
