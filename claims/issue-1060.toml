@@ -1,0 +1,7 @@
+claim_id = "b8d115351bb140279987586bc4d292b6"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "01bd6ac8f40ccc627d53e86c8ae93d2c2fe4cd0d"
+branch = "claude/issue-1060-deploy-docs-today"
+scope = ["docs/architecture.md"]
+opened_commit = "addd995ff7a6d03fedda431b53571f5abfb1fa58"
