@@ -247,12 +247,12 @@ def run_playbook_as_root(argv: Sequence[str]) -> PlaybookRun:
     try:
         with subprocess.Popen(["sudo", "env", "PYTHONDONTWRITEBYTECODE=1", "sh", "-c", 'printf \'%s\\n\' "$1" && shift && exec "$@" 2>&1', "sh", STARTED_LINE, *argv], stdout=subprocess.PIPE, text=True, cwd=PLAYBOOK.parent, env=environment) as playbook:  # noqa: S603, S607 - argv is the packaged playbook and sudo is found on PATH by design
             try:
-                with live_line(SYSTEM_ROW) as show_task:
+                with live_line() as show_task:
                     for line in playbook.stdout:
                         if line.startswith(EVENT_MARK):
                             event_lines.append(line)
                             if (task := _started_task(line)) is not None:
-                                show_task(task)
+                                show_task(SYSTEM_ROW, task)
                         elif is_verbose():
                             write_detail(line.rstrip("\n"), tone=Tone.DIM, flush=True)
             finally:

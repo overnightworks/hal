@@ -14,41 +14,26 @@ from enum import StrEnum
 from types import SimpleNamespace
 
 import pytest
-from support.terminal_support import TerminalStream, put_on_terminals
+from support.terminal_support import (
+    ANSI,
+    ERASE,
+    FrameStream,
+    StoppedTerminal,
+    TerminalStream,
+    frames_of,
+    no_newline_owed_after_the_test,  # noqa: F401 the autouse fixture, active in this module
+    press_ctrl_c,
+    put_on_terminals,
+)
 
 import hal.output
 from hal.output import Glyph, Row, live_line, verbose_run, write_row
 
-ERASE = "\r\x1b[K"
-ANSI = re.compile(r"\x1b\[[0-9;]*[mK]")
 SUBJECT = "system"
 
 
 class Event(StrEnum):
     INTERRUPTED = "interrupted"
-
-
-class FrameStream(TerminalStream):
-    """A terminal that says when it has been handed a number of frames (a write past the erase)."""
-
-    def __init__(self, frames_wanted: int = 1) -> None:
-        super().__init__()
-        self.frames_wanted = frames_wanted
-        self.frames = 0
-        self.reached = threading.Event()
-
-    def write(self, text: str, /) -> int:
-        written = super().write(text)
-        if len(text) > len(ERASE):
-            self.frames += 1
-            if self.frames >= self.frames_wanted:
-                self.reached.set()
-        return written
-
-
-def frames_of(stream: TerminalStream) -> list[str]:
-    """The visible text of each frame, without colour and erase."""
-    return [ANSI.sub("", frame) for frame in stream.getvalue().split("\r") if ANSI.sub("", frame)]
 
 
 def clock_reading(*seconds: float) -> SimpleNamespace:
@@ -113,10 +98,6 @@ def redraw_held_at_the_lock(
     return held
 
 
-def press_ctrl_c() -> None:
-    signal.raise_signal(signal.SIGINT)
-
-
 @pytest.mark.usefixtures("stills")
 def test_show_draws_an_erase_then_a_styled_frame_with_subject_text_and_time_on_stderr(
     monkeypatch: pytest.MonkeyPatch,
@@ -124,8 +105,8 @@ def test_show_draws_an_erase_then_a_styled_frame_with_subject_text_and_time_on_s
     out, err = stderr_terminal(monkeypatch)
     monkeypatch.setattr(hal.output, "time", clock_reading(0, 0.4))
 
-    with live_line(SUBJECT) as show:
-        show("Read the default log driver")
+    with live_line() as show:
+        show(SUBJECT, "Read the default log driver")
         drawn = err.getvalue()
 
     assert drawn.startswith(ERASE)
@@ -151,8 +132,8 @@ def test_the_end_of_the_block_erases_the_line_and_nothing_follows(
     _, err = stderr_terminal(monkeypatch)
     threads_before = threading.active_count()
 
-    with live_line(SUBJECT) as show:
-        show("Write edge files")
+    with live_line() as show:
+        show(SUBJECT, "Write edge files")
 
     assert err.getvalue().endswith(ERASE)
     assert err.getvalue().count(ERASE) == 2
@@ -167,9 +148,9 @@ def test_a_line_redrawing_fast_across_two_shows_has_one_thread_and_ends_on_the_e
     threads_before = threading.active_count()
     ctrl_c_before = signal.getsignal(signal.SIGINT)
 
-    with live_line(SUBJECT) as show:
-        show("first task")
-        show("second task")
+    with live_line() as show:
+        show(SUBJECT, "first task")
+        show(SUBJECT, "second task")
         threads_during = threading.active_count()
         assert err.reached.wait(timeout=10)
 
@@ -189,8 +170,8 @@ def test_without_a_new_show_a_later_frame_comes_with_a_later_time(
         hal.output, "time", SimpleNamespace(monotonic=lambda: float(min(next(ticking), 59)))
     )
 
-    with live_line(SUBJECT) as show:
-        show("Install packages")
+    with live_line() as show:
+        show(SUBJECT, "Install packages")
         assert err.reached.wait(timeout=10)
 
     seconds = [int(re.search(r"· (\d+)s$", frame).group(1)) for frame in frames_of(err)]
@@ -203,9 +184,9 @@ def test_a_new_show_changes_the_text_and_restarts_the_time(monkeypatch: pytest.M
     _, err = stderr_terminal(monkeypatch)
     monkeypatch.setattr(hal.output, "time", clock_reading(0, 70, 100, 101))
 
-    with live_line(SUBJECT) as show:
-        show("first task")
-        show("second task")
+    with live_line() as show:
+        show(SUBJECT, "first task")
+        show(SUBJECT, "second task")
 
     first, second = frames_of(err)[:2]
     assert (first.endswith("first task · 1m10s"), second.endswith("second task · 1s")) == (
@@ -252,8 +233,8 @@ def test_off_a_terminal_or_under_v_or_json_show_writes_nothing_and_starts_no_thr
     arrange(monkeypatch)
     threads_before = threading.active_count()
 
-    with verbose_run(verbose), live_line(SUBJECT) as show:
-        show("Write edge files")
+    with verbose_run(verbose), live_line() as show:
+        show(SUBJECT, "Write edge files")
         threads_during = threading.active_count()
 
     assert (sys.stderr.getvalue(), threads_during) == ("", threads_before)
@@ -293,8 +274,8 @@ def test_a_frame_stays_inside_the_terminal_and_gives_up_the_name_before_the_time
     monkeypatch.setenv("COLUMNS", str(columns))
     monkeypatch.setattr(hal.output, "time", clock_reading(0, seconds))
 
-    with live_line(SUBJECT) as show:
-        show(name)
+    with live_line() as show:
+        show(SUBJECT, name)
 
     assert frames_of(err) == [frame]
     assert len(frame) <= columns - 1
@@ -307,8 +288,8 @@ def test_a_terminal_of_one_column_gets_no_printable_byte_so_nothing_wraps(
     _, err = stderr_terminal(monkeypatch)
     monkeypatch.setenv("COLUMNS", "1")
 
-    with live_line(SUBJECT) as show:
-        show(LONG_NAME)
+    with live_line() as show:
+        show(SUBJECT, LONG_NAME)
 
     assert frames_of(err) == []
 
@@ -319,8 +300,8 @@ def test_a_name_with_escape_and_newline_is_one_escaped_line(
 ) -> None:
     _, err = stderr_terminal(monkeypatch)
 
-    with live_line(SUBJECT) as show:
-        show("a\x1b[31m\nb")
+    with live_line() as show:
+        show(SUBJECT, "a\x1b[31m\nb")
         drawn = err.getvalue()
 
     assert "\\x1b[31m\\nb" in drawn
@@ -333,7 +314,7 @@ def test_a_block_that_never_shows_writes_no_byte(monkeypatch: pytest.MonkeyPatch
     _, err = stderr_terminal(monkeypatch)
     threads_before = threading.active_count()
 
-    with live_line(SUBJECT):
+    with live_line():
         assert threading.active_count() == threads_before
 
     assert err.getvalue() == ""
@@ -348,8 +329,8 @@ def test_a_ctrl_c_leaves_the_line_and_the_next_row_starts_on_its_own_line(
     monkeypatch.setattr(sys, "stdout", shared)
     monkeypatch.setattr(sys, "stderr", shared)
 
-    with pytest.raises(KeyboardInterrupt), live_line(SUBJECT) as show:
-        show("Restart Docker")
+    with pytest.raises(KeyboardInterrupt), live_line() as show:
+        show(SUBJECT, "Restart Docker")
         raise KeyboardInterrupt
     left = shared.getvalue()
     write_row(Row(Glyph.FAILED, SUBJECT, Event.INTERRUPTED), fresh_line=True)
@@ -375,8 +356,8 @@ def test_a_redraw_past_its_wait_draws_nothing_once_a_ctrl_c_stopped_the_line(
 
     held = redraw_held_at_the_lock(monkeypatch, CtrlCOnceStarted)
 
-    with pytest.raises(KeyboardInterrupt), live_line(SUBJECT) as show:
-        show("Restart Docker")
+    with pytest.raises(KeyboardInterrupt), live_line() as show:
+        show(SUBJECT, "Restart Docker")
     left = err.getvalue()
     held.let_the_redrawer_end()
 
@@ -398,8 +379,8 @@ def test_a_ctrl_c_before_the_thread_starts_ends_the_block_without_a_frame_more(
         SimpleNamespace(Thread=CtrlCBeforeStart, Lock=threading.Lock, Event=threading.Event),
     )
 
-    with pytest.raises(KeyboardInterrupt), live_line(SUBJECT) as show:
-        show("Restart Docker")
+    with pytest.raises(KeyboardInterrupt), live_line() as show:
+        show(SUBJECT, "Restart Docker")
 
     assert ERASE not in err.getvalue()[len(ERASE) :]
 
@@ -424,8 +405,8 @@ def test_a_ctrl_c_inside_the_stop_waits_for_the_stop_and_nothing_draws_after_it(
     ctrl_c_before = signal.getsignal(signal.SIGINT)
 
     def block() -> None:
-        with live_line(SUBJECT) as show:
-            show("Restart Docker")
+        with live_line() as show:
+            show(SUBJECT, "Restart Docker")
             assert held.reached.wait(timeout=10)
             if ctrl_c_in_the_block:
                 raise KeyboardInterrupt
@@ -455,8 +436,8 @@ def test_a_ctrl_c_inside_a_normal_stop_leaves_the_line_for_the_row_below_it(
     monkeypatch.setattr(hal.output, "LIVE_STOP_SECONDS", 10)
 
     def block() -> None:
-        with live_line(SUBJECT) as show:
-            show("Restart Docker")
+        with live_line() as show:
+            show(SUBJECT, "Restart Docker")
             assert held.reached.wait(timeout=10)
 
     with pytest.raises(KeyboardInterrupt):
@@ -479,11 +460,11 @@ def test_a_callers_handler_stays_so_a_ctrl_c_keeps_the_play_and_the_line_and_the
     _, err = stderr_terminal(monkeypatch)
     ctrl_c_before = signal.signal(signal.SIGINT, callers_handler)
     try:
-        with live_line(SUBJECT) as show:
-            show("first task")
+        with live_line() as show:
+            show(SUBJECT, "first task")
             handler_in_the_block = signal.getsignal(signal.SIGINT)
             press_ctrl_c()
-            show("second task")
+            show(SUBJECT, "second task")
             frames_drawn = frames_of(err)
         handler_after = signal.getsignal(signal.SIGINT)
     finally:
@@ -501,8 +482,8 @@ def test_the_default_action_handler_stays_too(monkeypatch: pytest.MonkeyPatch) -
     stderr_terminal(monkeypatch)
     ctrl_c_before = signal.signal(signal.SIGINT, signal.SIG_DFL)
     try:
-        with live_line(SUBJECT) as show:
-            show("first task")
+        with live_line() as show:
+            show(SUBJECT, "first task")
             handler_in_the_block = signal.getsignal(signal.SIGINT)
         handler_after = signal.getsignal(signal.SIGINT)
     finally:
@@ -530,9 +511,9 @@ def test_a_ctrl_c_in_the_middle_of_a_frame_leaves_that_frame_and_ends_the_thread
     threads_before = threading.active_count()
 
     def block() -> None:
-        with live_line(SUBJECT) as show:
-            show("first task")
-            show("second task")
+        with live_line() as show:
+            show(SUBJECT, "first task")
+            show(SUBJECT, "second task")
 
     with pytest.raises(KeyboardInterrupt):
         block()
@@ -540,25 +521,6 @@ def test_a_ctrl_c_in_the_middle_of_a_frame_leaves_that_frame_and_ends_the_thread
     assert threading.active_count() == threads_before
     assert frames_of(err)[-1].split()[-3:] == ["task", "·", "<1s"]
     assert not err.getvalue().endswith(ERASE)
-
-
-class StoppedTerminal(FrameStream):
-    """A terminal stopped with Ctrl-S: the redrawing thread's write hangs until it is resumed, or
-    until a watchdog gives up, which only a stop without a bound lets happen."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.hanging = threading.Event()
-        self.resumed = threading.Event()
-        self.watchdog_fired = False
-        self.writer: threading.Thread | None = None
-
-    def write(self, text: str, /) -> int:
-        if threading.current_thread() is not threading.main_thread():
-            self.writer = threading.current_thread()
-            self.hanging.set()
-            self.watchdog_fired = not self.resumed.wait(timeout=10)
-        return super().write(text)
 
 
 @pytest.mark.parametrize("ctrl_c", [False, True], ids=["normal end", "Ctrl-C"])
@@ -571,8 +533,8 @@ def test_a_stopped_terminal_holds_the_thread_and_the_block_ends_within_the_bound
     monkeypatch.setattr(hal.output, "LIVE_TICK_SECONDS", 0.001)
     monkeypatch.setattr(hal.output, "LIVE_STOP_SECONDS", 0.01)
 
-    with pytest.raises(KeyboardInterrupt) if ctrl_c else nullcontext(), live_line(SUBJECT) as show:
-        show("Restart Docker")
+    with pytest.raises(KeyboardInterrupt) if ctrl_c else nullcontext(), live_line() as show:
+        show(SUBJECT, "Restart Docker")
         assert err.hanging.wait(timeout=10)
         if ctrl_c:
             press_ctrl_c()

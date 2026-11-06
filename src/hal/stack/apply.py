@@ -81,6 +81,7 @@ from hal.output import (
     Verdict,
     confirmed,
     counted,
+    live_line,
     write_error,
     write_groups,
     write_line,
@@ -673,8 +674,20 @@ def _confirm_and_switch(
     if not confirmed(f"apply {counted(asked, ChangeNoun.CHANGE)}"):
         _say_aborted(completed_setups)
         return ApplyExit.DECLINED
+    with live_line() as show:
+        exit_code = _apply_changes(engine, planned, marks, core_phase, Progress(show=show))
+    return _closed_on_verdict(exit_code, asked, elapsed, publish_follows)
+
+
+def _apply_changes(
+    engine: compose.Compose,
+    planned: Plan,
+    marks: switches.Switches,
+    core_phase: CorePhase,
+    progress: Progress,
+) -> int:
+    """Every step after the yes, each begun through `progress`; the exit, without the verdict."""
     changes = [plan for plan in planned.plans if plan.action is not Action.STAYS_STOPPED]
-    progress = Progress()
     snapshots = SwitchOnSnapshots(core_phase.backup, progress)
     withheld: dict[str, SwitchedOffMeanwhile] = {}
     writer = core_phase.writer
@@ -715,8 +728,7 @@ def _confirm_and_switch(
         write_error(*interrupted_error(interrupted))
         return ApplyExit.REFUSED
     later_failed = realm_failed or keys_failed or apps_failed
-    exit_code = _report_switched(bool(withheld or mismatched), later_failed, snapshots)
-    return _closed_on_verdict(exit_code, asked, elapsed, publish_follows)
+    return _report_switched(bool(withheld or mismatched), later_failed, snapshots)
 
 
 def _closed_on_verdict(
