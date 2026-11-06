@@ -597,7 +597,8 @@ def test_the_fakes_openai_key_refusal_names_the_key_only_masked(fake_provider):
     message = json.loads(reply)["error"]["message"]
     assert status == 401
     assert key not in message
-    assert key[:3] in message and key[-4:] in message
+    assert key[:3] in message
+    assert key[-4:] in message
 
 
 FIRST_ROUND = {"messages": [{"role": "user", "content": "probe"}]}
