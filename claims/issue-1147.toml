@@ -1,8 +1,0 @@
-claim_id = "dd9a50bf7d954afca99d0590ba616ea8"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "11058fbdbe4163cec57b8a2233aecb843016138d"
-branch = "claude/issue-1147-skat-sign-in-client"
-scope = ["compose.yaml", "docs/keycloak.md", "keycloak/realm.yaml", "probe/keycloak/README.md", "probe/keycloak/compose.probe.yaml", "probe/keycloak/probe.py", "src/hal/workstation/secrets_manifest.toml", "tests/test_keycloak_agents_client.py"]
-opened_commit = "c63f37b5a5f6c26d5b267058ec153f806d92434e"
-whole_reason = "One client's data across the realm, compose's secret list, the probe's secret list, the manifest and its doc line must land together, or the import refuses an undefined variable."
