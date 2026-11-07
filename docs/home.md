@@ -366,7 +366,7 @@ Ebenso den Provider-Key für OpenAI, mit dem LiteLLM Bilder erzeugt (`litellm/op
 Er nennt, wo der Key entsteht (die OpenAI Platform, im Projekt mit dem Guthaben; OpenAI zeigt ihn nur einmal),
 und bietet die Seite der API-Keys an. Auch er ist nicht `optional`; bis er eingefügt ist, bleibt `hal secrets` bei `missing litellm/openai`, und ein `hal apply`, das `litellm` anlegt, bricht vorher ab (`next: hal setup`).
 Eine vorhandene Datei bleibt unangetastet; ersetzen ist `--rotate` und kommt
-später. Ein Eintrag ohne Assistent (etwa `sonarcloud/token`) wird mit seiner Seite aus
+später. Ein Eintrag ohne Assistent (etwa `claudebot.env`) wird mit seiner Seite aus
 `recreate` genannt (`by hand`), ein optionaler, der fehlt, übersprungen (`skipped`, `optional`). Strg-C bricht ab, ohne eine halbe Datei zu hinterlassen
 (Exit-Code `130`); der nächste Lauf macht beim ersten fehlenden Eintrag weiter.
 Der Assistent druckt kein eigenes Ende; den Ausgang nennt `hal setup` mit seiner `secrets`-Zeile und seinem Urteil.
