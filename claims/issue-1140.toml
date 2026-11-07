@@ -3,6 +3,6 @@ agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
 role = "builder"
 base = "e0bc377aa3b6f1c6843f5471fb1a5701f5e778e4"
 branch = "claude/issue-1140-drop-agent-service-secret-entries"
-scope = ["docs/home.md", "src/hal/workstation/secrets_create.py", "src/hal/workstation/secrets_manifest.toml", "src/hal/workstation/secrets_setup.py", "src/hal/workstation/secrets_view.py", "tests/fixtures/old_names_baseline.toml", "tests/support/workstation_secrets_support.py", "tests/test_workstation_secrets_login.py", "tests/test_workstation_secrets_setup.py"]
+scope = ["docs/home.md", "src/hal/secrets_rows.py", "src/hal/workstation/secrets_create.py", "src/hal/workstation/secrets_manifest.toml", "src/hal/workstation/secrets_setup.py", "src/hal/workstation/secrets_view.py", "tests/fixtures/old_names_baseline.toml", "tests/support/workstation_secrets_support.py", "tests/support/workstation_support.py", "tests/test_hal_output_hidden_paste.py", "tests/test_workstation_app_secrets.py", "tests/test_workstation_secrets_login.py", "tests/test_workstation_secrets_setup.py", "tests/test_workstation_secrets_verification.py", "tests/test_workstation_secrets_view.py", "tests/test_workstation_setup.py"]
 opened_commit = "94b77d87bc8903958834d3fd06d3e50ae8533ed6"
 whole_reason = "One mechanism with a single caller leaves at once: its manifest entry, its parser, its wizard path, its tests and its doc; split, each part would leave dead code or a failing test behind."
