@@ -64,11 +64,6 @@ rule = "test-layout"
 reason = "it tests compose.yaml, the gateway files and the probe overlay of the agent service's egress, which no module of src/hal mirrors"
 
 [[layout.allow]]
-path = "tests/test_agent_service_census_watch.py"
-rule = "test-layout"
-reason = "it tests the agent service's census watch mode, outside src/hal, which no module of src/hal mirrors"
-
-[[layout.allow]]
 path = "tests/test_agent_service_image.py"
 rule = "test-layout"
 reason = "it tests the agent service's image recipe, its probe and scripts/agent_service_lock.py, outside src/hal, which no module of src/hal mirrors"
@@ -126,7 +121,7 @@ reason = "it tests agent-service/smoke.py and the agent-smoke service of compose
 [[layout.allow]]
 path = "tests/test_agent_service_tree_census.py"
 rule = "test-layout"
-reason = "it tests the agent service's in-container census, outside src/hal, which no module of src/hal mirrors"
+reason = "it tests the in-container retention census, outside src/hal, which no module of src/hal mirrors"
 
 [[layout.allow]]
 path = "tests/test_agent_service_unit.py"
