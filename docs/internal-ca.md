@@ -9,7 +9,7 @@ switches in `fleet.yaml`: `step-ca` (and with it `traefik-mcp`), and `agent-egre
 ## Interne CA
 
 `step-ca` is the certificate authority for the MCP origins: the servers behind `https://<app>.mcp.internal`
-that the agent service calls over https only. It listens on `step-ca:9000` on the internal network `mcp-ca`
+reached over https only. It listens on `step-ca:9000` on the internal network `mcp-ca`
 (no route out, no published port), has one ACME provisioner that accepts only `*.mcp.internal` through
 TLS-ALPN-01, and issues 24-hour certificates. `step-ca/ca.json` is its one configuration. `traefik-mcp`
 fetches its certificates from it.
@@ -39,7 +39,7 @@ since it holds certificates from this CA.
 A second Traefik, the gateway to the MCP origins and the speech service's one way to Keycloak's key
 set. It has no host networking and no Docker API, and
 listens on 443 inside internal networks, none with a route out: `mcp-ca` (step-ca and
-`traefik-mcp`), `mcp` (`traefik-mcp` and the agent service), `mcp-backends` (`traefik-mcp` and the
+`traefik-mcp`), `mcp` (`traefik-mcp` alone), `mcp-backends` (`traefik-mcp` and the
 probe's MCP server) and one network per app that serves an MCP origin, `hal_mcp_songmaker` for
 songmaker (`traefik-mcp` and the app's web service, which joins it as an external network). It is the
 only container on all of them. Two more internal, isolated networks carry the key set (next section). It answers to `<app>.mcp.internal` on `mcp-ca`
@@ -65,7 +65,7 @@ path, and nothing else of Keycloak, to `keycloak:8080` on `keycloak-keys`, a net
 is pinned and `traefik-mcp` finds it through `extra_hosts`, so an app on another of its networks
 cannot answer as `keycloak` with a forged key set. Traefik routes by Host and SNI, not by network, so
 the speech service reaches every router of `mcp/dynamic/`: `hello` (whose backend runs only in the
-probe), `songmaker` (whose `/mcp` demands the agent service's capability) and `keycloak`; none routes
+probe), `songmaker` (its `/mcp` path alone) and `keycloak`; none routes
 to the speech service.
 
 The speech service's networks to its callers, `hal_speech_hopin` and `hal_speech_presentator`, are
