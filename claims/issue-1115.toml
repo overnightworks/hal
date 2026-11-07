@@ -1,0 +1,7 @@
+claim_id = "212ed922ed19405dae0457404426d19f"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "2f180f433398f24dff6d5aed6b673bac62639d5e"
+branch = "claude/issue-1115-signal-cases-race-the-prompt"
+scope = ["src/hal/stack/external/cli.py", "tests/test_stack_external.py"]
+opened_commit = "1be9ae029604a15d95a726b358e369bcf0f1de69"
