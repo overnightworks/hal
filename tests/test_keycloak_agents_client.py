@@ -82,6 +82,20 @@ def test_a_scope_that_is_not_offered_fails_the_relation(app: str) -> None:
     assert mcp_problems(realm, read("fleet.yaml")) == [f"{AGENTS} does not offer mcp-{app}"]
 
 
+def test_an_app_with_an_mcp_scope_but_no_mcp_subgroup_fails_the_relation() -> None:
+    realm = read("keycloak/realm.yaml")
+    hopin = next(
+        app
+        for group in realm["groups"]
+        if group["name"] == "apps"
+        for app in group["subGroups"]
+        if app["name"] == "hopin"
+    )
+    hopin["subGroups"] = [child for child in hopin["subGroups"] if child["name"] != "mcp"]
+
+    assert mcp_problems(realm, read("fleet.yaml")) == ["/apps/hopin has no mcp subgroup"]
+
+
 def test_the_client_is_public_with_the_rulings_settings() -> None:
     client = agents_client(read("keycloak/realm.yaml"))
     attributes = client["attributes"]
