@@ -1,0 +1,7 @@
+claim_id = "a0d19f2eeb3643d3937989d5b238273d"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "c38e43bbda310505ecc4b73e25029d82a6841598"
+branch = "claude/issue-1135-drop-gitlab-manifest-entry"
+scope = ["docs/home.md", "src/hal/workstation/secrets_manifest.toml"]
+opened_commit = "8d302409093b90c490427e4d45e2ebec14364c69"
