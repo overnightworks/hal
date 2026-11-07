@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path, PurePosixPath
 
 import pytest
-from support.workstation_secrets_support import never_run, run_wizard
+from support.workstation_secrets_support import run_wizard
 from support.workstation_support import FAKE_SECRET_VALUE, TEST_MANIFEST, UNEXPECTED_ERROR_PREFIX, FakeProbe, plant_secrets, run_hal_secrets, run_report_command, symlinked_folder_fix
 from support.workstation_secrets_report import cells_of, findings_of, report_of
 
@@ -336,14 +336,13 @@ def test_only_the_pending_root_certificate_may_be_0644(
 
 
 def test_the_files_go_live_and_init_write_are_known_and_need_no_change(tmp_path: Path, probe: FakeProbe, capsys) -> None:
-    """#195 M5: laid out as keycloak/go-live and step-ca/init write them, `hal check` reports nothing for them; #201 the agent service's token with its renewal file beside it; #356 its signing pair, whose public half at 0644 is no finding."""
+    """#195 M5: laid out as keycloak/go-live and step-ca/init write them, `hal check` reports nothing for them."""
     home = tmp_path / "home"
     files = {
         "step-ca": {"password": 0o644, "root_ca_key": 0o600, "root_ca.crt": 0o644},
         "step-ca/.pending-root": {"root_ca_key": 0o600, "root_ca.crt": 0o644},
         "keycloak": {"db-password": 0o644, "config-cli-secret": 0o644, "bootstrap-admin-password": 0o644},
         "keycloak/clients": {"edge": 0o644, "presentator": 0o644},
-        "agent-service/claude": {"token": 0o600, "token.new": 0o600}, "agent-service/signing": {"private.pem": 0o600, "public.pem": 0o644},
     }
     for folder, modes in files.items():
         (home / ".secrets" / folder).mkdir(parents=True, mode=0o700)
@@ -351,7 +350,7 @@ def test_the_files_go_live_and_init_write_are_known_and_need_no_change(tmp_path:
             (home / ".secrets" / folder / name).write_text("x")
             (home / ".secrets" / folder / name).chmod(mode)
     folders = ("keycloak/clients", "keycloak", "step-ca/.pending-root", "step-ca", "")
-    for folder in ("agent-service/signing", "agent-service/claude", "agent-service", *folders):
+    for folder in folders:
         (home / ".secrets" / folder).chmod(0o700)
 
     run_hal_secrets(home, probe, now=NOW)
@@ -610,7 +609,7 @@ def test_a_missing_restic_password_is_named_with_its_recreate_line_and_setup_nev
     plant_secrets(home)
     password = home / ".secrets" / "restic" / "password"
     password.unlink()
-    operator_absent = Boundaries(Terminal(lambda: True, never_asked, never_asked, never_asked), never_asked, os.fsync, never_run)
+    operator_absent = Boundaries(Terminal(lambda: True, never_asked, never_asked, never_asked), never_asked, os.fsync)
 
     view_code = run_hal_secrets(home, probe, now=NOW)
     view = report_of(home)

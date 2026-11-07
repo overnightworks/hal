@@ -11,7 +11,7 @@ from pathlib import Path, PurePosixPath
 
 import pytest
 from support.workstation_support import FakeProbe, Sandbox, lines_of_the_run, plant_secrets, run_captured_hal_setup, run_hal_secrets, run_hal_setup
-from support.workstation_secrets_support import never_run, FakeSync, FakeTerminal, guided_boundaries, secrets_terminal
+from support.workstation_secrets_support import FakeSync, FakeTerminal, guided_boundaries, secrets_terminal
 from support.workstation_secrets_report import cells_of, findings_of, report_of
 
 from support.terminal_support import put_stdout_on_a_terminal
@@ -192,7 +192,7 @@ def never_verified(_source: object, _value: str) -> Verdict:
 
 
 def run_turn_setup(sandbox: Sandbox, capsys: pytest.CaptureFixture[str], terminal: FakeTerminal, disk: FakeSync | None = None) -> tuple[int, str]:
-    boundaries = Boundaries(terminal.boundary(), never_verified, (disk or FakeSync()).sync, never_run)
+    boundaries = Boundaries(terminal.boundary(), never_verified, (disk or FakeSync()).sync)
     code = run_hal_setup(home=sandbox.home, secrets_setup_boundaries=boundaries, now=NOW)
     captured = capsys.readouterr()
     return code, captured.out + captured.err
@@ -727,7 +727,7 @@ def test_hal_setup_apply_ended_by_ctrl_c_exits_130_and_leaves_no_file(
 
     terminal = secrets_terminal(True)
     code, _, error = hal_secrets(
-        LIVE, boundaries=Boundaries(terminal.terminal, terminal.verify, interrupted, never_run)
+        LIVE, boundaries=Boundaries(terminal.terminal, terminal.verify, interrupted)
     )
 
     assert code == ExitCode.INTERRUPTED
@@ -781,7 +781,7 @@ def walk_on_a_terminal(
     """The setup walk of both TURN values and a GitHub token the packaged manifest lacks, with stdout on a terminal, nothing pasted."""
     use_manifest(PACKAGED_MANIFEST.read_text() + "\n" + GUIDED_TOKEN)
     stdout = put_stdout_on_a_terminal(monkeypatch)
-    boundaries = Boundaries(FakeTerminal(browser_opens=browser_opens).boundary(), never_verified, FakeSync().sync, never_run)
+    boundaries = Boundaries(FakeTerminal(browser_opens=browser_opens).boundary(), never_verified, FakeSync().sync)
 
     run_hal_setup(home=sandbox.home, secrets_setup_boundaries=boundaries, now=NOW)
 

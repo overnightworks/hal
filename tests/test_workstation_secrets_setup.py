@@ -14,7 +14,6 @@ import yaml
 from support.workstation_secrets_report import findings_of, report_of
 from support.workstation_support import FakeProbe, plant_secrets, run_hal_secrets, symlinked_folder_fix
 from support.workstation_secrets_support import (
-    FakeCli,
     FakeSync,
     FakeTerminal,
     private_directory,
@@ -113,16 +112,11 @@ def disk() -> FakeSync:
 
 
 @pytest.fixture
-def cli() -> FakeCli:
-    return FakeCli()
-
-
-@pytest.fixture
 def boundaries(
-    terminal: FakeTerminal, verifier: FakeVerifier, disk: FakeSync, cli: FakeCli
+    terminal: FakeTerminal, verifier: FakeVerifier, disk: FakeSync
 ) -> Boundaries:
-    """The operator at the keyboard; the walk sees only these fakes, never a browser, a prompt, a provider or a CLI."""
-    return Boundaries(terminal.boundary(), verifier, disk.sync, cli)
+    """The operator at the keyboard; the walk sees only these fakes, never a browser, a prompt or a provider."""
+    return Boundaries(terminal.boundary(), verifier, disk.sync)
 
 
 def test_every_secret_is_written_0600_in_directories_kept_0700(home: Path, terminal: FakeTerminal, boundaries: Boundaries) -> None:
@@ -330,35 +324,6 @@ def test_a_secret_already_present_stays_untouched_and_its_page_is_not_opened(
     assert existing.read_text() == "FAKE-OLD-VALUE"
     assert (existing.stat().st_mtime_ns, existing.stat().st_mode) == (before.st_mtime_ns, before.st_mode)
     assert [urlsplit(page).netloc for page in terminal.opened] == ["github.com"]
-
-
-LOGIN_MANIFEST = """
-[[secret]]
-name = "agent-service/codex"
-kind = "tool-login"
-paths = ["~/.secrets/agent-service/codex/auth.json"]
-read_by = ["agent-service"]
-create = { run = ["codex", "login"], home = ["CODEX_HOME"], label = "Codex" }
-purpose = "the agent service runs Codex for the apps"
-"""
-
-
-def test_a_link_at_a_login_files_place_counts_as_missing_so_the_walk_signs_in_and_replaces_it_unfollowed(
-    home: Path, tmp_path: Path, terminal: FakeTerminal, boundaries: Boundaries, cli: FakeCli, use_manifest
-) -> None:
-    use_manifest(LOGIN_MANIFEST)
-    place = private_directory(home, ".secrets/agent-service/codex") / "auth.json"
-    victim = tmp_path / "victim"
-    victim.write_text("untouched")
-    place.symlink_to(victim)
-
-    end = run_wizard(home, boundaries)
-
-    assert end is WalkEnd.DONE
-    assert len(cli.calls) == 1
-    assert place.read_text() == cli.content
-    assert not place.is_symlink()
-    assert victim.read_text() == "untouched"
 
 
 @pytest.mark.parametrize("present", [False, True], ids=["absent", "present at 0644"])

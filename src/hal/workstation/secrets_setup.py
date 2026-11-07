@@ -4,9 +4,7 @@ A person stays in the loop on purpose: only someone with more rights than a toke
 for fine-grained tokens, and on Cloudflare the wizard would need an admin key on disk. So the browser login stays the
 operator's. The wizard does everything else: it says what comes and why, opens the provider's page, takes the pasted
 value without echo, has the provider confirm it and only then writes the file, 0600 in a 0700 directory. A service
-password is generated and written unseen. A login a CLI makes (`create` in the manifest) is made by that CLI in a fresh private
-home; the wizard only runs it, checks path and mode, and moves the login file into the entry's folder. A file already present
-stays untouched. It runs only at a terminal.
+password is generated and written unseen. A file already present stays untouched. It runs only at a terminal.
 
 Its read-only view is `secrets_view`.
 
@@ -20,16 +18,14 @@ import contextlib
 import json
 import os
 import secrets
-import shutil
 import signal
 import stat
-import subprocess
 import sys
 import urllib.error
 import urllib.request
 import uuid
 import webbrowser
-from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import Enum, StrEnum
@@ -40,7 +36,6 @@ from hal.output import DETAIL_INDENT, Glyph, Row, Tone, write_detail, write_erro
 from hal.output.command import Verb, command
 from hal.output.hidden_paste import END_HINT, PasteRefused, TerminalCannotHide, TerminalNotRestored, is_visible_ascii, read_hidden_paste
 from hal.workstation import secrets_view
-from hal.workstation.secrets_create import CreateCommand
 from hal.workstation.secrets_view import (
     HOME_PREFIX,
     LOOSEST_DIRECTORY_MODE,
@@ -205,29 +200,15 @@ class Terminal:
 
 
 DiskSync = Callable[[int], None]
-# Runs a CLI with the terminal as its own and `variables` added to the environment; its exit code, None when the CLI is not installed.
-LoginRunner = Callable[[Sequence[str], Mapping[str, str]], int | None]
-
-
-def run_command(argv: Sequence[str], variables: Mapping[str, str]) -> int | None:
-    """The CLI keeps the operator's terminal, so its sign-in output and prompts reach the person; hal reads none of it."""
-    try:
-        return subprocess.run(argv, env={**os.environ, **variables}, check=False).returncode  # noqa: S603 - argv is the provider CLI the wizard names and no shell runs
-    except FileNotFoundError:
-        return None
-
 
 @dataclass(frozen=True)
 class Boundaries:
     terminal: Terminal
     verify: TokenVerifier
     sync: DiskSync
-    run_command: LoginRunner
 
 
-TERMINAL_BOUNDARIES = Boundaries(
-    Terminal(_both_ends_are_a_terminal, input, read_hidden_paste, webbrowser.open), verify_token, os.fsync, run_command
-)
+TERMINAL_BOUNDARIES = Boundaries(Terminal(_both_ends_are_a_terminal, input, read_hidden_paste, webbrowser.open), verify_token, os.fsync)
 
 
 # --- the filesystem boundary ------------------------------------------------
@@ -275,7 +256,7 @@ _OWNER_SEARCH_BIT = 0o100
 
 def _store_refusal(layout: Layout, entry: SecretEntry, *, unless_unsearchable: bool = False) -> StoreRefused | None:
     """Read-only, before a provider page is opened: what an existing directory on the way, or a link at the place, would
-    refuse the store for. A login's rename replaces such a link unfollowed, so for a login only the directories count.
+    refuse the store for.
 
     With `unless_unsearchable`, a directory its owner cannot search (no owner x bit) ends the look with None: the walk
     cannot read below it, so it reports the entry as not checked instead of naming a refusal it cannot see through. The
@@ -292,7 +273,7 @@ def _store_refusal(layout: Layout, entry: SecretEntry, *, unless_unsearchable: b
                 return None
             return _refused_below(unfit)
     try:
-        linked = None if entry.create or unless_unsearchable else linked_place(entry.place, place.lstat().st_mode)
+        linked = None if unless_unsearchable else linked_place(entry.place, place.lstat().st_mode)
     except FileNotFoundError:
         return None
     return _refused_below(linked) if linked else None
@@ -423,9 +404,6 @@ class WizardEvent(StrEnum):
     NOT_CHECKED = "not checked"
     BY_HAND = "by hand"
     NOT_STORED = "not stored"
-    NEW_LOGIN = "new login"
-    SIGNED_IN = "signed in"
-    NOT_SIGNED_IN = "not signed in"
 
 
 def _write_entry_row(glyph: Glyph, entry_name: str, event: WizardEvent, fact: str) -> None:
@@ -513,67 +491,13 @@ def _set_up_token(entry: SecretEntry, source: TokenSource, layout: Layout, bound
 def _set_up_unverified_token(entry: SecretEntry, layout: Layout, boundaries: Boundaries) -> bool:
     """O6: the value is asked hidden and stored without provider verification; no provider is asked."""
     _announce(entry, UNVERIFIED_FACT)
-    write_detail(f"create: {entry.renewal}")
+    write_detail(f"create: {entry.recreate}")
     _offer_page(boundaries.terminal, entry.page)
     value = _visible_paste(entry, boundaries.terminal)
     if not value:
         _skipped(entry)
         return False
     _store(entry, layout, boundaries, value)
-    return True
-
-
-@contextlib.contextmanager
-def _fresh_login_home(folder: Path) -> Iterator[Path]:
-    """A new empty folder open to its owner only, beside the entry's folder and so outside the service's bind; gone on every way out."""
-    home = folder.with_name(f".{folder.name}.{uuid.uuid4().hex}.login")
-    home.mkdir(mode=LOOSEST_DIRECTORY_MODE)
-    try:
-        yield home
-    finally:
-        shutil.rmtree(home)
-
-
-def _install_login(entry: SecretEntry, layout: Layout, home: Path) -> PurePosixPath | None:
-    """The login file the CLI left in `home` moves to its place with the entry's loosest mode; None when it left no regular file.
-
-    Only `lstat`, `chmod` and one `rename`: the content is never opened, and the rename replaces whatever stands at the place,
-    a link included, without following it.
-    """
-    made = home / entry.place.name
-    with contextlib.suppress(FileNotFoundError):
-        if stat.S_ISREG(made.lstat().st_mode):
-            made.chmod(entry.loosest_mode)
-            made.rename(layout.home / entry.place)
-            return entry.place
-    return None
-
-
-def _login_refusal(create: CreateCommand, exit_code: int | None) -> str:
-    cli = create.run[0]
-    if exit_code is None:
-        return f"{cli} is not installed · install it, then rerun"
-    if exit_code:
-        return f"{' '.join(create.run)} ended with exit {exit_code} · nothing stored"
-    return f"{' '.join(create.run)} ended without a login file · nothing stored"
-
-
-def _set_up_tool_login(entry: SecretEntry, create: CreateCommand, layout: Layout, boundaries: Boundaries) -> bool:
-    """The CLI makes the secret itself in a home of its own, since the service may write the entry's folder; hal moves only the login
-    file into the folder, checks path and mode only and never reads what the CLI wrote."""
-    subject = entry.name
-    suffix = ", a login of its own" if create.home else ""
-    _write_entry_row(Glyph.ANNOUNCE, subject, WizardEvent.NEW_LOGIN, f"your {create.label} account{suffix}")
-    write_detail(f"why: {entry.purpose}")
-    boundaries.terminal.ask(f"{DETAIL_INDENT}Enter opens the {create.label} sign-in in your browser: ")
-    _private_directories(layout.home, layout.home / entry.folder)
-    with _fresh_login_home(layout.home / entry.folder) as home:
-        exit_code = boundaries.run_command(create.run, dict.fromkeys(create.home, str(home)))
-        made = _install_login(entry, layout, home) if exit_code == 0 else None
-    if made is None:
-        _write_entry_row(Glyph.FAILED, subject, WizardEvent.NOT_SIGNED_IN, _login_refusal(create, exit_code))
-        return False
-    write_row(Row(Glyph.DONE, subject, WizardEvent.SIGNED_IN, f"{HOME_PREFIX}{made} ({entry.loosest_mode:o}) · never shown"))
     return True
 
 
@@ -677,14 +601,12 @@ def _set_up_or_fail(entry: SecretEntry, layout: Layout, boundaries: Boundaries, 
 
 def _set_up(entry: SecretEntry, layout: Layout, boundaries: Boundaries, now: datetime) -> Step:
     if not entry.written_by_setup:
-        _write_entry_row(Glyph.NEEDS_YOU, entry.name, WizardEvent.BY_HAND, f"no wizard yet: {entry.renewal}")
+        _write_entry_row(Glyph.NEEDS_YOU, entry.name, WizardEvent.BY_HAND, f"no wizard yet: {entry.recreate}")
         return Step.BY_HAND
     if refusal := _store_refusal(layout, entry):
         raise refusal
     if entry.source:
         stored = _set_up_token(entry, entry.source, layout, boundaries, now)
-    elif entry.create:
-        stored = _set_up_tool_login(entry, entry.create, layout, boundaries)
     elif entry.kind is SecretKind.UNVERIFIED_TOKEN:
         stored = _set_up_unverified_token(entry, layout, boundaries)
     else:

@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import BinaryIO
 
 import pytest
-from support.workstation_secrets_support import never_run
 from support.workstation_support import (
     COMMIT_HOOK,
     FAKE_MISE,
@@ -149,7 +148,7 @@ def test_a_walk_that_stored_everything_ends_setup_with_its_verdict_and_next_hal_
 ) -> None:
     """#503: the wizard prints no ending; the verdict of `hal setup` is followed by `next: hal apply`."""
     use_manifest(GENERATED_SECRET)
-    at_the_keyboard = Boundaries(Terminal(lambda: True, lambda _: "", lambda _: "", lambda _: True), lambda *_: None, lambda _: None, never_run)
+    at_the_keyboard = Boundaries(Terminal(lambda: True, lambda _: "", lambda _: "", lambda _: True), lambda *_: None, lambda _: None)
 
     code = run_hal_setup(home=sandbox.home, secrets_setup_boundaries=at_the_keyboard)
     lines = capsys.readouterr().out.splitlines()
