@@ -36,8 +36,6 @@ attributes:
   adminEventsExpiration: "31536000"   # admin events: 1 year
 roles:
   realm:
-    - name: agent-workload
-      description: Service-account-only marker of an app workload calling the agent service.
     - name: speech-workload
       description: Service-account-only marker of an app workload calling the speech service.
 groups:
@@ -62,8 +60,6 @@ groups:
     subGroups:
       - name: agent-service
         subGroups:
-          # The agent service's subscription right; it reads this path through its service.toml.
-          - name: subscription
           # The paid LiteLLM right; nothing reads it until the paid route exists.
           - name: api
       # Exactly this path is the speech service's right; it has no subgroup.
@@ -92,24 +88,6 @@ clientScopes:
           access.token.claim: "true"
           userinfo.token.claim: "true"
           introspection.token.claim: "true"
-  - name: agent-service-audience
-    description: Adds agent-service to the access token audience
-    protocol: openid-connect
-    attributes:
-      include.in.token.scope: "false"
-      display.on.consent.screen: "false"
-    protocolMappers:
-      - name: agent-service-audience
-        protocol: openid-connect
-        protocolMapper: oidc-audience-mapper
-        consentRequired: false
-        config:
-          included.client.audience: agent-service
-          id.token.claim: "false"
-          access.token.claim: "true"
-          # Stated, because Keycloak would otherwise default it on create and the next apply flip it.
-          userinfo.token.claim: "false"
-          introspection.token.claim: "true"
   - name: speech-service-audience
     description: Adds speech-service to the access token audience
     protocol: openid-connect
@@ -125,6 +103,7 @@ clientScopes:
           included.client.audience: speech-service
           id.token.claim: "false"
           access.token.claim: "true"
+          # Stated, because Keycloak would otherwise default it on create and the next apply flip it.
           userinfo.token.claim: "false"
           introspection.token.claim: "true"
   - name: mcp-songmaker
@@ -191,39 +170,21 @@ requiredActions:
     enabled: true
     defaultAction: true
     priority: 20
-# Only the service accounts of the clients that call the agent service (A1d, #183) or the speech service
-# are users here, and only to hold their workload roles; no person is ever listed, and no group.
+# Only the service accounts of the clients that call the speech service are users here, and only
+# to hold their workload role; no person is ever listed, and no group.
 users:
-  - username: service-account-songmaker
-    enabled: true
-    serviceAccountClientId: songmaker
-    realmRoles:
-      - agent-workload
   - username: service-account-presentator
     enabled: true
     serviceAccountClientId: presentator
     realmRoles:
-      - agent-workload
       - speech-workload
   - username: service-account-hopin
     enabled: true
     serviceAccountClientId: hopin
     realmRoles:
-      - agent-workload
       - speech-workload
 clients:
-  # Audience only: the agent service accepts tokens issued for it and never signs anyone in.
-  - clientId: agent-service
-    name: agent-service
-    enabled: true
-    bearerOnly: true
-    publicClient: false
-    standardFlowEnabled: false
-    implicitFlowEnabled: false
-    directAccessGrantsEnabled: false
-    serviceAccountsEnabled: false
-    frontchannelLogout: false
-  # Audience only, like agent-service: the speech service accepts tokens issued for it.
+  # Audience only: the speech service accepts tokens issued for it and never signs anyone in.
   - clientId: speech-service
     name: speech-service
     enabled: true
@@ -234,12 +195,11 @@ clients:
     directAccessGrantsEnabled: false
     serviceAccountsEnabled: false
     frontchannelLogout: false
-  # songmaker signs people in with the authorization code and PKCE. Only it also allows the device
-  # grant, for the live smoke's sign-in; a device request needs its client secret. A sign-out in Keycloak calls
-  # songmaker's back-channel logout over the internal network hal_backchannel_songmaker. songmaker
-  # ignores the session id and ends every session of the person, so the call does not require one.
-  # Its service account is the workload identity for the agent service (the token's azp must equal
-  # the people's); the same holds for presentator and hopin.
+  # songmaker signs people in with the authorization code and PKCE, and has no service account. A
+  # sign-out in Keycloak calls songmaker's back-channel logout over the internal network
+  # hal_backchannel_songmaker. songmaker ignores the session id and ends every session of the
+  # person, so the call does not require one. The device grant is named as off, so the import's
+  # merge cannot keep an earlier on.
   - clientId: songmaker
     name: songmaker
     enabled: true
@@ -248,7 +208,7 @@ clients:
     standardFlowEnabled: true
     implicitFlowEnabled: false
     directAccessGrantsEnabled: false
-    serviceAccountsEnabled: true
+    serviceAccountsEnabled: false
     frontchannelLogout: false
     baseUrl: "https://songmaker.hallucinai.de/"
     alwaysDisplayInConsole: false
@@ -259,23 +219,20 @@ clients:
       pkce.code.challenge.method: "S256"
       backchannel.logout.url: "http://songmaker.hallucinai.de:8080/auth/backchannel-logout"
       backchannel.logout.session.required: "false"
-      oauth2.device.authorization.grant.enabled: "true"
-    defaultClientScopes: &songmaker_presentator_scopes
+      oauth2.device.authorization.grant.enabled: "false"
+    defaultClientScopes:
       - basic
       - profile
       - email
       - roles
       - web-origins
       - acr
-      - service_account
       - groups
-      - agent-service-audience
     optionalClientScopes: []
   # hopin signs people in the same way as songmaker and is logged out the same way (#254). It holds
   # a refresh token per session, named as on so a merge cannot keep an earlier off, and its service
-  # account is a workload of the agent service and of the speech service, whose audience it asks for by
-  # the optional scope speech-service-audience. It reads no email, web origin or acr, so it has
-  # none of those scopes.
+  # account is a workload of the speech service, whose audience it asks for by the optional scope
+  # speech-service-audience. It reads no email, web origin or acr, so it has none of those scopes.
   - clientId: hopin
     name: hopin
     enabled: true
@@ -302,13 +259,12 @@ clients:
       - groups
       - roles
       - service_account
-      - agent-service-audience
     optionalClientScopes:
       - speech-service-audience
   # One client for presentator's two hosts (agent-presentator#242). It is logged out like hopin, on
   # presentator's own port, over its own back-channel network. Its service account is a workload of
-  # the agent service and of the speech service, whose audience it asks for by the optional
-  # scope speech-service-audience.
+  # the speech service, whose audience it asks for by the optional scope speech-service-audience.
+  # It has songmaker's default scopes and service_account.
   - clientId: presentator
     name: presentator
     enabled: true
@@ -329,7 +285,15 @@ clients:
       pkce.code.challenge.method: "S256"
       backchannel.logout.url: "http://presentator.hallucinai.de:8000/auth/backchannel-logout"
       backchannel.logout.session.required: "false"
-    defaultClientScopes: *songmaker_presentator_scopes
+    defaultClientScopes:
+      - basic
+      - profile
+      - email
+      - roles
+      - web-origins
+      - acr
+      - service_account
+      - groups
     optionalClientScopes:
       - speech-service-audience
   # The public sign-in of a person's own AI agents: the authorization code with PKCE at one fixed

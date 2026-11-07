@@ -209,7 +209,7 @@ def change_unlisted_and_secrets(realms: dict[str, FakeRealm]) -> None:
         ),
         pytest.param(
             change_unlisted_and_secrets,
-            ["hallucinai: change client agent-service attributes.probe.unlisted: changed"],
+            ["hallucinai: change client speech-service attributes.probe.unlisted: changed"],
             id="U25-unlisted-key-changed-without-value-secret-silent",
         ),
     ],
@@ -285,7 +285,7 @@ def test_the_inventory_holds_no_secret_value_and_no_unlisted_value(
     assert leaked == []
     assert TOKEN not in run.stdout + run.stderr
     assert SECRET not in run.stdout + run.stderr
-    client = json.loads(run.stdout)["hallucinai"]["client"]["agent-service"]
+    client = json.loads(run.stdout)["hallucinai"]["client"]["speech-service"]
     assert "attributes.probe.unlisted" in client["digests"]
     assert "secret" not in client["digests"]
     assert "secret" not in client["fields"]
@@ -297,7 +297,7 @@ def test_the_nested_service_rights_groups_appear_in_the_inventory(
     run = run_observer(keycloak.url)
 
     observed = json.loads(run.stdout)["hallucinai"]["group"]
-    assert {"/services/agent-service/subscription", "/services/agent-service/api"} <= set(observed)
+    assert {"/services/agent-service/api", "/services/litellm/admin"} <= set(observed)
 
 
 def test_a_component_identity_includes_its_sub_type(keycloak: FakeKeycloak) -> None:
@@ -672,7 +672,7 @@ def test_a_missing_optional_field_is_null(keycloak: FakeKeycloak) -> None:
     """U21: Keycloak leaves out empty fields."""
     del keycloak.realms["hallucinai"].clients[0]["name"]
 
-    client = observe(keycloak)["hallucinai"]["client"]["agent-service"]
+    client = observe(keycloak)["hallucinai"]["client"]["speech-service"]
 
     assert client["fields"]["name"] is None
 

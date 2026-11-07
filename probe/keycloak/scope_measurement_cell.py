@@ -17,7 +17,6 @@ from typing import Any, Protocol
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 import terms_cell
-from device_grant_cell import PKCE
 from test_rp import token_claims
 
 REALM = "hallucinai"
@@ -26,6 +25,7 @@ AUTH_PATH = f"/realms/{REALM}/protocol/openid-connect/auth"
 DECLARED_SCOPE = "speech-service-audience"
 DECLARED_CLIENT = "hopin"
 AUDIENCE_MAPPER = "oidc-audience-mapper"
+PKCE = {"code_challenge": "x" * 43, "code_challenge_method": "S256"}  # the app clients require PKCE
 TARGET = "probe-measured-service"
 SCOPE = "probe-measured-audience"
 ROLE = "probe-measured-workload"

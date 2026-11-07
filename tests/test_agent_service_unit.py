@@ -1,6 +1,5 @@
 """The agent service unit as files, no containers (#201 cell U13): the `agent-service` service of
-compose.yaml, `agent-service/service.toml`, and what they must agree on with the image recipe and
-the realm.
+compose.yaml, `agent-service/service.toml`, and what they must agree on with the image recipe.
 
 The running paths (U1-U12) are proven by probe/agent-service/unit.py and egress.py --target
 service; these tests hold the static facts the probe does not see in CI: the hardening, the binds
@@ -15,9 +14,6 @@ from urllib.parse import urlsplit
 
 import pytest
 import yaml
-
-from hal.stack.realm import observe
-from hal.stack.realm.declared import declared_realm
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -46,11 +42,6 @@ def dockerfile() -> str:
 @pytest.fixture(scope="module")
 def configuration() -> dict:
     return tomllib.loads((ROOT / "agent-service/service.toml").read_text())
-
-
-@pytest.fixture(scope="module")
-def realm() -> dict:
-    return yaml.safe_load((ROOT / "keycloak/realm.yaml").read_text())
 
 
 @pytest.fixture(scope="module")
@@ -169,42 +160,6 @@ def test_each_version_pin_equals_the_cli_the_recipe_installs(provider, configura
     pinned = re.search(rf"^ARG {argument}=(\S+)$", dockerfile, re.MULTILINE).group(1)
 
     assert configuration["cli"][provider]["version"] == pinned
-
-
-def test_the_identity_names_the_realms_issuer_audience_and_subscription_groups(
-    configuration, realm
-):
-    """The issuer is the realm's public one, the keys come from it over https, the audience is
-    the realm's bearer-only client and the subscription group is the realm's."""
-    identity = configuration["identity"]
-    issuer, jwks = urlsplit(identity["issuer"]), urlsplit(identity["jwks_url"])
-    clients = {client["clientId"] for client in realm["clients"]}
-    declared = declared_realm((ROOT / "keycloak/realm.yaml").read_text())
-    groups = declared.identities[observe.GROUP.name]
-
-    assert issuer.path == f"/realms/{realm['realm']}"
-    assert jwks.scheme == "https"
-    assert jwks.hostname == issuer.hostname
-    assert jwks.path.startswith(issuer.path + "/")
-    assert identity["audience"] in clients
-    assert identity["subscription_groups"]
-    assert set(identity["subscription_groups"]) <= groups
-    assert not {"subscription_group", "api_groups"} & identity.keys()
-
-
-def test_every_app_is_a_realm_workload_client_with_a_service_account_and_overrides_no_model(
-    configuration, realm
-):
-    """The workload clients of #183; no app declares a `tools` table (songmaker's MCP server
-    lists them) or overrides the model (N2)."""
-    service_accounts = {
-        client["clientId"] for client in realm["clients"] if client.get("serviceAccountsEnabled")
-    }
-
-    assert configuration["apps"]
-    for app in configuration["apps"].values():
-        assert app["workload_client"] in service_accounts
-        assert not {"tools", "purposes", "model", "agents"} & app.keys()
 
 
 def test_the_service_declares_no_paid_api_route(configuration):

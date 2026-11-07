@@ -7,7 +7,7 @@
 "Keycloak.admin_api" = 29
 
 [file_lines]
-"probe/keycloak/probe.py" = 2799
+"probe/keycloak/probe.py" = 2798
 "probe/step-ca/probe.py" = 840
 "src/hal/workstation/secrets_view.py" = 822
 "tests/test_backup_runner.py" = 1170
