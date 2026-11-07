@@ -1,7 +1,0 @@
-claim_id = "3158704bf44e4d3ab833a73b21b75cec"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "b5676a56c3c6d0f62f01a234002024fea7e2f6d0"
-branch = "claude/issue-1151-hopin-host-platform-tunnel"
-scope = ["fleet.yaml"]
-opened_commit = "f445e1b3a308f60d71209c83d75687967447e049"
