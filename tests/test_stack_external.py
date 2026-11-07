@@ -47,19 +47,11 @@ from hal.stack.external import apply as external_apply
 from hal.stack.external import cli as external_cli
 from hal.stack.external import cloudflare_read, host_probe, secrets, tofu
 
-(
-    fake_tofu,
-    home,
-    live_checkout,
-    publish,
-    terminal,
-) = (
-    stack_external_support.fake_tofu,
-    stack_external_support.home,
-    stack_external_support.live_checkout,
-    stack_external_support.publish,
-    stack_external_support.terminal,
-)  # fmt: skip
+fake_tofu = stack_external_support.fake_tofu
+home = stack_external_support.home
+live_checkout = stack_external_support.live_checkout
+publish = stack_external_support.publish
+terminal = stack_external_support.terminal
 
 SENTINEL = "sentinel-4b1d-never-print-me"
 ALLOWED_NAMES = {
@@ -622,6 +614,14 @@ CLEANUP_PATHS = [
 ]
 
 
+def wait_until_reading(apply) -> None:
+    """`input()` loses a signal that lands before its blocking `read`: wait until it sleeps."""
+    deadline = time.monotonic() + 20
+    while Path(f"/proc/{apply.process.pid}/stat").read_text().rpartition(")")[2].split()[0] != "S":
+        assert time.monotonic() < deadline, "the prompt never waited for an answer"
+        time.sleep(0.005)
+
+
 @pytest.mark.parametrize("configuration,reaction,expected_exit", CLEANUP_PATHS)
 def test_the_plan_file_is_deleted_on_every_path(
     home, fake_tofu, terminal, configuration, reaction, expected_exit
@@ -636,6 +636,7 @@ def test_the_plan_file_is_deleted_on_every_path(
                 apply.type("yes\n")
                 wait_until_hanging()
             if isinstance(reaction, signal.Signals):
+                wait_until_reading(apply)
                 apply.signal(reaction)
             else:
                 apply.type(reaction)
@@ -1310,10 +1311,9 @@ def test_an_apply_that_applied_nothing_and_found_a_plan_never_calls_the_check(
         if configuration.get("hang_in"):
             wait_until_hanging()
             apply.signal(reaction)
-        else:
-            if reaction:
-                apply.read_until(PROMPT)
-                apply.type(reaction)
+        elif reaction:
+            apply.read_until(PROMPT)
+            apply.type(reaction)
         assert apply.finish() == expected_exit
     assert apply.checks() == []
 
