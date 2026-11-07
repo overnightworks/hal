@@ -38,9 +38,10 @@ from functools import partial
 from pathlib import Path
 
 REPOSITORY = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(Path(__file__).resolve().parent))  # egress.py, importable by path too
+sys.path.insert(0, str(REPOSITORY / "probe"))  # the helper of the probes, importable by path too
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # the probes beside this one
 
-from egress import scratch_directory  # noqa: E402
+from edge_copy import scratch_directory  # noqa: E402
 from scratch_secrets import write_dummy_codex_login, write_dummy_token  # noqa: E402
 
 from hal.output import Stream, write_line  # noqa: E402
@@ -127,7 +128,7 @@ def build(context: Path, transcript: Path, *extra: str, tag: str = IMAGE, cache:
         timeout=BUILD_SECONDS,
     )
     # The path is the operator's own --output, made absolute and checked once at the argparse
-    # boundary by egress.scratch_directory; Sonar does not follow that check across calls.
+    # boundary by edge_copy.scratch_directory; Sonar does not follow that check across calls.
     transcript.write_text(result.stdout + result.stderr, encoding="utf-8")  # NOSONAR(S8707)
     return result
 
@@ -413,7 +414,7 @@ def cell_i5(output: Path, scratch: Path) -> None:
     finally:
         logs = docker(["logs", PROBE_NAME])
         # The path is the operator's own --output, made absolute and checked once at the argparse
-        # boundary by egress.scratch_directory; Sonar does not follow that check across calls.
+        # boundary by edge_copy.scratch_directory; Sonar does not follow that check across calls.
         (output / "i5-service.txt").write_text(  # NOSONAR(S8707)
             logs.stdout + logs.stderr, encoding="utf-8"
         )

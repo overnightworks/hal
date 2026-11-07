@@ -1,6 +1,6 @@
 """What a network namespace can reach and what listens in it, as plain observations.
 
-The one owner of these observations: `probe/agent-service/egress.py` (its `Client`) and
+The one owner of these observations: `probe/agent-service/litellm_stack.py` (its `Client`) and
 `live_smoke.py` both import it and both send its source to `python -I -` inside the container, so
 it needs nothing but the standard library of the service image. It judges nothing; the probe and
 the live smoke each keep their own verdicts. `lan_address` runs on the host only.

@@ -650,8 +650,8 @@ services:
     volumes:
       - ./agent-service/api_canary.py:/opt/canary/api_canary.py:ro
 
-  # The probe's stand-in for the agent service (probe/agent-service/egress.py): the same
-  # attachments, hardened like the service, listening on nothing.
+  # The stand-in for the agent service: the same attachments, hardened like the service,
+  # listening on nothing.
   agent-probe:
     <<: *agent-attachments
     image: python:3.14.10-alpine@sha256:eb2c62658b8d51bff0acc408504b76521d02030de56a8a3c1e830083e89b89d2

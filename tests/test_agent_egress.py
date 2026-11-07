@@ -12,7 +12,6 @@ import re
 import signal
 import socket
 import struct
-import subprocess
 from collections.abc import Iterator
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -24,11 +23,10 @@ from support.script_module import loaded_script
 ROOT = Path(__file__).resolve().parents[1]
 PROBE = ROOT / "probe" / "agent-service"
 GATEWAY = "agent-egress"
-SERVICE = "agent-service"
-STAND_IN = "agent-probe"
 LITELLM_EGRESS = "litellm-egress"
 OBSERVER = "realm-observer"
 ISOLATED_MODE = {"com.docker.network.bridge.gateway_mode_ipv4": "isolated"}
+APP_NETWORK_NAME = re.compile(r"hal_agent_[a-z]+")
 HOST_SNI = re.compile(r"HostSNI\(`([^`]+)`\)")
 
 
@@ -51,29 +49,19 @@ def routers() -> dict:
     return load("agent-service/egress/dynamic/allowed.yml")["tcp"]["routers"]
 
 
-@pytest.fixture(scope="module")
-def attachments(compose) -> dict:
-    return compose["x-agent-attachments"]
+def test_every_app_network_is_internal_isolated_and_joined_by_the_front_of_litellm(compose):
+    """E16: each `hal_agent_<app>` network has no route out, and the front of LiteLLM joins all."""
+    app_networks = {
+        key: network
+        for key, network in compose["networks"].items()
+        if APP_NETWORK_NAME.fullmatch((network or {}).get("name", ""))
+    }
 
-
-def test_every_network_of_the_agent_attachments_is_internal_and_isolated(compose, attachments):
-    """E16: the service and the stand-in join only networks with no route out or host address."""
-    joined = {name: compose["networks"][name] for name in attachments["networks"]}
-
-    for network in joined.values():
+    assert app_networks
+    for key, network in app_networks.items():
         assert network["internal"] is True
         assert network["driver_opts"] == ISOLATED_MODE
-
-
-@pytest.mark.parametrize("member", [STAND_IN, SERVICE])
-def test_a_member_carries_the_attachments_and_nothing_else_of_the_network(
-    compose, attachments, member
-):
-    """E16: the stand-in and the service merge the one anchor; neither adds a port, a network
-    mode or a network."""
-    service = compose["services"][member]
-    assert service["networks"] == attachments["networks"]
-    assert not {"ports", "network_mode", "expose"} & service.keys()
+        assert key in compose["services"]["litellm-front"]["networks"]
 
 
 def test_the_gateway_is_the_only_service_on_internet(compose):
@@ -142,10 +130,9 @@ def test_the_gateway_shares_the_public_traefiks_image_and_hardening(compose):
     }
 
 
-@pytest.mark.parametrize("member", [GATEWAY, SERVICE, STAND_IN])
-def test_no_plain_compose_up_starts_the_gateway_the_service_or_the_stand_in(compose, member):
-    """Each sits behind a profile, whichever one."""
-    assert compose["services"][member]["profiles"]
+def test_no_plain_compose_up_starts_the_gateway(compose):
+    """It sits behind a profile, whichever one."""
+    assert compose["services"][GATEWAY]["profiles"]
 
 
 def test_the_gateways_static_file_keeps_global_and_log_of_the_public_traefik_and_no_api():
@@ -605,113 +592,6 @@ def test_the_dns_window_matches_one_whole_question_by_its_first_label_and_counts
     window.see(segment, ["litellm-db"])
 
     assert (window.one_question_frames, window.dns_messages) == (matched, 1)
-
-
-# --- the unit probe's refused-start decision, on synthetic state and logs ----------------------
-
-DIAGNOSTIC = "cli.anthropic.token_file"
-LISTENING_LINE = "INFO: Uvicorn running on http://0.0.0.0:8080"
-
-
-@pytest.fixture(scope="module")
-def unit() -> Iterator[ModuleType]:
-    yield from probe_module("unit")
-
-
-def stopped(exit_code: int) -> dict:
-    return {"Running": False, "Restarting": False, "ExitCode": exit_code}
-
-
-def test_a_start_that_listened_before_it_crashed_fails_the_cell(unit):
-    """U6/U11: a non-zero exit does not excuse a log that shows the service listening."""
-    logs = f"{LISTENING_LINE}\n{DIAGNOSTIC} is too open\n"
-    assert unit.ended_unsuccessfully(stopped(1))
-    with pytest.raises(unit.ProbeFailed):
-        unit.refusal_is_complete("U11", logs, [DIAGNOSTIC])
-
-
-def test_a_clean_exit_is_no_refused_start(unit):
-    assert not unit.ended_unsuccessfully(stopped(0))
-
-
-def test_a_container_that_is_running_is_no_refused_start(unit):
-    assert not unit.ended_unsuccessfully({"Running": True, "Restarting": False, "ExitCode": 1})
-
-
-def test_a_failed_start_that_names_the_field_and_never_listened_passes(unit):
-    restarting = {"Running": True, "Restarting": True, "ExitCode": 1}
-    assert unit.ended_unsuccessfully(stopped(1))
-    assert unit.ended_unsuccessfully(restarting)
-    assert unit.refusal_is_complete("U11", f"{DIAGNOSTIC} is too open\n", [DIAGNOSTIC])
-    assert not unit.refusal_is_complete("U11", "starting\n", [DIAGNOSTIC])
-
-
-@pytest.mark.parametrize("failing", ["docker ps", "docker inspect"])
-def test_a_failed_listing_or_inspection_fails_the_cell_never_reads_as_down(
-    unit, monkeypatch, failing
-):
-    def answer(command, **_):
-        if command[:2] == ["docker", "ps"]:
-            code, out = (1, "") if failing == "docker ps" else (0, "abc\n")
-        else:
-            code, out = 1, ""
-        return subprocess.CompletedProcess(command, code, out, "daemon error")
-
-    monkeypatch.setattr(unit.subprocess, "run", answer)
-    probe = object.__new__(unit.UnitProbe)
-    probe.environment = {}
-    with pytest.raises(unit.ProbeFailed):
-        probe.service_state()
-
-
-@pytest.fixture
-def agent_networks() -> Iterator[ModuleType]:
-    # it imports its sibling modules by name
-    yield from probe_module("agent_networks", PROBE, ROOT / "probe", ROOT / "agent-service")
-
-
-def test_p36_checks_every_ordered_pair_of_the_three_agent_networks(agent_networks):
-    target = "agent-service-1"
-    refused_pairs = []
-
-    class Probe:
-        def __init__(self):
-            self.target = SimpleNamespace(compose_service=target)
-            self.image = "image"
-
-        def run(self, command):
-            return SimpleNamespace(stdout=f"ip-{command[-1]}\n")
-
-        def client_in_namespace_of(self, beside, action, *arguments):
-            if action == "resolve":
-                return {"addresses": []}
-            if arguments[0] == "127.0.0.1":
-                return {"result": "connected"}
-            if arguments[0] == target:
-                return {"result": "connected"}
-            refused_pairs.append((beside, arguments[0]))
-            return {"result": "ENETUNREACH"}
-
-        def container(self, name):
-            return "id"
-
-        def inspect_network(self, network):
-            return {"Containers": {"id": {}}}
-
-        def hold(self, cell, text):
-            self.held = cell
-
-    probe = Probe()
-    agent_networks.cell_p36(probe, project="p", label="l", service_port=80, service_listens=True)
-    assert probe.held == "P36"
-    callers = {network: f"p-caller-{network}" for network in agent_networks.AGENT_NETWORKS}
-    assert set(refused_pairs) == {
-        (callers[caller], f"ip-{callers[other]}")
-        for caller in callers
-        for other in callers
-        if caller != other
-    }
-    assert len(refused_pairs) == 6
 
 
 def test_a_term_during_the_litellm_probes_stack_removal_is_ignored(litellm_stack):

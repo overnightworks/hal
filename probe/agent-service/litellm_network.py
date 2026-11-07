@@ -27,6 +27,9 @@ start.sh. S1 and S2 claim LiteLLM's behaviour from the moment `start.sh` runs, n
 start of the container. G20 is one gateway SYN window over the start and every driving cell, not
 over the stack's start. A window that ends before the last cell it covers is NOT DRIVEN.
 
+X13 to X16 are the refusals of no SNI, of plain bytes, and of a suffix and a prefix of the
+provider's name.
+
 Exit 0: every cell held, 1: a cell failed or was not driven.
 """
 
@@ -76,6 +79,7 @@ LOOPBACK = "lo"
 PROVIDER_ON_INTERNET = "fake provider on internet"
 PICTURES_ON_INTERNET = "fake OpenAI on internet"
 REFUSED_HOST = "auth.hallucinai.de"  # a real host of ours that no router of the gateway names
+NOT_FOUND = "HTTP/1.1 404 Not Found"  # Traefik's own answer to a request it has no router for
 TLS_HANDSHAKE, TLS_ALERT, SERVER_HELLO = 22, 21, 2  # record content types, handshake type
 FIRST_RECORD_PROGRAM = """\
 import json, socket, ssl, sys
@@ -363,6 +367,7 @@ class NetworkProbe(LitellmProbe):
         )
         self.refused_without_a_dial("X8", no_server_hello)
         self.refused_without_a_dial("X9", lambda: ended("example.com"))
+        self.cells_x13_to_x16(entrypoint, ended)
         container = self.container(LITELLM)
         outside = self.client_in_namespace_of(container, "resolve", "example.com")["addresses"]
         expect(outside == [], f"X10: example.com resolves to {outside}")
@@ -373,6 +378,29 @@ class NetworkProbe(LitellmProbe):
         self.hold("X11", f"LiteLLM resolves {PROVIDER_HOST} and {PICTURE_HOST} to {entrypoint}, "
                   "the gateway's entrypoint")  # fmt: skip
         self.cells_picture_host(intervals)
+
+    def cells_x13_to_x16(self, entrypoint: str, ended: Callable[[str], str]) -> None:
+        """No SNI, plain bytes, a suffix and a prefix of the provider name end in the gateway."""
+
+        def without_sni() -> str:
+            result = self.client_in_namespace_of(
+                self.container(LITELLM), "tls", entrypoint, "-", str(GATEWAY_PORT), "noverify"
+            )
+            alerted(result, "no SNI")
+            return f"no SNI refused ({result['error']})"
+
+        def plain_bytes() -> str:
+            result = self.client_in_namespace_of(
+                self.container(LITELLM), "plain", entrypoint, str(GATEWAY_PORT)
+            )
+            refused = not result["connected"] or result["reply"] in ("closed", NOT_FOUND)
+            expect(refused, f"plain bytes: {result}")
+            return f"plain bytes refused ({result})"
+
+        self.refused_without_a_dial("X13", without_sni)
+        self.refused_without_a_dial("X14", plain_bytes)
+        self.refused_without_a_dial("X15", lambda: ended(f"{PROVIDER_HOST}.example.com"))
+        self.refused_without_a_dial("X16", lambda: ended(f"x{PROVIDER_HOST}"))
 
     def cells_picture_host(self, intervals: dict[str, tuple[float, float]]) -> None:
         """X7e and X7g: only the gateway reaches the fake OpenAI."""
