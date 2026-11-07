@@ -178,7 +178,7 @@ SPEECH_APPS = tuple(app for app in APP_CLIENTS if SPEECH_SCOPE in app.optional_s
 SECRET_FILES = (
     "db-password",
     "config-cli-secret",
-    "bootstrap-admin-password",
+    *("bootstrap-admin-password", "clients/skat"),
     *(client.secret_file for client in APP_CLIENTS),
 )
 READY_TIMEOUT_SECONDS = 240

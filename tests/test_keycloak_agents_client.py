@@ -38,14 +38,17 @@ def mcp_audiences(scope: dict[str, Any]) -> list[str]:
 
 
 def mcp_problems(realm: dict[str, Any], fleet: dict[str, Any]) -> list[str]:
-    """What breaks an app's MCP front: no group, no optional scope, or an audience that is not
-    the app's `/mcp` address."""
+    """What breaks the MCP front of an app that has one (an `mcp` subgroup or an `mcp-<app>`
+    scope): no group, no optional scope, or an audience that is not the app's `/mcp` address.
+    An app with neither, like Skat, has no MCP front and is not checked."""
     scopes = {scope["name"]: scope for scope in realm["clientScopes"]}
     optional = agents_client(realm)["optionalClientScopes"]
     zone = catalog.zone(fleet)
     problems = []
     for app, children in app_groups(realm).items():
         scope = f"mcp-{app}"
+        if "mcp" not in children and scope not in scopes and scope not in optional:
+            continue
         host = fleet["services"][app]["hosts"][0]["name"]
         if "mcp" not in children:
             problems.append(f"/apps/{app} has no mcp subgroup")
@@ -57,7 +60,7 @@ def mcp_problems(realm: dict[str, Any], fleet: dict[str, Any]) -> list[str]:
     return problems
 
 
-def test_each_app_has_its_group_scope_and_audience() -> None:
+def test_each_app_with_an_mcp_front_has_its_group_scope_and_audience() -> None:
     assert mcp_problems(read("keycloak/realm.yaml"), read("fleet.yaml")) == []
 
 
