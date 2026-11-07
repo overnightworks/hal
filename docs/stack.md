@@ -76,7 +76,7 @@ retire it with `stop` and `rm -f` under the same profile. Afterwards `hello.<EDG
 ## Rollback
 
 `docker compose --profile '*' down` removes the containers of every profile (the core, Keycloak,
-step-ca, the agent service and its gateway) and the project's networks; the listeners on
+step-ca, LiteLLM and the gateways) and the project's networks; the listeners on
 `127.0.0.1:8081` and `127.0.0.1:8090` disappear. It keeps the volumes: `keycloak-db` holds every
 Keycloak user, credential and session and survives the rollback (it and `step-ca` keep their
 names `edge_keycloak-db` and `edge_step-ca`, set in `compose.yaml`). Never run `down --volumes`. The
