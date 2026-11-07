@@ -15,9 +15,7 @@ and nothing starts, and one that starts with its unit is recorded once the unit 
 A unit is a compose profile: on starts its services, off removes their containers. A live service of
 a unit that is enabled and not switched off or on whose compose definition changed is recreated
 alone after the followers, under the switch lock, one plan line each (#376). Volumes are never
-touched. The built service of a unit with `run.build` (agent-service) whose container, in any
-state, runs another image or definition than compose.yaml and its tag name now is recreated alone
-after the followers, one plan line, and its running requests end (#482). The app or database
+touched. The app or database
 service of Keycloak or LiteLLM whose live container runs another image than compose.yaml pins is
 recreated onto it the same way, its unit's first recreate after the unit's pre-apply snapshot is
 taken and proven (`pre_apply.py`); a snapshot that fails leaves the old container and the run ends
@@ -234,7 +232,7 @@ def _plan(
     core_plans = core.plan_core(fleet.config, containers, hashes, tracked, record)
     follower_plans = core.plan_followers(fleet.config, containers, hashes, tracked, record, gates)
     services = plan_unit_services(
-        fleet, containers, hashes, plans, followers, gates, engine, DATABASE_UNITS
+        fleet, containers, hashes, plans, followers, engine, DATABASE_UNITS
     )
     keycloak_gate = gates.get(reconcile.REALM_UNIT)
     keycloak_restart = restart_of(plans, services.recreates, reconcile.KEYCLOAK)
@@ -251,7 +249,6 @@ def _plan(
         read,
         core_plans,
         follower_plans,
-        services.built,
         services.recreates,
         plans,
         services.images,

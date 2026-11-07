@@ -1,7 +1,6 @@
-"""Cells SP1-SP6, SP8 and W4 of probe.py: a service's audience reaches a token only
-through the client scope that names it. The agent service's scope is a default of every app
-client; the speech service's is an optional scope of the clients that declare it, so a token
-carries `speech-service` only when one of them asks for it, and the others cannot ask. Each
+"""Cells SP1-SP6 and SP8 of probe.py: the speech service's audience reaches a token only
+through the client scope that names it, an optional scope of the clients that declare it, so a
+token carries `speech-service` only when one of them asks for it, and the others cannot ask. The
 service is a bearer-only client, and `/services/speech-service` has no subgroup. The held lines
 print the decoded claims the speech service reads and never a token. After them, hopin's branch
 runs the measurements of `scope_measurement_cell` on clients the probe makes."""
@@ -12,20 +11,20 @@ import secrets
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
+from urllib.parse import parse_qs, urlsplit
 
 import scope_measurement_cell
 from test_rp import token_claims
 
 REALM = "hallucinai"
 TOKEN_PATH = f"/realms/{REALM}/protocol/openid-connect/token"
-AGENT_SERVICE = "agent-service"
+AUTH_PATH = f"/realms/{REALM}/protocol/openid-connect/auth"
 SPEECH_SERVICE = "speech-service"
-WORKLOAD_ROLES = {AGENT_SERVICE: "agent-workload", SPEECH_SERVICE: "speech-workload"}
+SPEECH_WORKLOAD_ROLE = "speech-workload"
 SPEECH_SCOPE = "speech-service-audience"
 PROOF_CLIENT = "hopin"  # the client whose branch also runs the bearer-only and measurement cells
 SPEECH_GROUP = f"/services/{SPEECH_SERVICE}"
 USERNAME = f"probe-{PROOF_CLIENT}-speech-member"
-BEARER_ONLY_PROOFS = {AGENT_SERVICE: "W4", SPEECH_SERVICE: "SP6"}
 FLOWS = (
     "standardFlowEnabled",
     "implicitFlowEnabled",
@@ -39,28 +38,30 @@ def audience_of(access: dict[str, Any]) -> list[str]:
     return [audience] if isinstance(audience, str) else audience
 
 
-def has_workload_role(access: dict[str, Any], service: str) -> bool:
-    return WORKLOAD_ROLES[service] in access.get("realm_access", {}).get("roles", [])
+def has_workload_role(access: dict[str, Any]) -> bool:
+    return SPEECH_WORKLOAD_ROLE in access.get("realm_access", {}).get("roles", [])
 
 
-def is_workload_identity_of(
-    access: dict[str, Any], client_id: str, service: str = AGENT_SERVICE
-) -> bool:
-    """The shape a service accepts: its workload role and audience, `client_id` and `azp` both
-    naming the app, and no group."""
+def is_workload_of(access: dict[str, Any], client_id: str) -> bool:
+    """An app's workload token: the workload role, `client_id` and `azp` both naming the app, and
+    no group."""
     return (
-        has_workload_role(access, service)
-        and service in audience_of(access)
+        has_workload_role(access)
         and access.get("client_id") == client_id
         and access.get("azp") == client_id
         and not access.get("groups")
     )
 
 
+def is_workload_identity_of(access: dict[str, Any], client_id: str) -> bool:
+    """The shape the speech service accepts: an app's workload token with its audience."""
+    return is_workload_of(access, client_id) and SPEECH_SERVICE in audience_of(access)
+
+
 def decoded(access: dict[str, Any]) -> str:
     """The claims a held line shows: no token and no subject."""
     roles = access.get("realm_access", {}).get("roles", [])
-    checked = [role for role in roles if role in WORKLOAD_ROLES.values()]
+    checked = [role for role in roles if role == SPEECH_WORKLOAD_ROLE]
     return (
         f"aud {audience_of(access)}, roles {checked}, groups {access.get('groups', [])}, "
         f"client_id {access.get('client_id')}, azp {access.get('azp')}"
@@ -70,6 +71,7 @@ def decoded(access: dict[str, Any]) -> str:
 class Answer(Protocol):
     status: int
     text: str
+    headers: Any
 
     def json(self) -> Any: ...
 
@@ -95,6 +97,8 @@ class Probe(scope_measurement_cell.Probe, Protocol):
     admin: Admin
     secret_values: dict[str, str]
 
+    def app_client_authorization_query(self, client: Any, **changes: str) -> str: ...
+
 
 @dataclass(frozen=True)
 class ServiceAudienceCell:
@@ -119,16 +123,15 @@ class ServiceAudienceCell:
         holder = f"{self.name} workload {scope or 'without a scope'}"
         return token_claims(self.probe.tokens_from(holder, self.workload(scope))["access_token"])
 
-    def bearer_only_services(self) -> None:
+    def bearer_only_service(self) -> None:
         admin = self.probe.admin
-        for service, proof in BEARER_ONLY_PROOFS.items():
-            found = admin.find(f"/{REALM}/clients", "clientId", service)
-            on = [flow for flow in FLOWS if found.get(flow)]
-            self.expect(
-                found.get("bearerOnly") is True and not on,
-                f"{service} is bearerOnly {found.get('bearerOnly')} with flows on: {on}",
-            )
-            self.probe.held(proof, f"{service} is bearer-only with every flow off")
+        found = admin.find(f"/{REALM}/clients", "clientId", SPEECH_SERVICE)
+        on = [flow for flow in FLOWS if found.get(flow)]
+        self.expect(
+            found.get("bearerOnly") is True and not on,
+            f"{SPEECH_SERVICE} is bearerOnly {found.get('bearerOnly')} with flows on: {on}",
+        )
+        self.probe.held("SP6", f"{SPEECH_SERVICE} is bearer-only with every flow off")
         group = admin.get(f"/{REALM}/group-by-path{SPEECH_GROUP}")
         children = admin.get(f"/{REALM}/groups/{group['id']}/children")
         self.expect(not children, f"{SPEECH_GROUP} has subgroups {children}")
@@ -137,7 +140,7 @@ class ServiceAudienceCell:
     def workload_with_and_without_the_scope(self) -> None:
         asked = self.workload_claims(SPEECH_SCOPE)
         self.expect(
-            is_workload_identity_of(asked, self.name, SPEECH_SERVICE),
+            is_workload_identity_of(asked, self.name),
             f"{self.name}'s workload token asked for {SPEECH_SCOPE}: {decoded(asked)}",
         )
         self.probe.held(
@@ -145,9 +148,7 @@ class ServiceAudienceCell:
         )
         plain = self.workload_claims()
         self.expect(
-            is_workload_identity_of(plain, self.name)
-            and has_workload_role(plain, SPEECH_SERVICE)
-            and SPEECH_SERVICE not in audience_of(plain),
+            is_workload_of(plain, self.name) and SPEECH_SERVICE not in audience_of(plain),
             f"{self.name}'s workload token asked for no scope: {decoded(plain)}",
         )
         self.probe.held(
@@ -172,7 +173,7 @@ class ServiceAudienceCell:
             SPEECH_SERVICE in audience_of(access)
             and SPEECH_GROUP in access.get("groups", [])
             and "/services" not in access["groups"]
-            and not has_workload_role(access, SPEECH_SERVICE)
+            and not has_workload_role(access)
             and SPEECH_SERVICE not in audience_of(identity),
             f"a member's token asked for {SPEECH_SCOPE}: {decoded(access)}; "
             f"ID token aud {audience_of(identity)}",
@@ -192,21 +193,26 @@ class ServiceAudienceCell:
         self.probe.held("SP4", f"a person's access token asked for none: {decoded(access)}")
 
     def client_without_the_scope(self, person_access_token: str) -> None:
-        refused = self.workload(SPEECH_SCOPE)
-        error = refused.json().get("error") if refused.status == 400 else None
-        self.expect(
-            error == "invalid_scope" and "access_token" not in refused.text,
-            f"{self.name} asked for {SPEECH_SCOPE} and was answered {refused.status}",
+        """A client without the scope has no service account, so it can ask only at sign-in."""
+        query = self.probe.app_client_authorization_query(
+            self.client, scope=f"openid {SPEECH_SCOPE}", **scope_measurement_cell.PKCE
         )
-        workload, person = self.workload_claims(), token_claims(person_access_token)
+        refused = self.probe.through_tunnel("GET", f"{AUTH_PATH}?{query}")
+        error = parse_qs(urlsplit(refused.headers.get("Location", "")).query).get("error")
         self.expect(
-            SPEECH_SERVICE not in audience_of(workload) + audience_of(person),
-            f"{self.name}'s tokens carry {SPEECH_SERVICE}: {decoded(workload)}; {decoded(person)}",
+            refused.status == 302 and error == ["invalid_scope"],
+            f"{self.name} asked for {SPEECH_SCOPE} at sign-in and was answered {refused.status} "
+            f"with {error}",
+        )
+        person = token_claims(person_access_token)
+        self.expect(
+            SPEECH_SERVICE not in audience_of(person),
+            f"{self.name}'s person token carries {SPEECH_SERVICE}: {decoded(person)}",
         )
         self.probe.held(
             "SP5",
-            f"{self.name} asking for the scope: 400 invalid_scope; its workload token "
-            f"({decoded(workload)}) and person token ({decoded(person)}) carry no {SPEECH_SERVICE}",
+            f"{self.name} asking for the scope at sign-in: invalid_scope; its person token "
+            f"({decoded(person)}) carries no {SPEECH_SERVICE}",
         )
 
 
@@ -224,7 +230,7 @@ def prove(
         cell.client_without_the_scope(person_access_token)
         return
     if runs_whole_proof:
-        cell.bearer_only_services()
+        cell.bearer_only_service()
     cell.workload_with_and_without_the_scope()
     if runs_whole_proof:
         cell.member_token_with_the_scope()

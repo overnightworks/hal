@@ -10,7 +10,6 @@ from hal.output.command import Verb, command
 from hal.stack import checkout, core, environment, switches
 from hal.stack.appkit_step import APPKIT_UNIT, TARGETS, AppkitPlan
 from hal.stack.apps import AppKind, AppPlan, AppsPlan, OffPlan, SkippedNote, StaysStoppedNote
-from hal.stack.built_image import ENDS_RUNS, BuiltRecreate
 from hal.stack.legal_step import LEGAL_UNIT, BlockChange, LegalPlan, PageChange
 from hal.stack.litellm_keys import (
     ADMIN_BUDGET_ID,
@@ -365,25 +364,11 @@ def _cause_fact(cause: core.Cause, service: str) -> str:
 def _unit_rows(plan: Plan) -> tuple[Row, ...]:
     realm_row = _realm_row(plan.realm)
     return (
-        *(_built_row(built) for built in plan.built),
         *(_recreate_row(recreate) for recreate in plan.recreates),
         *(_unit_plan_row(unit_plan) for unit_plan in plan.plans),
         *(_old_image_row(image) for image in plan.images),
         *(() if realm_row is None else (realm_row,)),
     )
-
-
-def _built_row(built: BuiltRecreate) -> Row:
-    facts = (
-        *(
-            f"image {running} \N{RIGHTWARDS ARROW} {built.reference}"
-            for running in built.moved_from
-        ),
-        *((_DEFINITION_CHANGED,) if built.definition_changed else ()),
-        *((f"image {built.reference} rebuilt",) if built.rebuilt else ()),
-        ENDS_RUNS,
-    )
-    return Row(Glyph.CHANGE, built.service, PlanEvent.RECREATE, _SEPARATOR.join(facts))
 
 
 def _recreate_row(recreate: Recreate) -> Row:

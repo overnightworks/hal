@@ -1,9 +1,8 @@
 """The recreate of a service that is not a core service, alone and under the switch lock:
 a follower whose file or definition changed, a live service of a unit that runs on whose
-definition changed, the built service whose image or definition changed in whatever state its
-container is, and a database unit's service whose image moved, after the unit's proven pre-apply
-snapshot (#89, #376, #995); and the snapshot before a switch-on starts a database unit over its
-data."""
+definition changed, and a database unit's service whose image moved, after the unit's proven
+pre-apply snapshot (#89, #376, #995); and the snapshot before a switch-on starts a database unit
+over its data."""
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -11,7 +10,7 @@ from typing import Any
 
 from hal.output import printable
 from hal.output.command import Verb, command
-from hal.stack import built_image, compose, core, switches
+from hal.stack import compose, core, switches
 from hal.stack.pre_apply import SNAPSHOT_SHORT_ID, Backup, PreApplyError
 from hal.stack.unit_plans import (
     Begin,
@@ -89,13 +88,10 @@ class ServiceRecreator:
         self.progress.begin(f"mark {plan.service} unfinished in {core.APPLIED_FILE}")
         record.mark_unfinished([plan.service], followed)
 
-    def unit_services(
-        self, recreates: Sequence[Recreate | built_image.BuiltRecreate]
-    ) -> RecreateFailure | None:
-        """Recreate each live service of a unit that runs on whose definition changed, and each
-        built service, in the order planned; the failure of the first that fails. A volume
-        is kept; the image is the container's own except for the built service, which runs the
-        image its tag names (#376), and a database unit's moved service, which runs the image
+    def unit_services(self, recreates: Sequence[Recreate]) -> RecreateFailure | None:
+        """Recreate each live service of a unit that runs on whose definition changed, in the
+        order planned; the failure of the first that fails. A volume is kept; the image is the
+        container's own except for a database unit's moved service, which runs the image
         compose.yaml names (#995)."""
         snapshots: dict[str, str] = {}  # unit -> its pre-apply snapshot of this run
         began: set[str] = set()  # the units one of whose services is being or was recreated
@@ -106,7 +102,7 @@ class ServiceRecreator:
 
     def _unit_service(
         self,
-        plan: Recreate | built_image.BuiltRecreate,
+        plan: Recreate,
         snapshots: dict[str, str],
         began: set[str],
     ) -> RecreateFailure | None:
@@ -121,7 +117,7 @@ class ServiceRecreator:
             began.add(plan.unit)
 
         try:
-            if isinstance(plan, Recreate) and plan.snapshot:
+            if plan.snapshot:
                 taken = snapshots[plan.unit] = proven_snapshot(
                     self.backup, self.progress, plan.snapshot
                 )

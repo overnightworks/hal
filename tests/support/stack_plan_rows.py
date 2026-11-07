@@ -79,7 +79,6 @@ def plan_of(
         keys=keys,
         legal=legal,
         appkit=appkit,
-        built=list(units.pop("built", ())),
         recreates=list(units.pop("recreates", ())),
         plans=list(units.pop("unit_plans", ())),
         core=list(units.pop("core", ())),

@@ -25,8 +25,7 @@ A release bump runs `python3 scripts/agent_service_lock.py <tag>` (it needs `git
 only writer of `requirements.txt`. A bump of either CLI changes its pin in the Dockerfile and its
 `version` in `service.toml`; every bump changes the image name, which carries the release and both CLI
 versions, in `compose.yaml` and in the build line above together. A base-image digest bump alone keeps
-the name, so setup builds nothing. `probe/agent-service/image.py` builds with `--no-cache` (the CLI files are served by digest) and starts the
-entrypoint from the clean image.
+the name, so setup builds nothing.
 
 ## The service
 
@@ -275,8 +274,7 @@ networks:
   agent: {external: true, name: hal_agent_songmaker}
 ```
 
-and calls `http://agent-service:8080` (the service's own default port; the smoke and the unit probe
-use it). No CA mount is needed: the service is plain http on an isolated internal network, and no
+and calls `http://agent-service:8080` (the service's own default port; the smoke uses it). No CA mount is needed: the service is plain http on an isolated internal network, and no
 host process can reach it, because the network has no host address and publishes no port.
 
 An app that calls LiteLLM directly holds only its own key, the file `~/.secrets/litellm/apps/<app>` (`songmaker`,
@@ -509,8 +507,7 @@ nothing is pasted (it waits as long as the code lives). Keycloak starts a
 device sign-in only for a request with songmaker's client secret, which lives in `~/.secrets` on
 this machine, so no stranger can send you a link to confirm; no other client allows the grant.
 It recreates the service and runs the live cells L2-L7, L9
-and E6-E10, E12 against it, which its docstring lists; E3-E5 and E10's packet windows stay with the
-probe's `egress.py`. L3 holds when `run_started` names `anthropic/` and a model of `[cli.anthropic] models` on route `cli`, and shows both. L9 holds when no
+and E6-E10, E12 against it, which its docstring lists. L3 holds when `run_started` names `anthropic/` and a model of `[cli.anthropic] models` on route `cli`, and shows both. L9 holds when no
 JWT-shaped string is in the smoke output, `docker inspect` or the service log. It needs the image, the client's secret file and the login token under
 `~/.secrets`, and the person in the groups `/apps/songmaker` and `/services/agent-service/subscription`.
 The realm declares these groups but grants no membership: add yourself once in the admin
@@ -541,68 +538,3 @@ fingerprint, which `hal expire` removes like any other. Nothing is recreated; a 
 It prints only verdict lines of a closed grammar and a last line, `canary and census held` or `canary and census FAILED`, matching the exit
 code; no exception text, key or container output reaches the terminal. The probe `probe/agent-service/litellm_live_canary.py` runs it
 against the fake-only stack.
-
-**The login command** is `python3 probe/agent-service/cells_12b.py --login-directory DIR`; its docstring gives the
-full command line (the probe-stack lock and a timeout). It starts the service in a throwaway project with `DIR` bound read-only as the
-login, a stand-in issuer, the bootstrapped entrypoint and `max_parallel_cli_runs = 1` in a scratch
-`service.toml` only, and holds agent-runtime#440's A1d conditions there (`config`, U2, U3, U6, U7, U8, and I6
-against the container's own image), the S00 census of every writable mount and S1, the no-token cell. It
-refuses before starting anything unless the resolved compose configuration binds exactly that
-directory and that scratch file read-only. It prints only verdicts, counts, role names and a docker verb
-with an exit code, and an exact-secret gate over its output is the second line. Agents give it only a `mktemp`
-directory with a dummy token.
-
-Between S00 and S1 it drives R2 (agent-runtime#440 B9 (a)-(e)), only when every frame cell held. The fake app
-(`app_tools.py`, in mode `hold`) holds a call of `step` until its connection closes. One run is posted once by
-`run_client.py` in `agent-smoke`, which prints only a closed vocabulary of lines; the host writes `close` on
-the client's stdin when the app logs the held call, or, when no call came within the time bound, writes it then
-and ends the wait.
-`tree_census.py`'s `watch` mode samples the CLI group and the run tree every 10 ms, the client reads
-`GET /runs/{id}` and the host the service log. B9 (a)-(e) and an observed timing line, with no bound claimed, follow. A
-dummy login makes no call: B9 (a)-(e) are then NOT DRIVEN ("no call reached the fake app") and the command
-exits 1 by design. With the real login R2 is one paid model turn, which is why it is posted once and `busy` is
-not retried.
-
-**The unit probe** is `python3 probe/agent-service/unit.py --scratch DIR`; its docstring gives the full command
-line (the probe-stack lock and a timeout). It starts the real service in a throwaway project
-with a dummy login of each CLI and drives the cells U1 to U11 and U15, which its docstring and code define: the
-process, the container hardening, the tmpfs and login mounts, a replaced login of either CLI seen at once, and the
-refusals (bad working-root mode, missing login directory, login at the wrong mode, no token, a Codex sign-in
-without its access token). P09 and P11a are the
-signing key's: a key at mode 0640 or 0000 stops the start, naming `signing.key_file` and no key byte (a wrong owner needs
-root and is not driven), and with the key or the CA root moved aside the service is not created and nothing appears at the
-source. Every probe that starts the real service writes a throwaway CA and signing pair into its scratch HOME
-(`scratch_secrets.py`).
-U12 is `egress.py --target service`; U13 is the static facts in `tests/test_agent_service_unit.py`.
-`--cell smoke` drives U14, the `agent-smoke` against the service with a stand-in issuer, U17, the
-refusals before any run (the previous protocol: 400 `unsupported_version`, outside the app: 403 `forbidden`,
-and the api group only: 403 `not_enabled`; there is no offer), and U16 runs
-the cells of `live_smoke.py` there, past its sign-in: all hold except L2, which must fail with the
-dummy login. L4 is proven only live, with the real login; the probe has no L4 cell.
-`--cell containment` adds a fake app that lists tools on
-`agent-songmaker`, certified by the scratch CA and named in place of songmaker's origin, and runs `agent-smoke --tool NAME:EFFECT` against it: B1 (the run with the relay
-is accepted and fails at the upstream) and B2 (a capability written into a tool description fails
-the relay's owner and the run) of agent-runtime#440. B2 (c) asserts that the runner's failure is
-`CapabilityReflected`, that no run reaches `CliLoginRefusedError` and that no announcement verdict
-other than `RELAY_NOT_CONNECTED` appears; a `RELAY_NOT_CONNECTED` line is tolerated. B3 to B5 run through a wrapper bound read-only in place of the CLI: it execs the CLI, and
-on `-p` while the probe's flag file is there it first starts marker A in the CLI's process group and
-marker B in a session of its own. B3 holds when, 6 s after the run's terminal frame, A is gone, the
-working root lists nothing and B lives on under init (docs/host.md: a `setsid` process keeps
-running); B4 kills the service's pid as its own user and holds when the container dies once and
-restarts, B is on no host or container process list and the working root and `/tmp` are empty.
-The processes and listings come from `tree_census.py` through `census_client.py`. B5 runs the smoke a hundred times in a row with the wrapper transparent, each run with
-freshly minted tokens, and holds when afterwards only init and the same service process remain, the
-working root is empty and `/tmp` is unchanged, the loopback listener count is unchanged, and the
-service log holds exactly one runner line of `CliLoginRefusedError` per run and no other ERROR,
-announcement refusal or bare line; another writable mount whose listing changed is only reported. B5 prints the first and last run id of the log, the shown names of the remaining processes and the before and after listings of the working root and `/tmp`; the `cc-socks` directory in `/tmp` is reported, not asserted.
-For that the probe starts the service through a bootstrap that adds one WARNING-level root handler
-with level and logger name (the same records the service prints bare otherwise), a deviation the
-report names. The cells print counts and event names, never a log line. The loopback capture (the
-(a) parts) is not driven: it is not built (#339).
-`--cell signer` (`signer.py`) is the live signer proof without the live stack. It starts the service with the
-scratch signing key, the scratch CA and songmaker's `mcp_origin` from `service.toml`, and a TLS front for that origin on `mcp`
-(a Traefik of compose.yaml's pin, its certificate issued by the scratch CA). P12: a run naming one tool reaches the front
-before any CLI start, and `mcp_signer.py` behind it verifies the capability against the scratch `public.pem`. P12b: with
-no stand-in behind the front it answers 502, the run fails without text and no CLI starts, and the front saw no other host.
-P28: two `--force-recreate`s of the service each start, and P12 holds again. P26: every compose call resolves only the
-project's networks. It runs in the unit probe's throwaway project and prints verdicts, counts and names, never a capability.

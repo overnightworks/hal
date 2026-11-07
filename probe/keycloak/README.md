@@ -37,7 +37,7 @@ stack behind, ends with `PROBE FAILED` and exit 1.
   unchanged export after a second apply that resets only the pinned console changes to declared
   objects and keeps every other console change, and a changed YAML that applies and deletes no
   undeclared top-level object and no person, with a seeded member untouched (3a-3d); the `groups`
-  claim and the `agent-service` audience (4); a disabled user refused on refresh (5); a
+  claim (4); a disabled user refused on refresh (5); a
   back-channel logout reaching the test relying party `probe-rp` (6);
   which console actions send one (LA1, measured on Keycloak 26.8.1: a user signed in to the client
   `probe-logout-actions`, which carries HopIn's ruled settings (#254, #506),
@@ -58,11 +58,11 @@ stack behind, ends with `PROBE FAILED` and exit 1.
   runs the realm observer (`realm-observer`, #66) around an apply and holds when it lists exactly
   the console changes to declared objects that the apply resets (a mapper on the scope `groups`,
   a step in `browser-mfa-forms`, a subflow under `direct-grant-mfa-totp`, a default scope and a
-  flow binding override on songmaker, a client role on its service account, hopin's service account
+  flow binding override on presentator, a client role on its service account, hopin's service account
   turned off, which the apply turns on again with its scope, user and role mappings; the blockquote in docs/keycloak.md after „Theme and language“ states the class) and the
   console subgroup with its member, flows, role and group on service accounts, and the default
-  scope on `agent-service` (a client without scope lists) are still there; proof 3d holds that a changed YAML which drops a group, a client
-  and the realm role `agent-workload` deletes none of them nor the role's mappings; proof 9 checks the
+  scope on `speech-service` (a client without scope lists) are still there; proof 3d holds that a changed YAML which drops a group, a client
+  and the realm role `speech-workload` deletes none of them nor the role's mappings; proof 9 checks the
   observer's container (65534, read-only, the keycloak network alone, its secret a file), an
   escaped line for a group named with ESC and a newline, that SIGINT and SIGTERM, sent as its
   container runs and as its inventory arrives, leave no container, and that an exit 0 carries
@@ -72,9 +72,11 @@ stack behind, ends with `PROBE FAILED` and exit 1.
   the master's untouched theme and language. Proof 10 signs a member of the app's group
   (`/apps/songmaker/admin`, `/apps/hopin`, `/apps/presentator/admin`) in to each of the
   songmaker, hopin and presentator clients through the edge entrypoint with PKCE, its secret a scratch file the
-  overlay mounts; the token response has a refresh token for each of the three. The overlay names all three back-channel networks `<project>_backchannel_*`, so the probe never creates a `hal_*` network. For each of the three it also drives the agent workload cells of #183
-  (W1 to W3: the `client_credentials` token has `agent-workload`, the `agent-service` audience, `azp`
-  and the realm's token lifespan or 1 s more, with no client override; a person's token has no `agent-workload`; proof 10 also puts the person in `/services/agent-service/subscription` and requires that group, as a full path, in the access token beside the `agent-service` audience) and `agent-service` with every flow off (W4); DG1 (#297) shows that only songmaker starts a device sign-in and only with its secret. LM1 (#965's A1, `litellm_admin_cell.py`), at hopin's member sign-in alone, puts that member in `/services/litellm/admin` and a second person in `/services/litellm`, runs the observer's members mode as `hal apply` does and holds when it lists the member and not the second person, its issuer is the `iss` of the member's access token and the member's id that token's `sub`; it prints no id. Proof 11 (#129) loads
+  overlay mounts; the token response has a refresh token for each of the three. The overlay names all three back-channel networks `<project>_backchannel_*`, so the probe never creates a `hal_*` network. For each of the three it also drives the workload cells
+  (W3: a person's token has the app's group and no `speech-workload`; W1, W2 for hopin and presentator, the clients with a
+  service account: the `client_credentials` token has `speech-workload`, `client_id` and `azp` naming the app, no group,
+  and the realm's token lifespan or 1 s more, with no client override; songmaker, which has none, is refused the
+  `client_credentials` grant), and DG1: no app client starts a device sign-in, not even with its secret. LM1 (#965's A1, `litellm_admin_cell.py`), at hopin's member sign-in alone, puts that member in `/services/litellm/admin` and a second person in `/services/litellm`, runs the observer's members mode as `hal apply` does and holds when it lists the member and not the second person, its issuer is the `iss` of the member's access token and the member's id that token's `sub`; it prints no id. Proof 11 (#129) loads
   `keycloak/go-live` and runs only its step 6 (never `run()`, whose compose calls would reach the
   operator's project): the admin it creates holds `admin` with `CONFIGURE_TOTP` and
   `webauthn-register` pending (both enabled in master), is refused a password grant without TOTP,
@@ -107,10 +109,10 @@ stack behind, ends with `PROBE FAILED` and exit 1.
   which an admin reads and the account REST, both tokens and an admin PUT do not show or change (TC4); a later
   sign-in to hopin and presentator asks nothing (TC5); asked again, Decline removes the old time and Accept stores a new one (TC6).
   Cells SP1 to SP6 and SP8 (#837) also run in proof 10: hopin's and presentator's workload tokens carry the `speech-service` audience
-  only when they ask for `speech-service-audience`, and `speech-workload` either way, as their service accounts' role (SP1, SP2); SP3, SP4, SP6, SP8 and W4 run in hopin's branch only. A
+  only when they ask for `speech-service-audience`, and `speech-workload` either way, as their service accounts' role (SP1, SP2); SP3, SP4, SP6 and SP8 run in hopin's branch only. A
   member's person token carries the audience only when asked and `/services/speech-service` either way, as the default `groups`
   scope gives it, and its ID token never the audience (SP3); a non-member's token without the scope carries no audience (SP4); songmaker is refused the scope as the control and
-  never gets the audience (SP5); `agent-service` and `speech-service` are bearer-only with every flow off (W4, SP6); the group has no subgroup (SP8).
+  never gets the audience (SP5); `speech-service` is bearer-only with every flow off (SP6); the group has no subgroup (SP8).
   Cells D1 to D3, N1, B1 to B3, A1 to A10, C1 to C4 and E1 (#905) run in proof 10 after its last app client, in `agents_client_cell.py`: the apply that adds the public client `agents`, the scopes `mcp-<app>` and the empty groups `/apps/<app>/mcp` leaves the realm and the three app clients' settings and the seeded member's memberships unchanged, and sessions signed in before it refresh twice in turn and twice at once with one refresh token (D1 to D3), and none of those refreshed ID tokens has a `nonce` key, though each session signed in with one; a refreshed ID token with a `nonce` key fails the probe (N1); a member signs in to `agents` through the edge with PKCE at its one loopback address and gets a token with `typ` `at+jwt`, exactly the app's `/mcp` audience, `azp` `agents`, the group, no role claim, the realm's lifespan and no refresh token (A1, B2), and asking `offline_access` stores no offline session (A2); the consent page names the app on every app and a second authorization in the session asks nothing (C1, C2); a person with no group gets a token with no group (B3); declining stores nothing (C3); no PKCE, `plain`, another redirect address, the password, device, implicit and client-credentials grants, anonymous client registration and an app's scope on the wrong client are refused (A5 to A9); the discovery document and a forged host header through the edge answer as ruled (A10, E1). A3, C1's offline line and C4 are printed as measured. C5 (the consent page in a browser) is not driven by the probe.
   Cells F0, U3, U4, RF0 to RF2 (#844) run last in hopin's branch of the same proof, on a target, a scope copied from `speech-service-audience`, a role and two clients the probe makes: the probe holds the setup and prints, as measured and not held, what a workload token's `aud` and roles are under Keycloak's defaults, without the default roles, with `fullScopeAllowed` off and with a role scope mapping (U3), and what refreshes and a new authorization request give sessions signed in before and after the scope turned optional (U4, RF1, RF2); `docs/keycloak.md` states the answers for the pinned Keycloak.
 - `hold` brings the same stack up, runs no proof and keeps it for another repository's proof.

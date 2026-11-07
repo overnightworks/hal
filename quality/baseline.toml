@@ -7,7 +7,7 @@
 "Keycloak.admin_api" = 29
 
 [file_lines]
-"probe/keycloak/probe.py" = 2799
+"probe/keycloak/probe.py" = 2798
 "probe/step-ca/probe.py" = 840
 "src/hal/workstation/secrets_view.py" = 822
 "tests/test_backup_runner.py" = 1170
@@ -32,9 +32,6 @@
 
 [function_lines."tests/support/realm_fake.py"]
 "hallucinai" = 96
-
-[clones."probe/agent-service/litellm_stack.py"]
-"Client.main" = [["probe/agent-service/unit.py", "Inside.main"]]
 
 [clones."probe/apps/probe.py"]
 "Probe.wait_until" = [["probe/switches/probe.py", "Probe.wait_until"]]

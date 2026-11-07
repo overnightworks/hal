@@ -12,5 +12,5 @@
     "backchannel.logout.url": "http://probe-rp:8000/backchannel-logout",
     "backchannel.logout.session.required": "true"
   },
-  "defaultClientScopes": ["basic", "profile", "groups", "agent-service-audience"]
+  "defaultClientScopes": ["basic", "profile", "groups"]
 }

@@ -45,8 +45,7 @@ class CorePhase:
         progress: Progress,
     ) -> CoreFailure | None:
         """The core, the followers, then the services to recreate (a live service of a unit that
-        runs on, the built service in any container state); the failure of the first step
-        that fails."""
+        runs on); the failure of the first step that fails."""
         self.writer.enter(PlanGroup.CORE)
         return self._recreate_core(engine, planned, marks, progress) or self._recreate_services(
             engine, planned, marks, progress
@@ -79,7 +78,7 @@ class CorePhase:
         ):
             return failure
         self.writer.enter(PlanGroup.UNITS)
-        return recreator.unit_services([*planned.built, *planned.recreates])
+        return recreator.unit_services(planned.recreates)
 
     def _say_recreated(self, recreated: Recreated) -> None:
         self.writer.write(recreated_row(recreated))

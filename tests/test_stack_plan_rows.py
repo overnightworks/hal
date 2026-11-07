@@ -27,7 +27,6 @@ from hal.stack.apps import (
     SkippedNote,
     StaysStoppedNote,
 )
-from hal.stack.built_image import ENDS_RUNS, BuiltRecreate
 from hal.stack.catalog import App
 from hal.stack.core import (
     Cause,
@@ -256,18 +255,6 @@ def test_the_kept_images_come_before_the_realm_row_and_the_units_before_the_apps
 SINCE = "2026-10-17T22:10:00"
 
 
-def built(**overrides: Any) -> BuiltRecreate:
-    fields: dict[str, Any] = {
-        "unit": "agent-service",
-        "service": "agent-service",
-        "reference": "agent-service:local",
-        "moved_from": (),
-        "definition_changed": False,
-        "rebuilt": False,
-    }
-    return BuiltRecreate(**{**fields, **overrides})
-
-
 def moved_keycloak(**overrides: Any) -> Recreate:
     running, configured = ImageReference(KEYCLOAK, DIGEST_A), ImageReference(KEYCLOAK, DIGEST_B)
     return Recreate("keycloak", "keycloak", KeptImage("keycloak", running, configured), **overrides)
@@ -305,49 +292,6 @@ def moved_keycloak(**overrides: Any) -> Recreate:
             {"recreates": (moved_keycloak(),)},
             Row(Glyph.CHANGE, "keycloak", PlanEvent.RECREATE, f"image {KEYCLOAK}@79c6… → @a78d…"),
             id="a moved image after an earlier recreate of its unit",
-        ),
-        pytest.param(
-            {"built": (built(definition_changed=True),)},
-            Row(
-                Glyph.CHANGE,
-                "agent-service",
-                PlanEvent.RECREATE,
-                f"definition changed · {ENDS_RUNS}",
-            ),
-            id="built definition",
-        ),
-        pytest.param(
-            {"built": (built(moved_from=("agent-service:old", "agent-service:older")),)},
-            Row(
-                Glyph.CHANGE,
-                "agent-service",
-                PlanEvent.RECREATE,
-                "image agent-service:old → agent-service:local"
-                " · image agent-service:older → agent-service:local"
-                f" · {ENDS_RUNS}",
-            ),
-            id="built image moved",
-        ),
-        pytest.param(
-            {"built": (built(rebuilt=True),)},
-            Row(
-                Glyph.CHANGE,
-                "agent-service",
-                PlanEvent.RECREATE,
-                f"image agent-service:local rebuilt · {ENDS_RUNS}",
-            ),
-            id="built rebuilt",
-        ),
-        pytest.param(
-            {"built": (built(moved_from=("a:1",), definition_changed=True, rebuilt=True),)},
-            Row(
-                Glyph.CHANGE,
-                "agent-service",
-                PlanEvent.RECREATE,
-                "image a:1 → agent-service:local · definition changed"
-                f" · image agent-service:local rebuilt · {ENDS_RUNS}",
-            ),
-            id="built combination",
         ),
         pytest.param(
             {"unit_plans": (unit_plan(Action.ON, volumes=()),)},
@@ -405,11 +349,10 @@ def test_a_unit_part_is_one_row_of_its_typed_fields(parts: dict[str, Any], row: 
     assert unit_rows_of(**parts) == (row,)
 
 
-def test_the_unit_rows_stand_built_then_recreates_then_plans_then_images_then_the_realm() -> None:
+def test_the_unit_rows_stand_recreates_then_plans_then_images_then_the_realm() -> None:
     image = kept(ImageReference(STEP_CA_IMAGE, DIGEST_A), ImageReference(STEP_CA_IMAGE, DIGEST_B))
 
     _, _, units, _, apps = groups_of(
-        built=(built(rebuilt=True),),
         recreates=(Recreate("keycloak", "keycloak-db"),),
         unit_plans=(unit_plan(Action.ON), unit_plan(Action.STAYS_STOPPED)),
         images=(image,),
@@ -418,7 +361,6 @@ def test_the_unit_rows_stand_built_then_recreates_then_plans_then_images_then_th
     )
 
     assert [(row.subject, row.event) for row in units.rows] == [
-        ("agent-service", PlanEvent.RECREATE),
         ("keycloak-db", PlanEvent.RECREATE),
         ("step-ca", PlanEvent.SWITCH_ON),
         ("step-ca", PlanEvent.STAYS_STOPPED),

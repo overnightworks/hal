@@ -604,7 +604,6 @@ class AgentsClientCell:
         app = self.app_clients[0]
         for client_id, scope in (
             (app.client_id, f"openid {MCP_SCOPE_PREFIX}{next(iter(self.declared.apps))}"),
-            (self.declared.client_id, "openid agent-service-audience"),
             (self.declared.client_id, "openid speech-service-audience"),
         ):
             query = self.probe.app_client_authorization_query(

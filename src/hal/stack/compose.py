@@ -217,31 +217,6 @@ class Compose:
             )
         return result.stdout.strip()
 
-    def built_image_id(self, reference: str) -> str | None:
-        """The id of the image the local tag names in Docker now; None when it is not built. A
-        failing lookup or a tag that names two images is no answer."""
-        result = self.run(
-            [
-                "docker",
-                "image",
-                "ls",
-                "--no-trunc",
-                "--quiet",
-                "--filter",
-                f"reference={reference}",
-            ],
-            READ_SECONDS,
-        )
-        if result.returncode != 0:
-            raise ComposeError(
-                f"`docker image ls {reference}` exited {result.returncode}: "
-                f"{last_line(result.stderr + result.stdout)}"
-            )
-        ids = set(result.stdout.split())
-        if len(ids) > 1:
-            raise ComposeError(f"`docker image ls {reference}` names {len(ids)} images")
-        return ids.pop() if ids else None
-
     def volume_exists(self, name: str) -> bool:
         """Docker holds a volume of exactly this name."""
         listing = ["docker", "volume", "ls", "--quiet", "--filter", f"name={name}"]

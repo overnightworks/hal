@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from hal.stack import core, litellm_keys, switches
 from hal.stack.appkit_step import AppkitPlan
 from hal.stack.apps import AppsPlan
-from hal.stack.built_image import BuiltRecreate
 from hal.stack.legal_step import LegalPlan
 from hal.stack.realm import reconcile
 from hal.stack.unit_plans import Action, Fleet, KeptImage, Recreate, UnitPlan
@@ -19,7 +18,6 @@ class Plan:
     read: Mapping[str, switches.Mark | None]
     core: list[core.CorePlan]
     followers: list[core.FollowerPlan]
-    built: list[BuiltRecreate]
     recreates: list[Recreate]
     plans: list[UnitPlan]
     images: list[KeptImage]
@@ -46,7 +44,6 @@ class Plan:
                 for plan in self.followers
                 if plan.action is core.FollowerAction.RECREATE
             ),
-            *(built.service for built in self.built),
             *(recreate.service for recreate in self.recreates),
             *((litellm_keys.KEYS_SERVICE,) if litellm_keys.reads(self.keys) else ()),
         )
@@ -60,7 +57,6 @@ class Plan:
             and all(plan.action is Action.STAYS_STOPPED for plan in self.plans)
             and all(plan.action is core.CoreAction.NOT_STARTED for plan in self.core)
             and all(plan.action is core.FollowerAction.HELD for plan in self.followers)
-            and not self.built
             and not self.recreates
             and self.app_plans.changes_nothing
             and self.appkit.changes_nothing
