@@ -5,14 +5,23 @@ from pathlib import Path
 
 import support.stack_apply as base
 import yaml
-from support.stack_apply import FOLLOWER_FILE, switch_off, up_calls, write_fleet
+from support.stack_apply import (
+    FOLLOWER_FILE,
+    SCENARIO_SECRET,
+    SCENARIO_SETUP,
+    SCENARIO_SIDECAR,
+    SCENARIO_SIDECAR_SECRET,
+    SCENARIO_UNIT,
+    switch_off,
+    up_calls,
+    write_fleet,
+)
 from support.stack_plan_rows import find_row
 
 from hal.stack import apply
 from hal.stack.result_rows import ResultEvent
 
 # The fixtures of `tests/support/stack_apply.py` this module's tests request by name.
-agent_service_unit = base.agent_service_unit
 applied_core = base.applied_core
 at_terminal = base.at_terminal
 core_files = base.core_files
@@ -20,6 +29,7 @@ home = base.home
 ingress = base.ingress
 realm_backup = base.realm_backup
 repository = base.repository
+scenario_unit = base.scenario_unit
 scripted = base.scripted
 scripted_git = base.scripted_git
 setup_check = base.setup_check
@@ -28,8 +38,6 @@ state = base.state
 step_ca_applied = base.step_ca_applied
 switch = base.switch
 
-SIGNING_KEY = "agent_service_signing_key"
-ROOT_CERTIFICATE = "step_ca_root_certificate"
 NEXT = "next: hal setup"
 
 
@@ -63,15 +71,15 @@ def refused_before_the_yes(exit_code: int, out: str, err: str, scripted, *paths:
 
 
 def test_a_unit_switched_on_whose_service_lacks_its_secret_file_is_refused_before_the_yes(
-    agent_service_unit, switch, scripted
+    scenario_unit, switch, scripted
 ):
     """C1."""
-    path = lose(scripted, SIGNING_KEY)
+    path = lose(scripted, SCENARIO_SECRET)
 
     exit_code, out, err = switch()
 
     refused_before_the_yes(exit_code, out, err, scripted, path)
-    assert f"agent-service needs {path}; nothing switched\n{NEXT}" in err
+    assert f"{SCENARIO_UNIT} needs {path}; nothing switched\n{NEXT}" in err
 
 
 def test_a_live_service_with_a_changed_definition_whose_file_is_missing_is_refused(
@@ -114,53 +122,49 @@ def test_a_changed_core_service_whose_file_is_missing_is_refused(
     assert f"traefik needs {path}" in err
 
 
-def test_two_missing_files_of_two_services_are_named_in_one_error(
-    agent_service_unit, switch, scripted, tmp_path
-):
+def test_two_missing_files_of_two_services_are_named_in_one_error(scenario_unit, switch, scripted):
     """C5."""
-    signing_key = lose(scripted, SIGNING_KEY)
-    further = needs(scripted, "agent-egress", "egress_secret", tmp_path)
+    signing_key = lose(scripted, SCENARIO_SECRET)
+    further = lose(scripted, SCENARIO_SIDECAR_SECRET)
 
     exit_code, out, err = switch()
 
     refused_before_the_yes(exit_code, out, err, scripted, signing_key, further)
-    assert f"agent-service needs {signing_key}" in err
-    assert f"agent-egress needs {further}" in err
+    assert f"{SCENARIO_UNIT} needs {signing_key}" in err
+    assert f"{SCENARIO_SIDECAR} needs {further}" in err
 
 
-def test_with_every_file_there_the_plan_and_the_yes_are_as_before(
-    agent_service_unit, switch, scripted
-):
+def test_with_every_file_there_the_plan_and_the_yes_are_as_before(scenario_unit, switch, scripted):
     """C6."""
     exit_code, out, err = switch()
 
     assert exit_code == 0
-    assert find_row(out, "agent-service", ResultEvent.SWITCHED_ON)
+    assert find_row(out, SCENARIO_UNIT, ResultEvent.SWITCHED_ON)
     assert "needs" not in err
 
 
 def test_a_file_the_units_own_setup_makes_is_asked_for_first_and_refuses_nothing(
-    agent_service_unit, switch, scripted, setup_check, setup_run
+    scenario_unit, switch, scripted, setup_check, setup_run
 ):
     """C7."""
     setup_check.exit_code, setup_check.line = 1, "the key is not made"
-    path = lose(scripted, SIGNING_KEY)
+    path = lose(scripted, SCENARIO_SECRET)
     setup_run.meanwhile = lambda: path.write_text("x\n")
 
     exit_code, out, _ = switch("yes\nyes")
 
     assert exit_code == 0
-    assert "run `agent-service/setup` now" in out
-    assert find_row(out, "agent-service", ResultEvent.SWITCHED_ON)
+    assert f"run `{SCENARIO_SETUP}` now" in out
+    assert find_row(out, SCENARIO_UNIT, ResultEvent.SWITCHED_ON)
 
 
 def test_a_file_still_missing_after_the_setup_ran_refuses_with_nothing_switched(
-    agent_service_unit, switch, scripted, setup_check, setup_run
+    scenario_unit, switch, scripted, setup_check, setup_run
 ):
     """C8."""
     setup_check.exit_code, setup_check.line = 1, "the key is not made"
-    made = lose(scripted, SIGNING_KEY)
-    absent = lose(scripted, ROOT_CERTIFICATE)
+    made = lose(scripted, SCENARIO_SECRET)
+    absent = lose(scripted, SCENARIO_SIDECAR_SECRET)
     setup_run.meanwhile = lambda: made.write_text("x\n")
 
     exit_code, out, err = switch("yes\nyes")
@@ -171,11 +175,11 @@ def test_a_file_still_missing_after_the_setup_ran_refuses_with_nothing_switched(
 
 
 def test_a_unit_that_is_switched_off_is_not_refused_for_a_missing_file(
-    agent_service_unit, switch, scripted, state
+    scenario_unit, switch, scripted, state
 ):
     """C9, off or stopped by `hal stop`."""
-    switch_off(state, unit="agent-service")
-    lose(scripted, SIGNING_KEY)
+    switch_off(state, unit=SCENARIO_UNIT)
+    lose(scripted, SCENARIO_SECRET)
 
     exit_code, out, err = switch()
 
@@ -185,14 +189,14 @@ def test_a_unit_that_is_switched_off_is_not_refused_for_a_missing_file(
 
 
 def test_a_unit_disabled_in_the_fleet_with_live_containers_is_not_refused_for_a_missing_file(
-    agent_service_unit, switch, scripted, repository
+    scenario_unit, switch, scripted, repository
 ):
     """C9, a unit switched off in the fleet file."""
     assert switch()[0] == 0
     scripted.calls.clear()
-    lose(scripted, SIGNING_KEY)
+    lose(scripted, SCENARIO_SECRET)
     fleet = yaml.safe_load((repository / "fleet.yaml").read_text())
-    fleet["services"]["agent-service"]["run"]["enabled"] = False
+    fleet["services"][SCENARIO_UNIT]["run"]["enabled"] = False
     write_fleet(repository, yaml.safe_dump(fleet))
 
     exit_code, _, err = switch()
@@ -230,12 +234,12 @@ def test_a_changed_core_service_that_is_not_running_is_not_refused_for_a_missing
 
 
 def test_a_running_service_the_plan_leaves_alone_is_not_refused_for_a_missing_file(
-    agent_service_unit, switch, scripted
+    scenario_unit, switch, scripted
 ):
     """C9, a running service the plan leaves alone."""
     assert switch()[0] == 0
     scripted.calls.clear()
-    lose(scripted, SIGNING_KEY)
+    lose(scripted, SCENARIO_SECRET)
 
     exit_code, out, err = switch()
 
@@ -245,19 +249,17 @@ def test_a_running_service_the_plan_leaves_alone_is_not_refused_for_a_missing_fi
     assert "needs" not in err
 
 
-def test_a_secret_with_an_environment_and_no_file_is_not_looked_at(
-    agent_service_unit, switch, scripted
-):
+def test_a_secret_with_an_environment_and_no_file_is_not_looked_at(scenario_unit, switch, scripted):
     """C10."""
     scripted.config["secrets"]["from_environment"] = {
         "name": "from_environment",
         "environment": "SOME_VARIABLE",
     }
-    scripted.config["services"]["agent-service"]["secrets"].append(
+    scripted.config["services"][SCENARIO_UNIT]["secrets"].append(
         {"source": "from_environment", "target": "from_environment"}
     )
 
     exit_code, out, _ = switch()
 
     assert exit_code == 0
-    assert find_row(out, "agent-service", ResultEvent.SWITCHED_ON)
+    assert find_row(out, SCENARIO_UNIT, ResultEvent.SWITCHED_ON)

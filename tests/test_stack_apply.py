@@ -40,6 +40,8 @@ from support.stack_apply import (
     RECREATE_SOCKET_PROXY,
     RECREATE_TRAEFIK,
     REPOSITORY,
+    SCENARIO_SETUP,
+    SCENARIO_UNIT,
     STEP_CA_BUMP,
     STEP_CA_ON,
     STEP_CA_SERVICES,
@@ -99,7 +101,6 @@ from hal.stack.unit_plans import ImageReference, KeptImage, plan_kept_images
 
 SWITCHED_ON, SWITCHED_OFF = ResultEvent.SWITCHED_ON, ResultEvent.SWITCHED_OFF
 (
-    agent_service_unit,
     applied_core,
     at_terminal,
     core_files,
@@ -111,6 +112,7 @@ SWITCHED_ON, SWITCHED_OFF = ResultEvent.SWITCHED_ON, ResultEvent.SWITCHED_OFF
     realm_backup,
     realm_unit,
     repository,
+    scenario_unit,
     scripted,
     scripted_git,
     setup_check,
@@ -121,7 +123,6 @@ SWITCHED_ON, SWITCHED_OFF = ResultEvent.SWITCHED_ON, ResultEvent.SWITCHED_OFF
     switch,
     unreadable_profile_bind,
 ) = (
-    stack_apply_support.agent_service_unit,
     stack_apply_support.applied_core,
     stack_apply_support.at_terminal,
     stack_apply_support.core_files,
@@ -133,6 +134,7 @@ SWITCHED_ON, SWITCHED_OFF = ResultEvent.SWITCHED_ON, ResultEvent.SWITCHED_OFF
     stack_apply_support.realm_backup,
     stack_apply_support.realm_unit,
     stack_apply_support.repository,
+    stack_apply_support.scenario_unit,
     stack_apply_support.scripted,
     stack_apply_support.scripted_git,
     stack_apply_support.setup_check,
@@ -386,72 +388,26 @@ def test_switching_on_keeps_every_existing_container_and_the_volumes(
     assert scripted.volumes == held
 
 
-def test_the_repositorys_agent_service_unit_starts_both_services_and_then_changes_nothing(
-    switch, scripted, setup_check, repository, agent_service_unit
-):
-    """#214 S1: the real catalog line starts the profile's services; a second apply
-    plans nothing. #234: it asks `agent-service/setup --check` before it switches on."""
-    exit_code, out, _ = switch()
-
-    assert exit_code == 0
-    assert setup_check.commands == [[str(repository / "agent-service/setup"), "--check"]]
-    assert find_row(out, "agent-service", SWITCHED_ON)
-    assert scripted.containers == dict.fromkeys(agent_service_unit, "running")
-
-    exit_code, out, _ = switch()
-
-    assert exit_code == 0
-    assert "nothing to change" in out
-    assert scripted.changing_verbs() == ["up"]
-
-
-@pytest.mark.usefixtures("agent_service_unit")
-@pytest.mark.parametrize(
-    "docker_line",
-    [
-        "Error response from daemon: No such image: edge-agent-service:0.4.0-2.1.302",
-        'Error response from daemon: invalid mount config for type "bind": bind source path '
-        "does not exist: /home/operator/.secrets/agent-service/claude",
-    ],
-    ids=["missing image", "missing login directory"],
-)
-def test_an_agent_service_whose_image_or_login_is_missing_is_partial_and_never_on(
-    switch, scripted, docker_line
-):
-    """#214 S2: apply's own start and its observation carry the precondition; no setup check is
-    needed, because Compose refuses the start (`pull_policy: never`, `create_host_path: false`)
-    and the unit is never reported on."""
-    scripted.failing_verb, scripted.failure_line = "up", docker_line
-
-    exit_code, out, _ = switch()
-
-    assert exit_code == 1
-    assert find_row(
-        out, "agent-service", ResultEvent.FAILED, f"`docker compose up` exited 1: {docker_line}"
-    )
-    assert not find_row(out, "agent-service", SWITCHED_ON)
-
-
-@pytest.mark.usefixtures("agent_service_unit")
+@pytest.mark.usefixtures("scenario_unit")
 @pytest.mark.parametrize(
     ("failure", "partial"),
     [
-        ("unstartable", "partial, agent-service"),
-        ("crash_loops", "partial, agent-service not running"),
+        ("unstartable", f"partial, {SCENARIO_UNIT}"),
+        ("crash_loops", f"partial, {SCENARIO_UNIT} not running"),
     ],
 )
-def test_an_agent_service_that_never_runs_or_restarts_is_partial_and_never_on(
+def test_a_unit_that_never_runs_or_restarts_is_partial_and_never_on(
     switch, scripted, failure, partial
 ):
     """#214 S2: a container that exists but does not run, or runs and then restarts (a refused
     login), is found by the watch and never reported or recorded on."""
-    setattr(scripted, failure, {"agent-service"})
+    setattr(scripted, failure, {SCENARIO_UNIT})
 
     exit_code, out, err = switch()
 
     assert exit_code == 1
     assert partial in err
-    assert not find_row(out, "agent-service", SWITCHED_ON)
+    assert not find_row(out, SCENARIO_UNIT, SWITCHED_ON)
 
 
 def test_every_service_that_is_down_at_any_look_of_the_watch_is_named(
@@ -1542,18 +1498,18 @@ def test_start_with_any_answer_but_yes_aborts_and_keeps_the_switch(start, script
     assert scripted.changing_verbs() == []
 
 
-@pytest.mark.usefixtures("agent_service_unit")
-def test_a_start_of_an_agent_service_that_restarts_is_partial_and_never_on(start, scripted, state):
+@pytest.mark.usefixtures("scenario_unit")
+def test_a_start_of_a_unit_that_restarts_is_partial_and_never_on(start, scripted, state):
     """P15, #214: `hal start` decides through the watch, not one look: a login the upstream
     refuses makes the container restart, and the unit stays switched off."""
-    switch_off(state, unit="agent-service")
-    scripted.crash_loops = {"agent-service"}
+    switch_off(state, unit=SCENARIO_UNIT)
+    scripted.crash_loops = {SCENARIO_UNIT}
 
-    exit_code, out, err = start(unit="agent-service")
+    exit_code, out, err = start(unit=SCENARIO_UNIT)
 
     assert exit_code == 1
-    assert "partial, agent-service is not on after the start; its switch stays" in err
-    assert marker(state, "agent-service") == SWITCHED_OFF_AT
+    assert f"partial, {SCENARIO_UNIT} is not on after the start; its switch stays" in err
+    assert marker(state, SCENARIO_UNIT) == SWITCHED_OFF_AT
     assert "is on" not in out
 
 
@@ -3511,8 +3467,8 @@ def test_a_kept_image_and_a_core_recreate_share_one_yes_core_first(
     assert {service: scripted.container_ids[service] for service in STEP_CA_SERVICES} == unit_ids
 
 
-@pytest.mark.usefixtures("agent_service_unit")
-def test_the_repositorys_agent_service_unit_that_is_not_set_up_runs_its_setup_with_a_yes(
+@pytest.mark.usefixtures("scenario_unit")
+def test_a_unit_that_is_not_set_up_runs_its_setup_with_a_yes(
     switch, scripted, setup_check, setup_run, repository
 ):
     """#234: a missing image or token file is asked about, and the answer yes runs the setup
@@ -3522,9 +3478,9 @@ def test_the_repositorys_agent_service_unit_that_is_not_set_up_runs_its_setup_wi
     exit_code, out, _ = switch("yes\nyes")
 
     assert exit_code == 0
-    assert "run `agent-service/setup` now" in out
-    assert setup_run.commands == [(repository / "agent-service/setup", repository)]
-    assert find_row(out, "agent-service", SWITCHED_ON)
+    assert f"run `{SCENARIO_SETUP}` now" in out
+    assert setup_run.commands == [(repository / SCENARIO_SETUP, repository)]
+    assert find_row(out, SCENARIO_UNIT, SWITCHED_ON)
 
 
 KEYCLOAK_DISABLED = "services:\n  keycloak:\n    run: {enabled: false, setup: keycloak/init}\n"

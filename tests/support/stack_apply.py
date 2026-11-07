@@ -108,7 +108,7 @@ def switch_off(state: Path, since: str = SWITCHED_OFF_AT, unit: str = "step-ca")
 def edge_tree(tree: Path) -> Path:
     """A tree of this repository's shape at `tree`, a main worktree (its `.git` is a directory)."""
     (tree / ".git").mkdir(parents=True)
-    for directory, name in (("step-ca", "init"), ("keycloak", "init"), ("agent-service", "setup")):
+    for directory, name in (("step-ca", "init"), ("keycloak", "init")):
         (tree / directory).mkdir(exist_ok=True)
         setup = tree / directory / name
         setup.write_text("#!/bin/sh\n")
@@ -329,53 +329,42 @@ STEP_CA_ON = {"step-ca": "running", "traefik-mcp-acme-owner": "exited", "traefik
 APP_EXITED = STEP_CA_ON | {"traefik-mcp": "exited"}
 
 
+SCENARIO_UNIT = "scenario-unit"
+SCENARIO_SIDECAR = "scenario-sidecar"
+SCENARIO_SECRET = "scenario_key"
+SCENARIO_SIDECAR_SECRET = "scenario_sidecar_key"
+SCENARIO_SETUP = f"{SCENARIO_UNIT}/setup"
+
+
 @pytest.fixture
-def agent_service_unit(repository, scripted, tmp_path) -> set[str]:
-    """The repository's `agent-service` unit, switched on, and compose.yaml, the other units off;
-    its services, their secrets resolved as `docker compose config` spells them, each file written.
-    The shipped unit is off; switched on here, it carries the unit's setup, with
-    `agent-egress` moved into its profile as the pulled sibling and the follower beside it."""
-    real = yaml.safe_load((REPOSITORY / "fleet.yaml").read_text())["services"]["agent-service"]
-    switched_on = real | {"run": real["run"] | {"enabled": True}}
-    fleet = {"cloudflare": {"zone": ZONE}, "services": {"agent-service": switched_on}}
-    write_fleet(repository, yaml.safe_dump(fleet))
-    compose_file = yaml.safe_load((REPOSITORY / "compose.yaml").read_text())
-    sibling = compose_file["services"]["agent-egress"] | {"profiles": ["agent-service"]}
-    profile = {
-        n: d
-        for n, d in compose_file["services"].items()
-        if "agent-service" in d.get("profiles", ())
-    } | {"agent-egress": sibling}
-    for name, definition in profile.items():
-        scripted.config["services"][name] = definition | {
-            "volumes": [_resolved_mount(mount) for mount in definition.get("volumes", [])],
-            "secrets": [
-                {"source": secret, "target": secret} for secret in definition.get("secrets", [])
-            ],
-        }
-    named = {secret for definition in profile.values() for secret in definition.get("secrets", [])}
-    scripted.config["secrets"] = {
-        secret: _written_secret(secret, compose_file["secrets"][secret]["file"], tmp_path)
-        for secret in sorted(named)
+def scenario_unit(repository, scripted, tmp_path) -> set[str]:
+    """A unit of the test's own, switched on, with a setup, two services and a file secret each, the
+    other units off; its services and secret as `docker compose config` spells them, the secret's
+    file written."""
+    fleet = {
+        "cloudflare": {"zone": ZONE},
+        "services": {SCENARIO_UNIT: {"run": {"enabled": True, "setup": SCENARIO_SETUP}}},
     }
-    return set(profile)
-
-
-def _written_secret(name: str, file: str, tmp_path: Path) -> dict:
-    """A top-level secret as `docker compose config` spells it, its file under the test's HOME."""
-    path = tmp_path / "compose-home" / file.removeprefix("${HOME}/")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("x\n")
-    return {"name": name, "file": str(path)}
-
-
-def _resolved_mount(mount: str | dict) -> dict:
-    """A volume as `docker compose config` spells it: the short form `source:target[:ro]` of
-    compose.yaml becomes the long form."""
-    if isinstance(mount, dict):
-        return mount
-    source, target, *mode = mount.split(":")
-    return {"type": "bind", "source": source, "target": target, "read_only": mode == ["ro"]}
+    write_fleet(repository, yaml.safe_dump(fleet))
+    setup_script = repository / SCENARIO_SETUP
+    setup_script.parent.mkdir()
+    setup_script.write_text("#!/bin/sh\n")
+    setup_script.chmod(setup_script.stat().st_mode | stat.S_IXUSR)
+    secrets_of_service = {
+        SCENARIO_UNIT: SCENARIO_SECRET,
+        SCENARIO_SIDECAR: SCENARIO_SIDECAR_SECRET,
+    }
+    scripted.config["secrets"] = {}
+    for service, secret in secrets_of_service.items():
+        secret_file = tmp_path / "compose-home" / secret
+        secret_file.parent.mkdir(parents=True, exist_ok=True)
+        secret_file.write_text("x\n")
+        scripted.config["secrets"][secret] = {"name": secret, "file": str(secret_file)}
+        scripted.config["services"][service] = {
+            "profiles": [SCENARIO_UNIT],
+            "secrets": [{"source": secret, "target": secret}],
+        }
+    return {SCENARIO_UNIT, SCENARIO_SIDECAR}
 
 
 NOT_SET_UP_LINE = "password is not done"
