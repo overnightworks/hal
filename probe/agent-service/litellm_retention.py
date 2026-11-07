@@ -112,7 +112,7 @@ SETTINGS_SECTIONS = {
         "store_prompts_in_spend_logs": False,
         "maximum_spend_logs_retention_period": NonEmptyId(),
     },
-    "router_settings": {"num_retries": 0},
+    "router_settings": {"num_retries": 0, "disable_cooldowns": True},
 }
 # Switches whose effect the spend rows of litellm_logs.py L2 to L4 judge, not B11 their value.
 CONSUMER_SWITCHES = {"disable_spend_logs", "disable_error_logs"}

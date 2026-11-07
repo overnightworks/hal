@@ -446,7 +446,8 @@ and the admin budget with its customer rows (the key step below).
   database and change without a recreate.
 - **A provider failure reaches the caller.** An upstream reset, a broken answer and Anthropic's
   refusal of a used-up balance (a 402 `billing_error`, or a 400 saying the credit balance is too
-  low) each reach the provider once, and the caller gets an error, never a 200; LiteLLM's error
+  low) each reach the provider once, and the caller gets an error, never a 200. The router keeps no cooldown,
+  so the next call goes to the provider again and gets its own answer, never a 429; LiteLLM's error
   line and the call's spend log row name the provider's error, so the logs tell them apart. A caller that leaves
   does not end the request in flight, which may finish and is billed.
 - **Rotating a provider key is a recreate.** A replaced provider key file reaches LiteLLM only

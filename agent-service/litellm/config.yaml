@@ -41,6 +41,9 @@ model_list:
 
 router_settings:
   num_retries: 0
+  # Each model has one deployment and nothing to fall back to, so a cooldown only turns one
+  # provider failure into 429s for every later call.
+  disable_cooldowns: true
 
 litellm_settings:
   turn_off_message_logging: os.environ/HAL_TURN_OFF_MESSAGE_LOGGING

@@ -197,6 +197,7 @@ class FailureProbe(LitellmProbe):
         self.key = self.make_key()
         self.steer()
         self.cells_provider_failures()
+        self.cell_f20()
         self.cell_f9()
         self.cell_f10()
         self.cell_f11()
@@ -222,6 +223,17 @@ class FailureProbe(LitellmProbe):
                 statuses.append(self.failed_answer(cell))
             self.hold(cell, f"{how}: F 1 per answer, the caller got {statuses}")
         self.steer()
+
+    def cell_f20(self) -> None:
+        """A call right after a provider 401 reaches the provider and is served: the router
+        keeps no cooldown, so no 429 stands in for the provider's answer."""
+        self.steer(mode="status", status=401)
+        refused = self.failed_answer("F20")
+        self.steer()
+        before = len(self.provider_requests())
+        answer = self.complete(self.key, user=self.fingerprint())
+        self.served("F20", answer, self.provider_requests()[before:])
+        self.hold("F20", f"after the provider's {refused}, the next call reached F and was served")
 
     def serve_provider_certificate_of(self, authority: ScratchCa) -> None:
         """The fake provider recreated with a certificate of `authority`, once it listens."""
