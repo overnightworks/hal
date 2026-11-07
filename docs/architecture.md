@@ -442,6 +442,7 @@ Every app goes live from a release tag, never from a landing on `main`. A releas
 |---|---|
 | **hopin**, **presentator**, **speech-runtime** | `hal apply`, after the operator's `yes` (below). presentator's backup is the SQLite record in `backup/apps.toml` (`docs/backup.md`) |
 | **songmaker** | its own timer, outside `hal apply` (below). Its host bypasses Traefik (gap 35) |
+| **skat** | the platform (overnightworks/platform); hal only fronts its host and reads its legal text |
 
 ### hopin, presentator and speech-runtime: `hal apply`
 
@@ -544,7 +545,7 @@ They survive a dead PC because they live at the provider.
 | 4 | App groups | `keycloak/realm.yaml` (the `/apps/*` groups) and the catalog's `login_group` | **new slice in E3**: the catalog's CI checks against `realm.yaml` and `apps.toml` (section 3) |
 | 5 | Org secret reach | home-tools#10 line 19 (repo-list drift) and E3 X5 (`fleet.yaml` org secrets) | home-tools#10 (drop its drift view) and E3 X5 (keep it) |
 | 6 | Alert channels: three today | songmaker's e-mail (`songmaker-alert@`), Alertmanager inside songmaker, `hal check`'s desktop notification | edge#4: **one e-mail channel** (ruled 24.10.2026: `msmtp`, run as the operator, over the SMTP account songmaker uses). `hal check` mails its news itself; Gatus ("is it OK now?") and Alertmanager ("why, since when?") both send into it; songmaker's own e-mail alert goes |
-| 7 | Deploy | hopin, presentator and speech-runtime through `hal apply` from their release tag; songmaker by its own timer from its release tag (section 5) | [#1016](https://github.com/overnightworks/hal/issues/1016): one release rule for all apps |
+| 7 | Deploy | hopin, presentator and speech-runtime through `hal apply` from their release tag; songmaker by its own timer from its release tag; skat by the platform (section 5) | [#1016](https://github.com/overnightworks/hal/issues/1016): one release rule for all apps |
 | 8 | Deploy checkout = work clone | closed in songmaker: it deploys from `~/srv/songmaker` (section 5), and its `scripts/auto-deploy.sh` refuses a checkout on a branch. What is left is the landing clone `~/git/songmaker-land`, which songmaker may retire now that it deploys from `~/srv/songmaker` | songmaker |
 | 9 | Monitoring stack | Prometheus, Grafana and Alertmanager live in songmaker's compose, though they serve the platform | edge#4: **ruled 16.10.2026:** they move into edge and serve every service. songmaker keeps only its metrics endpoint and its dashboards as files edge loads |
 | 10 | Two publishers | E3 X8 lets `keycloak/go-live` call `edge external apply`; section 6 publishes in `edge apply` | E3 X8, changed once (section 3): go-live never publishes |

@@ -111,14 +111,20 @@ Plan.
   nicht mehr: seine Bereitschaft belegt der Besitzer des Tunnels vor dem Umzug, danach belegen sie
   `/health` mit 200 und die abgewiesenen `deny_public`-Pfade unter dem oeffentlichen Namen.
   `ready` bleibt im Katalog Pflicht fuer den Host einer App.
-- **Zurueck:** die Zeile `tunnel:` entfernen, `hal apply`; Record und Tunnel-Zeile kehren zu hals
-  Tunnel zurueck. hals Container der App laeuft waehrenddessen weiter als Ziel dieses Rueckwegs.
+- **Zurueck** gilt fuer den Host einer App oder Einheit, die hal betreibt: die Zeile `tunnel:`
+  entfernen, `hal apply`; Record und Tunnel-Zeile kehren zu hals Tunnel zurueck. Ihr Container
+  muss vor diesem `hal apply` laufen und gesund sein, denn die Publish-Phase prueft `ready` ueber
+  hals Traefik und verweigert den Lauf sonst. Wurde er gestoppt, kommt `hal start <app>` zuerst;
+  hopins Umzug hat ihn gestoppt.
+- **Ein Host ohne `repo` und `run`** (heute `skat`): hal betreibt nichts dahinter. Der Besitzer des
+  Tunnels bedient ihn und stoppt oder startet ihn; hal haelt nur Record, `deny_public` und Access.
+  Der Rueckweg ist seiner, und `hal stop` und `hal start` kennen den Host nicht.
 - **Gibt es den genannten Tunnel nicht mehr** (geloescht, umbenannt oder doppelt), scheitert jeder
   `hal apply` und jeder `hal check hosts`, bis der Host zurueckgezogen ist; ein Tunnel, der
   geloescht werden soll, verliert deshalb zuerst seine Hosts im Katalog.
 - **`hal check hosts`** erwartet den Record eines solchen Hosts als CNAME auf dessen Tunnel; zeigt
   er auf hals Tunnel (oder der eines eigenen Hosts auf den anderen), meldet er `record-wrong`.
-- **`hal stop <dienst>`** setzt seine Sperre weiter in hals Traefik; die Zeile nennt jeden Host,
+- **`hal stop <dienst>`** (eine Einheit oder App, die hal betreibt) setzt seine Sperre weiter in hals Traefik; die Zeile nennt jeden Host,
   den sie nicht schliesst (`<fqdn> stays served by tunnel <name>`). `hal stop --all` schliesst nur
   hals Tunnel.
 
