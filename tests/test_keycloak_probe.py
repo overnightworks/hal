@@ -802,8 +802,8 @@ class ImportedClients:
         return self.client
 
 
-HOPIN_SCOPES = ["basic", "profile", "groups", "roles", "service_account", "agent-service-audience"]
-SONGMAKER_SCOPES = [*HOPIN_SCOPES, "email", "web-origins", "acr"]
+HOPIN_SCOPES = ["basic", "profile", "groups", "roles", "service_account"]
+PRESENTATOR_SCOPES = [*HOPIN_SCOPES, "email", "web-origins", "acr"]
 
 
 def imported_client(client: object, **changes: object) -> dict[str, object]:
@@ -812,7 +812,7 @@ def imported_client(client: object, **changes: object) -> dict[str, object]:
         "standardFlowEnabled": True,
         "implicitFlowEnabled": False,
         "directAccessGrantsEnabled": False,
-        "serviceAccountsEnabled": True,
+        "serviceAccountsEnabled": client.service_account,
         "frontchannelLogout": False,
         "redirectUris": list(client.callbacks),
         "baseUrl": f"{client.origin}/",
@@ -828,9 +828,14 @@ def imported_client(client: object, **changes: object) -> dict[str, object]:
     [
         pytest.param("PRESENTATOR", {}, True, id="a workload client as decided"),
         pytest.param("HOPIN", {}, True, id="hopin as decided"),
+        pytest.param("SONGMAKER", {}, True, id="songmaker as decided, with no service account"),
+        pytest.param("SONGMAKER", {"serviceAccountsEnabled": True}, False, id="songmaker with one"),
+        pytest.param(
+            "SONGMAKER", {"defaultClientScopes": PRESENTATOR_SCOPES}, False, id="a scope too many"
+        ),
         pytest.param(
             "PRESENTATOR",
-            {"defaultClientScopes": SONGMAKER_SCOPES[::-1]},
+            {"defaultClientScopes": PRESENTATOR_SCOPES[::-1]},
             True,
             id="another order of the scopes",
         ),
@@ -847,10 +852,10 @@ def imported_client(client: object, **changes: object) -> dict[str, object]:
             "HOPIN", {"serviceAccountsEnabled": False}, False, id="no service account on hopin"
         ),
         pytest.param(
-            "HOPIN", {"defaultClientScopes": SONGMAKER_SCOPES}, False, id="songmaker's set on hopin"
-        ),
-        pytest.param(
-            "HOPIN", {"defaultClientScopes": HOPIN_SCOPES[:-1]}, False, id="hopin without audience"
+            "HOPIN",
+            {"defaultClientScopes": PRESENTATOR_SCOPES},
+            False,
+            id="presentator's set on hopin",
         ),
         pytest.param("HOPIN", {"optionalClientScopes": []}, False, id="hopin without its scope"),
         pytest.param(
@@ -883,10 +888,6 @@ def test_an_app_client_is_accepted_with_its_callbacks_in_another_order(probe: Mo
 
 
 @pytest.mark.parametrize(
-    ("service", "role"),
-    [("agent-service", "agent-workload"), ("speech-service", "speech-workload")],
-)
-@pytest.mark.parametrize(
     ("changes", "accepted"),
     [
         pytest.param({}, True, id="a correct workload token"),
@@ -900,17 +901,16 @@ def test_an_app_client_is_accepted_with_its_callbacks_in_another_order(probe: Mo
     ],
 )
 def test_a_token_is_the_workload_identity_only_with_role_audience_client_and_no_group(
-    probe: ModuleType, service: str, role: str, changes: dict[str, object], accepted: bool
+    probe: ModuleType, changes: dict[str, object], accepted: bool
 ) -> None:
     claims = {
-        "realm_access": {"roles": [role]},
-        "aud": [service],
-        "client_id": "songmaker",
-        "azp": "songmaker",
+        "realm_access": {"roles": ["speech-workload"]},
+        "aud": ["speech-service"],
+        "client_id": "presentator",
+        "azp": "presentator",
     } | changes
     claims = {key: value for key, value in claims.items() if value is not None}
-
-    assert probe.is_workload_identity_of(claims, "songmaker", service) is accepted
+    assert probe.service_audience_cell.is_workload_identity_of(claims, "presentator") is accepted
 
 
 @pytest.mark.parametrize(

@@ -70,7 +70,7 @@ The `hal` command's name and verbs have one code owner, `hal.output.command`; ev
 | `quality` ✓ | `overnightworks-quality` | `quality` | `quality` | check `quality / verdict` ✓ | ✓ | none |
 | `atelier` (marketplace) | `overnightworks-atelier` (dev only) | none | plugin and marketplace `atelier` ✓ | none | `overnightworks_atelier` | none |
 | `webauth` ✓ | ✓ | ✓ | none | none | ✓ | none |
-| `agent-runtime` (agent-providers) | `overnightworks-agent-runtime`, `overnightworks-agent-runtime-client`, `overnightworks-agent-runtime-service` | `agent_runtime`, `agent_runtime_client`, `agent_runtime_service` | `agent-runtime-service` | none | `overnightworks_agent-runtime` | client `agent-service` |
+| `agent-runtime` (agent-providers) | `overnightworks-agent-runtime`, `overnightworks-agent-runtime-client`, `overnightworks-agent-runtime-service` | `agent_runtime`, `agent_runtime_client`, `agent_runtime_service` | `agent-runtime-service` | none | `overnightworks_agent-runtime` | none |
 | `appkit` (ui-style) | `overnightworks-appkit`; npm `overnightworks-appkit` | `appkit` | none | none | `overnightworks_appkit` | none |
 | `presentator` (agent-presentator) | `overnightworks-presentator`, `overnightworks-presentator-copresenter`, `overnightworks-presentator-speech`; npm `slidev-addon-presentator` ✓ | `presentator` ✓, `presentator_copresenter`, `presentator_speech` | `presentator`, `presentator-copresenter`, `presentator-speech` ✓ | `presentator-copresenter`, `presentator-speech` ✓ | `overnightworks_presentator` | `presentator.hallucinai.de`, `/apps/presentator` |
 | `redphone` (claudebot) | `overnightworks-redphone` | `redphone` | none | `redphone` (was `agent-telegram`) | `overnightworks_redphone` | none |

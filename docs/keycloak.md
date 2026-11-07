@@ -65,21 +65,20 @@ presentator clients are in `realm.yaml`, each secret the file
 presentator's one client serves `presentator` and `presentator-talk`); the other
 app clients arrive at K13/K14.
 
-songmaker, presentator and hopin are also the workload identity of the agent service (A1d, #183,
-#506): their service accounts are the only users `realm.yaml` lists, each holding the realm role
-`agent-workload` and no group, and their default scopes add the `agent-service` audience. Whoever
-holds such an app's client secret can therefore get a workload token for that app, which is the
-design; the secret stays the app's own file. hopin's default scopes are exactly `basic`, `profile`,
-`groups`, `roles`, `service_account` and `agent-service-audience`: it reads no email, web origin or
-acr.
+songmaker signs people in only: it has no service account and allows no device grant, and its
+client names the device grant as off, so the import's merge cannot keep an earlier on. hopin's
+default scopes are exactly `basic`, `profile`, `groups`, `roles` and `service_account`: it reads no
+email, web origin or acr.
 
-hopin and presentator are the callers of the speech service (#674, #941). Their service accounts hold the
-realm role `speech-workload` beside `agent-workload`, and `speech-service-audience` is an optional scope of
+hopin and presentator are the callers of the speech service (#674, #941). Their service accounts are
+the only users `realm.yaml` lists, each holding the realm role `speech-workload` and no group.
+Whoever holds such an app's client secret can therefore get a workload token for that app, which is
+the design; the secret stays the app's own file. `speech-service-audience` is an optional scope of
 these two clients alone, so a token carries the `speech-service` audience only when its request names the
 scope: `scope=speech-service-audience` on the `client_credentials` grant, or `openid speech-service-audience`
-on the authorization request. The scope is an `oidc-audience-mapper` on the access token only, like
-the agent service's. songmaker cannot ask for it: the request is refused with
-`invalid_scope`. The speech service is a bearer-only client `speech-service` like `agent-service`, and
+on the authorization request. The scope is an `oidc-audience-mapper` on the access token only.
+songmaker cannot ask for it: the request is refused with
+`invalid_scope`. The speech service is a bearer-only client `speech-service`, and
 the group `/services/speech-service` has no subgroup: the service admits exactly that path. A person
 reaches the service by being a member of the group and signing in to hopin or presentator with the scope.
 
@@ -218,8 +217,8 @@ clears only Cloudflare's copy; a browser that already holds the old file keeps i
 >   - a mapper on a declared client scope (the scope `groups`); a mapper on a declared client is
 >     ruled the same way but not measured;
 >   - a default scope on a declared client that lists its scopes (songmaker, hopin, presentator;
->     an optional scope is ruled the same way but not measured), while a client without scope lists (`agent-service`) keeps its additions;
->   - a client role on a listed service account (`service-account-songmaker`); its realm roles
+>     an optional scope is ruled the same way but not measured), while a client without scope lists (`speech-service`) keeps its additions;
+>   - a client role on a listed service account (`service-account-presentator`); its realm roles
 >     and groups stay;
 >   - a service account turned off in the console on a declared client (hopin), which the apply
 >     turns on again, which recreates its user with its roles and no group;

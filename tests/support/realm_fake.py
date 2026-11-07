@@ -240,7 +240,6 @@ HALLUCINAI_GROUPS = (
     "/apps/hopin/admin",
     "/services",
     "/services/agent-service",
-    "/services/agent-service/subscription",
     "/services/agent-service/api",
     "/services/litellm",
     "/services/litellm/admin",
@@ -252,15 +251,15 @@ def hallucinai() -> FakeRealm:
     realm.groups = {path: Group() for path in HALLUCINAI_GROUPS}
     realm.groups["/apps/hopin"].members = [uid("hallucinai", "anna"), uid("hallucinai", "ben")]
     realm.roles = [role_rep("hallucinai", "", name) for name in ("offline_access", "uma")]
-    agent = client_rep("hallucinai", "agent-service", bearerOnly=True)
-    agent["protocolMappers"] = [
+    speech = client_rep("hallucinai", "speech-service", bearerOnly=True)
+    speech["protocolMappers"] = [
         mapper_rep(
-            "agent-service", "audience", "oidc-audience-mapper", **{"access.token.claim": "true"}
+            "speech-service", "audience", "oidc-audience-mapper", **{"access.token.claim": "true"}
         )
     ]
-    realm.clients = [agent, client_rep("hallucinai", "account", publicClient=True)]
+    realm.clients = [speech, client_rep("hallucinai", "account", publicClient=True)]
     realm.client_roles = {
-        agent["id"]: [role_rep("hallucinai", "agent-service", "use", client=True)]
+        speech["id"]: [role_rep("hallucinai", "speech-service", "use", client=True)]
     }
     groups_scope = {
         "id": uid("hallucinai", "scope", "groups"),

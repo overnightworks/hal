@@ -352,7 +352,7 @@ def test_a_speech_caller_has_a_workload_service_account_in_no_group(app):
 
     assert account["serviceAccountClientId"] == app
     declared_roles = {role["name"] for role in realm["roles"]["realm"]}
-    assert set(account["realmRoles"]) == {"agent-workload", "speech-workload"}
+    assert set(account["realmRoles"]) == {"speech-workload"}
     assert set(account["realmRoles"]) <= declared_roles
     assert "groups" not in account
     assert realm_clients()[app]["serviceAccountsEnabled"] is True
@@ -365,12 +365,14 @@ def test_hopin_has_no_personal_scope():
     )
 
 
-def test_presentator_shares_songmakers_default_scopes():
+def test_presentator_has_songmakers_default_scopes_and_its_service_account():
+    """songmaker has no service account, so it lacks only the scope that carries one."""
     clients = realm_clients()
 
-    assert (
-        clients["presentator"]["defaultClientScopes"] == clients["songmaker"]["defaultClientScopes"]
-    )
+    assert set(clients["presentator"]["defaultClientScopes"]) == {
+        *clients["songmaker"]["defaultClientScopes"],
+        "service_account",
+    }
 
 
 @pytest.mark.parametrize(
@@ -394,85 +396,6 @@ def test_only_the_speech_callers_list_the_speech_audience_among_their_scopes():
     }
 
     assert listing == {"hopin", "presentator"}
-
-
-def test_only_songmaker_allows_the_device_grant():
-    """#297: the live smoke signs in by device grant; a stranger needs songmaker's secret."""
-    realm = yaml.safe_load((REPOSITORY / "keycloak/realm.yaml").read_text())
-
-    allowing = [
-        client["clientId"]
-        for client in realm["clients"]
-        if client.get("attributes", {}).get("oauth2.device.authorization.grant.enabled") == "true"
-    ]
-
-    assert allowing == ["songmaker"]
-
-
-@pytest.mark.parametrize(
-    ("client_id", "answers"),
-    [
-        ("songmaker", {"with": 200, "without": 401}),
-        ("hopin", {"with": 400, "without": 400}),
-    ],
-)
-def test_the_device_grant_cell_accepts_only_songmaker_with_its_secret(
-    device_grant_cell, client_id, answers
-):
-    """#297: the cell reports a held cell for the ruled answers and no other."""
-
-    def answer(status):
-        body = {"device_code": "d", "user_code": "u"} if status == 200 else {"error": "x"}
-        return SimpleNamespace(status=status, text=json.dumps(body), json=lambda: body)
-
-    class FakeProbe:
-        def __init__(self, status_for):
-            self.status_for = status_for
-            self.held_lines = []
-
-        def through_tunnel(self, _method, _path, form):
-            return answer(self.status_for(form.get("client_secret")))
-
-        def held(self, proof, detail):
-            self.held_lines.append((proof, detail))
-
-    def expecting(failures):
-        return lambda held, message: held or failures.append(message)
-
-    failures = []
-    ruled = FakeProbe(lambda secret: answers["with" if secret == "s3" else "without"])
-    device_grant_cell.prove(ruled, client_id, "s3", expecting(failures))
-    assert failures == []
-    assert [proof for proof, _ in ruled.held_lines] == ["DG1"]
-
-    device_grant_cell.prove(FakeProbe(lambda _secret: 200), client_id, "s3", expecting(failures))
-    assert failures
-
-
-def test_the_device_grant_cell_names_no_part_of_an_answer_that_lacks_the_user_code(
-    device_grant_cell,
-):
-    """#297: a device_code in a malformed answer must not reach the probe's output."""
-    body = {"device_code": "SECRET-DEVICE-CODE"}
-    started = SimpleNamespace(status=200, text=json.dumps(body), json=lambda: body)
-
-    class FakeProbe:
-        def through_tunnel(self, _method, _path, form):
-            return started
-
-        def held(self, proof, detail):
-            pass
-
-    messages = []
-    device_grant_cell.prove(
-        FakeProbe(), "songmaker", "s3", lambda held, message: held or messages.append(message)
-    )
-
-    assert (
-        messages[0]
-        == "a device request for songmaker with its secret answered 200 without user_code"
-    )
-    assert "SECRET-DEVICE-CODE" not in "".join(messages)
 
 
 def test_the_back_channel_cell_keeps_the_client_secret_out_of_the_exec_arguments(backchannel_cell):
@@ -563,11 +486,6 @@ def test_the_auth_host_opens_only_the_realm_paths_and_the_admin_console_only_on_
 @pytest.fixture(scope="module")
 def backchannel_cell():
     yield from loaded_script("backchannel_cell", CELLS / "backchannel_cell.py", CELLS)
-
-
-@pytest.fixture(scope="module")
-def device_grant_cell():
-    yield from loaded_script("device_grant_cell", CELLS / "device_grant_cell.py", CELLS)
 
 
 @pytest.mark.parametrize(

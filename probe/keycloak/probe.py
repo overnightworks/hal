@@ -58,7 +58,6 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path[:0] = [str(REPO / "src"), str(REPO / "probe/keycloak"), str(REPO / "probe")]
 import agents_client_cell  # noqa: E402
 import backchannel_cell  # noqa: E402
-import device_grant_cell  # noqa: E402
 import edge_copy  # noqa: E402
 import edge_subnets  # noqa: E402
 import litellm_admin_cell  # noqa: E402
@@ -66,13 +65,14 @@ import logout_actions_cell  # noqa: E402
 import service_audience_cell  # noqa: E402
 import terms_cell  # noqa: E402
 from admin import AdminToken  # noqa: E402
+from scope_measurement_cell import PKCE  # noqa: E402
 from service_audience_cell import (  # noqa: E402
-    AGENT_SERVICE,
+    SPEECH_GROUP,
     SPEECH_SCOPE,
     SPEECH_SERVICE,
-    WORKLOAD_ROLES,
+    SPEECH_WORKLOAD_ROLE,
     audience_of,
-    is_workload_identity_of,
+    is_workload_of,
 )
 from test_rp import token_claims as claims  # noqa: E402
 
@@ -113,12 +113,11 @@ PROBE_CONSTRAINTS = f"Label(`com.docker.compose.project`, `{PROJECT}`)"
 MOVED_NETWORKS = ("keycloak", "keycloak-keys")  # compose.yaml's, each on a free /24 of its own
 TRAEFIK_NOT_FOUND = b"404 page not found\n"
 
-# `roles` carries the workload role, `service_account` the client_id and the audience is the
-# service's; hopin reads no email, web origin or acr, so it has none of the three.
-HOPIN_CLIENT_SCOPES = frozenset(
-    {"basic", "profile", "groups", "roles", "service_account", "agent-service-audience"}
-)
-SONGMAKER_PRESENTATOR_CLIENT_SCOPES = HOPIN_CLIENT_SCOPES | {"email", "web-origins", "acr"}
+# `roles` carries the workload role and `service_account` the client_id; hopin reads no email, web
+# origin or acr, so it has none of the three, and songmaker has no service account.
+HOPIN_CLIENT_SCOPES = frozenset({"basic", "profile", "groups", "roles", "service_account"})
+PRESENTATOR_CLIENT_SCOPES = HOPIN_CLIENT_SCOPES | {"email", "web-origins", "acr"}
+SONGMAKER_CLIENT_SCOPES = PRESENTATOR_CLIENT_SCOPES - {"service_account"}
 
 
 @dataclass(frozen=True)
@@ -131,6 +130,7 @@ class AppClient:
     logout_redirect: str
     default_scopes: frozenset[str]  # exactly the client's default scopes in realm.yaml
     optional_scopes: frozenset[str] = frozenset()  # and its optional ones
+    service_account: bool = False  # whether it has one, a workload of the speech service
 
     @property
     def secret_file(self) -> str:
@@ -150,7 +150,7 @@ SONGMAKER = AppClient(
     "/apps/songmaker/admin",
     (f"https://songmaker.{DOMAIN}/auth/callback",),
     f"https://songmaker.{DOMAIN}/login",
-    default_scopes=SONGMAKER_PRESENTATOR_CLIENT_SCOPES,
+    default_scopes=SONGMAKER_CLIENT_SCOPES,
 )
 HOPIN = AppClient(
     "hopin",
@@ -159,6 +159,7 @@ HOPIN = AppClient(
     f"https://hopin.{DOMAIN}/login",
     default_scopes=HOPIN_CLIENT_SCOPES,
     optional_scopes=frozenset({SPEECH_SCOPE}),
+    service_account=True,
 )
 PRESENTATOR = AppClient(
     "presentator",
@@ -168,12 +169,12 @@ PRESENTATOR = AppClient(
         f"https://presentator-talk.{DOMAIN}/auth/callback",
     ),
     f"https://presentator.{DOMAIN}/login",
-    default_scopes=SONGMAKER_PRESENTATOR_CLIENT_SCOPES,
+    default_scopes=PRESENTATOR_CLIENT_SCOPES,
     optional_scopes=frozenset({SPEECH_SCOPE}),
+    service_account=True,
 )
 APP_CLIENTS = (SONGMAKER, HOPIN, PRESENTATOR)
 SPEECH_APPS = tuple(app for app in APP_CLIENTS if SPEECH_SCOPE in app.optional_scopes)
-AGENT_WORKLOAD_ROLE = WORKLOAD_ROLES[AGENT_SERVICE]
 SECRET_FILES = (
     "db-password",
     "config-cli-secret",
@@ -184,7 +185,6 @@ READY_TIMEOUT_SECONDS = 240
 CHANGED_ACCESS_TOKEN_LIFESPAN = 360
 CHANGED_GROUP = "probe-changed"
 MEMBER_GROUP = "/apps/songmaker"
-SUBSCRIPTION_GROUP = "/services/agent-service/subscription"
 PUBLIC_AUTH_PATH = f"{REALM_PATH}/protocol/openid-connect/auth"
 PUBLIC_LOGOUT_PATH = f"{REALM_PATH}/protocol/openid-connect/logout"
 CLIENT_ADDRESS = "198.51.100.23"  # the person signing in, as Cloudflare saw it
@@ -203,7 +203,7 @@ SUBFLOW_PARENT = "direct-grant-mfa-totp"
 CONSOLE_SUBFLOW = f"{CONSOLE_NAME}-subflow"
 CONSOLE_SCOPE = f"{CONSOLE_NAME}-scope"
 CONSOLE_CLIENT_ROLE = f"{CONSOLE_NAME}-client-role"
-LISTED_CLIENT = "songmaker"  # lists its default scopes and a service account
+LISTED_CLIENT = "presentator"  # lists its default scopes and a service account
 ENABLED_ACCOUNT_CLIENT = "hopin"  # its service account, which the console turns off
 SERVICE_ACCOUNT_ROLE_ADDITION = "hallucinai: addition service-account realm role service-account-"
 BACKUP_ASKED = ["backup", "keycloak", "--pre-apply", "--json"]  # what hal was asked first
@@ -222,21 +222,19 @@ RESIDUE_OF_THE_APPLY = [
     # the service account a console turned off and the apply turns back on: Keycloak drops its
     # scope with the flag and the apply restores it
     f"hallucinai: change client {ENABLED_ACCOUNT_CLIENT} defaultClientScopes: "
-    '["agent-service-audience", "basic", "groups", "profile", "roles"] → '
-    '["agent-service-audience", "basic", "groups", "profile", "roles", "service_account"]',
+    '["basic", "groups", "profile", "roles"] → '
+    '["basic", "groups", "profile", "roles", "service_account"]',
     f"hallucinai: change client {ENABLED_ACCOUNT_CLIENT} serviceAccountsEnabled: false → true",
-    f'hallucinai: change client {LISTED_CLIENT} defaultClientScopes: ["acr", '
-    '"agent-service-audience", "basic", "email", "groups", "probe-console-scope", "profile", '
-    '"roles", "service_account", "web-origins"] → ["acr", "agent-service-audience", "basic", '
-    '"email", "groups", "profile", "roles", "service_account", "web-origins"]',
+    f'hallucinai: change client {LISTED_CLIENT} defaultClientScopes: ["acr", "basic", "email", '
+    '"groups", "probe-console-scope", "profile", "roles", "service_account", "web-origins"] → '
+    '["acr", "basic", "email", "groups", "profile", "roles", "service_account", "web-origins"]',
     f"hallucinai: change client {LISTED_CLIENT} authenticationFlowBindingOverrides: changed",
     f"hallucinai: removal protocol mapper scope groups/{CONSOLE_NAME}-mapper",
     f"hallucinai: removal service-account client role service-account-{LISTED_CLIENT}/"
-    f"{AGENT_SERVICE}/{CONSOLE_CLIENT_ROLE}",
+    f"{SPEECH_SERVICE}/{CONSOLE_CLIENT_ROLE}",
     # the user and the role mappings the apply recreates with the service account
-    f"{SERVICE_ACCOUNT_ROLE_ADDITION}{ENABLED_ACCOUNT_CLIENT}/{AGENT_WORKLOAD_ROLE}",
     f"{SERVICE_ACCOUNT_ROLE_ADDITION}{ENABLED_ACCOUNT_CLIENT}/default-roles-hallucinai",
-    f"{SERVICE_ACCOUNT_ROLE_ADDITION}{ENABLED_ACCOUNT_CLIENT}/{WORKLOAD_ROLES[SPEECH_SERVICE]}",
+    f"{SERVICE_ACCOUNT_ROLE_ADDITION}{ENABLED_ACCOUNT_CLIENT}/{SPEECH_WORKLOAD_ROLE}",
     f"hallucinai: addition service-account user service-account-{ENABLED_ACCOUNT_CLIENT}",
     f"master: removal flow {CONSOLE_SUBFLOW}",
     f"master: removal flow step {FORMS_FLOW}/auth-otp-form#1",
@@ -245,8 +243,7 @@ RESIDUE_OF_THE_APPLY = [
 DROPPED_CLIENT = "hopin"
 DROPPED_GROUP = "services"
 ROLE_HOLDERS = {  # the realm roles earlier applies created, with the service accounts holding each
-    AGENT_WORKLOAD_ROLE: [f"service-account-{client.client_id}" for client in APP_CLIENTS],
-    WORKLOAD_ROLES[SPEECH_SERVICE]: [f"service-account-{app.client_id}" for app in SPEECH_APPS],
+    SPEECH_WORKLOAD_ROLE: [f"service-account-{app.client_id}" for app in SPEECH_APPS],
 }
 CHANGED_CONFIG = "browser-mfa-without-passkey"
 # 6.5.1 reads the managed-role switch only when the file has a roles section, so an empty
@@ -1249,8 +1246,8 @@ class Probe:
             f"managed in full) resets the {len(removed)} console changes the observer lists above, "
             "all inside objects the file declares, and keeps the console subgroup with its member, "
             "the console flows, the console role on config-cli's service account and the console "
-            f"group on {LISTED_CLIENT}'s, the console default scope on agent-service, the "
-            "console client, identity provider, component, realm roles and the agent-service "
+            f"group on {LISTED_CLIENT}'s, the console default scope on {SPEECH_SERVICE}, the "
+            f"console client, identity provider, component, realm roles and the {SPEECH_SERVICE} "
             f"mapper, and probe-member in {MEMBER_GROUP}; a third apply lists nothing",
         )
         self.realm_settings_as_decided(admin, reapplied)
@@ -1266,7 +1263,7 @@ class Probe:
         roles = admin.get(f"/{REALM}/users/{account['id']}/role-mappings/realm")
         names, groups = [role["name"] for role in roles], admin.group_paths(account["id"])
         expect(
-            set(WORKLOAD_ROLES.values()) <= set(names) and groups == [],
+            SPEECH_WORKLOAD_ROLE in names and groups == [],
             f"{ENABLED_ACCOUNT_CLIENT}'s service account has roles {names} and groups "
             f"{groups} after the apply",
         )
@@ -1284,11 +1281,11 @@ class Probe:
             CONSOLE_FLOW in [flow["alias"] for flow in admin.get("/master/authentication/flows")],
             f"the console flow {CONSOLE_FLOW} did not survive the apply",
         )
-        agent = admin.find(f"/{REALM}/clients?clientId=agent-service", "clientId", "agent-service")
-        scopes = admin.get(f"/{REALM}/clients/{agent['id']}/default-client-scopes")
+        service = admin.client(SPEECH_SERVICE)
+        scopes = admin.get(f"/{REALM}/clients/{service['id']}/default-client-scopes")
         expect(
             CONSOLE_SCOPE in [scope["name"] for scope in scopes],
-            f"agent-service lost the default scope {CONSOLE_SCOPE} the console added",
+            f"{SPEECH_SERVICE} lost the default scope {CONSOLE_SCOPE} the console added",
         )
         account = admin.service_account_user("config-cli", "master")
         roles = admin.get(f"/master/users/{account['id']}/role-mappings/realm")
@@ -1332,8 +1329,8 @@ class Probe:
         scope_id = admin.create(
             f"/{REALM}/client-scopes", {"name": CONSOLE_SCOPE, "protocol": "openid-connect"}
         )
-        agent = admin.find(f"/{REALM}/clients?clientId=agent-service", "clientId", "agent-service")
-        admin.must("PUT", f"/{REALM}/clients/{agent['id']}/default-client-scopes/{scope_id}")
+        service = admin.client(SPEECH_SERVICE)
+        admin.must("PUT", f"/{REALM}/clients/{service['id']}/default-client-scopes/{scope_id}")
         self.make_changes_to_declared_objects(admin, scope_id)
         self.make_survivors(admin)
 
@@ -1344,9 +1341,7 @@ class Probe:
             f"/master/authentication/flows/{SUBFLOW_PARENT}/executions/flow",
             {"alias": CONSOLE_SUBFLOW, "type": "basic-flow", "provider": "registration-page-form"},
         )
-        role_client = admin.find(
-            f"/{REALM}/clients?clientId={AGENT_SERVICE}", "clientId", AGENT_SERVICE
-        )
+        role_client = admin.client(SPEECH_SERVICE)
         admin.create(f"/{REALM}/clients/{role_client['id']}/roles", {"name": CONSOLE_CLIENT_ROLE})
         client_role = admin.get(f"/{REALM}/clients/{role_client['id']}/roles/{CONSOLE_CLIENT_ROLE}")
         account = admin.service_account_user(LISTED_CLIENT)
@@ -1417,10 +1412,10 @@ class Probe:
                 "config": {"max-clients": ["50"]},
             },
         )
-        agent = admin.find(f"/{REALM}/clients?clientId=agent-service", "clientId", "agent-service")
+        service = admin.client(SPEECH_SERVICE)
         admin.create(
-            f"/{REALM}/clients/{agent['id']}/protocol-mappers/models",
-            hardcoded_claim(f"{CONSOLE_NAME}-agent-mapper"),
+            f"/{REALM}/clients/{service['id']}/protocol-mappers/models",
+            hardcoded_claim(f"{CONSOLE_NAME}-service-mapper"),
         )
 
     def realm_settings_as_decided(self, admin: Admin, inventory: Inventory) -> None:
@@ -1910,7 +1905,7 @@ class Probe:
             admin.call("GET", f"/{REALM}/group-by-path/{CHANGED_GROUP}").status == 200,
             f"group {CHANGED_GROUP} was not created",
         )
-        for path in (SUBSCRIPTION_GROUP, CONSOLE_SUBGROUP):
+        for path in (SPEECH_GROUP, CONSOLE_SUBGROUP):
             expect(
                 admin.call("GET", f"/{REALM}/group-by-path{path}").status == 200,
                 f"the group {path} did not survive the changed apply",
@@ -1971,7 +1966,6 @@ class Probe:
         audience = audience_of(access)
         expect(access.get("iss") == PUBLIC_ISSUER, f"access token issuer is {access.get('iss')}")
         expect(MEMBER_GROUP in access.get("groups", []), f"groups claim is {access.get('groups')}")
-        expect("agent-service" in audience, f"audience is {audience}")
         self.held(
             "4",
             f"probe-member's access token: iss {access['iss']}, groups {access['groups']}, "
@@ -2089,7 +2083,6 @@ class Probe:
         password = self.keep_secret(f"{username} password", secrets.token_urlsafe(16))
         member_id = admin.create_user(REALM, username, password)
         admin.join_group(member_id, client.group)
-        admin.join_group(member_id, SUBSCRIPTION_GROUP)
         client_secret = self.secret_values[client.secret_file]
         browser = self.browser(name)
         tokens = self.app_client_sign_in(client, browser, username, password, client_secret)
@@ -2100,7 +2093,8 @@ class Probe:
         self.app_client_refuses_what_it_does_not_use(client, client_secret)
         self.app_client_logout_pages(client, browser)
         self.app_client_representation(admin, client)
-        self.workload_token_carries_the_role(admin, client_secret, client)
+        if client.service_account:
+            self.workload_token_carries_the_role(admin, client_secret, client)
         terms_cell.prove(self, expect, form_with, client)
         service_audience_cell.prove(self, expect, client, tokens["access_token"])
         agents_client_cell.prove(self, expect, form_with, client, APP_CLIENTS)
@@ -2109,16 +2103,16 @@ class Probe:
             "10",
             f"a member of {client.group} signs in to {name} with PKCE and gets a code "
             f"at exactly {client.callback}, exchanged with the scratch secret for an ID token "
-            f"with groups {groups}, and an access token with {SUBSCRIPTION_GROUP} and the "
-            f"{AGENT_SERVICE} audience; no code challenge, a suffixed callback, http, the password "
-            "grant and the offline_access scope are refused; the end-session page asks before "
-            f"logging out for {client.logout_redirect} and refuses an unregistered address and "
-            "the origin root; the client's logout, optional scopes, base URL, console listing and "
-            "refresh token are as ruled; a person's token has the "
-            f"{AGENT_SERVICE} audience and no {AGENT_WORKLOAD_ROLE} role, and its "
-            f"client_credentials token has {AGENT_WORKLOAD_ROLE}, client_id and azp {name}, no "
-            "group and the realm's lifespan or 1 s more to live (W1 to W3)",
-        )
+            f"with groups {groups}; no code challenge, a suffixed callback, http, the password "
+            f"grant, a device request{'' if client.service_account else ', client_credentials'} "
+            "and the offline_access scope are refused; the end-session page asks before logging "
+            f"out for {client.logout_redirect} and refuses an unregistered address and the origin "
+            "root; the client's logout, optional scopes, base URL, console listing and refresh "
+            f"token are as ruled; a person's token has no {SPEECH_WORKLOAD_ROLE} role (W3)"
+            + (f"; its client_credentials token has {SPEECH_WORKLOAD_ROLE}, client_id and azp "
+               f"{name}, no group and the realm's lifespan or 1 s more (W1, W2)"
+               if client.service_account else ""),
+        )  # fmt: skip
 
     def browser(self, name: str) -> OpenerDirector:
         return new_opener(ReceivedCookies(lambda c, v: self.keep_secret(f"{name} {c}", v)))
@@ -2190,7 +2184,8 @@ class Probe:
     def app_client_refuses_what_it_does_not_use(
         self, client: AppClient, client_secret: str
     ) -> None:
-        """Cells T3-T5, DG1: PKCE required, exact callback, only songmaker's device grant."""
+        """Cells T3-T5, DG1: PKCE required, exact callback, no device grant, and no
+        client_credentials grant for a client without a service account."""
         without_challenge = self.through_tunnel(
             "GET", f"{PUBLIC_AUTH_PATH}?{self.app_client_authorization_query(client)}"
         )
@@ -2204,38 +2199,45 @@ class Probe:
             f"{client.callback}/x",
             client.callback.replace("https", "http"),
         ):
-            query = self.app_client_authorization_query(
-                client, redirect_uri=redirect_uri, **device_grant_cell.PKCE
-            )
+            query = self.app_client_authorization_query(client, redirect_uri=redirect_uri, **PKCE)
             page = self.through_tunnel("GET", f"{PUBLIC_AUTH_PATH}?{query}")
             expect(
                 page.status == 400 and "Invalid parameter: redirect_uri" in page.text,
                 f"redirect_uri {redirect_uri} answered {page.status}: {page_message(page)}",
             )
         self.app_client_refuses_offline_access(client)
-        grant = self.password_grant_of_the_member()
-        refused = self.through_tunnel(
+        grants = [self.password_grant_of_the_member()]
+        if not client.service_account:
+            grants.append({"grant_type": "client_credentials"})
+        for grant in grants:
+            refused = self.through_tunnel(
+                "POST",
+                PUBLIC_TOKEN_PATH,
+                form={"client_id": client.client_id, "client_secret": client_secret, **grant},
+            )
+            error = refused.json().get("error") if refused.status in (400, 401) else None
+            expect(
+                error == "unauthorized_client",
+                f"{grant['grant_type']} on {client.client_id} answered {refused.status}",
+            )
+        device = self.through_tunnel(
             "POST",
-            PUBLIC_TOKEN_PATH,
-            form={"client_id": client.client_id, "client_secret": client_secret, **grant},
+            f"{PUBLIC_AUTH_PATH}/device",
+            form={"client_id": client.client_id, "client_secret": client_secret, "scope": "openid"},
         )
-        error = refused.json().get("error") if refused.status in (400, 401) else None
         expect(
-            error == "unauthorized_client",
-            f"{grant['grant_type']} on {client.client_id} answered {refused.status}",
+            device.status in (400, 401) and "device_code" not in device.text,
+            f"a device request for {client.client_id} with its secret answered {device.status}",
         )
-        device_grant_cell.prove(self, client.client_id, client_secret, expect)
 
     @staticmethod
     def person_token_is_no_workload(client: AppClient, access_token: str) -> None:
-        """Cell W3: a person's token from the app's login has the audience and groups (the app's
-        group and the subscription group in full path), never the workload role."""
+        """Cell W3: a person's token from the app's login has the app's group in full path,
+        never the workload role."""
         access = claims(access_token)
         roles = access.get("realm_access", {}).get("roles", [])
         expect(
-            AGENT_SERVICE in audience_of(access)
-            and {client.group, SUBSCRIPTION_GROUP} <= set(access.get("groups", []))
-            and AGENT_WORKLOAD_ROLE not in roles,
+            client.group in access.get("groups", []) and SPEECH_WORKLOAD_ROLE not in roles,
             f"a person's access token from {client.client_id} has aud {audience_of(access)}, "
             f"groups {access.get('groups')}, realm roles {roles}",
         )
@@ -2243,7 +2245,7 @@ class Probe:
     def workload_token_carries_the_role(
         self, admin: Admin, client_secret: str, client: AppClient
     ) -> None:
-        """Cells W1, W2: the client-credentials token is the app's workload identity and lives the
+        """Cells W1, W2: the client-credentials token is the app's workload and lives the
         realm's 300 s (proof 8) or 1 s more: Keycloak reads the clock twice."""
         name = client.client_id
         override = admin.find(f"/{REALM}/clients", "clientId", name)["attributes"].get(
@@ -2266,7 +2268,7 @@ class Probe:
         roles = access.get("realm_access", {}).get("roles", [])
         extra_seconds = access["exp"] - access["iat"] - realm_lifespan
         expect(
-            is_workload_identity_of(access, name) and not override and extra_seconds in (0, 1),
+            is_workload_of(access, name) and not override and extra_seconds in (0, 1),
             f"{name}'s workload token has realm roles {roles}, aud {audience_of(access)}, "
             f"client_id {access.get('client_id')}, azp {access.get('azp')}, groups "
             f"{access.get('groups')}, lifespan {realm_lifespan + extra_seconds}s (realm "
@@ -2275,9 +2277,7 @@ class Probe:
 
     def app_client_refuses_offline_access(self, client: AppClient) -> None:
         """Cell T13: offline_access is no scope of the client, so no offline token is issued."""
-        query = self.app_client_authorization_query(
-            client, scope="openid offline_access", **device_grant_cell.PKCE
-        )
+        query = self.app_client_authorization_query(client, scope="openid offline_access", **PKCE)
         refused = self.through_tunnel("GET", f"{PUBLIC_AUTH_PATH}?{query}")
         error = parse_qs(urlsplit(refused.headers.get("Location", "")).query)
         expect(
@@ -2332,7 +2332,7 @@ class Probe:
                 "standardFlowEnabled": True,
                 "implicitFlowEnabled": False,
                 "directAccessGrantsEnabled": False,
-                "serviceAccountsEnabled": True,
+                "serviceAccountsEnabled": client.service_account,
                 "frontchannelLogout": False,
                 "baseUrl": f"{client.origin}/",
                 "alwaysDisplayInConsole": False,
