@@ -3,6 +3,6 @@ agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
 role = "builder"
 base = "9ca37fbce3dea434dc4a27318fb4ff4ccecf6036"
 branch = "claude/issue-1085-cooldown-off-on-the-api-route"
-scope = ["agent-service/litellm/config.yaml", "docs/agent-service.md", "probe/agent-service"]
+scope = ["agent-service/litellm/config.yaml", "docs/agent-service.md", "probe/agent-service", "tests/test_litellm_unit.py"]
 opened_commit = "55f906307c3e56fb99f470b78e329377b4241bdf"
 whole_reason = "One router setting, its fake-stack probe and the sentence that states it."
