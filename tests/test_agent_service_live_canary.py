@@ -9,8 +9,8 @@ from dataclasses import dataclass, field
 
 import live_canary
 import pytest
+from live_canary import Stack
 from retention_census import DATABASE, ROUTE_SERVICES, Completed
-from support.live_smoke_fakes import FakeStack, completed, resolved_configuration
 from support.probe_support import probe_imports
 
 with probe_imports():
@@ -30,13 +30,17 @@ PYTHON_REPORT = {"table": [["/", "overlay", False]], "mounts": []}
 TOOL_COPY = 'COPY public."LiteLLM_ToolTable" (tool_name) FROM stdin;'
 
 
+def completed(stdout: str = "", returncode: int = 0, stderr: str = ""):
+    return subprocess.CompletedProcess([], returncode, stdout, stderr)
+
+
 def container_of(service: str) -> str:
     return f"{service}-1"
 
 
 def configuration() -> dict:
     """The resolved compose configuration, with the database's login."""
-    resolved = resolved_configuration()
+    resolved = {"name": "edge", "services": {}}
     resolved["services"][DATABASE] = {"environment": {**LOGIN, "POSTGRES_PASSWORD_FILE": "/x"}}
     return resolved
 
@@ -110,12 +114,12 @@ class Route:
             return Completed(0, json.dumps(PYTHON_REPORT).encode(), SENTINEL.encode())
         return Completed(0, HOST_TABLE, SENTINEL.encode())
 
-    def stack(self) -> FakeStack:
+    def stack(self) -> Stack:
         return RecordingStack(route=self)
 
 
 @dataclass(frozen=True)
-class RecordingStack(FakeStack):
+class RecordingStack(Stack):
     """The scripted docker, which also sees each command's standard input."""
 
     route: Route | None = None

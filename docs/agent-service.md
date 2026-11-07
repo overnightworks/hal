@@ -2,8 +2,7 @@
 
 Reference and runbook for the operator and for an engineer changing the agent service. The code is
 the truth: `compose.yaml` (the `agent-service` service, its `agent-songmaker`, `agent-presentator`, `agent-hopin` and `mcp` networks),
-`agent-service/service.toml`, `agent-service/image/` (the image recipe), `agent-service/live_smoke.py`,
-`agent-service/live_signer.py`, `agent-service/live_canary.py` and the probes under `probe/agent-service/`. The egress gateway of LiteLLM is in
+`agent-service/service.toml`, `agent-service/image/` (the image recipe), `agent-service/live_canary.py` and the probes under `probe/agent-service/`. The egress gateway of LiteLLM is in
 [internal-ca.md](internal-ca.md); the platform picture is [architecture.md](architecture.md).
 
 ## The image
@@ -498,35 +497,6 @@ Its load cells prove `hal restore litellm --live`: only while LiteLLM is switche
 person past their budgets still refused after a load into the rebuilt volume, a failed load that
 changes nothing, the question's no and the missing terminal, a killed run's load that runs to its
 own end, and an interrupt that waits for the load.
-
-**The live smoke** is one command, run in the live checkout after `hal apply` and with the image
-built: `cd ~/srv/hal && python3 agent-service/live_smoke.py`. It signs you in as yourself (the
-`songmaker` client's device grant, edge#184 D6): it prints a link and a code and opens the link
-where a browser is there; you sign in and confirm on any device, and the run goes on by itself,
-nothing is pasted (it waits as long as the code lives). Keycloak starts a
-device sign-in only for a request with songmaker's client secret, which lives in `~/.secrets` on
-this machine, so no stranger can send you a link to confirm; no other client allows the grant.
-It recreates the service and runs the live cells L2-L7, L9
-and E6-E10, E12 against it, which its docstring lists. L3 holds when `run_started` names `anthropic/` and a model of `[cli.anthropic] models` on route `cli`, and shows both. L9 holds when no
-JWT-shaped string is in the smoke output, `docker inspect` or the service log. It needs the image, the client's secret file and the login token under
-`~/.secrets`, and the person in the groups `/apps/songmaker` and `/services/agent-service/subscription`.
-The realm declares these groups but grants no membership: add yourself once in the admin
-console on port 8090. The smoke names the possible causes of a refusal for rights. Run it at once, as
-the workload token lives five minutes, and send the head its report.
-
-**The live signer proof** is `cd ~/srv/hal && python3 agent-service/live_signer.py`, run by the operator
-after a key change or a change of the service's gateway route. It signs you in as the live smoke does,
-recreates the service and judges the recreate (L3): the service's networks are the resolved ones and each is internal and
-isolated, and its two secret mounts come from `private.pem` and `root_ca.crt` under `~/.secrets`, as the compose
-configuration names them. It then removes the shared `hal_agent` network, which no compose file defines any more, once it
-has no member (found by its compose labels, never by name); with a member it prints FAILED and removes nothing. Then it
-runs `agent-smoke --tool` twice, with no paid turn: both runs fail before any CLI starts. L4a, with no backend behind the gateway, holds when the run ends `failed` with no text and the
-service log shows the gateway's refusal. L4b joins a stand-in, `mcp_signer.py` in the service image with only
-`public.pem` mounted read-only, at songmaker-web's place on songmaker's MCP network, and holds when the
-capability it receives verifies against `public.pem` (signature, `kid`, `aud`, the one tool, the Host
-`songmaker.mcp.internal`); the stand-in is removed afterwards. Only the verdict is printed, never the
-capability. It needs `[apps.songmaker] mcp_origin` in `service.toml`. It also refuses once anything but traefik-mcp is on songmaker's MCP network; from then on
-songmaker's own call is the proof.
 
 **The live canary** is `cd ~/srv/hal && python3 agent-service/live_canary.py`, for the operator at the go
 to let people in; it has not been run. It makes a paid call from hopin's app budget, so it runs only when the operator says so,

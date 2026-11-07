@@ -19,28 +19,30 @@ reason. Only the standard library is used.
 from __future__ import annotations
 
 import http
+import json
 import re
 import secrets
 import subprocess
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
+from functools import cached_property
+from pathlib import Path
 from typing import TextIO
 
 from api_canary import EXCEPTION_NAME, crashed_line, verdicts
-from live_smoke import (
-    PAID_TURN_SECONDS,
-    TIMED_OUT,
-    Cell,
-    Stack,
-    Verdict,
-    remove_smoke_containers,
-)
 from retention_census import ROUTE_SERVICES, Census, Run, Sweep, Target, route_target, run_docker
 
+REPOSITORY = Path(__file__).resolve().parents[1]
+LIVE_COMPOSE = (
+    "docker", "compose", "--project-directory", str(REPOSITORY),
+    "--file", str(REPOSITORY / "compose.yaml"), "--profile", "agent-service",
+)  # fmt: skip
 CANARY_SERVICE = "agent-canary"
+PAID_TURN_SECONDS = 420
+TIMED_OUT = 124
 INSPECT_NAME = "{{.Name}}"
 # LiteLLM 1.106.6 writes its batched updates every PROXY_BATCH_WRITE_AT = 10 s (constants.py:1877)
 # plus randint(0, 5) (proxy_server.py:10936), and a job of its own writes the daily tag rows every
@@ -56,6 +58,90 @@ LITELLM_LONGEST_WRITE_INTERVAL_SECONDS = int(
     (LITELLM_BATCH_SECONDS + LITELLM_BATCH_JITTER_SECONDS) * LITELLM_TAG_MULTIPLIER
 )
 ROUTE_SETTLE_SECONDS = LITELLM_LONGEST_WRITE_INTERVAL_SECONDS
+
+
+class ComposeConfigFailed(Exception):
+    """`docker compose config` gave no configuration; the message is free of any secret."""
+
+
+class Verdict(StrEnum):
+    HELD = "held"
+    FAILED = "FAILED"
+
+
+@dataclass(frozen=True)
+class Cell:
+    name: str
+    verdict: Verdict
+    figure: str
+
+    def line(self) -> str:
+        return f"{self.name} {self.verdict}: {self.figure}"
+
+
+def last_line(text: str) -> str:
+    lines = [line for line in text.splitlines() if line.strip()]
+    return lines[-1].strip() if lines else "no output"
+
+
+@dataclass(frozen=True)
+class Stack:
+    """One compose project and how docker is asked for it.
+
+    `compose_prefix` is everything before the compose subcommand: the repository's own files for
+    the live stack, the probe's project and files for the probe. The project's name is read from
+    the configuration compose resolves for that prefix."""
+
+    compose_prefix: tuple[str, ...] = LIVE_COMPOSE
+    environment: Mapping[str, str] | None = None
+    directory: Path | None = None
+
+    def run(
+        self, command: Sequence[str], stdin: str | None = None, timeout: int = 300
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(  # noqa: S603 - argv is built by the program itself and no shell parses it on the host
+            command, input=stdin, capture_output=True, text=True, check=False, timeout=timeout,
+            env=self.environment, cwd=self.directory,
+        )  # fmt: skip
+
+    def compose(
+        self, *arguments: str, stdin: str | None = None, timeout: int = 300
+    ) -> subprocess.CompletedProcess[str]:
+        return self.run([*self.compose_prefix, *arguments], stdin, timeout)
+
+    @cached_property
+    def configuration(self) -> dict:
+        answer = self.compose("config", "--format", "json")
+        try:
+            configuration = json.loads(answer.stdout) if answer.returncode == 0 else None
+        except ValueError:
+            configuration = None
+        if not isinstance(configuration, dict):
+            raise ComposeConfigFailed(f"docker compose config failed: {last_line(answer.stderr)}")
+        return configuration
+
+    @property
+    def project(self) -> str:
+        return self.configuration["name"]
+
+
+def remove_run_containers(stack: Stack, service: str) -> str | None:
+    """A run of `service` the host stopped waiting for leaves its `run --rm` container behind.
+    Returns why the clean-up failed, in one line, or None."""
+    listed = stack.run([
+        "docker", "ps", "-aq",
+        "--filter", f"label=com.docker.compose.project={stack.project}",
+        "--filter", f"label=com.docker.compose.service={service}",
+    ])  # fmt: skip
+    if listed.returncode != 0:
+        return f"docker ps exited {listed.returncode}: {last_line(listed.stderr)}"
+    leftovers = listed.stdout.split()
+    if not leftovers:
+        return None
+    removed = stack.run(["docker", "rm", "-f", *leftovers])
+    if removed.returncode != 0:
+        return f"docker rm exited {removed.returncode}: {last_line(removed.stderr)}"
+    return None
 
 
 class Reason(StrEnum):
@@ -202,7 +288,7 @@ def canary_turn(stack: Stack, say: Verdicts, marker: str) -> bool:
         try:
             reason = canary_reason(one_canary(stack, marker))
         finally:
-            cleanup = remove_smoke_containers(stack, CANARY_SERVICE)
+            cleanup = remove_run_containers(stack, CANARY_SERVICE)
     except Exception as failure:
         say.refuse(C1, crashed_line(failure))
         return False

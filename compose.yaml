@@ -601,30 +601,6 @@ services:
         bind:
           create_host_path: false
 
-  # The operator's smoke of the agent service (agent-service/smoke.py; docs/agent-service.md,
-  # "Proofs"): the service image, one run, the answer printed. Run it as
-  # `compose run -T --rm agent-smoke [--cancel]` with the person's and the workload's token on
-  # stdin, one per line. No depends_on: a run never starts the service. On `agent-songmaker` alone and with
-  # no secret, port or published address: the tokens come in on stdin and never leave in output.
-  agent-smoke:
-    image: *agent-service-image
-    pull_policy: never
-    profiles: [apply]
-    logging: *one-off-logging
-    user: "65534:65534"
-    read_only: true
-    cap_drop: [ALL]
-    security_opt: ["no-new-privileges:true"]
-    networks: [agent-songmaker]
-    # -I ignores the PYTHON* environment, so -B is what keeps bytecode unwritten.
-    entrypoint:
-      - python
-      - -I
-      - -B
-      - /opt/smoke/smoke.py
-    volumes:
-      - ./agent-service/smoke.py:/opt/smoke/smoke.py:ro
-
   # The canary of the direct route (agent-service/api_canary.py, run by live_canary.py; docs/
   # agent-service.md, "Proofs"): one completion through the front, as an app posts it, with hopin's
   # key, the second reader of that key file beside litellm-keys; only verdict lines out. Run as

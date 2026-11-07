@@ -627,7 +627,6 @@ def test_the_census_targets_are_the_containers_of_the_direct_route_without_the_a
     route = {retention.FRONT, retention.GATEWAY, retention.LITELLM, retention.DATABASE}
 
     assert set(retention.ROUTE_SERVICES) == route
-    assert retention.AGENT_SERVICE not in retention.ROUTE_SERVICES
 
 
 def test_the_route_target_of_the_database_carries_the_login_compose_resolves(retention) -> None:

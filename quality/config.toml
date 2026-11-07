@@ -84,21 +84,6 @@ rule = "test-layout"
 reason = "it tests agent-service/live_canary.py, outside src/hal, which no module of src/hal mirrors"
 
 [[layout.allow]]
-path = "tests/test_agent_service_live_signer.py"
-rule = "test-layout"
-reason = "it tests agent-service/live_signer.py, outside src/hal, which no module of src/hal mirrors"
-
-[[layout.allow]]
-path = "tests/test_agent_service_live_smoke.py"
-rule = "test-layout"
-reason = "it tests agent-service/live_smoke.py, outside src/hal, which no module of src/hal mirrors"
-
-[[layout.allow]]
-path = "tests/test_agent_service_mcp_signer.py"
-rule = "test-layout"
-reason = "it tests agent-service/mcp_signer.py, outside src/hal, which no module of src/hal mirrors"
-
-[[layout.allow]]
 path = "tests/test_agent_service_retention_census.py"
 rule = "test-layout"
 reason = "it tests the agent service's retention census and LiteLLM's config, outside src/hal, which no module of src/hal mirrors"
@@ -114,11 +99,6 @@ rule = "test-layout"
 reason = "it tests the signing key that agent-service/setup makes, outside src/hal, which no module of src/hal mirrors"
 
 [[layout.allow]]
-path = "tests/test_agent_service_smoke.py"
-rule = "test-layout"
-reason = "it tests agent-service/smoke.py and the agent-smoke service of compose.yaml, outside src/hal, which no module of src/hal mirrors"
-
-[[layout.allow]]
 path = "tests/test_agent_service_tree_census.py"
 rule = "test-layout"
 reason = "it tests the in-container retention census, outside src/hal, which no module of src/hal mirrors"
@@ -127,11 +107,6 @@ reason = "it tests the in-container retention census, outside src/hal, which no 
 path = "tests/test_agent_service_unit.py"
 rule = "test-layout"
 reason = "it tests the agent-service service of compose.yaml and its service.toml, outside src/hal, which no module of src/hal mirrors"
-
-[[layout.allow]]
-path = "tests/test_device_sign_in.py"
-rule = "test-layout"
-reason = "it tests agent-service/device_sign_in.py, outside src/hal, which no module of src/hal mirrors"
 
 [[layout.allow]]
 path = "tests/test_keycloak_agents_client.py"
