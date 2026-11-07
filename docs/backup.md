@@ -508,7 +508,7 @@ refuses while the killed run's loader still uses the volume, then loads.
 At its next start `litellm-db` is empty and LiteLLM migrates it. The key step of `hal apply` then
 makes the person budget and each app's key anew from the key files (when it runs:
 [agent-service.md](agent-service.md), „The API route“). Every budget restarts at zero, and the
-daily rows are gone. `hal restore litellm --live` loads the last
+daily rows are gone. `~/.secrets` is in no backup. `hal restore litellm --live` loads the last
 backup into the live database and gives the month's spend back („Restore LiteLLM“ above). The key
 files must be the ones that made the hashes.
 

@@ -524,7 +524,7 @@ Today `hal restore` cannot restore on a clean machine: its settings fix the repo
 
 **The proof: a clean-machine drill.**
 - A throwaway machine (a VM or a spare disk) with no `~/.secrets` and no `~/backups`.
-- Only the USB disk and the typed password.
+- Only the USB disk, the typed password and, for step 4, the age key from the password manager with platform-secrets.
 - It runs steps 4, 6, 8, 9 and 10, and **never** step 11.
 - It is done when the restore test passes there and an admin login works on its loopback. It checks data, not GPU jobs.
 - D3 counts as done only after the first drill passes. The drill repeats after every change to the backup layout, and at least every 6 months. The LOOK page shows the last drill date.
