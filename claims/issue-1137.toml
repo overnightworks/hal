@@ -1,7 +1,0 @@
-claim_id = "54eb0097a0e945d09d5a4060c5821757"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "c38e43bbda310505ecc4b73e25029d82a6841598"
-branch = "claude/issue-1137-keycloak-privacy-token-sentence"
-scope = ["legal/sections/keycloak/datenschutz.html"]
-opened_commit = "54a503ada5327035f05f1b4318fc7e646ba79cee"
