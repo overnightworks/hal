@@ -1,0 +1,7 @@
+claim_id = "d0569091644742c9811f4ae4d028b579"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "6ffa64e0071a740d3dead53caea25b57f4e15fb7"
+branch = "claude/issue-1157-speech-hearing-a9"
+scope = ["probe/speech/admission_cells.py"]
+opened_commit = "3a1c59a6ae35ca5f0a8a793cf3b8a3fd6af407a3"
