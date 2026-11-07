@@ -1,7 +1,0 @@
-claim_id = "32516a663d0f471295c220c0261706ba"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "7b35daec23ff675af5781092fcee8776ae53045f"
-branch = "claude/issue-1159-agent-doc-pin"
-scope = ["docs/agent-service.md"]
-opened_commit = "5bba48055541d333789ad038890ffb98e5a25ef3"
