@@ -5,7 +5,6 @@ import fcntl
 import io
 import json
 import os
-import shutil
 import stat
 import sys
 from collections.abc import Callable, Iterator
@@ -334,14 +333,12 @@ APP_EXITED = STEP_CA_ON | {"traefik-mcp": "exited"}
 def agent_service_unit(repository, scripted, tmp_path) -> set[str]:
     """The repository's `agent-service` unit, switched on, and compose.yaml, the other units off;
     its services, their secrets resolved as `docker compose config` spells them, each file written.
-    The shipped unit is off; switched on here, it carries the unit's setup and built image, with
-    `agent-egress` moved into its profile as the pulled sibling and the follower beside the built
-    service."""
+    The shipped unit is off; switched on here, it carries the unit's setup, with
+    `agent-egress` moved into its profile as the pulled sibling and the follower beside it."""
     real = yaml.safe_load((REPOSITORY / "fleet.yaml").read_text())["services"]["agent-service"]
     switched_on = real | {"run": real["run"] | {"enabled": True}}
     fleet = {"cloudflare": {"zone": ZONE}, "services": {"agent-service": switched_on}}
     write_fleet(repository, yaml.safe_dump(fleet))
-    shutil.copytree(REPOSITORY / "agent-service" / "image", repository / "agent-service" / "image")
     compose_file = yaml.safe_load((REPOSITORY / "compose.yaml").read_text())
     sibling = compose_file["services"]["agent-egress"] | {"profiles": ["agent-service"]}
     profile = {

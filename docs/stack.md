@@ -118,8 +118,7 @@ keeps the grammar (its section below). The deviations are:
 `fleet.yaml` ist der Katalog. Ein Eintrag mit `run` und ohne `repo` ist eine Einheit dieses
 Repositorys; sein Schluessel ist der Name des Compose-Profils (`docs/naming.md`). `run.enabled: false`
 schaltet das Profil ab; `run.setup` nennt optional den Befehl, der den Schluessel macht (`step-ca/init`,
-`keycloak/go-live`); `run.build` nennt das Rezeptverzeichnis des einen gebauten Images der Einheit
-(`agent-service/image`), das `hal apply` in einem Recreate tauscht. Wer die Aenderung in welchem Zustand darf, steht in der Zustandstabelle von
+`keycloak/go-live`). Wer die Aenderung in welchem Zustand darf, steht in der Zustandstabelle von
 [architecture.md](architecture.md) (Abschnitt 8) und wird hier nicht wiederholt.
 
 **Zwei Teile.** Das blosse `hal apply` fuehrt den lokalen Teil (`hal apply --local`) aus und, nur
@@ -247,10 +246,7 @@ Reihenfolge, und wie der Eintrag in `applied.json` gefuehrt wird:
 
 **Images.** Laeuft ein Dienst einer Einheit, die nicht ausgeschaltet wird, auf einem anderen Image, als
 `compose.yaml` jetzt nennt, nennt der Plan es mit `!` und tauscht es nicht; der Lauf bleibt
-`nothing to change`. Das gilt fuer step-ca, legal und `litellm-front`. Zwei Ausnahmen:
-- Der gebaute Dienst einer Einheit mit `run.build` (`agent-service`): `hal apply` erzeugt ihn nach dem
-  Ja des Plans neu, wenn sein Image, seine Definition oder sein Tag-Inhalt abweicht; laufende Anfragen
-  enden dabei.
+`nothing to change`. Das gilt fuer step-ca, legal und `litellm-front`. Eine Ausnahme:
 - Keycloak und LiteLLM, jeweils der Dienst und seine Datenbank: der Plan nennt
   `<dienst> recreate image X → Y · snapshot first`. Nach dem Ja nimmt `hal apply` vor dem ersten
   Neuerstellen der Einheit `hal backup <einheit> --pre-apply` und beweist den Snapshot mit

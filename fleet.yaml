@@ -43,7 +43,6 @@ services:
     run:
       enabled: false
       setup: agent-service/setup
-      build: agent-service/image
   litellm:
     run:
       enabled: true
