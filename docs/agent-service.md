@@ -1,54 +1,10 @@
-# The agent service
+# The AI route
 
-Reference for the operator and for an engineer changing the agent service: what a turn leaves behind, an app's side, the API route through LiteLLM and the probes. The code is
+Reference for the operator and for an engineer changing the AI route: what a call leaves behind, an app's side, the API route through LiteLLM and the probes. The code is
 the truth: the LiteLLM route, `agent-service/live_canary.py` and the probes under `probe/agent-service/`. The egress gateway of LiteLLM is in
 [internal-ca.md](internal-ca.md); the platform picture is [architecture.md](architecture.md).
 
-## The service
-
-`agent-service` (profile `agent-service`) runs from `agent-service/service.toml`: one
-container, one worker, no published port. It runs as `1000:1000` with `init`, a read-only root, no
-capability, `no-new-privileges`, no core dump and `restart: unless-stopped`; `/tmp` (its `HOME`) and
-the working root `/run/agent-service/cli` are size-bounded tmpfs mounts owned by 1000 with mode 0700
-(the service refuses to start on a working root that is not owned by its user with exactly that
-mode), all `nosuid,nodev,noexec`. The unit `agent-service` of `fleet.yaml` is switched off
-(`enabled: false`): `hal apply` stops and removes its container, and a switched-on unit starts only the service. A missing login directory stops the start
-(`create_host_path: false`), so apply reports the unit partial and never on. A missing CA root file is
-asked of its unit's setup first (`step-ca/init`); a file still missing after the
-setup, such as the root while `step-ca` is off or stopped, refuses `hal apply` before its `yes`,
-naming the path and `next: hal setup`, with nothing switched.
-
-It signs for songmaker's origin, `https://songmaker.mcp.internal`, the name `traefik-mcp` answers to on `mcp`, which it joins
-beside the per-app agent networks (never `mcp-songmaker`). The key reaches it as the compose secret
-`agent_service_signing_key`, the one file `~/.secrets/agent-service/signing/private.pem` and never its folder, read through
-`[signing] key_file`; the step-ca root reaches it as `step_ca_root_certificate` through `[mcp] ca_file`, because the service
-trusts that file alone and ignores `SSL_CERT_FILE`. A file secret binds the inode, so a new key reaches the service only
-through a recreate. The service alone decides an agent's model: `[defaults] model` (`anthropic/opus`), which
-an app or an agent entry of `service.toml` may override, and the request names none (a body with `model`
-answers 422). `run_started` names the model and the route the service chose.
-
-The service admits no background run, and which identity runs an app's background agents is agent-runtime#479's question.
-
-A change to `compose.yaml` or the image reaches the running service through `hal apply`: its plan
-names the recreate, which ends every run in flight, and the one `yes` covers it. A change to
-`service.toml` alone is not seen by apply yet (the file is bound from the checkout), so it still
-needs the hand recreate
-`docker compose --profile agent-service up -d --force-recreate agent-service`, in the live checkout
-after `hal update`.
-
-## What a turn leaves behind
-
-The service has no writable persistent mount but the Codex login directory (a renewal rewrites `auth.json` there, nothing a turn leaves). The CLI's per-run home and work directories and `/tmp`
-are tmpfs ([The service](#the-service)), which the kernel may page to swap, and a restart or recreate
-drops them. The only host binds are `service.toml` and the two login directories, read-only except the Codex
-login directory, which the service renews, and the two read-only file secrets ([The service](#the-service)); the Claude login reaches the CLI only through its environment. The service sets
-no `logging` override, so its logs follow the Docker daemon's settings; their destination and
-retention are set there, not in this file (log retention: edge#167,
-<https://github.com/overnightworks/edge/issues/167>). What the service itself keeps of a run is
-stated in agent-runtime's section
-[What a run keeps](https://github.com/overnightworks/agent-runtime/blob/main/docs/wire.md#what-a-run-keeps).
-The content of
-a turn leaves this PC for Anthropic, which generates the answer.
+## What a call leaves behind
 
 **What the route logs depends on `[api] log_depth`** (`~/.config/hal/config.toml`, home.md
 „Konfiguration“). At the default `metadata` a call leaves these records, none with its content except a provider's
@@ -103,33 +59,26 @@ in no sink at all; none reaches the provider. The daily label rows are in the
 tables `hal expire` prunes, so the 90 days above cover them; the spend log rows go with their 30 days. `logging.lastResort` and
 `warnings.warn` reach LiteLLM's standard error too, and whether a real path sends request content
 through them is not measured. Memory holds the content
-while a run is in flight, and tmpfs may be paged to swap. The Docker log driver's retention is the daemon's
+while a call is in flight. The Docker log driver's retention is the daemon's
 (edge#167); the census proves that no content reaches the logs, a provider's error text excepted, not how long they live. Any other
 path is not covered by this.
 
-**The metadata lines are apart from the content.** The service and the front write an access line
+**The metadata lines are apart from the content.** The front writes an access line
 per request, LiteLLM an error line per refusal by an unknown key or failure at a provider (none for a plain bearer), and the gateway keeps no access log:
 its TCP routers have none, and whether Traefik can log a TCP connection there is not measured.
 Their retention is the Docker daemon's (edge#167). How long Anthropic keeps the content is stated in the
 privacy section, which owns it.
 
-**Whose account.** Only the operator and his own test accounts are members of `/services/agent-service/subscription`, so his
-Claude subscription serves only his own use. Every other person reaches the provider only through the
-API route, under Anthropic's commercial API terms: an app's own key at LiteLLM, not the service
-(see „The API route“). No app takes that route yet. The privacy section `agent-dienst` in
+**Whose account.** Every person reaches the provider only through the API route, under Anthropic's commercial API terms: an app's own key at LiteLLM (see „The API route“). No app takes that route yet. The privacy section `agent-dienst` in
 `legal/sections/litellm/datenschutz.html` describes only that route as an app takes it, through the
 front, LiteLLM with its database and the gateway to Anthropic: what a request carries, what LiteLLM keeps
 per app and per person, when that is deleted, how long the backup keeps it and the legal basis of the budget per person (Art. 6 Abs. 1 lit. f DSGVO, with the right to object in the general part). The Keycloak section states the same backup bound for a snapshot before an update. hal writes it itself
-(operator, 03.11.2026, [#110](https://github.com/overnightworks/hal/issues/110)); by the operator's ruling
-of 28.10.2026 ([#299 comment](https://github.com/overnightworks/hal/issues/299#issuecomment-6464712955))
-it does not speak of the subscription, which no user can ever use, and no
-text a person reads speaks of the subscription. Every other app or service links
-`/datenschutz#agent-dienst` and says in its own text only what it sends. Who may use the subscription is decided by the service's subscription group, and who may
-use the API route by LiteLLM's keys and budgets, the same in every app; an app adds no AI group of its own. Membership in the app (`/apps/<name>`) stays separate access to the app.
+(operator, 03.11.2026, [#110](https://github.com/overnightworks/hal/issues/110)). Every other app or service links
+`/datenschutz#agent-dienst` and says in its own text only what it sends. Who may use the API route is decided by LiteLLM's keys and budgets, the same in every app; an app adds no AI group of its own. Membership in the app (`/apps/<name>`) stays separate access to the app.
 
 ## An app's side
 
-An app reaches the service by joining its own agent network, `hal_agent_<app>` (`hal_agent_songmaker`,
+An app reaches `litellm-front` by joining its own agent network, `hal_agent_<app>` (`hal_agent_songmaker`,
 `hal_agent_presentator`, `hal_agent_hopin`), as an external network. The names are fixed, so the project's rename does not
 move them, and no app sees another's network:
 
@@ -141,10 +90,7 @@ networks:
   agent: {external: true, name: hal_agent_songmaker}
 ```
 
-and calls `http://agent-service:8080` (the service's own default port; the smoke uses it). No CA mount is needed: the service is plain http on an isolated internal network, and no
-host process can reach it, because the network has no host address and publishes no port.
-
-An app that calls LiteLLM directly holds only its own key, the file `~/.secrets/litellm/apps/<app>` (`songmaker`,
+An app holds only its own key, the file `~/.secrets/litellm/apps/<app>` (`songmaker`,
 `hopin`, `presentator`). `hal setup` creates a missing one with the prefix `sk-` that LiteLLM requires of a custom
 key, mode 0644 in a 0700 folder so the app's container reads it as its own user. `hal apply`'s key step reads it to
 make the app's key in LiteLLM (see "The API route"); hopin's file is also read by `agent-canary`, the live canary's one-off. On the same agent network the app posts to
@@ -295,9 +241,7 @@ and the admin budget with its customer rows (the key step below).
   bound. The front is a member of every app's agent network, so an app could give itself the alias
   `litellm` there; the front therefore finds LiteLLM through
   `extra_hosts` at its fixed address on `litellm-backend` (`compose.yaml` pins the subnet, and its
-  `ip_range` keeps that address from any other container), never by Docker's DNS. The service shares
-  those app networks with the front but sends it nothing, and has no address on `litellm-backend` or
-  `litellm-egress`. LiteLLM reaches
+  `ip_range` keeps that address from any other container), never by Docker's DNS. LiteLLM reaches
   only the front, its database and, through the gateway's `litellm` entrypoint, the providers'
   names.
 - **The bound.** Each app key's `max_parallel_requests` bounds its requests in flight; LiteLLM

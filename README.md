@@ -85,7 +85,7 @@ container environment values; review evidence must not dump those payloads.
 `compose.yaml`, `traefik.yml` and `fleet.yaml` (the service catalog: which units run, and the
 OpenTofu inputs) hold the stack; `dynamic/` holds routes for host processes and the emergency
 barriers `hal stop` writes. `keycloak/` is the realms as code, `step-ca/` and `traefik-mcp.yml` the
-internal CA and the MCP gateway, `agent-service/` the agent service, LiteLLM and its egress gateway,
+internal CA and the MCP gateway, `agent-service/` LiteLLM, its front and its egress gateway and the live canaries,
 `legal/` the legal unit's frame and sections (imprint, privacy notice, terms; `hal apply` builds the pages into `legal/built/`), stylesheet and nginx config, `tunnel/` the cloudflared unit and its polkit rule, `backup/` the declared backups (their timers are declared in `src/hal/workstation/jobs.py`). The commands are Python under `src/` (`edge`, `hal`;
 a bare `hal check` is the daily check (it also mails and pops up what is new), `hal check exposure` reports what reaches beyond loopback and `hal check hosts` compares Cloudflare with `fleet.yaml`, `hal backup` and `hal restore` run the backup runner; `bin/hal` is the launcher), the OpenTofu
 root is `external/`, the probes that prove each service on a throwaway stack are under `probe/`, and
@@ -102,7 +102,7 @@ root is `external/`, the probes that prove each service on a throwaway stack are
 | [docs/backup.md](docs/backup.md) | `hal check`, `hal backup`, `hal restore`, what a backup holds, restore |
 | [docs/people.md](docs/people.md) | what an app offers so one person can be exported and erased |
 | [docs/internal-ca.md](docs/internal-ca.md) | `step-ca`, `traefik-mcp`, `agent-egress` |
-| [docs/agent-service.md](docs/agent-service.md) | the agent service: image, login, an app's side, proofs |
+| [docs/agent-service.md](docs/agent-service.md) | the AI route through LiteLLM: what a call leaves behind, an app's side, proofs |
 | [docs/home.md](docs/home.md) | `hal setup` and the workstation tools (German) |
 | [docs/naming.md](docs/naming.md) | how every overnightworks repo, tool, package and unit is named |
 
