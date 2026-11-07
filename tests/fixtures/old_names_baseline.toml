@@ -1,6 +1,6 @@
 [edge-verb]
 "docs/architecture.md" = 9
-"docs/design/hal-output.html" = 18
+"docs/design/hal-output.html" = 16
 "src/hal/stack/barrier.py" = 2
 "src/hal/stack/environment.py" = 1
 "tests/test_stack_barrier.py" = 2
