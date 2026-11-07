@@ -59,7 +59,7 @@ flowchart TB
             KC["Keycloak + its database<br/>auth.hallucinai.de: the login page"]
             CA["step-ca :9000, internal network mcp-ca<br/>internal CA for the MCP origins, *.mcp.internal"]
             TMC["traefik-mcp :443, no host port<br/>the gateway to the MCP origins and to Keycloak's key set, certificates from step-ca"]
-            MCPN["internal networks:<br/>mcp-ca (step-ca, traefik-mcp)<br/>mcp (traefik-mcp; isolated)<br/>mcp-backends (traefik-mcp, the MCP servers)<br/>mcp-songmaker (traefik-mcp, songmaker; isolated)<br/>keycloak-keys (Keycloak, traefik-mcp; isolated)<br/>hal_speech_issuer (traefik-mcp, the speech service; isolated)<br/>hal_speech_hopin, hal_speech_presentator (one app and the speech service; isolated)<br/>agent-songmaker, agent-presentator, agent-hopin (litellm-front, one app each; isolated)<br/>internet, a NAT bridge: agent-egress alone"]
+            MCPN["internal networks:<br/>mcp-ca (step-ca, traefik-mcp)<br/>mcp (traefik-mcp; isolated)<br/>mcp-backends (traefik-mcp, the MCP servers)<br/>mcp-songmaker (traefik-mcp, songmaker; isolated)<br/>keycloak-keys (Keycloak, traefik-mcp; isolated)<br/>hal_speech_issuer (traefik-mcp, the speech service; isolated)<br/>hal_speech_hopin, hal_speech_presentator (one app and the speech service; isolated)<br/>agent-songmaker, agent-presentator, agent-hopin (litellm-front, one app each, and hopin's network the live canary's one-off; isolated)<br/>internet, a NAT bridge: agent-egress alone"]
             BAK["hal backup<br/>restic weekly, restore test monthly<br/>second copy off this disk (D3)"]
             LOOK["Traffic-light page, Gatus<br/>is it OK now?"]
             MON["Prometheus, Grafana, Alertmanager<br/>why, since when? every service"]
@@ -841,7 +841,7 @@ The rules are labelled "§10 rule n", because [edge#50](https://github.com/overn
 - **Calls:** HTTP with typed JSON. Every request body carries the contract's version `v`; an unknown version answers 400 `unsupported_version`.
 - **Streams:** events from service to app are SSE; media are a chunked HTTP body of their media type; a WebSocket only where both sides stream at once (live audio).
 - **Identity:** the app's workload token, plus the person's token when a person acts, both Keycloak tokens whose audience is the service (§10 rule 3).
-- **Refusals:** an HTTP status and a JSON body with one code from the service's closed list. A refusal that means the same as one of agent-runtime's takes its name and status (`docs/wire.md`, "The run" of agent-runtime).
+- **Refusals:** an HTTP status and a JSON body with one code from the service's closed list.
 - **MCP** only where a model calls an app's tools, never for an app calling a service.
 - **One client library per service** owns its wire types; the service and the apps import them, and no app re-implements them.
 
