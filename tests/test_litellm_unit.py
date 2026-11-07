@@ -330,7 +330,7 @@ def test_each_text_name_carries_a_positive_whole_max_tokens(config):
 
 
 def test_litellm_retries_nothing_and_has_no_callback_or_cache(config):
-    assert config["router_settings"] == {"num_retries": 0}
+    assert config["router_settings"] == {"num_retries": 0, "disable_cooldowns": True}
     assert config["litellm_settings"].keys() - {"max_end_user_budget_id"} == {
         "turn_off_message_logging",
         "redact_messages_in_exceptions",
