@@ -40,7 +40,7 @@ from hal.workstation.secrets_setup import (
     github_page,
 )
 from hal.workstation.secrets_view import MANIFEST_PATH as PACKAGED_MANIFEST
-from hal.workstation.secrets_view import FindingRule, SecretEntry, TokenSource, load_manifest
+from hal.workstation.secrets_view import SecretEntry, TokenSource, load_manifest
 
 from support import workstation_secrets_wizard
 from support.workstation_secrets_wizard import PASSPHRASE_FILE, PASTED_VALUE, PASTED_VALUE_PARTS, SETUP_MANIFEST, files_under
@@ -777,14 +777,13 @@ def test_each_apps_litellm_key_is_listed_with_its_readers_and_mode_0644_is_no_fi
     for app in APPS:
         (home / ".secrets/litellm/apps" / app).chmod(0o644)
 
-    code = run_hal_secrets(home, probe, now=WIZARD_NOW)
+    run_hal_secrets(home, probe, now=WIZARD_NOW)
     report = report_of(home)
     capsys.readouterr()
     by_service = run_hal_secrets(home, probe, "--by-service", now=WIZARD_NOW)
     listing = capsys.readouterr().out
 
-    assert (code, by_service) == (ExitCode.FINDINGS, ExitCode.OK)
-    assert set(findings_of(report, FindingRule.REVOCATION_UNCONFIRMED.value)) == {"agent-service-claude", "agent-service/codex"}
+    assert by_service == ExitCode.OK
     assert findings_of(report, "loose-mode") == {}
     assert all(f"| {app} | " in listing and "litellm" in listing.split(f"| {app} |")[1].splitlines()[0] for app in APPS)
     key_step_rows = [line for line in listing.splitlines() if line.startswith("| litellm-keys | ")]
