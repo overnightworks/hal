@@ -66,7 +66,7 @@ off-site copy is a later slice (architecture.md, gap 19).
 - *Restore goes to a new folder.* `hal restore --target` refuses a directory that exists. The only form that changes a live database is `hal restore <app> --live`: it loads a DB-only app's snapshot into its live database while the app is switched off (below).
 - *0 rows is valid.* The restore test requires rows only where the record says `require_rows = true`.
 - *One retention.* Every app's snapshots follow the same policy, 4 weekly and 3 monthly, and pre-apply snapshots keep their own last 10, and each forget of an app drops those older than 90 days (below). There is no per-app retention of backup snapshots; privacy values are app-owned (architecture.md, section 2).
-- *Separate backups.* All secrets are backed up once as their own encrypted off-disk backup with its own password; the data backup has its own. Of the backup credentials only these two passwords sit in the password manager, and a restore after a disk loss brings the secrets back first, then the data. The secrets backup does not exist yet: `~/.secrets` is in no backup today (architecture.md, section 6).
+- *No secrets backup.* hal builds none: `~/.secrets` is in no backup. Deploy values survive a disk loss in the platform's repository platform-secrets, encrypted with SOPS and age, as each app moves there; the age key sits in the password manager. Personal tokens are issued again at their provider. The data backup has its own restic password and a second copy off this disk, and a restore after a disk loss brings the deploy values back from platform-secrets first, then the data (architecture.md, section 6).
 
 `backup/apps.toml` declares each app as a validated record (compose project, database service, dump kind,
 database user and name, the Postgres major, the audio volume with the table that names its files, and
@@ -233,8 +233,8 @@ presentator's copy is its SQLite database alone: its built decks (`builds`) and 
 sessions, their Keycloak `sub`s and the source secrets, which are encrypted with presentator's
 master key (the file
 `~/.secrets/presentator/secret-key`). The master key is not in the data backup, so a restored copy
-cannot read those secrets without it. Until the separate backups of secrets and data of #291 exist,
-the master key and the data backups sit on the same disk. The session ids (the signed session
+cannot read those secrets without it. The master key is the one secret that cannot be issued again:
+a copy of it sits in the password manager until presentator's values move to platform-secrets. The session ids (the signed session
 cookies carry them) and the Keycloak refresh and ID tokens are stored as plain text in the copy. The
 copy alone exposes the claims of the ID tokens and whatever an ID token allows as a logout hint at
 Keycloak. A takeover of a live session needs the master key as well, because presentator signs the
@@ -508,7 +508,7 @@ refuses while the killed run's loader still uses the volume, then loads.
 At its next start `litellm-db` is empty and LiteLLM migrates it. The key step of `hal apply` then
 makes the person budget and each app's key anew from the key files (when it runs:
 [agent-service.md](agent-service.md), „The API route“). Every budget restarts at zero, and the
-daily rows are gone. `~/.secrets` is in no backup. `hal restore litellm --live` loads the last
+daily rows are gone. `hal restore litellm --live` loads the last
 backup into the live database and gives the month's spend back („Restore LiteLLM“ above). The key
 files must be the ones that made the hashes.
 
