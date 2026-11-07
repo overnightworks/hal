@@ -260,6 +260,8 @@ services:
         target: HOPIN_CLIENT_SECRET
       - source: keycloak_client_presentator
         target: PRESENTATOR_CLIENT_SECRET
+      - source: keycloak_client_skat
+        target: SKAT_CLIENT_SECRET
     volumes:
       - ./keycloak/entrypoint.sh:/opt/hal/entrypoint.sh:ro
       - ./keycloak:/config:ro
@@ -597,6 +599,8 @@ secrets:
     file: ${HOME}/.secrets/keycloak/clients/hopin
   keycloak_client_presentator:
     file: ${HOME}/.secrets/keycloak/clients/presentator
+  keycloak_client_skat:
+    file: ${HOME}/.secrets/keycloak/clients/skat
   # step-ca/init creates it; docs/internal-ca.md.
   step_ca_password:
     file: ${HOME}/.secrets/step-ca/password

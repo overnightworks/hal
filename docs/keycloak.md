@@ -59,8 +59,8 @@ by keycloak-config-cli. People and their group memberships are managed only in
 the admin console; no file lists a person. An invited person gets the username
 they ask for, a pseudonym included, and nothing checks the names they enter at
 first sign-in, because the privacy notice promises pseudonymous use (§ 19 Abs. 2
-TDDDG; the operator's ruling of 22.10.2026, edge#312). The songmaker, hopin and
-presentator clients are in `realm.yaml`, each secret the file
+TDDDG; the operator's ruling of 22.10.2026, edge#312). The songmaker, hopin,
+presentator and skat clients are in `realm.yaml`, each secret the file
 `~/.secrets/keycloak/clients/<clientId>` (`keycloak/go-live` makes it;
 presentator's one client serves `presentator` and `presentator-talk`); the other
 app clients arrive at K13/K14.
@@ -107,7 +107,7 @@ The answers belong to this Keycloak version: the probe holds only that each ran,
 
 The cell N1 is not version-bound: webauth's group check (`current_groups`) refuses a refreshed ID token with a `nonce` key, so each app client's refreshed ID tokens must have none, and a Keycloak upgrade that adds the key fails the probe.
 
-Every login app follows the same shape. It gets its own client in `realm.yaml`, with its secret in its own file under `~/.secrets/keycloak/clients/`. Its `backchannel.logout.url` is `http://<app>.hallucinai.de:<port>/auth/backchannel-logout`, with `backchannel.logout.session.required: "false"`; the host is an alias the app's web service gives itself. The call travels over the app's own internal network `hal_backchannel_<app>`, which only `keycloak` joins on edge's side and the app joins as an external network, so no app sees another's. The public host lists the path in `deny_public` (`fleet.yaml`). An app that holds a refresh token per session names `use.refresh.tokens: "true"` (hopin); one without the line keeps Keycloak's default.
+Every login app follows the same shape. It gets its own client in `realm.yaml`, with its secret in its own file under `~/.secrets/keycloak/clients/`. Its `backchannel.logout.url` is `http://<app>.hallucinai.de:<port>/auth/backchannel-logout`, with `backchannel.logout.session.required: "false"`; the host is an alias the app's web service gives itself. The call travels over the app's own internal network `hal_backchannel_<app>`, which only `keycloak` joins on edge's side and the app joins as an external network, so no app sees another's. The public host lists the path in `deny_public` (`fleet.yaml`). An app that holds a refresh token per session names `use.refresh.tokens: "true"` (hopin); one without the line keeps Keycloak's default. Skat is the exception until Keycloak moves onto the platform: Skat runs there and Keycloak here reaches an app only on a Docker network, so its client has no `backchannel.logout.url`, and a sign-out in Keycloak ends a Skat session only at its lifetime.
 
 A sign-out in Keycloak ends the songmaker session: Keycloak calls songmaker's back-channel logout
 (`http://songmaker.hallucinai.de:8080/auth/backchannel-logout`; the name is an alias songmaker

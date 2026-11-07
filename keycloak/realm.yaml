@@ -8,7 +8,7 @@
 # a flow binding override) is reset on the next apply that runs the realm step. The blockquote in docs/keycloak.md after "Theme and
 # language" states that class with its measured examples; change a declared object here.
 # Deleting anything is done in the admin console, after a backup.
-# The songmaker, hopin and presentator clients are here before the go-live; the other app clients
+# The songmaker, hopin, presentator and skat clients are here before the go-live; the other app clients
 # arrive with each app's cutover, together with its live redirect and logout URLs. The public client
 # `agents` is the one sign-in of a person's own AI agents (docs/keycloak.md, "The agents client").
 realm: hallucinai
@@ -56,6 +56,7 @@ groups:
           # hopin's admin role, by webauth's group rule (/apps/<app>/admin means admin).
           - name: admin
           - name: mcp
+      - name: skat
   - name: services
     subGroups:
       - name: agent-service
@@ -296,6 +297,35 @@ clients:
       - groups
     optionalClientScopes:
       - speech-service-audience
+  # skat signs people in like hopin and holds a refresh token per session the same way. It has no
+  # back-channel logout: Skat runs on the platform, and this Keycloak reaches an app only on a
+  # Docker network, so a sign-out in Keycloak ends a Skat session only at its lifetime. The
+  # address comes when Keycloak moves onto the platform. Skat calls neither the speech service nor
+  # an AI service, so it has no service account and no optional scope.
+  - clientId: skat
+    name: skat
+    enabled: true
+    publicClient: false
+    secret: $(env:SKAT_CLIENT_SECRET)
+    standardFlowEnabled: true
+    implicitFlowEnabled: false
+    directAccessGrantsEnabled: false
+    serviceAccountsEnabled: false
+    frontchannelLogout: false
+    baseUrl: "https://skat.hallucinai.de/"
+    alwaysDisplayInConsole: false
+    redirectUris:
+      - "https://skat.hallucinai.de/auth/callback"
+    attributes:
+      post.logout.redirect.uris: "https://skat.hallucinai.de/login"
+      pkce.code.challenge.method: "S256"
+      use.refresh.tokens: "true"
+    defaultClientScopes:
+      - basic
+      - profile
+      - groups
+      - roles
+    optionalClientScopes: []
   # The public sign-in of a person's own AI agents: the authorization code with PKCE at one fixed
   # loopback address, no secret, no refresh token (so none is offline either), and the realm's
   # lifespan. A token carries the audience of an app's /mcp only for the optional scope mcp-<app>;
