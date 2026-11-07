@@ -792,20 +792,6 @@ Type <span class="w">yes</span> to set up 1 open row: yes
     paste the token, then an empty line (hidden, empty skips):
 <span class="g">  ✓</span> turn/key        stored         <span class="d">not verified · ~/.secrets/turn/key (644)</span></pre>
       </figure>
-      <figure>
-        <figcaption><span class="tag new">neu #666</span> ein Login, den eine CLI selbst anlegt (die Anmeldezeilen druckt die CLI)</figcaption>
-<pre class="term"><span class="c">  ›</span> agent-service/codex  new login  <span class="d">your Codex account, a login of its own</span>
-    why: the agent service runs Codex for the apps
-    Enter opens the Codex sign-in in your browser:
-<span class="d">    opened auth.openai.com/...</span>
-<span class="g">  ✓</span> agent-service/codex  signed in  <span class="d">~/.secrets/agent-service/codex/auth.json (600) · never shown</span></pre>
-      </figure>
-      <figure>
-        <figcaption><span class="tag fail">neu #666, kaputt</span> die CLI fehlt, die Anmeldung endet mit einem Fehler, oder sie lässt keine Login-Datei zurück</figcaption>
-<pre class="term"><span class="r">  ✗</span> agent-service/codex  not signed in  <span class="d">codex is not installed · install it, then rerun</span>
-<span class="r">  ✗</span> agent-service/codex  not signed in  <span class="d">codex login ended with exit 1 · nothing stored</span>
-<span class="r">  ✗</span> agent-service/codex  not signed in  <span class="d">codex login ended without a login file · nothing stored</span></pre>
-      </figure>
     </div>
     <div class="stack">
       <figure>
@@ -922,20 +908,10 @@ Type <span class="w">yes</span> to set up 1 open row: yes
     <h2 id="s-secrets"><span class="tag new">neu für S9e</span> <code>hal secrets</code>: nur Funde als Zeilen, <code>-v</code> zeigt jeden Eintrag</h2>
     <p class="sub">Gewählt 30.10.2026 (Option A): wie <code>hal setup</code> nur Probleme als Zeilen, Funde je Ordner gebündelt, eine Zeile für alles Gesunde; <code>-v</code> zeigt jeden Eintrag als ausgerichtete Tabelle. Der Markdown-Bericht bleibt die Datei, die <code>hal check</code> und seine Mail lesen. Namen aus deinem Stand, Zahlen erfunden.</p>
   </div>
-  <p class="s2note"><b>An den Zeilen-Renderer angepasst:</b> Betreff und Ereignis sind je 14 Zeichen breit wie in jeder Zeile; ein längerer Name schiebt seine Zeile. Das Urteil hat die Form von Bild A und zählt jeden Fund wie der Bericht und <code>hal check</code> (<code>88 findings</code>, nicht die zwei Zeilen); der Hinweis steht hinten (<code>· hal secrets -v lists every entry</code>). Die Fakten sind allgemein statt von Hand: <code>86 paths · not in the manifest</code> statt „86 files of a Grok login hal does not know yet“, der Befund im Wortlaut des Berichts (<code>has mode 755; at most 700 allowed</code>).</p>
+  <p class="s2note"><b>An den Zeilen-Renderer angepasst:</b> Betreff und Ereignis sind je 14 Zeichen breit wie in jeder Zeile; ein längerer Name schiebt seine Zeile. Das Urteil hat die Form von Bild A und zählt jeden Fund wie der Bericht und <code>hal check</code>; der Hinweis steht hinten (<code>· hal secrets -v lists every entry</code>). Die Fakten sind allgemein statt von Hand: der Befund steht im Wortlaut des Berichts (<code>has mode 775; at most 700 allowed</code>).</p>
   <p class="s2note"><b>Bündeln:</b> ab 6 Fund-Zeilen werden Datei- und Ordnerfunde mit gleicher Regel, gleichem Ordner und gleichem Befund eine Zeile. Der Ordner ist der nächste, in dem das Manifest eine Datei nennt, ohne <code>~/.secrets/</code> davor; bis drei Pfade stehen mit Namen da, sonst ihre Zahl. Fehlende, ungeprüfte und zurückgezogene Einträge bleiben je eine Zeile. Unter 6 steht jeder Fund für sich, mit seinem Schritt gedimmt darunter.</p>
   <div class="pair">
     <div class="stack">
-      <figure>
-        <figcaption><span class="tag new">neu</span> viele Funde in einem Login-Ordner: gebündelt</figcaption>
-<pre class="term"><span class="p">$</span> <span class="u">hal secrets</span>
-<span class="y">  !</span> agent-service/grok  unknown        <span class="d">86 paths · not in the manifest</span>
-<span class="y">  !</span> agent-service/grok  too open       <span class="d">.cache, .cache/fontconfig · has mode 755; at most 700 allowed</span>
-<span class="g">  ✓</span> 42 entries      present        <span class="d">gh checked: valid; the rest not checked</span>
-<span class="d">  · 2 retired       revoked        github/token, github/overnightworks-read-token</span>
-<span class="y">! 88 findings</span><span class="d"> · hal secrets -v lists every entry</span></pre>
-      <p class="was">heute: 88 Zeilen <code>| unknown-file | ~/.secrets/agent-service/grok/… |</code> unter einer siebenspaltigen Tabelle mit jedem Eintrag</p>
-      </figure>
       <figure>
         <figcaption><span class="tag new">neu</span> alles gut</figcaption>
 <pre class="term"><span class="p">$</span> <span class="u">hal secrets</span>
@@ -980,23 +956,20 @@ github/token            token         retired             revocation confirmed 1
       <figure>
         <figcaption><span class="tag new">neu</span> Pipe, <code>NO_COLOR</code>, <code>TERM=dumb</code>: dieselben Wörter ohne Farbe</figcaption>
 <pre class="term"><span class="p">$</span> <span class="u">NO_COLOR=1 hal secrets | cat</span>
-  ! agent-service/grok  unknown        86 paths · not in the manifest
-  ! agent-service/grok  too open       .cache, .cache/fontconfig · has mode 755; at most 700 allowed
   ✓ 42 entries      present        gh checked: valid; the rest not checked
   · 2 retired       revoked        github/token, github/overnightworks-read-token
-! 88 findings · hal secrets -v lists every entry</pre>
+✓ no findings · 44 entries · hal secrets -v lists every entry</pre>
       </figure>
       <figure>
         <figcaption><span class="tag new">neu, Vorschlag</span> <code>--by-service</code> mit derselben Tabelle</figcaption>
 <pre class="term"><span class="p">$</span> <span class="u">hal secrets --by-service</span>
 <span class="hd">service        reads</span>
-agent-service  agent-service/codex, agent-service/grok, agent-service/signing-key
 cloudflared    cloudflared
 hal apply      cloudflare/fleet-read, opentofu/state-passphrase
 <span class="n">… one line per service</span>
 <span class="hd">copy                source</span>
 ssh/id_ed25519.ppk  ssh/id_ed25519
-<span class="d">· declared dependencies</span><span class="d"> · 14 services · not proven complete</span></pre>
+<span class="d">· declared dependencies</span><span class="d"> · 13 services · not proven complete</span></pre>
       </figure>
     </div>
   </div>
@@ -1012,7 +985,7 @@ ssh/id_ed25519.ppk  ssh/id_ed25519
 <section aria-labelledby="s-apply">
   <div class="head">
     <h2 id="s-apply"><code>hal apply</code>: Plan, yes, Ergebnis in einer Reihenfolge</h2>
-    <p class="sub">Dein Lauf von heute: neue Rechtsseiten, vier Neuerstellungen, agent-service bleibt nicht oben, Keycloak antwortet nicht, hopin geht auf die neue Version.</p>
+    <p class="sub">Dein Lauf von heute: neue Rechtsseiten, vier Neuerstellungen, Keycloak antwortet nicht, hopin geht auf die neue Version.</p>
   </div>
   <div class="pair">
     <figure>
@@ -1025,8 +998,6 @@ ssh/id_ed25519.ppk  ssh/id_ed25519
   agent-egress: recreate (its compose definition changed)
   traefik-mcp: recreate (its compose definition changed)
   legal: recreate legal (its compose definition changed)
-  agent-service: on (services agent-service)
-  agent-service: agent-service runs edge-agent-service:0.7.0-2.1.302, compose.yaml names edge-agent-service:0.10.0-2.1.302; edge apply never swaps the image of a running unit, so it keeps running; the upgrade is yours (block 6; Keycloak with a dump first, K11b)
   keycloak: keycloak runs quay.io/keycloak/keycloak:26.8.1@sha256:79c6…, compose.yaml names quay.io/keycloak/keycloak:26.8.1@sha256:a78d…; edge apply never swaps the image of a running unit, so it keeps running; the upgrade is yours (block 6; Keycloak with a dump first, K11b)
   realm: Keycloak could not be read; not checked (the realm observer failed (`docker compose run` exited 1: realm-observer: Keycloak does not answer /realms/master/protocol/openid-connect/token (unreachable)))
   hopin: update to v2026.10.27.1 (79a51b4002833a0a46e729ce46193eb6ff53a383); last successful deployment v2026.10.26.1; now: hopin running (healthy)
@@ -1038,7 +1009,6 @@ edge apply --closed: traefik-mcp is recreated and runs the checked-out traefik-m
 edge apply --closed: legal is recreated
 edge apply --closed: partial, realm: Keycloak could not be read; not checked (...); run `edge apply --closed` again
 edge apply --closed: hopin is on at v2026.10.27.1
-edge apply --closed: partial, agent-service is not on after the change
 edge apply: nothing published</pre>
     </figure>
     <div class="stack">
@@ -1052,10 +1022,8 @@ edge apply: nothing published</pre>
 <span class="b">  ~</span> agent-egress    recreate       <span class="d">definition changed</span>
 <span class="b">  ~</span> traefik-mcp     recreate       <span class="d">definition changed</span>
 <span class="hd">units</span>
-<span class="b">  ~</span> agent-service   recreate       <span class="d">image edge-agent-service:0.7.0-2.1.302 → edge-agent-service:0.10.0-2.1.302 · in-flight requests end</span>
 <span class="b">  ~</span> keycloak        recreate       <span class="d">image quay.io/keycloak/keycloak:26.8.1@79c6… → @a78d… · snapshot first</span>
 <span class="b">  ~</span> legal           recreate       <span class="d">definition changed</span>
-<span class="g">  +</span> agent-service   switch on      <span class="d">agent-service</span>
 <span class="g">  +</span> litellm         switch on      <span class="d">agent-egress, litellm, litellm-db, litellm-front · snapshot first</span>
 <span class="y">  !</span> step-ca         old image      <span class="d">smallstep/step-ca:0.30.2@a2b1… · compose.yaml @7c4e…</span>
 <span class="y">  !</span> keycloak        realm skipped  <span class="d">the realm observer failed (…)</span>
@@ -1063,7 +1031,7 @@ edge apply: nothing published</pre>
 <span class="b">  ~</span> hopin           update         <span class="d">v2026.10.26.1 → v2026.10.27.1</span>
 <span class="hd">cloudflare</span>
 <span class="d">  · publish         later          own plan after a clean local run</span>
-Type <span class="w">yes</span> to apply 10 changes: yes
+Type <span class="w">yes</span> to apply 8 changes: yes
 <span class="g">  ✓</span> legal           pages written  <span class="d">datenschutz, nutzungsbedingungen</span>
 <span class="hd">core</span>
 <span class="g">  ✓</span> traefik         recreated      <span class="d">barriers proven · 9s</span>
@@ -1072,16 +1040,12 @@ Type <span class="w">yes</span> to apply 10 changes: yes
 <span class="hd">units</span>
 <span class="g">  ✓</span> legal           recreated      <span class="d">2s</span>
 <span class="g">  ✓</span> keycloak        recreated      <span class="d">snapshot 37c2a560 proven · 14s</span>
-<span class="g">  ✓</span> agent-service   recreated      <span class="d">3s</span>
-<span class="r">  ✗</span> agent-service   not running    <span class="d">seen down within 5s of the agent-service recreate</span>
 <span class="g">  ✓</span> litellm         switched on    <span class="d">agent-egress, litellm, litellm-db, litellm-front · up</span>
 <span class="d">    pre-apply snapshot 5be3a1f0 · proven</span>
 <span class="y">  !</span> keycloak        realm skipped  <span class="d">the realm observer failed (…)</span>
 <span class="hd">apps</span>
 <span class="live">  <span class="spin"></span> hopin           build at v2026.10.27.1 · 48s</span>  <span class="n">← nur live</span>
-<span class="g">  ✓</span> hopin           updated        <span class="d">v2026.10.27.1 · running · 1m42s</span>
-<span class="rw">error:</span> 1 of 9 failed, 1 skipped · Cloudflare not touched
-<span class="c">next:</span> docker logs --tail 50 hal-agent-service-1</pre>
+<span class="g">  ✓</span> hopin           updated        <span class="d">v2026.10.27.1 · running · 1m42s</span></pre>
       </figure>
       <figure>
         <figcaption><span class="tag new">neu A5-2a</span> nach dem yes: der Realm als eine Zeile, seine Änderungen und was nur in Keycloak liegt darunter</figcaption>
@@ -1313,33 +1277,27 @@ Type <span class="w">yes</span> to apply 2 changes: yes
 <pre class="term"><span class="p">$</span> <span class="u">hal apply</span>
 <span class="g">  ✓</span> checkout        current        <span class="d">c280a80 · origin/main</span>
 <span class="g">  +</span> step-ca         setup          <span class="d">step-ca/init · makes the CA key</span>
-<span class="g">  +</span> agent-service   setup          <span class="d">agent-service/setup · makes the signing key</span>
 <span class="g">  +</span> keycloak        setup          <span class="d">keycloak/go-live · starts Keycloak</span>
 <span class="g">  +</span> legal           2 new pages    <span class="d">datenschutz, nutzungsbedingungen</span>
-<span class="hd">units</span>
-<span class="g">  +</span> agent-service   switch on      <span class="d">agent-service</span>
 <span class="hd">cloudflare</span>
 <span class="g">  +</span> app.example.de  create         <span class="d">CNAME → tunnel</span>
 <span class="b">  ~</span> www.example.de  update         <span class="d">ttl 300 → auto</span>
 <span class="r">  -</span> old.example.de  delete         <span class="d">A 203.0.113.7</span>
-Type <span class="w">yes</span> to apply 8 changes: yes
+Type <span class="w">yes</span> to apply 6 changes: yes
 <span class="d">…</span></pre>
-        <p class="was">Acht Zeilen: drei Setups, eine Rechtsseite, ein Einschalten, drei Cloudflare-Zeilen mit dem Lese-Token; <code>~</code>/<code>!</code>-Zeilen stehen sonst wie heute. Nichts läuft vor diesem yes.</p>
+        <p class="was">Sechs Zeilen: zwei Setups, eine Rechtsseite, drei Cloudflare-Zeilen mit dem Lese-Token; <code>~</code>/<code>!</code>-Zeilen stehen sonst wie heute. Nichts läuft vor diesem yes.</p>
       </figure>
       <figure id="f-one-yes-handoff">
         <figcaption><span class="tag new">neu #361</span> Y7: nach dem yes übergibt hal jedes Setup an dein Terminal und nimmt es danach wieder auf</figcaption>
 <pre class="term"><span class="d">…</span>
-Type <span class="w">yes</span> to apply 8 changes: yes
+Type <span class="w">yes</span> to apply 6 changes: yes
 <span class="c">  ›</span> step-ca         setup          <span class="d">step-ca/init runs in your terminal</span>
 <span class="sys">Password for the CA key:</span>  <span class="n">← die Frage des Skripts, nicht von hal</span>
 <span class="g">  ✓</span> step-ca         set up         <span class="d">CA key made · 6s</span>
-<span class="c">  ›</span> agent-service   setup          <span class="d">agent-service/setup runs in your terminal</span>
-<span class="sys">Password for the agent account:</span>  <span class="n">← seine Ausgabe, hal druckt sie nicht um</span>
-<span class="g">  ✓</span> agent-service   set up         <span class="d">signing key made · 14s</span>
 <span class="c">  ›</span> keycloak        setup          <span class="d">keycloak/go-live runs in your terminal</span>
 <span class="sys">Back up before go-live? (no backup exists)</span>  <span class="n">← die eigene Einwilligung des Setups (Y3)</span>
 <span class="r">  ✗</span> keycloak        setup failed   <span class="d">go-live stopped: no backup consent</span>
-<span class="rw">error:</span> 1 of 8 failed, 5 skipped · Cloudflare not touched
+<span class="rw">error:</span> 1 of 6 failed, 4 skipped · Cloudflare not touched
 <span class="c">next:</span> hal apply</pre>
         <p class="was">Das Setup fragt seine Passwörter, den Passkey und die Einwilligung ohne Backup selbst; das eine yes ersetzt sie nicht. Übersprungen sind die lokalen Zeilen nach dem Fehler und die drei Cloudflare-Zeilen. Ein gescheitertes Setup endet im Paar <code>error:</code>/<code>next:</code>, Exit 3.</p>
       </figure>
@@ -1413,16 +1371,13 @@ Type <span class="w">yes</span> to apply 1 change: yes
 <pre class="term"><span class="p">$</span> <span class="u">hal apply --dry-run</span> <span class="d">&lt; /dev/null</span>
 <span class="g">  ✓</span> checkout        current        <span class="d">c280a80 · origin/main</span>
 <span class="g">  +</span> step-ca         setup          <span class="d">step-ca/init · makes the CA key</span>
-<span class="g">  +</span> agent-service   setup          <span class="d">agent-service/setup · makes the signing key</span>
 <span class="g">  +</span> keycloak        setup          <span class="d">keycloak/go-live · starts Keycloak</span>
 <span class="g">  +</span> legal           2 new pages    <span class="d">datenschutz, nutzungsbedingungen</span>
-<span class="hd">units</span>
-<span class="g">  +</span> agent-service   switch on      <span class="d">agent-service</span>
 <span class="hd">cloudflare</span>
 <span class="g">  +</span> app.example.de  create         <span class="d">CNAME → tunnel</span>
 <span class="b">  ~</span> www.example.de  update         <span class="d">ttl 300 → auto</span>
 <span class="r">  -</span> old.example.de  delete         <span class="d">A 203.0.113.7</span>
-<span class="b">~ 8 changes planned</span> <span class="d">· 4s · run hal apply</span></pre>
+<span class="b">~ 6 changes planned</span> <span class="d">· 4s · run hal apply</span></pre>
         <p class="was">Exit 0. Liest nur: Herkunft, Lese-Token für Cloudflare, den Realm. Kein Setup läuft, kein Lock bleibt, keine <code>.env</code> wird geschrieben, kein tofu apply, keine Plan-Datei bleibt.</p>
       </figure>
       <figure id="f-one-yes-dry-clean">
@@ -1436,66 +1391,8 @@ Type <span class="w">yes</span> to apply 1 change: yes
   <ul class="why">
     <li><b>Ein yes, danach nichts Neues ungefragt.</b> Jede Änderung eines Laufs steht vorher als Zeile da (Invariante 2). Taucht nach den Setups oder im Schreib-Plan von Cloudflare eine Zeile auf, die du nicht sahst, zeigt hal nur diese Zeile und fragt noch einmal; die Zahl im Satz ist die Zahl der gedruckten Zeilen.</li>
     <li><b>Die Zeilenform ist die aus Bild A:</b> <code>Zeichen · Objekt · Ereignis · Fakt</code>, am Ende genau ein <code>error:</code> und ein <code>next:</code>. Die Setups sind <code>+ &lt;unit&gt; setup</code>, der Übergang <code>› … runs in your terminal</code>, das Ergebnis <code>✓ … set up</code> oder <code>✗</code>.</li>
-    <li><b>Was dein eigenes Ja behält (Y3):</b> die Einwilligung ohne Backup in go-live, jedes Passwort und der Passkey eines Setups, <code>--replace-signing-key</code>, Löschen im Realm, Restore, <code>hal start</code> und <code>hal online</code>. Ein <code>-y</code> gibt es nicht: <code>error: unrecognized arguments: -y</code>, Exit 2.</li>
+    <li><b>Was dein eigenes Ja behält (Y3):</b> die Einwilligung ohne Backup in go-live, jedes Passwort und der Passkey eines Setups, Löschen im Realm, Restore, <code>hal start</code> und <code>hal online</code>. Ein <code>-y</code> gibt es nicht: <code>error: unrecognized arguments: -y</code>, Exit 2.</li>
     <li><b>Vorschläge des Kopfs, nicht gesegnet.</b> Gezeichnet ist je die empfohlene Form A. Y1a, Y1c, Y3 und Y5b wartet auf das Wort des Operators; anders entschieden, ändert sich das Bild vor dem Segnen. Bis dahin gilt das Bild darüber weiter, mit <code>cloudflare · publish later</code>.</li>
-  </ul>
-</section>
-
-<section aria-labelledby="s-smoke">
-  <div class="head">
-    <h2 id="s-smoke">Die Skripte: <code>live_smoke.py</code> im selben Schnitt</h2>
-    <p class="sub">Dein Lauf von heute. Gleiche Fakten, zwei Wörter pro Zelle, Gruppen wie im Code, am Ende ein Urteil.</p>
-  </div>
-  <div class="pair">
-    <figure>
-      <figcaption><span class="tag today">heute</span> echt</figcaption>
-<pre class="term"><span class="p">$</span> <span class="u">python3 agent-service/live_smoke.py</span>
-Open https://auth.hallucinai.de/realms/hallucinai/device?user_code=WZUW-XUGZ and confirm the code WZUW-XUGZ
-recreate held: the service listens
-L2 the paid turn held: exit 0; events ['run_started', 'assistant_text', 'succeeded']; ok | ok
-L3 admission through the gateway held: run_started names anthropic/opus on route cli
-L7 memory held: idle memory.current 63156224; memory.peak after the turn 177790976
-L4 the cancelled turn observed: smoke exit 0; CLI processes before (0) 0, while held (1 or more) 1, left after the cancel (0) 0; ERROR lines since (0) 0; holding the stream open 3 s | closing the stream before the answer
-L6 no secret anywhere held: docker inspect 0 (0); the service log 0 (0); the smoke output 0 (0)
-L9 no JWT-shaped string anywhere held: docker inspect 0 (0); the service log 0 (0); the smoke output 0 (0)
-E6 no TCP to the internet held: 1.1.1.1:443 ENETUNREACH, 160.79.104.10:443 ENETUNREACH
-E7 no route out held: default routes []; gateways of agent [] and egress []; TCP to docker0 172.17.0.1:22 ENETUNREACH, ...
-E8 no IPv6 held: IPv6 interfaces ['lo']; TCP over IPv6 ENETUNREACH
-E9 no UDP held: 1.1.1.1:443 ENETUNREACH, 1.1.1.1:53 ENETUNREACH
-E10 names held: example.com resolves to []; agent-egress to ['172.31.252.10']
-E12 the gateway's listeners held: listening: ['tcp 172.31.252.10:443']</pre>
-    </figure>
-    <figure>
-      <figcaption><span class="tag new">neu</span> derselbe Lauf, gestartet mit <code>uv run</code> · Dauern sind Beispielwerte</figcaption>
-<pre class="term"><span class="p">$</span> <span class="u">uv run agent-service/live_smoke.py</span>
-<span class="c">  ›</span> sign in         open link      <span class="d">confirm code</span> <span class="w">WZUW-XUGZ</span>
-    https://auth.hallucinai.de/realms/hallucinai/device?user_code=WZUW-XUGZ
-<span class="g">  ✓</span> sign in         confirmed      <span class="d">38s</span>
-<span class="hd">service</span>
-<span class="g">  ✓</span> recreate        listens
-<span class="g">  ✓</span> L2 paid turn    <span class="d">answered "ok" · ended succeeded</span>
-<span class="g">  ✓</span> L3 admission    <span class="d">run started through the gateway · anthropic/opus · route cli</span>
-<span class="g">  ✓</span> L7 memory       <span class="d">60 MiB idle · 170 MiB peak</span>
-<span class="d">  · L4 cancel       observed: CLI 0 → 1 → 0 · 0 ERROR lines · held 3 s</span>
-<span class="hd">leaks</span>
-<span class="g">  ✓</span> L6 secrets      <span class="d">0 in docker inspect, service log, smoke output</span>
-<span class="g">  ✓</span> L9 JWTs         <span class="d">0 in docker inspect, service log, smoke output</span>
-<span class="hd">egress</span>
-<span class="g">  ✓</span> E6 TCP out      <span class="d">1.1.1.1:443, 160.79.104.10:443 unreachable</span>
-<span class="g">  ✓</span> E7 routes       <span class="d">no default route · docker0 172.17.0.1:22 unreachable</span>
-<span class="g">  ✓</span> E8 IPv6         <span class="d">lo only · TCP over IPv6 unreachable</span>
-<span class="g">  ✓</span> E9 UDP          <span class="d">1.1.1.1:443, 1.1.1.1:53 unreachable</span>
-<span class="g">  ✓</span> E10 names       <span class="d">example.com unresolved · agent-egress 172.31.252.10</span>
-<span class="g">  ✓</span> E12 listeners   <span class="d">only tcp 172.31.252.10:443</span>
-<span class="w">✓ 13 held, 1 observed</span> <span class="d">· 4m10s</span></pre>
-    </figure>
-  </div>
-  <ul class="why">
-    <li><b>Die Zell-Namen L2, E6 bleiben:</b> Doku und der Bericht an den Kopf nennen sie so. Der lange Satz dahinter wird zwei Wörter; das Ereignis entfällt, denn ✓ heißt gehalten.</li>
-    <li><b>Der Code WZUW-XUGZ ist kein Geheimnis:</b> das Geräte-Login zeigt ihn, damit du ihn im Browser wiedererkennst; er nützt nur mit deinem Login und verfällt nach Minuten. Das Token danach erscheint nie, auch nicht mit <code>-v</code>. Der Link steht auf eigener Zeile und wird nie gekürzt.</li>
-    <li><b>Zahlen in Worten:</b> 63156224 Bytes werden 60 MiB. Die Schreibweise „(0) 0“ (erwartet, gefunden) fällt weg: ✓ heißt gefunden wie erwartet. Eine rote Zelle nennt beides: <code>✗ L6 secrets  1 in service log, expected 0</code>.</li>
-    <li><b>Neu ist die Urteilszeile.</b> Heute steht das Urteil nur im Exit-Code. Die genauen Zahlen für die Akte gibt <code>--json</code>, geschwärzt wie heute.</li>
-    <li><b>Dasselbe gilt für <code>live_signer.py</code> und die Setups</b> (<code>keycloak/go-live</code>, <code>step-ca/init</code>, <code>agent-service/setup</code>): ihre Schritte werden Zeilen, das lange Warum jedes Schritts steht nur vor einer Eingabe. Gestartet wird mit <code>uv run</code> statt <code>python3</code>, damit sie über denselben Eigentümer drucken wie hal.</li>
   </ul>
 </section>
 
@@ -1766,7 +1663,7 @@ Type <span class="w">yes</span> to apply 7 changes: yes
     </li>
     <li class="push">
       <div class="k"><b>Nach Kategorie, in der Reihenfolge der Arbeit</b><span class="tag push">Grenze</span></div>
-      <p>Sortieren nach Kategorie: ja, im Plan von <code>hal apply</code> und im Smoke. Darin gilt die Reihenfolge, in der hal arbeitet, nicht das Alphabet der Apps: sie ist eine Sicherheitsregel, und so steht das Ergebnis Zeile für Zeile wie der Plan. Köpfe erst ab etwa sechs Zeilen: bei drei wäre ein Kopf pro Gruppe mehr Rahmen als Inhalt.</p>
+      <p>Sortieren nach Kategorie: ja, im Plan von <code>hal apply</code>. Darin gilt die Reihenfolge, in der hal arbeitet, nicht das Alphabet der Apps: sie ist eine Sicherheitsregel, und so steht das Ergebnis Zeile für Zeile wie der Plan. Köpfe erst ab etwa sechs Zeilen: bei drei wäre ein Kopf pro Gruppe mehr Rahmen als Inhalt.</p>
     </li>
     <li>
       <div class="k"><b>Ein Zeilenstandard für alles</b></div>
@@ -1795,10 +1692,6 @@ Type <span class="w">yes</span> to apply 7 changes: yes
     <li>
       <div class="k"><b>80 Spalten, Links ganz</b></div>
       <p>Jede Zeile passt in 80 Spalten. Ist ein Fakt länger, kürzt ihn das Terminal mit <code>…</code>, <code>-v</code> zeigt ihn ganz. Was du öffnen oder kopieren sollst, ein Link oder ein Befehl, steht eingerückt auf eigener Zeile und wird nie gekürzt. Dauern heißen <code>47s</code> und <code>3m12s</code>, nie <code>3:12</code>: das liest sich wie eine Uhrzeit.</p>
-    </li>
-    <li>
-      <div class="k"><b>Skripte im venv des Checkouts</b></div>
-      <p>Damit die Skripte über denselben Eigentümer drucken wie hal, startest du sie mit <code>uv run agent-service/live_smoke.py</code> statt <code>python3 …</code>; <code>hal apply</code> startet die Setups mit seinem eigenen Python. Ein hal-Befehl pro Skript wäre die Alternative, er brächte neue Befehle ohne Not.</p>
     </li>
   </ul>
 </section>
