@@ -38,14 +38,17 @@ def mcp_audiences(scope: dict[str, Any]) -> list[str]:
 
 
 def mcp_problems(realm: dict[str, Any], fleet: dict[str, Any]) -> list[str]:
-    """What breaks an app's MCP front: no group, no optional scope, or an audience that is not
-    the app's `/mcp` address."""
+    """What breaks the MCP front of an app that has one (an `mcp` subgroup or an `mcp-<app>`
+    scope): no group, no optional scope, or an audience that is not the app's `/mcp` address.
+    An app with neither, like Skat, has no MCP front and is not checked."""
     scopes = {scope["name"]: scope for scope in realm["clientScopes"]}
     optional = agents_client(realm)["optionalClientScopes"]
     zone = catalog.zone(fleet)
     problems = []
     for app, children in app_groups(realm).items():
         scope = f"mcp-{app}"
+        if "mcp" not in children and scope not in scopes and scope not in optional:
+            continue
         host = fleet["services"][app]["hosts"][0]["name"]
         if "mcp" not in children:
             problems.append(f"/apps/{app} has no mcp subgroup")
@@ -57,7 +60,7 @@ def mcp_problems(realm: dict[str, Any], fleet: dict[str, Any]) -> list[str]:
     return problems
 
 
-def test_each_app_has_its_group_scope_and_audience() -> None:
+def test_each_app_with_an_mcp_front_has_its_group_scope_and_audience() -> None:
     assert mcp_problems(read("keycloak/realm.yaml"), read("fleet.yaml")) == []
 
 
@@ -77,6 +80,20 @@ def test_a_scope_that_is_not_offered_fails_the_relation(app: str) -> None:
     offered.remove(f"mcp-{app}")
 
     assert mcp_problems(realm, read("fleet.yaml")) == [f"{AGENTS} does not offer mcp-{app}"]
+
+
+def test_an_app_with_an_mcp_scope_but_no_mcp_subgroup_fails_the_relation() -> None:
+    realm = read("keycloak/realm.yaml")
+    hopin = next(
+        app
+        for group in realm["groups"]
+        if group["name"] == "apps"
+        for app in group["subGroups"]
+        if app["name"] == "hopin"
+    )
+    hopin["subGroups"] = [child for child in hopin["subGroups"] if child["name"] != "mcp"]
+
+    assert mcp_problems(realm, read("fleet.yaml")) == ["/apps/hopin has no mcp subgroup"]
 
 
 def test_the_client_is_public_with_the_rulings_settings() -> None:

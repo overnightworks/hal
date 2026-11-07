@@ -90,3 +90,5 @@ secrets:
     file: ${PROBE_SECRETS_DIR}/clients/hopin
   keycloak_client_presentator:
     file: ${PROBE_SECRETS_DIR}/clients/presentator
+  keycloak_client_skat:
+    file: ${PROBE_SECRETS_DIR}/clients/skat

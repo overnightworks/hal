@@ -6,8 +6,7 @@ directory, stands in for Cloudflare by sending `Host: auth.<domain>` and
 the stack down, volumes included. Its Traefik entrypoints listen on free loopback ports it picks
 and its two Keycloak networks take free /24s, so it runs beside the live edge, which stays up.
 
-    flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 50 720 \
-        python3 probe/keycloak/probe.py --scratch DIR  # teardown measured 11 s (K 50 s, CAP 720 s)
+The command, with its lock and measured teardown, is in probe/keycloak/README.md.
 
 `hold --scratch DIR` instead brings the same stack up without the proofs, prints one READY line
 and keeps it until SIGTERM, SIGINT or EOF on stdin (see probe/keycloak/README.md).
@@ -179,6 +178,7 @@ SECRET_FILES = (
     "db-password",
     "config-cli-secret",
     "bootstrap-admin-password",
+    "clients/skat",
     *(client.secret_file for client in APP_CLIENTS),
 )
 READY_TIMEOUT_SECONDS = 240
