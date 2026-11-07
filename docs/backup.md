@@ -55,8 +55,7 @@ A weekly encrypted backup of the declared apps (Songmaker, Keycloak, LiteLLM and
 and a monthly test that restores the last successful backup's snapshot and proves it is good.
 
 **What it protects against:** accidental deletion and corruption. The repository `~/backups/restic` sits
-on the same disk as the data, so it does **not** protect against losing the disk. A second disk or an
-off-site copy is a later slice (architecture.md, gap 19).
+on the same disk as the data, so it does **not** protect against losing the disk.
 
 **Platform rules for every app.**
 
