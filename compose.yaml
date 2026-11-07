@@ -38,9 +38,6 @@ x-postgres: &postgres
   cap_drop: [ALL]
   security_opt: ["no-new-privileges:true"]
 
-x-agent-attachments: &agent-attachments
-  networks: [agent-songmaker, agent-presentator, agent-hopin, mcp]
-
 # A one-off container's output belongs to its caller alone: it stays out of the journal.
 x-one-off-logging: &one-off-logging {driver: none}
 
@@ -274,7 +271,6 @@ services:
   # with `--members PATH`, which prints the issuer and the subjects of the group at PATH.
   realm-observer:
     # The probe's python pin (probe/keycloak/compose.probe.yaml); ci.yml checks the two are equal.
-    # agent-probe below carries the same pin; Dependabot moves all of them in one pull.
     image: python:3.14.10-alpine@sha256:eb2c62658b8d51bff0acc408504b76521d02030de56a8a3c1e830083e89b89d2
     profiles: [apply]
     logging: *one-off-logging
@@ -390,7 +386,7 @@ services:
     entrypoint: ["true"]
     networks: [speech-hopin, speech-presentator]
 
-  # The second Traefik: the one gateway between the agent service and the MCP servers, and the
+  # The second Traefik: the one gateway to the MCP servers, and the
   # speech service's one way to Keycloak's key set. No host networking, no Docker API; the only
   # container on all MCP networks.
   traefik-mcp:
@@ -544,63 +540,6 @@ services:
       - ./agent-service/litellm/config.yaml:/etc/litellm/config.yaml:ro
       - ./agent-service/litellm/start.sh:/etc/litellm/start.sh:ro
 
-  # The agent service (the image is built on the PC, docs/agent-service.md,
-  # "The image"). One worker, one replica. It runs as 1000:1000 because its reader refuses a
-  # login file that group or others can touch, so the container user must own the login directory
-  # (docs/agent-service.md, "The login"). The unit `agent-service` of fleet.yaml starts it.
-  agent-service:
-    <<: *agent-attachments
-    image: &agent-service-image edge-agent-service:0.12.0-claude-2.1.302-codex-0.163.0
-    pull_policy: never
-    profiles: [agent-service]
-    user: "1000:1000"
-    init: true
-    restart: unless-stopped
-    # A stop waits for the open requests, then for a Codex login renewal in flight (about 45 s at
-    # most), and agent-runtime's migration notes ask for at least 60 s beyond that. A kill sooner
-    # can leave `.<file>.new` beside the login file.
-    stop_grace_period: 105s
-    read_only: true
-    cap_drop: [ALL]
-    security_opt: ["no-new-privileges:true"]
-    ulimits:
-      core: 0
-    environment:
-      HOME: /tmp
-    # The service owns its working root and refuses to start unless the root is owned by its user
-    # with mode 0700.
-    tmpfs:
-      - /tmp:uid=1000,gid=1000,mode=0700,size=16m,nosuid,nodev,noexec
-      - /run/agent-service/cli:uid=1000,gid=1000,mode=0700,size=256m,nosuid,nodev,noexec
-    # The signing key and the CA root the service trusts for MCP origins; a missing source stops
-    # the start. Kept off the anchor, so agent-probe gets no key.
-    secrets: [agent_service_signing_key, step_ca_root_certificate]
-    volumes:
-      - type: bind
-        source: ./agent-service/service.toml
-        target: /etc/agent-service/service.toml
-        read_only: true
-        bind:
-          create_host_path: false
-      # A directory, never the token file: the file is replaced inside it (`mv -T token.new token`)
-      # and a file bind would keep the old inode. A missing directory fails the start; it is never
-      # created as root's.
-      - type: bind
-        source: ${HOME}/.secrets/agent-service/claude
-        target: /run/agent-service/login/claude
-        read_only: true
-        bind:
-          create_host_path: false
-      # The same for the Codex login: the dedicated folder `codex login` wrote its `auth.json`
-      # into, never the operator's ~/.codex. The one writable bind: the service renews the login
-      # itself, writing `.auth.json.new` beside the file and renaming it over, so it needs the
-      # directory read-write; a read-only directory renews nothing.
-      - type: bind
-        source: ${HOME}/.secrets/agent-service/codex
-        target: /run/agent-service/login/codex
-        bind:
-          create_host_path: false
-
   # The canary of the direct route (agent-service/api_canary.py, run by live_canary.py; docs/
   # agent-service.md, "Proofs"): one completion through the front, as an app posts it, with hopin's
   # key, the second reader of that key file beside litellm-keys; only verdict lines out. Run as
@@ -630,19 +569,6 @@ services:
     secrets: [litellm_key_hopin]
     volumes:
       - ./agent-service/api_canary.py:/opt/canary/api_canary.py:ro
-
-  # The stand-in for the agent service: the same attachments, hardened like the service,
-  # listening on nothing.
-  agent-probe:
-    <<: *agent-attachments
-    image: python:3.14.10-alpine@sha256:eb2c62658b8d51bff0acc408504b76521d02030de56a8a3c1e830083e89b89d2
-    profiles: [agent-probe]
-    user: "65534:65534"
-    read_only: true
-    cap_drop: [ALL]
-    security_opt: ["no-new-privileges:true"]
-    init: true
-    command: ["sleep", "infinity"]
 
 volumes:
   socket-proxy-run:
@@ -674,12 +600,9 @@ secrets:
   # step-ca/init creates it; docs/internal-ca.md.
   step_ca_password:
     file: ${HOME}/.secrets/step-ca/password
-  # The same init makes it; traefik-mcp and the agent service trust the CA through it.
+  # The same init makes it; traefik-mcp trusts the CA through it.
   step_ca_root_certificate:
     file: ${HOME}/.secrets/step-ca/root_ca.crt
-  # agent-service/setup makes it; only the private file reaches the service, never its folder.
-  agent_service_signing_key:
-    file: ${HOME}/.secrets/agent-service/signing/private.pem
   # LiteLLM refuses to boot without a master key; this one is generated, read by litellm and by
   # hal apply's key step litellm-keys and known to no app, so its admin routes stay closed to them.
   litellm_master_key:
@@ -708,8 +631,7 @@ networks:
   # still lets its containers reach host services through the gateway address).
   mcp-ca:
     internal: true
-  # The agent service and traefik-mcp; the clients never see step-ca or the backends. Isolated
-  # before the service joins, so no live network has to be created again.
+  # traefik-mcp's client side; the clients never see step-ca or the backends.
   mcp:
     internal: true
     driver_opts: *isolated-bridge
@@ -722,7 +644,7 @@ networks:
     name: hal_mcp_songmaker
     internal: true
     driver_opts: *isolated-bridge
-  # One app's callers, the agent service and the front of LiteLLM; each app joins its own network
+  # One app's callers and the front of LiteLLM; each app joins its own network
   # as an external network, so no app sees another's.
   agent-songmaker:
     name: hal_agent_songmaker

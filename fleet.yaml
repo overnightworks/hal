@@ -39,10 +39,6 @@ services:
       enabled: true
     hosts:
       - {name: "@", exposure: public, reason: "static legal pages without a login", ready: /impressum}
-  agent-service:
-    run:
-      enabled: false
-      setup: agent-service/setup
   litellm:
     run:
       enabled: true

@@ -259,7 +259,7 @@ class Stack:
             "DOCKER_GID": "0",
             "EDGE_DOMAIN": "front.invalid",
             "STAND_IN_IMAGE": compose["hello"]["image"],
-            "CLIENT_IMAGE": compose["agent-probe"]["image"],
+            "CLIENT_IMAGE": compose["agent-canary"]["image"],
         }
 
     def compose(self, *arguments: str, stdin: str | None = None) -> subprocess.CompletedProcess:

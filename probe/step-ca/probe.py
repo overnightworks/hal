@@ -1,5 +1,5 @@
 """Probe of the internal CA and of traefik-mcp (#38 proofs 1-5, #48 proofs 6-9, #52 proof 10,
-#60 proof 11, #69 proof 12, #89 proof 13, #346 cells P13-P27): a throwaway compose project and a
+#60 proof 11, #69 proof 12, #89 proof 13, #346 cells P14-P27): a throwaway compose project and a
 throwaway HOME.
 
 It runs a copy of `step-ca/init` against the scratch HOME, starts the real `step-ca`, `traefik-mcp`
@@ -16,7 +16,7 @@ them runs from a throwaway container on the network a client would sit on. Needs
 --scratch directory and leaves it empty, passed or failed (`edge_copy`). Proof 9 waits for a
 renewal, 10 runs three applies, 11 drives the emergency switch, 12 runs the setup from `hal apply`,
 13 lets traefik-mcp follow its file and definition through about ten applies
-(traefik_mcp_follows.py), and 14 drives songmaker's route (#346 P13-P27, mcp_networks.py): 13 to 20
+(traefik_mcp_follows.py), and 14 drives songmaker's route (#346 P14-P27, mcp_networks.py): 13 to 20
 minutes measured, 10 of them proof 9's renewal wait, bounded by the 1800 s cap above, so a run that
 needs longer is cut, not given more. Needs `uv`: proof 8 runs
 `hal check exposure` through it, proofs 10 to 13 `uv sync` in a copy of the repository. The copy
@@ -108,9 +108,7 @@ RENEWAL_POLL_SECONDS = 12 * 60
 RENEWAL_POLL_INTERVAL = 15
 FOREIGN_UID = 12345
 STEP_CA_SWITCH = re.compile(r"( {2}step-ca:\n {4}run:\n {6}enabled: )(?:true|false)")
-ASKING_SWITCHES = re.compile(
-    r"( {2}(?:keycloak|agent-service|litellm):\n {4}run:\n {6}enabled: )\w+"
-)
+ASKING_SWITCHES = re.compile(r"( {2}(?:keycloak|litellm):\n {4}run:\n {6}enabled: )\w+")
 STAND_IN_OVERLAY = REPO / "probe" / "step-ca" / "compose.probe.yaml"
 SHORT_LIVED_OVERLAY = REPO / "probe" / "step-ca" / "compose.short-lived.probe.yaml"
 

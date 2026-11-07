@@ -1,4 +1,4 @@
-"""Songmaker's MCP origin through traefik-mcp: the cells P13-P27 of #346, driven against a
+"""Songmaker's MCP origin through traefik-mcp: the cells P14-P27 of #346, driven against a
 stand-in for songmaker's web service (compose.probe.yaml) on `hal_mcp_songmaker`'s copy in the
 probe's project. A mixin of the step-ca probe (probe.py): it uses the probe's compose, client and
 container helpers."""
@@ -33,19 +33,6 @@ from step_ca_names import (
 from hal.output import write_line
 
 INCOMPLETE_EXIT_CODE = 2  # a cell was not driven: neither a pass nor a failure
-SERVICE_IMAGE_ROOT = "/root.crt"
-# What the service image's own TLS context (cli_runner.mcp_tls_context) makes of the origin.
-SERVICE_IMAGE_CLIENT = """\
-import http.client, pathlib, sys
-from agent_runtime_service.cli_runner import mcp_tls_context
-connection = http.client.HTTPSConnection(
-    sys.argv[1], 443, context=mcp_tls_context(pathlib.Path(sys.argv[2])), timeout=8
-)
-connection.request("GET", "/mcp")
-answer = connection.getresponse()
-print(answer.status)
-print(answer.read().decode())
-"""
 
 
 def print_verdict(not_driven: list[str]) -> int:
@@ -53,7 +40,7 @@ def print_verdict(not_driven: list[str]) -> int:
     if not_driven:
         write_line(f"PROBE INCOMPLETE: not driven: {'; '.join(not_driven)}")
         return INCOMPLETE_EXIT_CODE
-    write_line("PROBE PASSED: proofs 1-14, #95 P3 and #346 P13-P27 hold")
+    write_line("PROBE PASSED: proofs 1-14, #95 P3 and #346 P14-P27 hold")
     return 0
 
 
@@ -120,35 +107,6 @@ class McpNetworks:
 
     def expect_unreachable(self, cell: str, result: subprocess.CompletedProcess, what: str) -> None:
         expect(result.returncode != 0, f"{cell}: {what} answered")
-
-    def cell_p13_trusted_service_image(self, root: Path) -> str:
-        """The service image's own `mcp_tls_context`, trusting the probe root alone."""
-        with_service = self.compose("--profile", "agent-service", "config", "--format", "json")
-        image = json.loads(with_service.stdout)["services"]["agent-service"]["image"]
-        probed = self.run(["docker", "image", "inspect", "--format", "{{.Id}}", image], check=False)
-        if probed.returncode != 0:
-            self.not_driven.append(f"P13 (the image {image} is absent)")
-            return f"route P13 NOT DRIVEN: the image {image} is absent"
-        before = self.stand_in_requests()
-        result = self.run(
-            ["docker", "run", "--rm", "--network", f"{PROJECT}_mcp", "--read-only", "--user",
-             CONTAINER_USER, "--volume", f"{root}:{SERVICE_IMAGE_ROOT}:ro", "--entrypoint",
-             "python", image, "-I", "-c", SERVICE_IMAGE_CLIENT, SONGMAKER_ORIGIN,
-             SERVICE_IMAGE_ROOT],
-            check=False,
-        )  # fmt: skip
-        answer = result.stdout.decode(errors="replace")
-        expect(
-            result.returncode == 0,
-            f"P13: the service image's client failed: {result.stderr[-200:]}",
-        )
-        expect(answer.startswith("200"), f"P13: the stand-in answered {answer[:40]}")
-        expect(f"Host: {SONGMAKER_ORIGIN}" in answer, "P13: the Host header was changed")
-        expect(self.stand_in_requests() > before, "P13: the stand-in logged no request")
-        return (
-            f"route P13 held: mcp_tls_context of {image} reached the stand-in, "
-            f"Host {SONGMAKER_ORIGIN} unchanged"
-        )
 
     def wrong_root(self) -> Path:
         wrong = self.scratch / "wrong_ca.crt"
@@ -341,8 +299,7 @@ class McpNetworks:
         root = self.secrets_dir / ROOT_CERTIFICATE
         self.compose("up", "--detach", "--no-deps", STAND_IN)
         self.wait_until_songmaker_served()
-        lines = [self.cell_p13_trusted_service_image(root)]
-        lines += self.cell_p14_p15_p17_refused(root)
+        lines = self.cell_p14_p15_p17_refused(root)
         lines += self.cell_p16_p18_paths(root)
         lines.extend(
             [

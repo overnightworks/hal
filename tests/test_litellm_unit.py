@@ -24,7 +24,7 @@ from hal.stack import api_limits, litellm_keys
 
 ROOT = Path(__file__).resolve().parents[1]
 LITELLM_DIRECTORY = ROOT / "agent-service" / "litellm"
-LITELLM, FRONT, SERVICE, GATEWAY = "litellm", "litellm-front", "agent-service", "agent-egress"
+LITELLM, FRONT, GATEWAY = "litellm", "litellm-front", "agent-egress"
 DATABASE = "litellm-db"
 KEYS = litellm_keys.KEYS_SERVICE
 NEW_NETWORKS = ("litellm-backend", "litellm-egress", "litellm-db")
@@ -101,10 +101,6 @@ def test_each_member_joins_exactly_the_networks_the_boundary_declares(compose):
         LITELLM,
         DATABASE,
     }
-    assert not set(services[SERVICE]["networks"]) & set(NEW_NETWORKS)
-    assert set(services[SERVICE]["networks"]) & set(services[FRONT]["networks"]) == app_networks(
-        compose
-    )
     assert "litellm-egress" in services[GATEWAY]["networks"]
 
 
