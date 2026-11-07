@@ -1,0 +1,7 @@
+claim_id = "e64a6d8d54194382a5b399dddd3e0867"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "9b5bdde336480f84ff20fbc1e6ff02a276b2abfa"
+branch = "claude/issue-1129-s9b-architecture-without-agent-service"
+scope = ["docs/architecture.md", "docs/internal-ca.md", "tests/fixtures/old_names_baseline.toml"]
+opened_commit = "58bd29c3f9229e69d1ddcb103781dd59043e2822"
