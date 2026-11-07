@@ -234,7 +234,8 @@ sessions, their Keycloak `sub`s and the source secrets, which are encrypted with
 master key (the file
 `~/.secrets/presentator/secret-key`). The master key is not in the data backup, so a restored copy
 cannot read those secrets without it. The master key is the one secret that cannot be issued again:
-a copy of it sits in the password manager until presentator's values move to platform-secrets. The session ids (the signed session
+it sits only on this disk until presentator's values move to platform-secrets. Losing the key while the data survives
+means entering the Git sources in presentator again. The session ids (the signed session
 cookies carry them) and the Keycloak refresh and ID tokens are stored as plain text in the copy. The
 copy alone exposes the claims of the ID tokens and whatever an ID token allows as a logout hint at
 Keycloak. A takeover of a live session needs the master key as well, because presentator signs the
