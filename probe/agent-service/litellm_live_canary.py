@@ -33,8 +33,7 @@ sys.path.insert(0, str(REPO / "agent-service"))
 from litellm import DATABASE, FRONT, LISTENING, LITELLM, expect, hashed, run_scratch_probe  # noqa: E402
 from litellm_retention import RetentionProbe  # noqa: E402
 from litellm_stack import PROJECT  # noqa: E402
-from live_canary import Verdicts, live_canary, route_targets  # noqa: E402
-from live_smoke import Stack  # noqa: E402
+from live_canary import Stack, Verdicts, live_canary, route_targets  # noqa: E402
 from retention_census import DUMP, Census, contains, run_docker  # noqa: E402
 
 CANARY = "agent-canary"

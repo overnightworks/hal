@@ -40,7 +40,7 @@ HANDED_OVER = frozenset({Skip.NESTED_MOUNT.value, Skip.FILE_MOUNT.value})
 COMMAND_NOT_FOUND = frozenset({126, 127})
 MOUNT_TABLE = "/proc/1/mountinfo"
 DOCKER_SECONDS = 300
-FRONT, GATEWAY, LITELLM, AGENT_SERVICE = "litellm-front", "agent-egress", "litellm", "agent-service"
+FRONT, GATEWAY, LITELLM = "litellm-front", "agent-egress", "litellm"
 DATABASE = "litellm-db"
 # The compose services of the direct route an app request takes, each with whether its container
 # holds Python. LiteLLM cannot run without its database, so the database is searched with the rest.
