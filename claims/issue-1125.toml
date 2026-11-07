@@ -1,8 +1,0 @@
-claim_id = "515fcaaa48894774bfee60a3ef15a818"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "1c97993e453daeadaeb4b801d7d8613b86da081f"
-branch = "claude/issue-1125-manifest-retires-service-logins"
-scope = ["quality/baseline.toml", "src/hal/workstation/secrets_manifest.toml", "tests/test_workstation_app_secrets.py", "tests/test_workstation_secrets_setup.py", "tests/test_workstation_secrets_view.py"]
-opened_commit = "4846c05bef618b9c47088407dc2492a5bdcd5a71"
-whole_reason = "One retirement in the one secrets manifest, with the three test modules that run hal secrets on the packaged manifest and pin its exit code or findings."
