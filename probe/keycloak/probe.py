@@ -2223,12 +2223,11 @@ class Probe:
         device = self.through_tunnel(
             "POST",
             f"{PUBLIC_AUTH_PATH}/device",
-            form={"client_id": client.client_id, "client_secret": client_secret, "scope": "openid"},
+            form={"client_id": client.client_id, "client_secret": client_secret, **PKCE},
         )
-        expect(
-            device.status in (400, 401) and "device_code" not in device.text,
-            f"a device request for {client.client_id} with its secret answered {device.status}",
-        )
+        error = device.json().get("error") if device.status in (400, 401) else None
+        expect(error == "unauthorized_client", f"{client.client_id} device: {device.status}")
+        self.held("DG1", f"{client.client_id} refuses the device grant, unauthorized_client")
 
     @staticmethod
     def person_token_is_no_workload(client: AppClient, access_token: str) -> None:
