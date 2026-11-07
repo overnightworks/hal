@@ -293,10 +293,10 @@ def test_only_compose_project_names_in_the_switch_directory_are_switches(tmp_pat
     """#466 S-6: a half-written temporary and a foreign name are no switch."""
     directory = tmp_path / platform_check.SWITCHES_DIRECTORY
     directory.mkdir(parents=True)
-    for name in (".hopin.k3x9", "Bad Name", "hopin", "agent-service"):
+    for name in (".hopin.k3x9", "Bad Name", "hopin", "other-app"):
         (directory / name).write_text("2026-10-27T09:00:00+01:00")
 
-    assert platform_check.read_switched_off(tmp_path) == {"hopin", "agent-service"}
+    assert platform_check.read_switched_off(tmp_path) == {"hopin", "other-app"}
 
 
 def test_a_missing_switch_directory_means_no_switch_and_the_report_has_no_switch_line(docker, reboot_file, fake_disk, tmp_path) -> None:
