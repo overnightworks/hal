@@ -1,8 +1,0 @@
-claim_id = "9995c225dcf34af081dfe203847392c7"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "52cfd3a917b2bb8f081da156c4651be092320f51"
-branch = "claude/issue-1111-census-keeps-retention-mode"
-scope = ["agent-service/tree_census.py", "docs/agent-service.md", "quality/config.toml", "tests/test_agent_service_census_watch.py", "tests/test_agent_service_tree_census.py"]
-opened_commit = "70bf8d4bd5572366fdb268f3ddf2d6079157cb4c"
-whole_reason = "One removal of three proof modes of one census script, with their tests and config, none of which stays true without the others."
