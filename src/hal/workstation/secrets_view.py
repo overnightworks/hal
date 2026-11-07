@@ -35,7 +35,6 @@ from hal.output.command import Verb, command
 from hal.workstation.layout import Layout
 from hal.workstation.manifest_fields import ManifestError, fail, flag, https_link, require_key_of_kind, string, strings, value_prefix
 from hal.workstation.report import findings_count, markdown_table
-from hal.workstation.secrets_create import CreateCommand, is_renewal_sibling, parse_create
 from hal.workstation.tunnel_config import as_wildcard, with_tunnel_id
 
 MANIFEST_PATH = Path(__file__).with_name("secrets_manifest.toml")
@@ -150,7 +149,6 @@ class SecretEntry:
     page: str = ""
     loosest_mode: int = LOOSEST_FILE_MODE
     loosest_mode_reason: str = ""
-    create: CreateCommand | None = None
     value_prefix: str = ""
 
     @property
@@ -164,8 +162,8 @@ class SecretEntry:
 
     @property
     def written_by_setup(self) -> bool:
-        """the wizard writes a token it guides through and verifies, a token it asks hidden and stores unverified, and a service password it generates, and has the CLI of `create` make its login, unless that is optional: then the unit named in `recreate` writes it; every other entry is by hand."""
-        return self.source is not None or self.create is not None or self.kind in (SecretKind.SERVICE_PASSWORD, SecretKind.UNVERIFIED_TOKEN)
+        """the wizard writes a token it guides through and verifies, a token it asks hidden and stores unverified, and a service password it generates, unless that is optional: then the unit named in `recreate` writes it; every other entry is by hand."""
+        return self.source is not None or self.kind in (SecretKind.SERVICE_PASSWORD, SecretKind.UNVERIFIED_TOKEN)
 
     @property
     def place(self) -> PurePosixPath:
@@ -173,24 +171,13 @@ class SecretEntry:
         (path,) = self.paths
         return path
 
-    @property
-    def folder(self) -> PurePosixPath:
-        """The folder the login file of `create` is moved into; the manifest guarantees one place for it."""
-        return self.place.parent
-
-    @property
-    def renewal(self) -> str:
-        """How the entry is made again: for a `create` entry the wizard signs in again once its login file is gone, else the `recreate` text."""
-        return f"{command(Verb.SETUP)}, once {HOME_PREFIX}{self.place} is gone" if self.create else self.recreate
-
-
 # --- manifest --------------------------------------------------------------
 
 REQUIRED_KEYS = frozenset({"name", "kind", "paths", "read_by"})
 SOURCE_KEYS = frozenset({"provider", "resource", "scope", "expires_in_days"})
 RETIREMENT_KEYS = frozenset({"retired_on", "revoke_url", "revocation_confirmed"})
 MODE_KEYS = frozenset({"loosest_mode", "loosest_mode_reason"})
-OPTIONAL_KEYS = frozenset({"recreate", "create", "verify", "mirror_of", "purpose", "optional", "elsewhere", "page", "value_prefix"}) | RETIREMENT_KEYS | SOURCE_KEYS | MODE_KEYS
+OPTIONAL_KEYS = frozenset({"recreate", "verify", "mirror_of", "purpose", "optional", "elsewhere", "page", "value_prefix"}) | RETIREMENT_KEYS | SOURCE_KEYS | MODE_KEYS
 GITHUB_ACCESS_LEVELS = frozenset({"read", "write", "admin"})
 LONGEST_EXPIRY_DAYS = 366  # GitHub's ceiling for a fine-grained token's expires_in
 
@@ -289,8 +276,7 @@ def _entry(path: Path, index: int, raw: object) -> SecretEntry:
         raise fail(path, where, "must be a table")
     if isinstance(raw.get("name"), str):
         where = f"[[secret]] {raw['name']!r}"
-    required = REQUIRED_KEYS if "create" in raw else REQUIRED_KEYS | {"recreate"}
-    missing = sorted(required - set(raw))
+    missing = sorted((REQUIRED_KEYS | {"recreate"}) - set(raw))
     unknown = sorted(set(raw) - REQUIRED_KEYS - OPTIONAL_KEYS)
     if missing or unknown:
         raise fail(path, where, f"missing key(s) {missing}, unknown key(s) {unknown}")
@@ -300,14 +286,13 @@ def _entry(path: Path, index: int, raw: object) -> SecretEntry:
     retirement = _retirement(path, where, raw)
     source = _token_source(path, where, raw, kind)
     loosest_mode, loosest_mode_reason = _declared_mode(path, where, raw)
-    create = parse_create(path, where, raw, is_tool_login=kind is SecretKind.TOOL_LOGIN)
     patterns = _patterns(path, where, raw)
     entry = SecretEntry(
         name=string(path, where, raw, "name"),
         kind=kind,
         paths=patterns,
         read_by=strings(path, where, raw, "read_by"),
-        recreate="" if create else string(path, where, raw, "recreate"),
+        recreate=string(path, where, raw, "recreate"),
         verifier=_enum_value(path, where, raw, "verify", Verifier) if "verify" in raw else None,
         retired_on=retirement.retired_on,
         revoke_url=retirement.revoke_url,
@@ -320,7 +305,6 @@ def _entry(path: Path, index: int, raw: object) -> SecretEntry:
         page=https_link(path, where, raw, "page") if "page" in raw else "",
         loosest_mode=loosest_mode,
         loosest_mode_reason=loosest_mode_reason,
-        create=create,
         value_prefix=value_prefix(path, where, raw, kind, SecretKind.SERVICE_PASSWORD),
     )
     if entry.written_by_setup and (len(patterns) != 1 or _has_wildcard(patterns[0].name)):
@@ -738,17 +722,15 @@ def build_view(manifest: tuple[SecretEntry, ...], observation: Observation) -> S
         SecretStatus(entry, presence(entry, observation.matches), _verification(entry, observation.probe_codes)) for entry in manifest
     )
     patterns = tuple(pattern for entry in manifest for pattern in entry.paths)
-    logins = tuple(entry.place for entry in manifest if entry.create and not entry.retired)
-    tree = tuple(fact for fact in observation.tree if not any(is_renewal_sibling(fact.relative, login) for login in logins))
     unknown = (
         SecretFinding(FindingRule.UNKNOWN_FILE, f"{HOME_PREFIX}{fact.relative}", fix=f"add {HOME_PREFIX}{fact.relative} to the manifest or delete it")
-        for fact in tree
+        for fact in observation.tree
         if not _is_named(fact.relative, patterns)
     )
     findings = (
         *(f for status in statuses for f in _entry_findings(status)),
         *unknown,
-        *_tree_findings(tree, manifest, patterns),
+        *_tree_findings(observation.tree, manifest, patterns),
     )
     return SecretsView(statuses, findings)
 
@@ -769,7 +751,7 @@ def status_row(status: SecretStatus) -> list[str]:
         revocation = REVOCATION_CONFIRMED.format(date=entry.revocation_confirmed) if entry.revocation_confirmed else REVOCATION_UNCONFIRMED
         return [entry.name, entry.kind.label, RETIRED, revocation, EXPIRY_UNKNOWN, places(entry), f"revoke: {entry.revoke_url}"]
     presence = OPTIONAL.format(presence=status.presence.value) if entry.optional else status.presence.value
-    return [entry.name, entry.kind.label, presence, status.verification.value, EXPIRY_UNKNOWN, places(entry), entry.renewal]
+    return [entry.name, entry.kind.label, presence, status.verification.value, EXPIRY_UNKNOWN, places(entry), entry.recreate]
 
 
 def render_view(view: SecretsView, now: datetime) -> str:

@@ -487,7 +487,7 @@ class Sandbox:
             pytest.fail("the sandbox terminal answers no question, opens no page and reaches no network")
 
         terminal = SecretsTerminal(lambda: self.system.terminal, never, never, never)
-        return SecretsBoundaries(terminal, never, never, never)
+        return SecretsBoundaries(terminal, never, never)
 
 
 class RunnerWithCleanLogs(RunnerWithRealGitAndQuality):

@@ -21,7 +21,7 @@ from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
 import pytest
-from support.workstation_secrets_support import WIZARD_NOW, never_run
+from support.workstation_secrets_support import WIZARD_NOW
 
 from hal.output.hidden_paste import read_hidden_paste
 from hal.workstation import secrets_view
@@ -158,7 +158,7 @@ def _read_with(config: ChildConfig) -> str | None:
     walk_terminal = replace(
         TERMINAL_BOUNDARIES.terminal, ask=lambda _prompt: "", open_page=record_the_page
     )
-    boundaries = replace(TERMINAL_BOUNDARIES, terminal=walk_terminal, run_command=never_run)
+    boundaries = replace(TERMINAL_BOUNDARIES, terminal=walk_terminal)
     return run_setup(Layout(Path(config.home)), boundaries, WIZARD_NOW).name
 
 

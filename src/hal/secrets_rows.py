@@ -122,7 +122,7 @@ def _fact(finding: SecretFinding) -> str:
 def _entry_step(entry: SecretEntry) -> str:
     if entry.retired:
         return f"revoke: {entry.revoke_url}"
-    return command(Verb.SETUP) if entry.written_by_setup else as_command(entry.renewal)
+    return command(Verb.SETUP) if entry.written_by_setup else as_command(entry.recreate)
 
 
 def _step(finding: SecretFinding, entries: Mapping[str, SecretEntry]) -> str:
@@ -131,7 +131,7 @@ def _step(finding: SecretFinding, entries: Mapping[str, SecretEntry]) -> str:
     if finding.rule in ENTRY_STEP_RULES:
         return _entry_step(entries[finding.subject])
     if finding.rule is FindingRule.VERIFICATION_FAILED:
-        return as_command(entries[finding.subject].renewal)
+        return as_command(entries[finding.subject].recreate)
     return as_command(finding.fix)
 
 
