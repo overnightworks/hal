@@ -1,7 +1,0 @@
-claim_id = "3388a9fbe9c64a0c8c201bb7cab2a74d"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "9b5bdde336480f84ff20fbc1e6ff02a276b2abfa"
-branch = "claude/issue-1130-s9c-hal-output-record-loses-service-rows"
-scope = ["docs/design/hal-output.html", "tests/fixtures/old_names_baseline.toml"]
-opened_commit = "b8b1096780b288a6937e9066d585f390b283db72"
