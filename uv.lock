@@ -403,8 +403,8 @@ wheels = [
 
 [[package]]
 name = "overnightworks-agent-runtime-client"
-version = "0.24.0"
-source = { git = "https://github.com/overnightworks/agent-runtime?rev=v0.24.0#bebc22b140bac80b268f0e9878fd7b46fb60b494" }
+version = "0.25.0"
+source = { git = "https://github.com/overnightworks/agent-runtime?rev=v0.25.0#8de4e2e8ab32c673a11d5f0e5fb43428cb9664c9" }
 dependencies = [
     { name = "pydantic" },
     { name = "ruamel-yaml" },
@@ -444,7 +444,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "overnightworks-agent-runtime-client", git = "https://github.com/overnightworks/agent-runtime?rev=v0.24.0" },
+    { name = "overnightworks-agent-runtime-client", git = "https://github.com/overnightworks/agent-runtime?rev=v0.25.0" },
     { name = "overnightworks-appkit", url = "https://github.com/overnightworks/appkit/releases/download/v0.15.0/overnightworks_appkit-0.15.0-py3-none-any.whl" },
     { name = "pyyaml", specifier = ">=6" },
 ]
