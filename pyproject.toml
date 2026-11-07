@@ -38,11 +38,7 @@ module-name = "hal"
 
 [tool.ruff]
 line-length = 100
-extend-include = ["keycloak/go-live", "step-ca/init", "agent-service/setup"]
-
-[tool.ruff.per-file-target-version]
-# agent-service/setup imports these on CI's system python, which is older than the floor.
-"src/hal/output/*.py" = "py312"
+extend-include = ["keycloak/go-live", "step-ca/init"]
 
 [tool.ruff.format]
 # home's tree is imported as it is: home-tools#56 / home-tools#45 move its texts.

@@ -16,7 +16,7 @@ reason = "static configuration of traefik, bind-mounted by compose.yaml"
 
 [[root.allow]]
 entry = "agent-service/"
-reason = "the agent service image context that compose.yaml builds"
+reason = "the agent service's LiteLLM and egress files that compose.yaml mounts and its live canaries"
 
 [[root.allow]]
 entry = "backup/"
@@ -64,11 +64,6 @@ rule = "test-layout"
 reason = "it tests compose.yaml, the gateway files and the probe overlay of the agent service's egress, which no module of src/hal mirrors"
 
 [[layout.allow]]
-path = "tests/test_agent_service_image.py"
-rule = "test-layout"
-reason = "it tests the agent service's image recipe, its probe and scripts/agent_service_lock.py, outside src/hal, which no module of src/hal mirrors"
-
-[[layout.allow]]
 path = "tests/test_agent_service_api_canary.py"
 rule = "test-layout"
 reason = "it tests agent-service/api_canary.py and its compose one-off agent-canary, outside src/hal, which no module of src/hal mirrors"
@@ -87,16 +82,6 @@ reason = "it tests agent-service/live_canary.py, outside src/hal, which no modul
 path = "tests/test_agent_service_retention_census.py"
 rule = "test-layout"
 reason = "it tests the agent service's retention census and LiteLLM's config, outside src/hal, which no module of src/hal mirrors"
-
-[[layout.allow]]
-path = "tests/test_agent_service_setup.py"
-rule = "test-layout"
-reason = "it tests agent-service/setup, outside src/hal, which no module of src/hal mirrors"
-
-[[layout.allow]]
-path = "tests/test_agent_service_signing_key.py"
-rule = "test-layout"
-reason = "it tests the signing key that agent-service/setup makes, outside src/hal, which no module of src/hal mirrors"
 
 [[layout.allow]]
 path = "tests/test_agent_service_tree_census.py"
@@ -187,11 +172,6 @@ reason = "it tests compose.yaml, traefik-mcp.yml and mcp/dynamic as files, not o
 path = "agent-service/litellm/start.sh"
 rule = "script-name"
 reason = "the LiteLLM container starts it by this name (compose.yaml and config.yaml name it)"
-
-[[layout.allow]]
-path = "agent-service/setup"
-rule = "script-name"
-reason = "the operator runs it by this name and hal apply names it in its prompt"
 
 [[layout.allow]]
 path = "bin/hal"
