@@ -3,6 +3,6 @@ agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
 role = "builder"
 base = "641e072e2155c8e82128fb3c3cd5e0ad56ea2337"
 branch = "claude/issue-1110-keycloak-drops-agent-service-objects"
-scope = ["docs/architecture.md", "docs/keycloak.md", "docs/naming.md", "keycloak/realm.yaml", "probe/keycloak", "tests/support/realm_fake.py", "tests/test_keycloak_agents_client.py", "tests/test_keycloak_probe.py", "tests/test_stack_keycloak_unit.py", "tests/test_stack_realm_observe.py"]
+scope = ["docs/architecture.md", "docs/keycloak.md", "docs/naming.md", "keycloak/realm.yaml", "probe/keycloak", "tests/support/realm_fake.py", "tests/test_agent_service_unit.py", "tests/test_keycloak_agents_client.py", "tests/test_keycloak_probe.py", "tests/test_stack_keycloak_unit.py", "tests/test_stack_realm_observe.py"]
 opened_commit = "f001952927958126f783f7dc1a62dcddb8429a4f"
 whole_reason = "One removal of one service's realm objects from the realm file and from every proof and document that checks them, none of which stays true without the others."
