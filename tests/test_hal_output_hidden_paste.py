@@ -21,8 +21,6 @@ from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
 import pytest
-from support.agent_service_setup import SETUP, login_directory, make_login_directory, token_path
-from support.script_module import script_module
 from support.workstation_secrets_support import WIZARD_NOW, never_run
 
 from hal.output.hidden_paste import read_hidden_paste
@@ -146,15 +144,9 @@ def _chain(error: BaseException) -> list[str]:
 
 
 def _read_with(config: ChildConfig) -> str | None:
-    """What the named reader returns: the owner's paste, setup's nothing, the wizard's walk end."""
+    """What the named reader returns: the owner's paste, the wizard's walk end."""
     if config.reader == "owner":
         return read_hidden_paste(PROMPT)
-    if config.reader == "setup":
-        with script_module("agent_service_setup", SETUP, SETUP.parent) as setup:
-            setup.AgentServiceSetup(
-                setup.Tools(service_uid=os.getuid()), Path(config.home)
-            ).paste_token()
-        return None
     secrets_view.MANIFEST_PATH = Path(config.manifest)
     opened: list[str] = []
 
@@ -526,46 +518,7 @@ def test_a_failed_restore_discards_the_paste_and_never_claims_nothing_was_read(
     assert not outcome.holds_a_part(outcome.message)
 
 
-# --- the two callers ------------------------------------------------------------------------
-
-
-def test_setup_stores_a_wrapped_token_whole(spawn: Callable[..., PtyChild], tmp_path: Path) -> None:
-    """A1a: the token `claude setup-token` printed across two lines, pasted in two deliveries."""
-    make_login_directory(tmp_path)
-    token_path(tmp_path).write_text("old-token\n")
-    child = spawn(reader="setup", home=str(tmp_path))
-    child.paste(*ACKNOWLEDGED_WRAP, acknowledged=True)
-
-    outcome = child.finish()
-
-    assert outcome.error is None, outcome.shown
-    assert token_path(tmp_path).read_text() == "part1part2\n"
-
-
-@pytest.mark.parametrize(
-    "writes",
-    [
-        pytest.param(NOT_ONE_TOKEN, id="A1b not one token"),
-        pytest.param(b"\xff\r\r", id="U1 not UTF-8"),
-    ],
-)
-def test_setup_never_writes_a_refused_paste(
-    spawn: Callable[..., PtyChild], tmp_path: Path, writes: bytes
-) -> None:
-    make_login_directory(tmp_path)
-    token_path(tmp_path).write_text("old-token\n")
-    child = spawn(reader="setup", home=str(tmp_path))
-    child.paste(writes)
-
-    outcome = child.finish()
-
-    assert outcome.error == "StepFailure"
-    assert "nothing was written" in outcome.message
-    assert not any(
-        "UnicodeDecodeError" in link or outcome.holds_a_part(link) for link in outcome.chain
-    )
-    assert token_path(tmp_path).read_text() == "old-token\n"
-    assert sorted(path.name for path in login_directory(tmp_path).iterdir()) == ["token"]
+# --- the caller ---------------------------------------------------------------------------
 
 
 def test_the_wizard_stores_a_wrapped_token_whole(

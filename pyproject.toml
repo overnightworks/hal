@@ -38,10 +38,10 @@ module-name = "hal"
 
 [tool.ruff]
 line-length = 100
-extend-include = ["keycloak/go-live", "step-ca/init", "agent-service/setup"]
+extend-include = ["keycloak/go-live", "step-ca/init"]
 
 [tool.ruff.per-file-target-version]
-# agent-service/setup imports these on CI's system python, which is older than the floor.
+# hal.output keeps the syntax of Python 3.12, which is older than the floor.
 "src/hal/output/*.py" = "py312"
 
 [tool.ruff.format]

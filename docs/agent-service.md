@@ -1,43 +1,22 @@
 # The agent service
 
-Reference and runbook for the operator and for an engineer changing the agent service. The code is
+Reference for the operator and for an engineer changing the agent service: its runtime, what a turn leaves behind, an app's side, the API route through LiteLLM and the probes. The code is
 the truth: `compose.yaml` (the `agent-service` service, its `agent-songmaker`, `agent-presentator`, `agent-hopin` and `mcp` networks),
-`agent-service/service.toml`, `agent-service/image/` (the image recipe), `agent-service/live_canary.py` and the probes under `probe/agent-service/`. The egress gateway of LiteLLM is in
+`agent-service/service.toml`, `agent-service/live_canary.py` and the probes under `probe/agent-service/`. The egress gateway of LiteLLM is in
 [internal-ca.md](internal-ca.md); the platform picture is [architecture.md](architecture.md).
-
-## The image
-
-`agent-service/image/` is the recipe of the service's image (agent-runtime, Claude Code
-`2.1.302`, Codex `0.163.0`; the pins are in the Dockerfile and `requirements.txt`). Every byte that enters it is
-pinned: the base image by digest, the Python packages by hash, each CLI by its sha256 and its reported version (Codex as its release archive, whose one executable the Dockerfile unpacks by name). A
-wrong hash fails the build, and so does a CLI that does not report its pinned version; a build that
-fetches also fails on a changed or vanished artifact. The image is never pulled from a registry, because its
-name could be anyone's on a public one (`pull_policy: never`), so it is built on the PC.
-`agent-service/setup` builds it when it is missing, and `hal apply` asks to run that setup before it
-switches the unit on. The build line it runs, from the repository root:
-
-```sh
-docker build -f agent-service/image/Dockerfile -t edge-agent-service:0.12.0-claude-2.1.302-codex-0.163.0 agent-service/image
-```
-
-A release bump runs `python3 scripts/agent_service_lock.py <tag>` (it needs `git` and `uv`), the
-only writer of `requirements.txt`. A bump of either CLI changes its pin in the Dockerfile and its
-`version` in `service.toml`; every bump changes the image name, which carries the release and both CLI
-versions, in `compose.yaml` and in the build line above together. A base-image digest bump alone keeps
-the name, so setup builds nothing.
 
 ## The service
 
-`agent-service` (profile `agent-service`) is that image with `agent-service/service.toml`: one
+`agent-service` (profile `agent-service`) runs from `agent-service/service.toml`: one
 container, one worker, no published port. It runs as `1000:1000` with `init`, a read-only root, no
 capability, `no-new-privileges`, no core dump and `restart: unless-stopped`; `/tmp` (its `HOME`) and
 the working root `/run/agent-service/cli` are size-bounded tmpfs mounts owned by 1000 with mode 0700
 (the service refuses to start on a working root that is not owned by its user with exactly that
 mode), all `nosuid,nodev,noexec`. The unit `agent-service` of `fleet.yaml` is switched off
-(`enabled: false`): `hal apply` stops and removes its container, and a switched-on unit starts only the service. A missing image or login directory stops the start
-(`pull_policy: never`, `create_host_path: false`), so apply reports the unit partial and never on. A missing signing key or CA root file is
-asked of its unit's setup first (`agent-service/setup`, `step-ca/init`); a file still missing after the
-setups, such as the root while `step-ca` is off or stopped, refuses `hal apply` before its `yes`,
+(`enabled: false`): `hal apply` stops and removes its container, and a switched-on unit starts only the service. A missing login directory stops the start
+(`create_host_path: false`), so apply reports the unit partial and never on. A missing CA root file is
+asked of its unit's setup first (`step-ca/init`); a file still missing after the
+setup, such as the root while `step-ca` is off or stopped, refuses `hal apply` before its `yes`,
 naming the path and `next: hal setup`, with nothing switched.
 
 It signs for songmaker's origin, `https://songmaker.mcp.internal`, the name `traefik-mcp` answers to on `mcp`, which it joins
@@ -58,122 +37,12 @@ needs the hand recreate
 `docker compose --profile agent-service up -d --force-recreate agent-service`, in the live checkout
 after `hal update`.
 
-## The login
-
-The service runs the Claude CLI under the operator's subscription, with the one token that
-`claude setup-token` prints, in one file inside a read-only directory bind:
-
-```
-~/.secrets/agent-service/              0700
-~/.secrets/agent-service/claude/       0700, uid 1000   (bound at /run/agent-service/login/claude)
-~/.secrets/agent-service/claude/token  0600, uid 1000, one line
-```
-
-`agent-service/setup` makes it, in the operator's terminal and after `hal apply` has asked: it creates
-the directories with 0700, narrows a too-open token file to 0600, and when the token is missing or
-refused it asks the operator to run `claude setup-token` in another terminal and paste its token, then
-an empty line. `claude setup-token` prints the token across line breaks, so the paste runs up to that
-empty line and its lines are joined (`hal.output.hidden_paste`, the reader the secrets wizard uses
-too); text after the empty line, a line at the terminal's 4095-byte limit or lines that cannot be one
-token are refused. Text that arrives only after the paste was read is not part of it and stays in the
-input for the shell. The paste is read without echo, judged by the reader's rules as the exact bytes
-to write, and only then written to `token.new` (created 0600) before the rename over `token`. A refused paste leaves the old token
-as it was; the folders are opened without following a link and locked for the swap.
-`agent-service/setup --check` changes nothing and says the first gap. The token is pasted only
-there, never on a command line or in an issue. The file is a regular file of at most 16 KiB with one line, the token: no JSON,
-no API key (`sk-ant-api…`), nothing group or others can touch. The service refuses to start
-otherwise, naming `cli.anthropic.token_file` and the path, never the content. `hal secrets -v` lists
-the entry `agent-service-claude`.
-
-A second login, for Codex, lives beside it in `~/.secrets/agent-service/codex/auth.json`
-(folder 0700, file 0600), bound at `/run/agent-service/login/codex` the same way, but read-write: the
-service renews this login itself, so it needs the directory to create `.auth.json.new` and rename it
-over the file (a read-only directory logs `sibling not created` hourly and nothing renews). It is the
-service's one writable bind. The start refuses an incomplete sign-in or a file that group or others
-can touch, naming `cli.openai.token_file` and the path; a Codex run gets a copy without the renewal
-token. A stop waits for a renewal in flight, so `stop_grace_period` in `compose.yaml` covers about 45 s
-for the renewal plus at least 60 s beyond it; a kill sooner can leave `.auth.json.new` behind.
-`agent-service/setup --check` does not check it: a missing folder fails the start. It is a
-separate login with its own refresh token, so it never shares the operator's `~/.codex` and never
-rotates it away. `hal setup` walks the operator through that browser login when the file is missing (a link at
-`auth.json` counts as missing) and
-leaves a present one untouched; that is also the way to sign in again, once the file is gone. Because the
-service can write the folder, `codex login` never runs in it: hal runs it with `CODEX_HOME` at a fresh
-private folder beside it, moves only a regular `auth.json` (0600) into the folder, replacing whatever
-stood there without following a link, and removes the rest, however the login ends. hal never reads or
-prints the file. `hal secrets -v` lists the entry `agent-service/codex`; every file in the folder besides
-`auth.json` and the service's `.auth.json.new` is an unknown file there.
-
-**Why 1000:1000.** The service's reader refuses a login file that group or others can touch, so the
-container user must own the directory and the file. 1000 is the operator's uid on this PC, so his
-own `claude setup-token` writes a file the container can read. Another uid needs its own renewal
-procedure, which is not covered here. It is a deployment choice, not the reader's requirement.
-
-**Renewal.** `agent-service/setup --renew` takes a new paste, writes it to `token.new` beside the
-old one and swaps the name (an atomic rename); the next run opens the file anew, without a restart. The bind
-is the directory, never the file: a file bind (or a compose `secrets:` file) would keep the old
-inode, and the rename would never reach the running container. A missing directory fails the start
-instead of becoming a root-owned one; the directory itself stays for ever, so never replace or
-re-create it.
-
-## The signing key
-
-The service signs the capability of every admitted app-tool run with one RSA-3072 key; the app's
-verifier (songmaker-web) checks it against the public half. The service never makes the key
-(agent-runtime `docs/operations.md`, "App tools"); only `agent-service/setup` does, in the operator's
-terminal after `hal apply` has asked:
-
-```
-~/.secrets/agent-service/signing/              0700, uid 1000
-~/.secrets/agent-service/signing/private.pem   0600, uid 1000, one unencrypted PKCS#8 PEM block, at most 16 KiB
-~/.secrets/agent-service/signing/public.pem    0644, uid 1000, the SPKI half `openssl pkey -pubout` derives
-```
-
-**The contract.** Setup makes the pair with the host's `openssl` (version 3), and key bytes travel only
-over pipes: never on a command line, never in a printed line. Every path is reached without following a
-link, under one lock on the folder, and nothing is ever written through a link. `private.pem` is created
-exclusively (`private.pem.new`, then `link(2)`, which refuses any existing entry). A plain run and
-`--renew` never replace an existing key. A missing public half is derived again, and a public half with
-another mode is set to 0644. Setup refuses, in one line that names the file and the next step, a pair
-it cannot use, and changes nothing, `--renew` and the token included (the key is judged first):
-
-- a private key that is malformed, encrypted, of another size or exponent, failing openssl's own key
-  check, or missing while `public.pem` is still there, or a public half that is malformed or not its pair: the line names
-  `agent-service/setup --replace-signing-key`;
-- a wrong owner, a mode other than 0600 or a link: the line asks for the operator's own fix, because setup
-  never narrows or unlinks those.
-
-`agent-service/setup --check` changes nothing and exits 0 for a sound pair, 1 for the first gap, a
-refusal or a leftover of an interrupted run, and 2 when openssl or the host cannot answer; an openssl that exits 1 on a key counts as refusing it
-only when it passes the same check on a throwaway key. A leftover (`*.new`, `*.next.pem`) beside a
-sound pair is cleared by the next plain run; beside a missing or unusable pair only the `*.new` of an
-interrupted creation is, and the `*.next.pem` wait for `--replace-signing-key`. A temporary entry that
-is a link, no regular file or not the service's is never unlinked. `hal secrets -v` lists both files; a public half at 0644 is no finding.
-
-**Replacing the key.** `agent-service/setup --replace-signing-key` is the one command for a planned
-rotation, for a key that may have leaked, and for a lost private key (there is no backup: the key protects
-no stored data). It works only at a terminal, says what it does, and goes on after a typed `yes`. The old
-private key's directory entry is removed by the rename; the blocks are not erased. The stages:
-
-| Stage | State | What holds |
-|---|---|---|
-| R0 | the new pair is being made (openssl fails, the new key fails its check, an interruption) | the active pair is unchanged, or still missing; running containers are unaffected; run the command again, or plain setup to clear leftovers |
-| R1 | interrupted between the two renames | the new private key sits beside the old public half: `--check` says so and plain setup refuses; the service still signs with the old key it read at startup, and songmaker-web still trusts the old one, until the service is recreated, then calls fail with 401; the old pair is gone, so run the command again |
-| R2 | both renamed, nothing recreated | `--check` is 0, but the old key still signs and is still trusted: a compromise is not recovered yet |
-| R3 | one container recreated | every tool call fails with 401 until the other is recreated |
-| R4 | both recreated | done once a new capability verifies against the new `public.pem` and every songmaker-web container was created after it |
-
-The command ends by naming the two recreates: agent-service with `python3 agent-service/live_signer.py`
-while songmaker-web is not on the network (otherwise as in "The service"), then
-songmaker-web with songmaker's own deploy command. A file bind keeps the old inode, so only a recreate
-reaches a container, never a restart. There is no grace period.
-
 ## What a turn leaves behind
 
 The service has no writable persistent mount but the Codex login directory (a renewal rewrites `auth.json` there, nothing a turn leaves). The CLI's per-run home and work directories and `/tmp`
 are tmpfs ([The service](#the-service)), which the kernel may page to swap, and a restart or recreate
 drops them. The only host binds are `service.toml` and the two login directories, read-only except the Codex
-login directory, which the service renews ([The login](#the-login)), and the two read-only file secrets ([The service](#the-service)); the Claude login reaches the CLI only through its environment. The service sets
+login directory, which the service renews, and the two read-only file secrets ([The service](#the-service)); the Claude login reaches the CLI only through its environment. The service sets
 no `logging` override, so its logs follow the Docker daemon's settings; their destination and
 retention are set there, not in this file (log retention: edge#167,
 <https://github.com/overnightworks/edge/issues/167>). What the service itself keeps of a run is

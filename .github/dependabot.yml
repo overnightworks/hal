@@ -27,7 +27,7 @@ updates:
           - version-update:semver-minor
   - package-ecosystem: docker
     directories:
-      - /agent-service/image
+      - /probe/agent-service
       - /scripts/system-proof
       - /src/hal/backup/images
     multi-ecosystem-group: images

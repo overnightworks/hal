@@ -10,7 +10,7 @@ calls the wheel's `list_gateway_models` through the front (HAL-2.6m's W models).
 Measured: a run took 81 s, teardown included; the teardown is litellm_retention.py's, a few
 seconds (K 30 s, CAP 1800 s).
 
-The throwaway runs on the agent-service image's pinned base (the first `FROM` of its Dockerfile)
+The throwaway runs on the pinned base in probe/agent-service/Dockerfile (its first `FROM`)
 with this interpreter's site-packages mounted read-only, so the wheel is exactly the one hal's lock
 pins, and as the host's own user and group, which own the venv's files; the probe refuses root.
 Its program builds the turn from the wheel's own types; the tool's handler answers with the result
@@ -53,7 +53,7 @@ from litellm_retention import (
     front_user_agent,
 )
 
-DOCKERFILE = REPO / "agent-service" / "image" / "Dockerfile"
+DOCKERFILE = REPO / "probe" / "agent-service" / "Dockerfile"
 BASE_IMAGE = re.compile(r"^FROM\s+(\S+)", re.M)
 WHEEL = "/wheel"
 KEY_FILE = "/run/secrets/hopin-key"
@@ -132,7 +132,7 @@ asyncio.run(main())
 
 
 def base_image() -> str:
-    """The agent-service image's pinned base: the reference of its Dockerfile's first `FROM`."""
+    """The probe's pinned base: the reference of probe/agent-service/Dockerfile's first `FROM`."""
     matched = BASE_IMAGE.search(DOCKERFILE.read_text(encoding="utf-8"))
     if matched is None or "@sha256:" not in matched[1]:
         raise ProbeFailed(f"{DOCKERFILE}: no pinned FROM")

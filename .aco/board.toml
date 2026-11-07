@@ -1,8 +1,8 @@
 lane_shared = ["quality/baseline.toml"]
 dependency_paths = [
   ".github/workflows/",
-  "agent-service/image/Dockerfile",
   "compose.yaml",
+  "probe/agent-service/Dockerfile",
   "probe/agent-service/compose.probe.yaml",
   "probe/keycloak/compose.probe.yaml",
   "probe/step-ca/compose.probe.yaml",
