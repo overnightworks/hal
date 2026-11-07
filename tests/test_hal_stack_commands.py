@@ -49,7 +49,7 @@ from support.stack_external import (
 )
 from support.stack_global_stop import hosts_asked  # noqa: F401 the fixture, used by `fakes`
 from support.stack_plan_rows import find_row, plain
-from support.workstation_support import write_hal_config
+from support.workstation_support import TEST_TUNNEL_ID, write_hal_config
 
 from hal import cli, stack_commands
 from hal.grammar import ExitCode
@@ -187,7 +187,7 @@ def test_the_emergency_verbs_end_every_outcome_with_the_exit_they_always_had(
 )
 def test_every_outcome_of_apply_has_one_exit_of_hal(monkeypatch, home, stack_exit, hal_exit):  # noqa: F811
     """#784 D1, D2: declined 1, a guard 4, cannot plan, failed and partial 3."""
-    monkeypatch.setattr(stack, "apply_units", lambda _local, _api: stack_exit)
+    monkeypatch.setattr(stack, "apply_units", lambda _api, _own_tunnel: stack_exit)
 
     assert cli.main(["apply"]) == hal_exit
 
@@ -269,6 +269,27 @@ def test_apply_at_a_terminal_applies_the_local_part_then_publishes(hal, applying
     assert "hal apply: done" in result.err
     assert "✓ applied" not in result.out
     assert applying.fake_tofu.call("apply")
+
+
+def test_apply_plans_on_the_tunnel_the_machines_tunnel_config_names(hal, applying):
+    applying.fake_tofu.configure(**CHANGING_PLAN)
+
+    hal("apply", answers=("yes", "yes"))
+
+    assert f"-var=tunnel_id={TEST_TUNNEL_ID}" in applying.fake_tofu.call("plan")["argv"]
+
+
+def test_apply_without_a_tunnel_config_plans_nothing_and_the_line_names_it(
+    hal, applying, stand_in_tunnel_config
+):
+    stand_in_tunnel_config.unlink()
+
+    result = hal("apply", answers=("yes",))
+
+    assert result.exit_code == ExitCode.FAILURE
+    assert str(stand_in_tunnel_config) in result.err
+    assert "No such file" in result.err
+    assert applying.fake_tofu.calls() == []
 
 
 @pytest.mark.usefixtures("failing_app")

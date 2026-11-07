@@ -36,7 +36,7 @@ _OCTAL_NUMBER = re.compile(r"^0o[0-7]+$")
 
 DEFAULT_TARGET = "http://127.0.0.1:8081"  # Traefik
 ADMIN_PORT = 8090
-_HOST_KEYS = {"name", "exposure", "reason", "ready", "target", "deny_public"}
+_HOST_KEYS = {"name", "exposure", "reason", "ready", "target", "deny_public", "tunnel"}
 # Lowercase unreserved segments, no query or trailing slash: the rendering embeds it in a rule.
 _DENIED_PATH = re.compile(r"(/[a-z0-9._~-]+)+")
 _HTTPS_URL = re.compile(r"https://[a-z0-9.-]+(:\d+)?(/[a-z0-9._~/-]*)?")
@@ -44,6 +44,8 @@ _REDIRECT_KEYS = {"hosts", "target", "serve"}
 _SERVE_KEYS = {"pages", "files"}
 _FILES_PREFIX = re.compile(r"(/[a-z0-9._~-]+)+/")
 _LABEL = re.compile(r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?")
+# A tunnel's name goes unquoted into Cloudflare's tunnel query and into OpenTofu's lookup key.
+_TUNNEL_NAME = _LABEL
 # A compose project name: it is also the repository and the directory name of an app.
 _APP_KEY = re.compile(r"[a-z0-9][a-z0-9_-]*")
 _GITHUB_ORGANISATION = re.compile(r"[A-Za-z0-9]([A-Za-z0-9-]{0,37}[A-Za-z0-9])?")
@@ -87,6 +89,7 @@ class Unit:
     setup: str | None
     hosts: tuple[str, ...] = ()
     build: str | None = None  # the recipe directory of the unit's one built image; None: pulled
+    served_elsewhere: tuple[Host, ...] = ()  # the hosts another tunnel serves
 
 
 @dataclass(frozen=True)
@@ -95,6 +98,7 @@ class App:
     enabled: bool
     default_branch: str
     hosts: tuple[str, ...] = ()
+    served_elsewhere: tuple[Host, ...] = ()  # the hosts another tunnel serves
 
 
 def read(catalog_file: Path) -> Any:
@@ -205,8 +209,16 @@ def _app(
     if key in profile_services or key == edge_project:
         raise CatalogError(f"services.{key}: an app's key is no compose profile or project of edge")
     run = _app_run(key, entry)
-    hosts = _app_hosts(key, entry, document)
-    return App(key, _enabled(key, run), _default_branch(key, entry["repo"]), hosts)
+    entered = _entered_hosts(key, entry, document)
+    _require_ready(entered)
+    enabled = _enabled(key, run)
+    return App(
+        key,
+        enabled,
+        _default_branch(key, entry["repo"]),
+        _names(entered),
+        _served_elsewhere(entered, enabled),
+    )
 
 
 def _app_run(key: str, entry: dict) -> dict:
@@ -221,14 +233,6 @@ def _app_run(key: str, entry: dict) -> dict:
         if run_key not in _APP_RUN_KEYS:
             raise CatalogError(f"services.{key}.run.{run_key}: unknown key for an app")
     return run
-
-
-def _app_hosts(key: str, entry: dict, document: Any) -> tuple[str, ...]:
-    """The names of an app's hosts, each one valid and with its `ready` path: the publish phase
-    asks it there, so planning refuses a host without it before anything starts."""
-    entered = _entered_hosts(key, entry, document)
-    _require_ready(entered)
-    return tuple(one.name for _, one in entered)
 
 
 def _default_branch(key: str, repo: Any) -> str:
@@ -269,18 +273,26 @@ def _unit(
     for run_key in run:
         if run_key not in _RUN_KEYS:
             raise CatalogError(f"services.{key}.run.{run_key}: unknown key")
+    entered = _entered_hosts(key, entry, document)
+    enabled = _enabled(key, run)
     return Unit(
         key,
-        _enabled(key, run),
+        enabled,
         _setup(key, run.get("setup"), repository),
-        _declared_hosts(key, entry, document),
+        _names(entered),
         _build(key, run.get("build"), repository),
+        _served_elsewhere(entered, enabled),
     )
 
 
-def _declared_hosts(key: str, entry: dict, document: Any) -> tuple[str, ...]:
+def _names(entered: list[tuple[str, Host]]) -> tuple[str, ...]:
     """The catalog names an entry declares, enabled or not: the emergency barrier covers all."""
-    return tuple(one.name for _, one in _entered_hosts(key, entry, document))
+    return tuple(one.name for _, one in entered)
+
+
+def _served_elsewhere(entered: list[tuple[str, Host]], enabled: bool) -> tuple[Host, ...]:
+    """The hosts another tunnel serves; a disabled entry publishes none, as `hosts` has it."""
+    return tuple(one for _, one in entered if enabled and one.tunnel is not None)
 
 
 def _enabled(key: str, run: dict) -> bool:
@@ -329,6 +341,7 @@ class Host:
     ready: str | None
     target: str
     deny_public: tuple[str, ...] = ()
+    tunnel: str | None = None  # the other tunnel that serves the host; None: hal's own
 
 
 def hosts(document: Any) -> tuple[Host, ...]:
@@ -383,7 +396,8 @@ def _is_dotted_labels(zone: str) -> bool:
 
 
 def _require_ready(entered: list[tuple[str, Host]]) -> None:
-    """The publish phase asks an app's host through Traefik at `ready` before it publishes it."""
+    """An app's host needs its `ready` path, so planning refuses one without it before anything
+    starts: the publish phase asks it there, or the tunnel's owner does before the host moves."""
     for path, one in entered:
         if one.ready is None:
             raise CatalogError(f"{path}.ready: an app's host needs the path the publish asks")
@@ -421,15 +435,17 @@ def _host(service: str, path: str, item: Any, zone: str) -> Host:
     name = _name(path, item.get("name"))
     exposure = _exposure(path, item.get("exposure"))
     _check_exposure_fits_name(path, name, exposure)
+    fqdn = fqdn_of(name, zone)
     return Host(
         service=service,
         name=name,
-        fqdn=fqdn_of(name, zone),
+        fqdn=fqdn,
         exposure=exposure,
         reason=_reason(path, item.get("reason"), exposure),
         ready=_ready(path, item),
         target=_target(path, service, name, item.get("target", DEFAULT_TARGET)),
         deny_public=_deny_public(path, item.get("deny_public", [])),
+        tunnel=_tunnel(path, fqdn, item),
     )
 
 
@@ -495,6 +511,21 @@ def _deny_public(path: str, denied: Any) -> tuple[str, ...]:
             "(letters, digits, . _ ~ -), no query, no trailing slash"
         )
     return tuple(denied)
+
+
+def _tunnel(path: str, fqdn: str, item: dict) -> str | None:
+    """The other tunnel that serves the host; `target` is only hal's ingress target, and the
+    wildcard stays with hal's Access and tunnel."""
+    if "tunnel" not in item:
+        return None
+    tunnel = item["tunnel"]
+    if not isinstance(tunnel, str) or not _TUNNEL_NAME.fullmatch(tunnel):
+        raise CatalogError(f"{path}.tunnel: must be one lowercase DNS label")
+    if "target" in item:
+        raise CatalogError(f"{path}.tunnel: {fqdn} takes no target on another tunnel")
+    if item.get("name") == WILDCARD:
+        raise CatalogError(f"{path}.tunnel: the wildcard {fqdn} stays on hal's tunnel")
+    return tunnel
 
 
 def _loopback_port(target: Any) -> int | None:

@@ -9,11 +9,12 @@ import shutil
 import signal
 import subprocess
 import sys
+from collections.abc import Collection
 from pathlib import Path
 
 import pytest
 from support.git_support import elsewhere, hal_command, hal_environment, hal_program, run_hal
-from support.workstation_support import RunnerWithCleanLogs, home_check
+from support.workstation_support import TEST_TUNNEL_ID, RunnerWithCleanLogs, home_check
 
 from hal import check_commands, cli, exposure_rows
 from hal.exposure import host, inspection
@@ -282,11 +283,15 @@ class FakeCloudflare:
 
     def __init__(self, outcome) -> None:
         self.outcome = outcome
+        self.tunnels_asked: list[cloudflare_read.OwnTunnel] = []
+        self.tunnel_names_asked: list[set[str]] = []
 
-    def __call__(self, _token: str) -> FakeCloudflare:
+    def __call__(self, _token: str, tunnel: cloudflare_read.OwnTunnel) -> FakeCloudflare:
+        self.tunnels_asked.append(tunnel)
         return self
 
-    def read(self, _zone: str):
+    def read(self, _zone: str, tunnel_names: Collection[str]):
+        self.tunnel_names_asked.append(set(tunnel_names))
         if isinstance(self.outcome, BaseException):
             raise self.outcome
         if callable(self.outcome):
@@ -323,8 +328,12 @@ def hosts_home(tmp_path, monkeypatch) -> Path:
 
 @pytest.fixture
 def run_hosts(hosts_home, monkeypatch, capsys):
-    def run(*arguments: str, reads=CLEAN_SNAPSHOT, prober=None) -> tuple[int, str, str]:
-        monkeypatch.setattr(cloudflare_read, "CloudflareClient", FakeCloudflare(reads))
+    def run(
+        *arguments: str, reads=CLEAN_SNAPSHOT, prober=None, cloudflare=None
+    ) -> tuple[int, str, str]:
+        monkeypatch.setattr(
+            cloudflare_read, "CloudflareClient", cloudflare or FakeCloudflare(reads)
+        )
         monkeypatch.setattr(host_probe, "HttpProber", prober or AnsweringProber())
         try:
             exit_code = cli.main(["check", "hosts", *arguments])
@@ -340,6 +349,29 @@ def test_clean_hosts_say_how_many_and_exit_0(run_hosts):
     assert run_hosts() == (0, "no findings (1 hosts)\n", "")
 
 
+def test_hosts_are_checked_against_the_tunnel_the_machines_tunnel_config_names(
+    run_hosts, stand_in_tunnel_config
+):
+    cloudflare = FakeCloudflare(CLEAN_SNAPSHOT)
+
+    assert run_hosts(cloudflare=cloudflare)[0] == 0
+    assert cloudflare.tunnels_asked == [
+        cloudflare_read.OwnTunnel(TEST_TUNNEL_ID, stand_in_tunnel_config)
+    ]
+
+
+def test_without_a_tunnel_config_the_hosts_cannot_be_checked_and_the_line_names_it(
+    run_hosts, stand_in_tunnel_config
+):
+    stand_in_tunnel_config.unlink()
+    cloudflare = FakeCloudflare(CLEAN_SNAPSHOT)
+
+    exit_code, out, err = run_hosts(cloudflare=cloudflare)
+
+    assert (exit_code, out, cloudflare.tunnels_asked) == (3, "", [])
+    assert str(stand_in_tunnel_config) in err
+
+
 def test_clean_hosts_in_json_are_an_empty_list_keyed_by_the_area(run_hosts):
     exit_code, out, err = run_hosts("--json")
 
@@ -352,6 +384,45 @@ def test_findings_exit_1_and_never_print_the_token_in_text(run_hosts):
     assert (exit_code, err) == (1, "")
     assert out.splitlines()[0].startswith("record-wrong example.test: ")
     assert SENTINEL not in out
+
+
+MOVED_HOSTS = (
+    DECLARED_HOSTS
+    + """\
+  moved:
+    hosts:
+      - {name: there, exposure: public, reason: moved, tunnel: platform}
+      - {name: back, exposure: public, reason: moved, tunnel: platform}
+      - {name: own, exposure: public, reason: not moved}
+"""
+)
+
+
+def record_to(name: str, target: str) -> cloudflare_read.Record:
+    return cloudflare_read.Record(name, "CNAME", target, True)
+
+
+def test_each_record_is_held_to_the_tunnel_its_host_names_which_is_looked_up_once(run_hosts):
+    """A moved host on its tunnel is clean; one on hal's, or an own host on the other, is wrong."""
+    (tofu.PROJECT_ROOT / "fleet.yaml").write_text(MOVED_HOSTS)
+    other = "platform-id.cfargotunnel.com"
+    records = (
+        record_to("example.test", ZONE_TARGET),
+        record_to("there.example.test", other),
+        record_to("back.example.test", ZONE_TARGET),
+        record_to("own.example.test", other),
+    )
+    reads = cloudflare_read.Snapshot("t-1", records, (), (), {"platform": "platform-id"})
+    cloudflare = FakeCloudflare(reads)
+
+    exit_code, out, _ = run_hosts("--json", cloudflare=cloudflare)
+
+    assert exit_code == 1
+    assert [(item["problem"], item["subject"]) for item in json.loads(out)["hosts"]] == [
+        ("record-wrong", "back.example.test"),
+        ("record-wrong", "own.example.test"),
+    ]
+    assert cloudflare.tunnel_names_asked == [{"platform"}]
 
 
 def test_findings_in_json_are_one_object_keyed_by_the_area_without_the_token(run_hosts):

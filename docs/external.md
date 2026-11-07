@@ -94,8 +94,36 @@ Allowlist-Umgebung, dieselbe State-Passphrase).
 
 ## Was `apply` ausserdem setzt
 
-**Die Tunnel-Zeilen.** Eine je Host aus dem Katalog, die 404-Regel zuletzt. Die Konfiguration des
-Tunnels gehoert ganz dem Katalog: eine Zeile von anderswo zeigt `plan` als entfernt, und sie
+**Welcher Tunnel.** `hal apply` und `hal check hosts` suchen hals Tunnel ueber die ID in
+`/etc/cloudflared/config.yml`, die Datei, die der laufende Tunnel liest; weitere Tunnel im Konto
+spielen keine Rolle, ausser ein Host nennt einen davon (unten). Fehlt die Datei oder nennt sie
+keine ID, oder hat kein lebender Tunnel die ID, endet der Lauf mit einem Fehler.
+
+**Ein Host auf einem anderen Tunnel.** Ein Host im Katalog kann mit `tunnel: <name>` einen anderen
+Tunnel im Konto der Zone nennen (ein kleingeschriebenes DNS-Label; nicht neben `target`, nicht auf
+`*`). `apply` sucht jeden genannten Tunnel einmal ueber seinen Namen unter den lebenden Tunneln und
+richtet den Record des Hosts auf ihn; der Host verliert nur seine Zeile in hals Tunnel, die der
+Besitzer des anderen Tunnels in dessen Ingress schreibt. Record, `deny_public`, Access und der
+Import bleiben bei hal, wie ohne den Schluessel. Nennt der Name hals eigenen Tunnel, scheitert der
+Plan.
+- **Umziehen:** erst meldet der Besitzer des Tunnels den Host dort bereit, dann bekommt der Host im
+  Katalog `tunnel: <name>`, dann `hal apply`. Die `ready`-Pruefung der Publish-Phase fragt ihn
+  nicht mehr: seine Bereitschaft belegt der Besitzer des Tunnels vor dem Umzug, danach belegen sie
+  `/health` mit 200 und die abgewiesenen `deny_public`-Pfade unter dem oeffentlichen Namen.
+  `ready` bleibt im Katalog Pflicht fuer den Host einer App.
+- **Zurueck:** die Zeile `tunnel:` entfernen, `hal apply`; Record und Tunnel-Zeile kehren zu hals
+  Tunnel zurueck. hals Container der App laeuft waehrenddessen weiter als Ziel dieses Rueckwegs.
+- **Gibt es den genannten Tunnel nicht mehr** (geloescht, umbenannt oder doppelt), scheitert jeder
+  `hal apply` und jeder `hal check hosts`, bis der Host zurueckgezogen ist; ein Tunnel, der
+  geloescht werden soll, verliert deshalb zuerst seine Hosts im Katalog.
+- **`hal check hosts`** erwartet den Record eines solchen Hosts als CNAME auf dessen Tunnel; zeigt
+  er auf hals Tunnel (oder der eines eigenen Hosts auf den anderen), meldet er `record-wrong`.
+- **`hal stop <dienst>`** setzt seine Sperre weiter in hals Traefik; die Zeile nennt jeden Host,
+  den sie nicht schliesst (`<fqdn> stays served by tunnel <name>`). `hal stop --all` schliesst nur
+  hals Tunnel.
+
+**Die Tunnel-Zeilen.** Eine je Host aus dem Katalog, der auf hals Tunnel liegt, die 404-Regel
+zuletzt. Die Konfiguration des Tunnels gehoert ganz dem Katalog: eine Zeile von anderswo zeigt `plan` als entfernt, und sie
 verschwindet nach `yes` (anders als undeklarierte Records und Apps). Das gilt, **solange Cloudflare den
 Tunnel verwaltet (`config_src = cloudflare`)**. Solange er `local` ist, bedient cloudflared
 `/etc/cloudflared/config.yml`, und die Zeilen, die `apply` schreibt, bedienen nichts. Der Wechsel von

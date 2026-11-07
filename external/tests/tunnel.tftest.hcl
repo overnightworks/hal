@@ -19,6 +19,7 @@ mock_provider "cloudflare" {
 
 variables {
   catalog_file = "tests/fixtures/hosts-plain.yaml"
+  tunnel_id    = "tunnel-id"
 }
 
 run "t1_the_plain_catalog_gets_one_line_per_host_and_the_404_rule_last" {
@@ -263,5 +264,127 @@ run "t13_removing_the_last_host_leaves_only_the_404_rule" {
       == ["http_status:404"]
     )
     error_message = "the configuration is not planned with the 404 rule alone"
+  }
+}
+
+# A host another tunnel serves keeps its record, its deny clause and its Access app; only its line
+# in hal's ingress goes, and its record follows the tunnel looked up by its name.
+run "t15_a_host_on_another_tunnel_points_its_record_there_and_leaves_hals_ingress" {
+  command = plan
+
+  variables {
+    catalog_file = "tests/fixtures/tunnel-moved.yaml"
+  }
+
+  override_data {
+    target = data.cloudflare_zero_trust_tunnel_cloudflared.named
+    values = { id = "platform-tunnel-id" }
+  }
+
+  assert {
+    condition = (
+      keys(data.cloudflare_zero_trust_tunnel_cloudflared.named) == ["platform"]
+      && data.cloudflare_zero_trust_tunnel_cloudflared.named["platform"].filter.name == "platform"
+      && data.cloudflare_zero_trust_tunnel_cloudflared.named["platform"].filter.is_deleted == false
+      && data.cloudflare_zero_trust_tunnel_cloudflared.named["platform"].filter.uuid == null
+    )
+    error_message = "the named tunnel is not looked up once, as the live one with that name"
+  }
+
+  assert {
+    condition = (
+      cloudflare_dns_record.host["hopin.edge-fixture.invalid"].content == "platform-tunnel-id.cfargotunnel.com"
+      && cloudflare_dns_record.host["check.edge-fixture.invalid"].content == "platform-tunnel-id.cfargotunnel.com"
+      && cloudflare_dns_record.host["app.edge-fixture.invalid"].content == "tunnel-id.cfargotunnel.com"
+      && cloudflare_dns_record.host["www.edge-fixture.invalid"].content == "tunnel-id.cfargotunnel.com"
+    )
+    error_message = "a moved host's record does not point at its tunnel, or an own host's or a redirect-only name's left hal's"
+  }
+
+  assert {
+    condition = (
+      tolist([for rule in cloudflare_zero_trust_tunnel_cloudflared_config.this.config.ingress : rule.hostname])
+      == tolist(["app.edge-fixture.invalid", null])
+    )
+    error_message = "hal's ingress is not the own host and then the 404 rule"
+  }
+
+  assert {
+    condition = (
+      contains(keys(local.hosts), "hopin.edge-fixture.invalid")
+      && contains(local.record_fqdns, "hopin.edge-fixture.invalid")
+      && keys(local.access_app_hosts) == ["hopin.edge-fixture.invalid"]
+      && [for destination in cloudflare_zero_trust_access_application.host["hopin.edge-fixture.invalid"].destinations : "${destination.type} ${destination.uri}"] == ["public hopin.edge-fixture.invalid"]
+    )
+    error_message = "the moved host left the hosts, its record's import or its Access app"
+  }
+
+  assert {
+    condition = [for rule in cloudflare_ruleset.deny_public[0].rules : rule.expression] == [
+      "( lower(http.host) eq \"app.edge-fixture.invalid\" or starts_with(lower(http.host), \"app.edge-fixture.invalid:\") or lower(http.host) eq \"check.edge-fixture.invalid\" or starts_with(lower(http.host), \"check.edge-fixture.invalid:\") or lower(http.host) eq \"hopin.edge-fixture.invalid\" or starts_with(lower(http.host), \"hopin.edge-fixture.invalid:\") ) and url_decode(http.request.uri.path, \"r\") wildcard \"/*auth/*backchannel-logout*\"",
+    ]
+    error_message = "the deny rule no longer covers the moved hosts as it covers them unmoved"
+  }
+}
+
+run "t15_a_named_tunnel_that_is_hals_own_fails_the_plan" {
+  command = plan
+
+  variables {
+    catalog_file = "tests/fixtures/tunnel-moved.yaml"
+  }
+
+  override_data {
+    target = data.cloudflare_zero_trust_tunnel_cloudflared.named
+    values = { id = "tunnel-id" }
+  }
+
+  expect_failures = [cloudflare_zero_trust_tunnel_cloudflared_config.this]
+}
+
+run "t16_apply_the_moved_hosts" {
+  command = apply
+
+  variables {
+    catalog_file = "tests/fixtures/tunnel-moved.yaml"
+  }
+
+  override_data {
+    target = data.cloudflare_zero_trust_tunnel_cloudflared.named
+    values = { id = "platform-tunnel-id" }
+  }
+}
+
+run "t16_removing_the_tunnel_key_moves_record_and_line_back_and_keeps_the_protection" {
+  command = plan
+
+  variables {
+    catalog_file = "tests/fixtures/tunnel-unmoved.yaml"
+  }
+
+  assert {
+    condition = (
+      length(data.cloudflare_zero_trust_tunnel_cloudflared.named) == 0
+      && alltrue([for record in cloudflare_dns_record.host : record.content == "tunnel-id.cfargotunnel.com"])
+    )
+    error_message = "a record still points at the other tunnel, or a tunnel is still looked up by name"
+  }
+
+  assert {
+    condition = (
+      tolist([for rule in cloudflare_zero_trust_tunnel_cloudflared_config.this.config.ingress : rule.hostname])
+      == tolist(["app.edge-fixture.invalid", "check.edge-fixture.invalid", "hopin.edge-fixture.invalid", null])
+    )
+    error_message = "the hosts did not get their lines in hal's ingress back"
+  }
+
+  assert {
+    condition = (
+      keys(local.access_app_hosts) == ["hopin.edge-fixture.invalid"]
+      && [for rule in cloudflare_ruleset.deny_public[0].rules : rule.expression] == [
+        "( lower(http.host) eq \"app.edge-fixture.invalid\" or starts_with(lower(http.host), \"app.edge-fixture.invalid:\") or lower(http.host) eq \"check.edge-fixture.invalid\" or starts_with(lower(http.host), \"check.edge-fixture.invalid:\") or lower(http.host) eq \"hopin.edge-fixture.invalid\" or starts_with(lower(http.host), \"hopin.edge-fixture.invalid:\") ) and url_decode(http.request.uri.path, \"r\") wildcard \"/*auth/*backchannel-logout*\"",
+      ]
+    )
+    error_message = "the deny rule or the Access app differs from the moved plan"
   }
 }

@@ -408,7 +408,13 @@ def _compose_text(app_checkout: deploy_checkout.AppCheckout, sha: str) -> str | 
 
 def _contract_services(app: catalog.App, tag: str, text: str | None) -> tuple[str, ...]:
     try:
-        return app_contract.check(text, app.key, tag, app.hosts)
+        return app_contract.check(
+            text,
+            app.key,
+            tag,
+            app.hosts,
+            served_elsewhere=frozenset(host.name for host in app.served_elsewhere),
+        )
     except app_contract.ContractError as error:
         raise AppError(str(error)) from error
 

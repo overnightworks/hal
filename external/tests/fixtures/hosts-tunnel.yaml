@@ -1,0 +1,11 @@
+cloudflare:
+  zone: edge-fixture.invalid
+
+github:
+  org: edge-fixture.invalid
+
+services:
+  hopin:
+    hosts:
+      - {name: hopin, exposure: bypass, reason: "own login", ready: /health, tunnel: platform}
+      - {name: www, exposure: public, reason: "the alias"}

@@ -17,6 +17,10 @@ mock_provider "cloudflare" {
   }
 }
 
+variables {
+  tunnel_id = "tunnel-id"
+}
+
 run "the_wildcard_catalog_yields_the_expected_hosts" {
   command = plan
 
@@ -58,5 +62,23 @@ run "an_empty_catalog_has_no_hosts" {
   assert {
     condition     = length(local.hosts) == 0
     error_message = "the empty fixture has no hosts"
+  }
+}
+
+run "the_tunnel_catalog_yields_the_expected_hosts" {
+  command = plan
+
+  variables {
+    catalog_file = "tests/fixtures/hosts-tunnel.yaml"
+  }
+
+  override_data {
+    target = data.cloudflare_zero_trust_tunnel_cloudflared.named
+    values = { id = "platform-tunnel-id" }
+  }
+
+  assert {
+    condition     = local.hosts == jsondecode(file("tests/fixtures/hosts-tunnel.expected.json"))
+    error_message = "local.hosts differs from the expectation the Python reader is also held to"
   }
 }

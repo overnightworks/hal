@@ -6,6 +6,7 @@ mock_provider "cloudflare" {
 
 variables {
   catalog_file = "tests/fixtures/empty.yaml"
+  tunnel_id    = "tunnel-id"
 }
 
 run "an_empty_catalog_has_no_services" {

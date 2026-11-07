@@ -12,6 +12,7 @@ from hal.stack import catalog, checkout
 from hal.stack.external import apply, cloudflare_read, host_check, host_probe, secrets, tofu
 
 INTERRUPTED = 130
+ReaderFactory = Callable[[str, cloudflare_read.OwnTunnel], cloudflare_read.CloudflareRead]
 
 
 def apply_command(
@@ -19,13 +20,13 @@ def apply_command(
     tree: Path | None = None,
     git: checkout.Runner = checkout.run_git,
     *,
+    own_tunnel: Callable[[], cloudflare_read.OwnTunnel],
     prober_for: Callable[[str], host_probe.Prober] = host_probe.HttpProber,
 ) -> int:
     """`tree` is the checkout whose `external/` is applied (this code's own by default): only the
-    live one, on a clean main. A plan with changes is refused before `yes` while an enabled host's
-    `ready` path does not answer on its target (`prober_for` makes the prober of one target;
-    #30 rule 8). An apply that may have changed the services, or found nothing to
-    do, ends on the host check (#30 rule 8): its verdict decides the exit.
+    live one, on a clean main; `own_tunnel` reads hal's tunnel once. A plan with changes is refused
+    before `yes` while an enabled host's `ready` path does not answer (`prober_for`; #30 rule 8).
+    An apply that may have changed the services, or found nothing to do, ends on the host check.
 
     The `try` is the first statement and SIGTERM becomes an interrupt as its first step, so every
     setup step is inside both; the one `except KeyboardInterrupt` decides every interrupt that
@@ -55,10 +56,12 @@ def apply_command(
             def plan_and_apply(home: Path, token_values: dict[str, str]) -> int:
                 nonlocal closing
                 assert planned_catalog is not None  # noqa: S101 - narrows the type; the refusal that always runs first set it
+                run.tunnel = own_tunnel()
                 try:
                     outcome = apply.apply_plan(
                         home,
                         token_values,
+                        run.tunnel.id,
                         progress=run.progress,
                         hosts=planned_catalog.hosts,
                         prober_for=prober_for,
@@ -78,8 +81,6 @@ def apply_command(
                 apply.ApplyExit.CANNOT_PLAN,
                 refusal=refusal,
             )
-            if not closing.runs_the_check:
-                return exit_code
             return _close_on_host_check(home, closing, exit_code, run)
     except KeyboardInterrupt:
         # an interrupt before the record exists left nothing behind: the fresh record says so
@@ -92,6 +93,7 @@ class _ApplyRun:
 
     progress: apply.Progress = field(default_factory=apply.Progress)
     committed_exit: int | None = None
+    tunnel: cloudflare_read.OwnTunnel | None = None
 
 
 def _exit_after_interrupt(run: _ApplyRun) -> int:
@@ -144,12 +146,20 @@ _CLOSING_LINES = {
 
 
 def _close_on_host_check(
-    home: Path, closing: apply.ClosingCheck, apply_exit: int, run: _ApplyRun
+    home: Path,
+    closing: apply.ClosingCheck,
+    apply_exit: int,
+    run: _ApplyRun,
 ) -> int:
-    """The check after the tofu session, under the apply's own signal handling. Once
-    `check_command` returned its verdict, the mapping and the lines run with the signals ignored
-    and the exit is recorded: a clean verdict is never turned into "interrupted"."""
-    check_exit = check_command(home)
+    """The check after the tofu session, under the apply's own signal handling, when `closing`
+    runs it; otherwise the apply's exit stands. Once `check_command` returned its verdict, the
+    mapping and the lines run with the signals ignored and the exit is recorded: a clean verdict
+    is never turned into "interrupted"."""
+    if not closing.runs_the_check:
+        return apply_exit
+    tunnel = run.tunnel
+    assert tunnel is not None  # noqa: S101 - narrows the type; a closing check runs only after the plan read the tunnel
+    check_exit = check_command(home, own_tunnel=lambda: tunnel)
     with _signals_ignored():
         run.committed_exit = (
             apply_exit if check_exit == host_check.CheckExit.CLEAN else apply.ApplyExit.REFUSED
@@ -181,8 +191,9 @@ class HostCheckOutcome:
 def run_host_check(
     home: Path,
     *,
+    own_tunnel: Callable[[], cloudflare_read.OwnTunnel],
     as_json: bool = False,
-    cloudflare: Callable[[str], cloudflare_read.CloudflareRead] | None = None,
+    cloudflare: ReaderFactory | None = None,
     prober: Callable[[], host_probe.Prober] | None = None,
     emit: Callable[[str], None] = write_line,
 ) -> HostCheckOutcome:
@@ -195,9 +206,10 @@ def run_host_check(
     try:
         with apply.terminate_like_interrupt():
             valid = _read_catalog()
+            tunnel = own_tunnel()
             token_values = {"CLOUDFLARE_API_TOKEN": secrets.read_cloudflare_token(home)}
             reader = (cloudflare or cloudflare_read.CloudflareClient)(
-                token_values["CLOUDFLARE_API_TOKEN"]
+                token_values["CLOUDFLARE_API_TOKEN"], tunnel
             )
             result = host_check.check_hosts(
                 valid.document, reader, (prober or host_probe.HttpProber)()
@@ -213,6 +225,7 @@ def run_host_check(
         return HostCheckOutcome(verdict_stands if verdict_stands is not None else INTERRUPTED)
     except (
         catalog.CatalogError,
+        cloudflare_read.OwnTunnelUnknown,
         secrets.SecretFileError,
         cloudflare_read.CloudflareReadError,
     ) as error:
@@ -233,13 +246,16 @@ def _cannot_check(message: str, error: Exception, token_values: dict[str, str]) 
 def check_command(
     home: Path,
     *,
-    cloudflare: Callable[[str], cloudflare_read.CloudflareRead] | None = None,
+    own_tunnel: Callable[[], cloudflare_read.OwnTunnel],
+    cloudflare: ReaderFactory | None = None,
     prober: Callable[[], host_probe.Prober] | None = None,
     emit: Callable[[str], None] = write_line,
 ) -> int:
     """The host check that closes the publish: its findings on stdout, why it could not
     run on stderr."""
-    outcome = run_host_check(home, cloudflare=cloudflare, prober=prober, emit=emit)
+    outcome = run_host_check(
+        home, own_tunnel=own_tunnel, cloudflare=cloudflare, prober=prober, emit=emit
+    )
     for line in outcome.cause:
         write_line(f"{apply.SENDER}: host check: cannot check, {line}", stream=Stream.STDERR)
     return outcome.exit_code
@@ -317,7 +333,7 @@ def _guarded(
             return refused
         token_values = secrets.read_secrets(home, access)
         return run(home, token_values)
-    except (secrets.SecretFileError, tofu.TofuError) as error:
+    except (cloudflare_read.OwnTunnelUnknown, secrets.SecretFileError, tofu.TofuError) as error:
         _report(f"{sender}: {error}", error, token_values, sender)
     except apply.StepFailed as failure:
         _report(

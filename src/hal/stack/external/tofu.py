@@ -242,14 +242,17 @@ class Session:
     environment: dict[str, str]
     temporary_directory: Path
 
-    def plan_arguments_on(self, catalog_bytes: bytes) -> list[str]:
-        """The plan arguments that make tofu read exactly these catalog bytes, held in a private
-        file that lives and dies with this session."""
+    def plan_arguments(self, tunnel_id: str, catalog_bytes: bytes | None) -> list[str]:
+        """The plan arguments that look up the tunnel with this id and, given catalog bytes, make
+        tofu read exactly them, held in a private file that lives and dies with this session."""
+        arguments = [*PLAN_ARGUMENTS, f"-var=tunnel_id={tunnel_id}"]
+        if catalog_bytes is None:
+            return arguments
         snapshot = self.temporary_directory / "fleet.yaml"
         descriptor = os.open(snapshot, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(descriptor, "wb") as file:
             file.write(catalog_bytes)
-        return [*PLAN_ARGUMENTS, f"-var=catalog_file={snapshot}"]
+        return [*arguments, f"-var=catalog_file={snapshot}"]
 
 
 @contextmanager
