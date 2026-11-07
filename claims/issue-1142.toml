@@ -1,0 +1,8 @@
+claim_id = "f30f1b1d26994094aa5e6339cd3ff304"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "3a86fbd6652afe834eafb99cd0185b050c8b2b40"
+branch = "claude/issue-1142-platform-secrets-replace-secrets-backup"
+scope = ["docs/architecture.md", "docs/backup.md", "docs/home.md", "src/hal/workstation/secrets_manifest.toml"]
+opened_commit = "8632cc87bfc69ad7397afd19e0b912deb2206583"
+whole_reason = "One ruling changes how secrets survive a disk loss, and the three documents and the manifest that describe it change together."
