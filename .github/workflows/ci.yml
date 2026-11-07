@@ -96,19 +96,16 @@ jobs:
             case $module_file in "$tool_dir/"*) ;; *) echo "$module imported from $module_file"; exit 1 ;; esac
           done
 
-      - name: Compose renders (default, keycloak, step-ca, probe, agent-service, agent-probe and litellm profiles, Keycloak bootstrap and probe overlays)
+      - name: Compose renders (default, keycloak, step-ca, probe and litellm profiles, Keycloak bootstrap and probe overlays)
         run: |
           docker compose config -q
           docker compose --profile keycloak config -q
           docker compose --profile step-ca config -q
           docker compose --profile probe config -q
-          docker compose --profile agent-service config -q
-          docker compose --profile agent-probe config -q
           docker compose --profile litellm config -q
           docker compose --profile litellm config --services | grep -x litellm
           docker compose --profile litellm config --services | grep -x litellm-front
           docker compose --profile litellm config --services | grep -x agent-egress
-          docker compose --profile agent-probe config --services | grep -x agent-probe
           docker compose --profile step-ca config --services | grep -x step-ca
           docker compose --profile step-ca config --services | grep -x traefik-mcp
           docker compose --profile step-ca config --services | grep -x traefik-mcp-acme-owner

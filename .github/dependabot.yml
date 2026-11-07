@@ -20,8 +20,6 @@ updates:
     multi-ecosystem-group: images
     patterns: ["*"]
     ignore:
-      # A local tag built on the PC, never on a registry.
-      - dependency-name: edge-agent-service
       # A major or minor move of an image (postgres 17 to 18) is a data migration, its own item.
       - dependency-name: "*"
         update-types:

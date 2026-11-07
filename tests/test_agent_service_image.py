@@ -11,7 +11,6 @@ from types import ModuleType
 
 import agent_service_lock
 import pytest
-import yaml
 from support.script_module import script_module
 
 REPOSITORY = Path(__file__).resolve().parents[1]
@@ -225,14 +224,6 @@ def test_the_lock_holds_the_release_wheel_by_url_and_sha256(package):
         requirement.startswith(f"overnightworks-{package} @ {url} --hash=sha256:")
         for requirement in lock_requirements()
     )
-
-
-def test_the_agent_service_document_builds_the_name_compose_runs():
-    name = yaml.safe_load((REPOSITORY / "compose.yaml").read_text())["services"]["agent-service"][
-        "image"
-    ]
-    command = f"docker build -f agent-service/image/Dockerfile -t {name} agent-service/image"
-    assert command in AGENT_SERVICE_DOCUMENT
 
 
 @pytest.fixture(scope="module")

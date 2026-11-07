@@ -38,7 +38,7 @@ from retention_census import ROUTE_SERVICES, Census, Run, Sweep, Target, route_t
 REPOSITORY = Path(__file__).resolve().parents[1]
 LIVE_COMPOSE = (
     "docker", "compose", "--project-directory", str(REPOSITORY),
-    "--file", str(REPOSITORY / "compose.yaml"), "--profile", "agent-service",
+    "--file", str(REPOSITORY / "compose.yaml"), "--profile", "litellm",
 )  # fmt: skip
 CANARY_SERVICE = "agent-canary"
 PAID_TURN_SECONDS = 420

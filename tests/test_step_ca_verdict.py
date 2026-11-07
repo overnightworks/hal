@@ -1,4 +1,4 @@
-"""The step-ca probe's verdict (#346 P13): a cell that could not run is not held."""
+"""The step-ca probe's verdict: a cell that could not run is not held."""
 
 import json
 import os
@@ -33,12 +33,12 @@ def probe() -> Iterator[ModuleType]:
 def test_a_probe_with_a_cell_not_driven_is_incomplete_and_not_passed(
     capsys: pytest.CaptureFixture[str],
 ):
-    exit_code = mcp_networks.print_verdict(["P13 (the image edge-agent-service is absent)"])
+    exit_code = mcp_networks.print_verdict(["P14 (the stand-in is absent)"])
 
     output = capsys.readouterr().out
     assert exit_code == mcp_networks.INCOMPLETE_EXIT_CODE != 0
     assert "PROBE INCOMPLETE" in output
-    assert "P13" in output
+    assert "P14" in output
     assert "PROBE PASSED" not in output
 
 
@@ -50,8 +50,8 @@ def test_a_probe_with_every_cell_driven_passes(capsys: pytest.CaptureFixture[str
 @pytest.mark.parametrize(
     ("not_driven", "left_behind", "exit_code", "verdict"),
     [
-        (["P13 (no image)"], False, mcp_networks.INCOMPLETE_EXIT_CODE, "PROBE INCOMPLETE"),
-        (["P13 (no image)"], True, 1, None),
+        (["P14 (no stand-in)"], False, mcp_networks.INCOMPLETE_EXIT_CODE, "PROBE INCOMPLETE"),
+        (["P14 (no stand-in)"], True, 1, None),
         ([], True, 1, None),
         ([], False, 0, "PROBE PASSED"),
     ],
