@@ -1,0 +1,7 @@
+claim_id = "09c33091755d49cfa00ccb3a18db83c1"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "3a86fbd6652afe834eafb99cd0185b050c8b2b40"
+branch = "claude/issue-1143-take-agent-runtime-v0-23-0"
+scope = ["docs/agent-service.md", "pyproject.toml", "uv.lock"]
+opened_commit = "612b913c9e6d419f754a1007cfec8a7381b6570e"
