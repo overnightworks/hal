@@ -161,12 +161,13 @@ services:
       enabled: true              # Dienst an/aus: the one switch
       # setup: step-ca/init      # only where a unit needs key material (step-ca, keycloak)
     hosts:
-      - name: hopin              # hopin.hallucinai.de → container labelled edge.name=hopin
+      - name: hopin              # hopin.hallucinai.de
         exposure: public         # own login; the * Access app would otherwise cover it
         reason: "video calls; every page needs the Keycloak login (hopin#25)"
         ready: /health           # optional: the path X8a asks before it publishes the host
         deny_public: [/auth/backchannel-logout]   # Cloudflare refuses the route at its edge
-        # target: http://127.0.0.1:8081   # optional; this is the default (Traefik)
+        tunnel: platform         # another tunnel of the account serves the host; hal's ingress has no line for it
+        # target: http://127.0.0.1:8081   # optional; without tunnel the default is Traefik; never with tunnel
 ```
 
 Planned and not accepted by `catalog.py` yet: `run.login_group` (a group of `keycloak/realm.yaml`, checked by CI) and `run.health` (the LOOK page's path). An app's `run` takes only `enabled` (no `setup`, no `build`), its `repo` only `default_branch`, and `github.org` names the organisation of its repository.
