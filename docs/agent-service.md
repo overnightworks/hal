@@ -1,8 +1,7 @@
 # The agent service
 
-Reference for the operator and for an engineer changing the agent service: its runtime, what a turn leaves behind, an app's side, the API route through LiteLLM and the probes. The code is
-the truth: `compose.yaml` (the `agent-service` service, its `agent-songmaker`, `agent-presentator`, `agent-hopin` and `mcp` networks),
-`agent-service/service.toml`, `agent-service/live_canary.py` and the probes under `probe/agent-service/`. The egress gateway of LiteLLM is in
+Reference for the operator and for an engineer changing the agent service: what a turn leaves behind, an app's side, the API route through LiteLLM and the probes. The code is
+the truth: the LiteLLM route, `agent-service/live_canary.py` and the probes under `probe/agent-service/`. The egress gateway of LiteLLM is in
 [internal-ca.md](internal-ca.md); the platform picture is [architecture.md](architecture.md).
 
 ## The service

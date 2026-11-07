@@ -106,7 +106,7 @@ class Level(Enum):
     INFO = ("info", 6)
 
     @classmethod
-    def of(cls, glyph: "Glyph") -> "Level":
+    def of(cls, glyph: Glyph) -> Level:
         return _LEVELS.get(glyph, cls.INFO)
 
 
@@ -132,7 +132,7 @@ def _colour_on(stream: TextIO) -> bool:
     terminal is not `dumb`."""
     try:
         is_terminal = stream.isatty()
-    except (AttributeError, ValueError):  # no stdout when daemonised, or a closed stream
+    except AttributeError, ValueError:  # no stdout when daemonised, or a closed stream
         return False
     return is_terminal and not os.environ.get("NO_COLOR") and os.environ.get("TERM") != "dumb"
 

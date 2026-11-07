@@ -16,7 +16,7 @@ reason = "static configuration of traefik, bind-mounted by compose.yaml"
 
 [[root.allow]]
 entry = "agent-service/"
-reason = "the agent service's LiteLLM and egress files that compose.yaml mounts, its service.toml and its live canaries"
+reason = "the agent service's LiteLLM and egress files that compose.yaml mounts and its live canaries"
 
 [[root.allow]]
 entry = "backup/"
