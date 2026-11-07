@@ -216,11 +216,10 @@ class AdmissionCells:
             trusted=False,
             mounts=((self.recording, CLIENT_RECORDING),),
         )
-        expect(
-            answer.status == 403 and error_code(answer) == "not_enabled",
-            f"A9: {answer.status} {error_code(answer)}",
-        )
-        self.hold("A9", "hopin on the hearing route: 403 not_enabled")
+        expect(answer.status == 200, f"A9: {answer.status} {error_code(answer)}")
+        text = answer.json().get("text")
+        expect(isinstance(text, str) and text.strip(), "A9: the answer holds no transcript text")
+        self.hold("A9", f"hopin on the hearing route: 200, a transcript of {len(text)} characters")
 
     def cell_a12(self, words: str) -> None:
         logs = container_log(self.speech_id)
