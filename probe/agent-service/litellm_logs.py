@@ -272,7 +272,7 @@ class LogsProbe(FailureProbe, PictureCalls):
         shown = {name: row[name] for name in ("model", "spend", "status", "call_type")}
         write_line(f"L4 R: {json.dumps(shown, sort_keys=True)}", flush=True)
         self.hold("L4", f"a served call: no new LL line, R with the person, the key's hash, alias "
-                  f"{alias!r}, model {row['model']}, spend {row['spend']}")  # fmt: skip
+                  f"{APP_ALIAS!r}, model {row['model']}, spend {row['spend']}")  # fmt: skip
 
     def cell_l5(self) -> None:
         forbidden = self.forbidden()
