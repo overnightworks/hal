@@ -120,7 +120,7 @@ and the admin budget with its customer rows (the key step below).
   otherwise), a path among
   the key's `allowed_routes` (403 otherwise, the provider routes `/v1/messages` and
   `/v1/completions` included), and a `user`, the person's fingerprint (`enforce_user_param`; 401
-  without one), which LiteLLM sends on to Anthropic as `metadata.user_id` and to OpenAI as `user`. The privacy text rests on the client v0.22.0, pinned from its git tag (`pyproject.toml`): the fingerprint is `person_fingerprint`, a SHA-256 of issuer and subject, the same in every app, and the gateway backend sends the app's key as the only bearer, the fingerprint in the body's `user`. LiteLLM also routes
+  without one), which LiteLLM sends on to Anthropic as `metadata.user_id` and to OpenAI as `user`. The privacy text rests on the client v0.23.0, pinned from its git tag (`pyproject.toml`): the fingerprint is `person_fingerprint`, a SHA-256 of issuer and subject, the same in every app, and the gateway backend sends the app's key as the only bearer, the fingerprint in the body's `user`. LiteLLM also routes
   by a `model` in the query string, which the key's `models` do not bind: one unknown to
   `config.yaml` is refused with 400, but a configured name outside the key's `models` is served by that model and its spend counts on the key, and a key or person
   past its budget is refused (measured). The front therefore answers any query string on its
