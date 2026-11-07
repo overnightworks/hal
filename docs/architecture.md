@@ -164,7 +164,7 @@ services:
       - name: hopin              # hopin.hallucinai.de
         exposure: public         # own login; the * Access app would otherwise cover it
         reason: "video calls; every page needs the Keycloak login (hopin#25)"
-        ready: /health           # optional: the path X8a asks before it publishes the host
+        ready: /health           # required for app hosts; with tunnel, readiness belongs to that tunnel's owner
         deny_public: [/auth/backchannel-logout]   # Cloudflare refuses the route at its edge
         tunnel: platform         # another tunnel of the account serves the host; hal's ingress has no line for it
         # target: http://127.0.0.1:8081   # optional; without tunnel the default is Traefik; never with tunnel
