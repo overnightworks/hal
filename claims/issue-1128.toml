@@ -1,0 +1,7 @@
+claim_id = "5b80fa6af54b4c2f92d6210c7411d99b"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "9b5bdde336480f84ff20fbc1e6ff02a276b2abfa"
+branch = "claude/issue-1128-s9a-agent-service-doc-litellm-route"
+scope = ["README.md", "docs/agent-service.md", "docs/stack.md"]
+opened_commit = "bc38b3c446c32237b59624c03ecd94f337c36a19"
