@@ -20,9 +20,9 @@ an SQL count in the database. B2, B3a, B3b and D9's planted row are the controls
 canary where the search must find it (a file by exec into a tmpfs, a LiteLLM debug log, the front's
 access log, a row), and B2 and B3 run first on a stack the probe then recreates, so no clean
 cell sees their tmpfs. The probe differs from production as the controls say, for B3a and B3b
-only: `LITELLM_LOG=DEBUG`, and the front's access log. The fake's control file and the caller's
-program are harness inputs that hold the canaries by design and are no sinks of the route. Unlike
-litellm.py, the probe runs the shipped config.yaml unchanged, which B11 reads.
+only: `LITELLM_LOG=DEBUG`, and the front's access log of every field. The fake's control file
+and the caller's program are harness inputs that hold the canaries by design and are no sinks of
+the route. Unlike litellm.py, the probe runs the shipped config.yaml unchanged, which B11 reads.
 Every clean cell sends fresh canaries. B11 prints the configuration of the running
 containers; the reviewer judges it against the pinned image's source writers.
 
@@ -81,6 +81,7 @@ from retention_census import (  # noqa: E402
 )
 
 from hal.output import write_line  # noqa: E402
+from hal.stack import api_limits  # noqa: E402
 
 HOLD_SECONDS = 45  # B4's hold: over a scan of the route
 STREAM_HOLD_SECONDS = 60  # STR's hold: past it the fake logs `held timed out` and the cell fails
@@ -101,25 +102,27 @@ class NonEmptyId:
 
 SETTINGS_SECTIONS = {
     "litellm_settings": {
-        "turn_off_message_logging": True,
+        "turn_off_message_logging": f"os.environ/{api_limits.MESSAGE_LOGGING_OFF_VARIABLE}",
         "redact_messages_in_exceptions": True,
         "max_end_user_budget_id": NonEmptyId(),
         "disable_add_user_agent_to_request_tags": True,
     },
     "general_settings": {
         "enforce_user_param": True,
-        "disable_spend_logs": True,
-        "disable_error_logs": True,
         "store_prompts_in_spend_logs": False,
+        "maximum_spend_logs_retention_period": NonEmptyId(),
     },
     "router_settings": {"num_retries": 0},
 }
+# Switches whose effect the spend rows of litellm_logs.py L2 to L4 judge, not B11 their value.
+CONSUMER_SWITCHES = {"disable_spend_logs", "disable_error_logs"}
 DEPLOYMENT_KEYS = {"model_name", "litellm_params"}
 DEPLOYMENT_PARAMS = {"model", "api_key", "max_retries", "max_tokens"}
-# The one table of LiteLLM's database that may name a tool (D9), those that may name a fingerprint
-# (P7), and those a body tag may land in (T3).
-TOOL_TABLE = "LiteLLM_ToolTable"
-FINGERPRINT_TABLES = {"LiteLLM_EndUserTable", "LiteLLM_DailyEndUserSpend"}
+# The tables of LiteLLM's database that may name a tool (D9), those that may name a fingerprint
+# (P7), and those a body tag may land in (T3); the spend log's tool index expires with its rows.
+TOOL_TABLE, SPEND_TABLE = "LiteLLM_ToolTable", "LiteLLM_SpendLogs"
+TOOL_TABLES = {TOOL_TABLE, "LiteLLM_DailyToolSpend", "LiteLLM_SpendLogToolIndex"}
+FINGERPRINT_TABLES = {"LiteLLM_EndUserTable", "LiteLLM_DailyEndUserSpend", SPEND_TABLE}
 TAG_TABLE, DAILY_TAG_TABLE = "LiteLLM_TagTable", "LiteLLM_DailyTagSpend"
 USER_AGENT = "user agent"  # the label of the user-agent canary in T1 and D9
 TOOL_WRITE_SECONDS = 120
@@ -201,7 +204,7 @@ class RetentionProbe(FailureProbe, KeyFiles, PictureCalls):
         resolved = json.loads(self.compose("config", "--format", "json").stdout)["services"]
         shipped = mounted_file(resolved[FRONT], FRONT_STATIC).read_text(encoding="utf-8")
         static = scratch / "front-with-access-log.yml"
-        static.write_text(shipped + "\naccessLog: {}\n", encoding="utf-8")
+        static.write_text(yaml.safe_dump({**yaml.safe_load(shipped), "accessLog": {}}))
         static.chmod(0o644)
         overlay = scratch / "compose.controls.yaml"
         overlay.write_text(
@@ -270,10 +273,12 @@ class RetentionProbe(FailureProbe, KeyFiles, PictureCalls):
                 ]  # fmt: skip
         return "".join(f"\n  {line}" for line in shown)
 
-    def failed_with(self, cell: str, request: str, model: str = DEFAULT_MODEL) -> int:
-        """The status of a request holding the canary `request` that does not succeed."""
+    def failed_with(self, cell: str, request: str, model: str = DEFAULT_MODEL,
+                    person: str = "") -> int:  # fmt: skip
+        """The status of a request of `person` (else a new one) holding the canary `request` that
+        does not succeed."""
         asked = [{"role": "user", "content": request}]
-        answer = self.complete(self.key, model, self.fingerprint(), messages=asked)
+        answer = self.complete(self.key, model, person or self.fingerprint(), messages=asked)
         expect(answer["status"] != 200, f"{cell}: the request was answered 200")
         return answer["status"]
 
@@ -369,16 +374,11 @@ class RetentionProbe(FailureProbe, KeyFiles, PictureCalls):
             expect(status == 404, f"B3b: the front answered {status}")
             found = self.sweep({"request in LiteLLM debug log": litellm_canary,
                                 "path in front access log": front_canary}).found  # fmt: skip
-            expect(
-                f"{self.container_name(LITELLM)} log"
-                in found.get("request in LiteLLM debug log", ()),
-                f"B3a: found {found}",
-            )
+            debug = found.get("request in LiteLLM debug log", ())
+            expect(f"{self.container_name(LITELLM)} log" in debug, f"B3a: found {found}")
             self.hold("B3a", "with LITELLM_LOG=DEBUG the request canary is found in LiteLLM's log")
-            expect(
-                f"{self.container_name(FRONT)} log" in found.get("path in front access log", ()),
-                f"B3b: found {found}",
-            )
+            access = found.get("path in front access log", ())
+            expect(f"{self.container_name(FRONT)} log" in access, f"B3b: found {found}")
             self.hold(
                 "B3b", "with the access log on, a canary in the path is found in the front's log"
             )
@@ -390,9 +390,8 @@ class RetentionProbe(FailureProbe, KeyFiles, PictureCalls):
         resolved = json.loads(self.compose("config", "--format", "json").stdout)["services"]
         lines = []
         for service in ROUTE_SERVICES:
-            inspected = json.loads(self.run(["docker", "inspect", self.container(service)]).stdout)[
-                0
-            ]
+            inspect = ["docker", "inspect", self.container(service)]
+            inspected = json.loads(self.run(inspect).stdout)[0]
             wanted = self.declared_writable(resolved[service])
             seen = {mount["Destination"] for mount in inspected["Mounts"] if mount["RW"]} | set(
                 inspected["HostConfig"].get("Tmpfs") or {}
@@ -407,21 +406,11 @@ class RetentionProbe(FailureProbe, KeyFiles, PictureCalls):
     def declared_writable(service: dict) -> set[str]:
         """The destinations the resolved Compose service declares writable: read-write binds and
         tmpfs."""
-        binds = {
-            volume["target"]
-            for volume in service.get("volumes", [])
-            if volume["type"] in {"bind", "volume"} and not volume.get("read_only")
-        }
+        volumes = service.get("volumes", [])
+        binds = {v["target"] for v in volumes
+                 if v["type"] in {"bind", "volume"} and not v.get("read_only")}  # fmt: skip
         tmpfs = {entry.split(":")[0] for entry in service.get("tmpfs", [])}
-        return (
-            binds
-            | tmpfs
-            | {
-                volume["target"]
-                for volume in service.get("volumes", [])
-                if volume["type"] == "tmpfs"
-            }
-        )
+        return binds | tmpfs | {v["target"] for v in volumes if v["type"] == "tmpfs"}
 
     def cell_t1(self) -> None:
         """Around the front with presentator's key: both header canaries reach their tables."""
@@ -487,14 +476,19 @@ class RetentionProbe(FailureProbe, KeyFiles, PictureCalls):
                   "nowhere")  # fmt: skip
 
     def cell_b6(self) -> None:
-        request = canary("b6-request")
+        """The provider's error text goes word for word into LiteLLM's log and the call's spend
+        row (#1084), and with it what the provider quotes of the request."""
+        request, person = canary("b6-request"), self.fingerprint()
         self.steer(mode="echo", status=UPSTREAM_ERROR, request_canary=request)
         before = len(self.provider_requests())
-        status = self.failed_with("B6", request)
+        status = self.failed_with("B6", request, person=person)
         expect(self.request_canary_hits(before) == 1, "B6: the request canary never reached F")
-        self.expect_nothing_retained("B6", {"request": request})
+        self.wait_for_row(SPEND_TABLE, "end_user", person)
+        sinks = self.sweep({"request": request}).found.get("request", ())
+        held = (self.dump_tables(sinks), self.outside_the_database(sinks))
+        expect(held == ({SPEND_TABLE}, [f"{self.container_name(LITELLM)} log"]), f"B6: in {sinks}")
         self.hold("B6", f"an upstream {UPSTREAM_ERROR} whose body echoes the request canary: "
-                  f"the caller got {status}, retained nowhere")  # fmt: skip
+                  f"A {status}, the echo in LiteLLM's log and {SPEND_TABLE} alone")  # fmt: skip
 
     def cell_b7(self) -> None:
         request = canary("b7-request")
@@ -556,7 +550,7 @@ class RetentionProbe(FailureProbe, KeyFiles, PictureCalls):
         for kind in ("request tool", "response tool"):
             sinks = found.get(kind, ())
             tables, outside = self.dump_tables(sinks), self.outside_the_database(sinks)
-            expect(tables == {TOOL_TABLE}, f"D9: the {kind} name is in {sorted(tables)}")
+            expect(TOOL_TABLE in tables <= TOOL_TABLES, f"D9: the {kind} name is in {tables}")
             expect(not outside, f"D9: the {kind} name is in {outside}")
         agents = self.tool_user_agents(tool, answered)
         expect(agents == {front_user_agent()}, f"D9: the tool rows' user agents {agents}")
@@ -565,8 +559,8 @@ class RetentionProbe(FailureProbe, KeyFiles, PictureCalls):
         expect(not raw and hash_tables, f"D9: raw app keys {raw}, hash in {hash_tables}")
         self.clean.update({f"D9 {label}": value for label, value in canaries.items()})
         self.hold("D9", f"none of {len(canaries)} canaries in any sink, the dump included; the "
-                  f"planted row found; the tool names in {TOOL_TABLE} alone with the front's user "
-                  "agent; of the app keys only hashes")  # fmt: skip
+                  f"planted row found; the tool names in {TOOL_TABLE}, at most also the spend "
+                  "tables, with the front's user agent; of the app keys only hashes")  # fmt: skip
         self.hold("T2", "the User-Agent and x-litellm-tags canaries through the front at rest "
                   "nowhere")  # fmt: skip
         self.cell_p7(found.get("fingerprint", ()))
@@ -691,12 +685,14 @@ class RetentionProbe(FailureProbe, KeyFiles, PictureCalls):
             tables, outside = self.dump_tables(sinks), self.outside_the_database(sinks)
             figures = f"{recorded[form]}, in {self.landing(sinks) or 'no sink'}"
             figures += f", tag row id {self.request_id_form(tag)}"
-            if not tables <= {TAG_TABLE, DAILY_TAG_TABLE} or outside:
+            if not tables <= {TAG_TABLE, DAILY_TAG_TABLE, SPEND_TABLE} or outside:
                 failed.append(form)
                 write_line(f"{form} FAILED: {figures}, outside the database {outside}", flush=True)
             else:
                 self.hold(form, figures if sinks else f"{figures}: lands nowhere")
-        expect(not failed, f"T3: {failed}")
+        rows = self.count(f'SELECT count(*) FROM "{TAG_TABLE}"')  # noqa: S608 - the table name is this probe's literal
+        expect(not failed and rows == 0, f"T3: {failed}, {rows} {TAG_TABLE} rows")
+        self.hold("T3 tag table", f"{TAG_TABLE} still empty after the body tag requests")
 
     def tag_rows(self, tags: list[str]) -> int:
         named = ", ".join(f"'{tag}'" for tag in tags)
@@ -765,13 +761,14 @@ class RetentionProbe(FailureProbe, KeyFiles, PictureCalls):
         found = self.sweep(self.clean).found
         expect(not found, f"B10: retained in {found}")
         self.hold("B10", f"the mounts, logs and dump of {', '.join(ROUTE_SERVICES)} hold none of "
-                  f"{len(self.clean)} canaries of B4 to B7, B9, B12, D9 and STR")  # fmt: skip
+                  f"{len(self.clean)} canaries of B4, B5, B7, B9, B12, D9 and STR")  # fmt: skip
 
     def cell_b11(self) -> None:
         litellm, front = self.container_name(LITELLM), self.container_name(FRONT)
         config = self.run(["docker", "exec", litellm, "cat", "/etc/litellm/config.yaml"]).stdout
         for section, wanted in SETTINGS_SECTIONS.items():
             found = settings_of(config, section)
+            found = {key: value for key, value in found.items() if key not in CONSUMER_SWITCHES}
             expect(found == wanted, f"B11: {section} holds {found}, not {wanted}")
         top = set(yaml.safe_load(config))
         expect(top == {"model_list", *SETTINGS_SECTIONS}, f"B11: LiteLLM's sections {sorted(top)}")
@@ -781,13 +778,17 @@ class RetentionProbe(FailureProbe, KeyFiles, PictureCalls):
         stores = sorted({n.split("=")[0] for n in names.splitlines() if STORE_NAMES.search(n)})
         expect(not stores, f"B11: LiteLLM's environment names {stores}")
         level = [n for n in names.splitlines() if n.startswith("LITELLM_LOG=")]
-        expect(level == ["LITELLM_LOG=CRITICAL"], f"B11: LiteLLM's log level {level}")
-        static = self.run(["docker", "exec", front, "cat", FRONT_STATIC]).stdout
-        expect("accessLog" not in static and "level: INFO" in static, "B11: the front's log")
-        self.hold("B11", "LiteLLM: message logging off, redaction on, no custom_auth, "
+        metadata = api_limits.log_environment(api_limits.LogDepth.METADATA)
+        wanted = [f"LITELLM_LOG={metadata[api_limits.LOG_LEVEL_VARIABLE]}"]
+        expect(level == wanted, f"B11: LiteLLM's log level {level}")
+        fields = yaml.safe_load(self.run(["docker", "exec", front, "cat", FRONT_STATIC]).stdout)
+        fields = fields["accessLog"]["fields"]
+        expect({fields["defaultMode"], fields["headers"]["defaultMode"]} == {"drop"}, "B11: front")
+        self.hold("B11", "LiteLLM: message logging from the depth, redaction on, no custom_auth, "
                   "enforce_user_param on, one person budget id, no user-agent tag, retries 0, "
-                  "no callback, cache or spend and error log, no such environment name, "
-                  "log level CRITICAL; the front: INFO and no access log")  # fmt: skip
+                  "no callback or cache, spend rows without prompts and with a retention period, "
+                  f"no such environment name, {wanted[0]}; the front: an access log that drops "
+                  f"each field and header but {sorted(fields['names'])}")  # fmt: skip
 
 
 def main() -> int:

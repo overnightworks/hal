@@ -1,7 +1,8 @@
-"""What LiteLLM keeps per person or per tool, deleted once it has gone `RETENTION_DAYS` without
-use: the daily person and tool rows, the tool rows and the customer rows of idle fingerprints. One
-statement in the one `litellm-db` container of a compose project deletes all of it or nothing, and
-writes no other table. Days are UTC days, as LiteLLM writes them."""
+"""What LiteLLM keeps per person, per tool or per label, deleted once it has gone
+`RETENTION_DAYS` without use: the daily person, tool and label rows, the tool rows and the
+customer rows of idle fingerprints. One statement in the one `litellm-db` container of a compose
+project deletes all of it or nothing, and writes no other table. Days are UTC days, as LiteLLM
+writes them."""
 
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
@@ -40,6 +41,7 @@ class Kind(Enum):
 
     PERSON_DAYS = "LiteLLM_DailyEndUserSpend"
     TOOL_DAYS = "LiteLLM_DailyToolSpend"
+    TAG_DAYS = "LiteLLM_DailyTagSpend"
     TOOLS = "LiteLLM_ToolTable"
     PEOPLE = "LiteLLM_EndUserTable"
 
@@ -69,7 +71,7 @@ class ExpiryFailed(RuntimeError):
 
 
 def statement(limit: Cutoff) -> str:
-    """Four data-modifying CTEs share one snapshot: the customer condition reads the daily rows at
+    """Five data-modifying CTEs share one snapshot: the customer condition reads the daily rows at
     or after the cutoff, which the same statement does not delete. A customer row linked to its
     own budget, or with spend not yet reset, stays."""
     day = f"'{limit.day.isoformat()}'"
@@ -79,6 +81,8 @@ WITH person_days AS (
   DELETE FROM "{Kind.PERSON_DAYS.value}" WHERE date < {day} RETURNING 1
 ), tool_days AS (
   DELETE FROM "{Kind.TOOL_DAYS.value}" WHERE date < {day} RETURNING 1
+), tag_days AS (
+  DELETE FROM "{Kind.TAG_DAYS.value}" WHERE date < {day} RETURNING 1
 ), tools AS (
   DELETE FROM "{Kind.TOOLS.value}" WHERE coalesce(last_used_at, created_at) < {moment} RETURNING 1
 ), people AS (
@@ -89,6 +93,7 @@ WITH person_days AS (
   ) RETURNING 1
 )
 SELECT (SELECT count(*) FROM person_days), (SELECT count(*) FROM tool_days),
+  (SELECT count(*) FROM tag_days),
   (SELECT count(*) FROM tools), (SELECT count(*) FROM people)
 """  # noqa: S608 - the only values are the cutoff's day and moment formatted from date types
 

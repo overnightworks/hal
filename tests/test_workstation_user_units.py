@@ -256,7 +256,7 @@ TimeoutStartSec=6h
     ),
     "hal-expire.service": """\
 [Unit]
-Description=hal expire: deletes what LiteLLM keeps per person or per tool once unused for its retention period
+Description=hal expire: deletes what LiteLLM keeps per person, per tool or per label once unused for its retention period
 Documentation=file://%h/{live}/docs/agent-service.md
 
 [Service]

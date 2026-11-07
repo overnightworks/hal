@@ -20,7 +20,7 @@ import yaml
 from support.probe_support import probe_imports
 from support.script_module import loaded_script
 
-from hal.stack import litellm_keys
+from hal.stack import api_limits, litellm_keys
 
 ROOT = Path(__file__).resolve().parents[1]
 LITELLM_DIRECTORY = ROOT / "agent-service" / "litellm"
@@ -333,14 +333,13 @@ def test_each_text_name_carries_a_positive_whole_max_tokens(config):
     assert all(type(ceiling) is int and ceiling > 0 for ceiling in ceilings)
 
 
-def test_litellm_retries_nothing_logs_no_messages_and_has_no_callback_cache_or_spend_log(config):
+def test_litellm_retries_nothing_and_has_no_callback_or_cache(config):
     assert config["router_settings"] == {"num_retries": 0}
     assert config["litellm_settings"].keys() - {"max_end_user_budget_id"} == {
         "turn_off_message_logging",
         "redact_messages_in_exceptions",
         "disable_add_user_agent_to_request_tags",
     }
-    assert config["litellm_settings"]["turn_off_message_logging"] is True
     assert config["litellm_settings"]["redact_messages_in_exceptions"] is True
     assert config["litellm_settings"]["disable_add_user_agent_to_request_tags"] is True
     assert set(config) == {"model_list", "router_settings", "litellm_settings", "general_settings"}
@@ -348,10 +347,21 @@ def test_litellm_retries_nothing_logs_no_messages_and_has_no_callback_cache_or_s
         "disable_spend_logs",
         "disable_error_logs",
         "store_prompts_in_spend_logs",
+        "maximum_spend_logs_retention_period",
     }
-    assert config["general_settings"]["disable_spend_logs"] is True
-    assert config["general_settings"]["disable_error_logs"] is True
-    assert config["general_settings"]["store_prompts_in_spend_logs"] is False
+
+
+def test_litellm_stores_no_prompt_in_a_row_and_deletes_it_after_a_period(config):
+    general = config["general_settings"]
+
+    assert general["store_prompts_in_spend_logs"] is False
+    assert re.fullmatch(r"[1-9]\d*d", general["maximum_spend_logs_retention_period"])
+
+
+def test_litellm_takes_its_message_logging_from_the_variable_of_the_log_depth(config):
+    variable = api_limits.MESSAGE_LOGGING_OFF_VARIABLE
+
+    assert config["litellm_settings"]["turn_off_message_logging"] == f"os.environ/{variable}"
 
 
 def test_litellm_demands_a_user_and_loads_no_auth_hook(config):
@@ -576,6 +586,19 @@ def test_the_fake_quotes_the_canary_a_request_holds_and_nothing_else_of_it(
     status, reply = handler.provider_answer(None, steering, body)
 
     assert (status, json.loads(reply)["error"]["message"]) == (400, expected)
+
+
+def test_the_fakes_openai_key_refusal_names_the_key_only_masked(fake_provider):
+    key = secrets.token_urlsafe(32)
+    steering = {"mode": "status", "status": 401, "provider_key": key}
+
+    status, reply = fake_provider.picture_answer(None, steering)
+
+    message = json.loads(reply)["error"]["message"]
+    assert status == 401
+    assert key not in message
+    assert key[:3] in message
+    assert key[-4:] in message
 
 
 FIRST_ROUND = {"messages": [{"role": "user", "content": "probe"}]}

@@ -2,18 +2,24 @@
 
 The one-offs are the services of the `apply` profile: `compose run` starts them for their output,
 which belongs to the caller alone and must not reach the journal a second time. A failed one-off
-keeps the last line of its standard error apart from its standard output (#965).
+keeps the last line of its standard error apart from its standard output (#965). LiteLLM, a
+long-running service, takes its log level and message logging from the variables of the log depth
+that `hal apply` passes (#1084).
 """
 
 import json
 import subprocess
+from collections.abc import Mapping
+from functools import partial
 from pathlib import Path
+from types import MappingProxyType
 
 import pytest
 
 from hal.backup.restic import container_argv
 from hal.backup.settings import Settings
-from hal.stack import compose
+from hal.stack import api_limits, compose
+from hal.stack.api_limits import LogDepth
 
 ROOT = Path(__file__).resolve().parents[1]
 APPLY_PROFILE = "apply"
@@ -33,8 +39,11 @@ PLACEHOLDERS = {
 }
 
 
-def resolved(monkeypatch, *overlays: Path) -> dict:
-    """`docker compose config` of compose.yaml and the overlays, every profile switched on."""
+def resolved(
+    monkeypatch, *overlays: Path, passed: Mapping[str, str] = MappingProxyType({})
+) -> dict:
+    """`docker compose config` of compose.yaml and the overlays, every profile switched on, with
+    the variables `passed` the way `hal apply` gives them."""
     for name, value in PLACEHOLDERS.items():
         monkeypatch.setenv(name, value)
     files = [argument for path in (ROOT / "compose.yaml", *overlays) for argument in ("-f", path)]
@@ -42,6 +51,7 @@ def resolved(monkeypatch, *overlays: Path) -> dict:
         ["docker", "compose", "--project-directory", str(ROOT), *map(str, files),
          "--profile", "*", "config", "--format", "json"],
         compose.READ_SECONDS,
+        environment=passed,
     )  # fmt: skip
     assert result.returncode == 0, result.stderr
     return json.loads(result.stdout)
@@ -122,3 +132,49 @@ def test_every_one_shot_starts_in_the_profile_of_the_service_that_waits_for_it(m
         if services[one_shot].get("profiles") != service.get("profiles")
     )
     assert differing == []
+
+
+LITELLM_LEVEL, LITELLM_MESSAGE_LOGGING_OFF = "LITELLM_LOG", "HAL_TURN_OFF_MESSAGE_LOGGING"
+
+
+@pytest.fixture
+def no_depth_in_the_shell(monkeypatch) -> None:
+    for variable in api_limits.log_environment(LogDepth.METADATA):
+        monkeypatch.delenv(variable, raising=False)
+
+
+@pytest.mark.parametrize(
+    ("passed", "depth"),
+    [
+        pytest.param(
+            api_limits.log_environment(LogDepth.METADATA), LogDepth.METADATA, id="metadata"
+        ),
+        pytest.param(
+            api_limits.log_environment(LogDepth.EVERYTHING), LogDepth.EVERYTHING, id="everything"
+        ),
+        pytest.param({}, LogDepth.METADATA, id="nothing passed logs at metadata"),
+    ],
+)
+@pytest.mark.usefixtures("no_depth_in_the_shell")
+def test_litellm_logs_at_the_depth_whose_variables_compose_is_given(monkeypatch, passed, depth):
+    environment = resolved(monkeypatch, passed=passed)["services"]["litellm"]["environment"]
+    wanted = api_limits.log_environment(depth)
+
+    assert environment[LITELLM_LEVEL] == wanted[api_limits.LOG_LEVEL_VARIABLE]
+    assert (
+        environment[LITELLM_MESSAGE_LOGGING_OFF] == wanted[api_limits.MESSAGE_LOGGING_OFF_VARIABLE]
+    )
+
+
+@pytest.mark.usefixtures("no_depth_in_the_shell")
+def test_a_changed_log_depth_changes_the_definition_hash_the_plan_compares(monkeypatch):
+    for name, value in PLACEHOLDERS.items():
+        monkeypatch.setenv(name, value)
+    hashes = {
+        depth: compose.Compose(
+            partial(compose.run_docker, environment=api_limits.log_environment(depth)), ROOT
+        ).config_hashes(("litellm",))["litellm"]
+        for depth in LogDepth
+    }
+
+    assert len(set(hashes.values())) == len(LogDepth)

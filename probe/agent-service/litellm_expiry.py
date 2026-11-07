@@ -10,7 +10,7 @@ It starts `litellm-db` and `litellm`, waits until the database records every mig
 image ships as finished, then stops `litellm`, so no background job of LiteLLM writes while D is
 taken. Rows are planted by SQL relative to the database's UTC day; fingerprints, tool names, keys
 and budgets are random canaries, and no row value is printed. D is a digest per table of every
-table but the four `hal expire` deletes from; D* the same over every table. Run it again on every
+table but the five `hal expire` deletes from; D* the same over every table. Run it again on every
 LiteLLM bump: a schema change shows here with the missing column's name, in production only as a
 failed unit.
 
@@ -54,7 +54,9 @@ HEALTHY_SECONDS = 120
 TOOL_COLUMN = "last_used_at"
 RENAMED_COLUMN = "last_used_at_probe"
 EXPIRED_TABLES = {kind.value for kind in Kind}
-ROW_LINE = re.compile(r" {2}[✓·] (person days|tool days|tools|people) +deleted +(\d+) rows? · ")
+ROW_LINE = re.compile(
+    r" {2}[✓·] (person days|tool days|label days|tools|people) +deleted +(\d+) rows? · "
+)
 INSIDE, EDGE, OUTSIDE = RETENTION_DAYS - 1, RETENTION_DAYS, RETENTION_DAYS + 1
 
 
@@ -186,6 +188,15 @@ class ExpiryProbe(LitellmProbe):
         )
         return tool
 
+    def tag_day(self, days_back: int) -> str:
+        tag = self.name("tag")
+        self.sql(
+            'INSERT INTO "LiteLLM_DailyTagSpend" (id, tag, date, api_key, updated_at)'  # noqa: S608 - every value is a token or a number this probe generated
+            f" VALUES ('{self.name('tag-row')}', '{tag}', {utc_day(days_back)},"
+            f" '{self.name('key-hash')}', now())"
+        )
+        return tag
+
     def tool(self, days_back: int) -> str:
         tool = self.name("tool")
         self.sql(
@@ -222,6 +233,8 @@ class ExpiryProbe(LitellmProbe):
             "budget-l": linked, "budget-other": self.budget("5"), "key": self.key(),
             "tool-day-inside": self.tool_day(INSIDE), "tool-day-outside": self.tool_day(OUTSIDE),
             "tool-day-edge": self.tool_day(EDGE),
+            "tag-day-inside": self.tag_day(INSIDE), "tag-day-outside": self.tag_day(OUTSIDE),
+            "tag-day-edge": self.tag_day(EDGE),
             "tool-inside": self.tool(INSIDE), "tool-outside": self.tool(OUTSIDE),
             **{f"person-{name}": value for name, value in person.items()},
         }  # fmt: skip
@@ -249,6 +262,9 @@ class ExpiryProbe(LitellmProbe):
             ("LiteLLM_EndUserTable", "user_id", planted["person-d"]): True,
             ("LiteLLM_DailyToolSpend", "tool_name", planted["tool-day-inside"]): True,
             ("LiteLLM_DailyToolSpend", "tool_name", planted["tool-day-outside"]): False,
+            ("LiteLLM_DailyTagSpend", "tag", planted["tag-day-edge"]): True,
+            ("LiteLLM_DailyTagSpend", "tag", planted["tag-day-inside"]): True,
+            ("LiteLLM_DailyTagSpend", "tag", planted["tag-day-outside"]): False,
             ("LiteLLM_ToolTable", "tool_name", planted["tool-inside"]): True,
             ("LiteLLM_ToolTable", "tool_name", planted["tool-outside"]): False,
             **{("LiteLLM_EndUserTable", "user_id", planted[f"person-{n}"]): True
@@ -278,9 +294,11 @@ class ExpiryProbe(LitellmProbe):
     def cell_x3(self, run: Run) -> None:
         rows = [ROW_LINE.match(line) for line in run.out[:-1]]
         counts = [(match[1], int(match[2])) for match in rows if match]
-        wanted = [("person days", 3), ("tool days", 1), ("tools", 1), ("people", 1)]
+        wanted = [
+            ("person days", 3), ("tool days", 1), ("label days", 1), ("tools", 1), ("people", 1),
+        ]  # fmt: skip
         expect(counts == wanted and len(rows) == len(wanted), f"X3: rows {counts}")
-        expect(run.out[-1].startswith("✓ expire done · 6 rows · "), "X3: the verdict differs")
+        expect(run.out[-1].startswith("✓ expire done · 7 rows · "), "X3: the verdict differs")
         expect(run.err == [], f"X3: stderr holds {len(run.err)} lines")
         self.hold("X3", f"rows {counts}, verdict {run.out[-1]!r}, no canary printed")
 
@@ -288,16 +306,17 @@ class ExpiryProbe(LitellmProbe):
         before = self.digests(all_tables=True)
         run = self.hal_expire()
         counts = [int(match[2]) for line in run.out if (match := ROW_LINE.match(line))]
-        expect(run.exit_code == 0 and counts == [0, 0, 0, 0], f"X4: exit {run.exit_code} {counts}")
+        expect(run.exit_code == 0 and counts == [0] * 5, f"X4: exit {run.exit_code} {counts}")
         expect(self.digests(all_tables=True) == before, "X4: D* changed")
-        self.hold("X4", f"exit 0, four rows of 0, D* equal over {len(before)} tables")
+        self.hold("X4", f"exit 0, five rows of 0, D* equal over {len(before)} tables")
 
     def plant_fresh(self) -> dict[str, str]:
         person = self.name("person-f")
         self.person_day(person, OUTSIDE)
         self.customer(person, 0)
         return {
-            "person": person, "tool-day": self.tool_day(OUTSIDE), "tool": self.tool(OUTSIDE),
+            "person": person, "tool-day": self.tool_day(OUTSIDE),
+            "tag-day": self.tag_day(OUTSIDE), "tool": self.tool(OUTSIDE),
         }  # fmt: skip
 
     def fresh_present(self, fresh: dict[str, str]) -> bool:
@@ -305,6 +324,7 @@ class ExpiryProbe(LitellmProbe):
             self.present("LiteLLM_DailyEndUserSpend", "end_user_id", fresh["person"]),
             self.present("LiteLLM_EndUserTable", "user_id", fresh["person"]),
             self.present("LiteLLM_DailyToolSpend", "tool_name", fresh["tool-day"]),
+            self.present("LiteLLM_DailyTagSpend", "tag", fresh["tag-day"]),
             self.present("LiteLLM_ToolTable", "tool_name", fresh["tool"]),
         ])  # fmt: skip
 

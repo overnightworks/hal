@@ -1,4 +1,5 @@
-"""`hal expire`: the daily deletion of what LiteLLM keeps per person or per tool, behind hal's door.
+"""`hal expire`: the daily deletion of what LiteLLM keeps per person, per tool or per label,
+behind hal's door.
 `hal.litellm_expiry` deletes; this module adds the grammar, one row per kind, the verdict, the
 error pair and the exit code. It prints counts only, never a row value."""
 
@@ -18,6 +19,7 @@ DAYS = litellm_expiry.RETENTION_DAYS
 SUBJECTS = {
     Kind.PERSON_DAYS: ("person days", f"older than {DAYS} days"),
     Kind.TOOL_DAYS: ("tool days", f"older than {DAYS} days"),
+    Kind.TAG_DAYS: ("label days", f"older than {DAYS} days"),
     Kind.TOOLS: ("tools", f"unused for {DAYS} days"),
     Kind.PEOPLE: ("people", f"idle for {DAYS} days"),
 }
@@ -95,7 +97,7 @@ def _tell_failed(reason: str, outcome: Outcome) -> None:
 COMMANDS = (
     Command(
         Verb.EXPIRE,
-        f"delete what LiteLLM keeps per person or per tool after {DAYS} days without use",
+        f"delete what LiteLLM keeps per person, per tool or per label after {DAYS} days unused",
         _expire,
         _configure,
         json=False,
