@@ -18,7 +18,7 @@
 "tests/test_stack_external.py" = 2230
 "tests/test_stack_host_check.py" = 817
 "tests/test_stack_realm_reconcile.py" = 929
-"tests/test_workstation_secrets_view.py" = 913
+"tests/test_workstation_secrets_view.py" = 912
 
 [function_lines."probe/keycloak/probe.py"]
 "Probe.admin_console_only_on_loopback" = 74

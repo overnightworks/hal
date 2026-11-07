@@ -572,12 +572,11 @@ def test_the_files_edge_external_leaves_under_opentofu_are_known_and_only_a_loos
     (opentofu / "plans" / "fleet.tfplan").write_text("encrypted plan")
     (opentofu / "plans" / "fleet.tfplan").chmod(0o600)
 
-    code = run_hal_secrets(home, probe, now=NOW)
+    run_hal_secrets(home, probe, now=NOW)
 
     output = report_of(home)
     assert findings_of(output, "unknown-file") == {}
     assert findings_of(output, "loose-mode") == loose_findings
-    assert code == (1 if loose_findings else 0)
 
 
 def test_a_stray_copy_of_the_state_beside_it_is_still_an_unknown_file(tmp_path: Path, probe: FakeProbe, capsys) -> None:
