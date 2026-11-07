@@ -672,10 +672,15 @@ def test_the_shipped_configuration_holds_exactly_the_settings_b11_allows(
 ) -> None:
     text = LITELLM_CONFIG.read_text(encoding="utf-8")
 
+    switches = retention_probe.CONSUMER_SWITCHES
     found = {section: retention_probe.settings_of(text, section)
              for section in retention_probe.SETTINGS_SECTIONS}  # fmt: skip
 
-    assert found == retention_probe.SETTINGS_SECTIONS
+    assert switches <= found["general_settings"].keys()
+    assert {
+        section: {key: value for key, value in settings.items() if key not in switches}
+        for section, settings in found.items()
+    } == retention_probe.SETTINGS_SECTIONS
 
 
 @pytest.mark.parametrize(

@@ -37,6 +37,8 @@ While the unit `litellm` is on, the key step (`litellm_keys.py`) plans each app'
 and the person budget, with the numbers of `[api]` in `~/.config/hal/config.toml` that `hal`'s door
 read, in the same plan and makes them after the realm step and before the apps;
 a run that starts LiteLLM or recreates it or its database leaves the read to the next apply.
+Every `docker compose` call of the run carries the variables of `[api] log_depth` (`api_limits`),
+so a changed depth shows as a recreate of `litellm` in the plan.
 An app (an entry with `repo`) is planned last, in the same plan and under the same `yes`: its
 newest release tag is checked out, built, started and recorded once its containers are settled
 (`apps.py`).
@@ -377,7 +379,10 @@ def _plan_and_apply(
     publish_follows: bool,
 ) -> int:
     repository = live.tree
-    engine = collaborators.engine or compose.Compose(repository=repository)
+    log_variables = api_limits.log_environment(api.log_depth)
+    engine = collaborators.engine or compose.Compose(
+        partial(compose.run_docker, environment=log_variables), repository
+    )
     app_runtime = collaborators.app_runtime or AppRuntime.of(home, state_directory)
     marks = switches.Switches(state_directory)
     record = core.Record(state_directory)

@@ -1,5 +1,6 @@
 """The numbers LiteLLM enforces on each app's key and on the person budget: their code defaults,
-what `[api]` and `[api.<app>]` of `~/.config/hal/config.toml` say, and which of them holds.
+what `[api]` and `[api.<app>]` of `~/.config/hal/config.toml` say, and which of them holds; and the
+route's log depth, `[api] log_depth`, with the variables compose.yaml reads for it.
 
 Per number, an app's own table holds, else `[api]`, else the code default; the person budget is
 `[api]`'s, else the code default. Only the standard library: `hal.config` builds the record, and
@@ -7,11 +8,39 @@ Per number, an app's own table holds, else `[api]`, else the code default; the p
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from enum import Enum
 from types import MappingProxyType
 
 APP_BUDGET_DOLLARS = 10.0
 MAX_PARALLEL_REQUESTS = 5
 PERSON_BUDGET_DOLLARS = 2.0
+
+
+class LogDepth(Enum):
+    """What the route's logs hold: `METADATA` what a failure or an abuse needs and no content,
+    `EVERYTHING` also each request and answer."""
+
+    METADATA = "metadata"
+    EVERYTHING = "everything"
+
+
+# compose.yaml reads these for litellm; its defaults there are METADATA's, for a `docker compose`
+# that `hal apply` does not run.
+LOG_LEVEL_VARIABLE = "HAL_LITELLM_LOG"
+MESSAGE_LOGGING_OFF_VARIABLE = "HAL_TURN_OFF_MESSAGE_LOGGING"
+_LOG_ENVIRONMENTS: Mapping[LogDepth, Mapping[str, str]] = {
+    LogDepth.METADATA: MappingProxyType(
+        {LOG_LEVEL_VARIABLE: "ERROR", MESSAGE_LOGGING_OFF_VARIABLE: "true"}
+    ),
+    LogDepth.EVERYTHING: MappingProxyType(
+        {LOG_LEVEL_VARIABLE: "DEBUG", MESSAGE_LOGGING_OFF_VARIABLE: "false"}
+    ),
+}
+
+
+def log_environment(depth: LogDepth) -> Mapping[str, str]:
+    """The variables `hal apply` gives `docker compose` for LiteLLM to log at `depth`."""
+    return _LOG_ENVIRONMENTS[depth]
 
 
 @dataclass(frozen=True)
@@ -30,11 +59,13 @@ class AppLimits:
 
 @dataclass(frozen=True)
 class ApiSettings:
-    """`[api]` as `every_app` and the person budget, each `[api.<app>]` in `apps`."""
+    """`[api]` as `every_app`, the person budget and the log depth, each `[api.<app>]` in
+    `apps`."""
 
     every_app: AppNumbers = field(default_factory=AppNumbers)
     apps: Mapping[str, AppNumbers] = field(default_factory=lambda: MappingProxyType({}))
     person_budget_dollars: float | None = None
+    log_depth: LogDepth = LogDepth.METADATA
 
     def limits_of(self, app: str) -> AppLimits:
         own = self.apps.get(app, AppNumbers())

@@ -183,37 +183,66 @@ stated in agent-runtime's section
 The content of
 a turn leaves this PC for Anthropic, which generates the answer.
 
-**The API route keeps no content, as evidence for the paths exercised only.** LiteLLM logs no
-message and redacts the `Messages:` suffix of its exceptions, and neither it nor the front
-configures a callback, cache or spend log; LiteLLM's database holds keys, budgets, tool names and each
-person's fingerprint with its counters, but no spend-log or error-log row and no prompt (`disable_spend_logs`, `disable_error_logs`,
-`store_prompts_in_spend_logs`). Only the per-request logs stop: the daily and the key, user and team
-spend aggregates are written whatever `disable_spend_logs` says, and they hold amounts, never content.
-What the database keeps per person or per tool goes after 90 days without use ([The API route](#the-api-route), What expires).
-The front logs at INFO without an access log.
+**What the route logs depends on `[api] log_depth`** (`~/.config/hal/config.toml`, home.md
+„Konfiguration“). At the default `metadata` a call leaves these records, none with its content except a provider's
+error text, which may quote part of a request and is logged word for word:
+
+- **The front's access line**, one JSON line per request on its standard output: start time,
+  client address (the app's network), method, router (the route), service, its and LiteLLM's
+  status, both durations. Every header and the path are dropped, so no bearer and no query.
+- **LiteLLM's error line**, at `ERROR` in JSON, for a refusal or a failure only: an unknown app
+  key logs `Invalid proxy server token passed` with the key's hash, a provider's refusal its
+  class (a 401 is `litellm.AuthenticationError`) with the provider's error text word for word,
+  as the operator ruled; OpenAI's 401 names the key masked to 3 + 4 characters, and a provider
+  that quotes part of a request puts that part in the line and the row below. A served call logs no line,
+  and a bearer that is no virtual key (not `sk-…`) is refused with 401 without a line of its own.
+- **A spend log row** per call with a valid app key, a failure at the provider included (`LiteLLM_SpendLogs`): the key's hash and
+  alias, the person's fingerprint, model, tokens, cost, times, status and a failure's error;
+  never the prompt, answer or picture (`store_prompts_in_spend_logs: false`). LiteLLM deletes a
+  row, and the tool index it feeds, after 30 days (`maximum_spend_logs_retention_period`).
+- **The person's fingerprint**, the ruled pseudonym, stands in that row and in no line: not in the
+  front's, and not in LiteLLM's at `metadata` (a refused key, a refused plain bearer, both providers'
+  refusals and a served call).
+
+At `everything` LiteLLM logs at `DEBUG` with message logging on. Each request stands whole in LiteLLM's log, including its fingerprint. The fingerprint appears in that log and its spend row, never in the front's lines (probe L6); the front's line stays as above, so the one thing it does not show is the path and
+query of a request the front itself refuses before LiteLLM sees it. `hal apply` passes the
+depth's variables to Compose (`src/hal/stack/api_limits.py`), so a changed depth is a recreate of
+`litellm`; without them compose.yaml's defaults are `metadata`'s. `probe/agent-service/litellm_logs.py`
+drives both refusals, a served call and the switch on the fake-only stack, finds no prompt, answer,
+bearer or whole key in any line or row at `metadata` and each fingerprint it sent only in the spend
+rows, and drives LiteLLM's cleanup (period 1h, interval 5 s) against a backdated row and its
+tool-index row.
+
+**The API route keeps no content at `metadata`, as evidence for the paths exercised only, except a provider's error text, which may quote part of a request and is logged word for word.**
+LiteLLM logs no message and redacts the `Messages:` suffix of its exceptions, and neither it nor
+the front configures a callback or cache; LiteLLM's database holds keys, budgets, tool names, each
+person's fingerprint with its counters and the spend log rows above, but no prompt. What the
+database keeps per person, per tool or per label in its other tables goes after 90 days without use
+([The API route](#the-api-route), What expires).
 The retention census (`agent-service/retention_census.py`, driven by
 `probe/agent-service/litellm_retention.py` on the fake-only stack with hopin's key) searches its canaries in every writable mount and every log of
 the front, the gateway, LiteLLM and its database, the database's volume among them, and in a `pg_dump` of the database, naming the table a
 hit sits in. The canaries sit in the message, the tool description, the tool-call arguments, the tool result, the answer, a streamed
-answer, `User-Agent` and `x-litellm-tags`. After a success, an upstream 500, an upstream error body that echoes the request, a refused
+answer, `User-Agent` and `x-litellm-tags`. After a success, an upstream 500, a refused
 model, a refusal of LiteLLM's guard, a tool call and a streamed answer it finds none, and each search is proven by a control that plants
-a canary where it must be found. The front's constant user agent lands in the tool rows, beside each tool name. LiteLLM writes no request
+a canary where it must be found; an upstream error body that echoes the request lands in LiteLLM's error line and the call's spend log row alone. The tool names
+also land in the daily tool spend, which holds no fingerprint, and in the spend log's tool index,
+whose request id joins to the spend row, so for its 30 days a tool name is attributable to the
+fingerprint. The front's constant user agent lands in the tool rows, beside each tool name. LiteLLM writes no request
 tag from the user agent (`disable_add_user_agent_to_request_tags`), so a conforming request writes no tag row. A key holder who does not
 conform can send a tag in the body: a root `tags` list, `metadata.tags` and `litellm_metadata.tags` each land in `LiteLLM_DailyTagSpend`
-with LiteLLM's own request id, and so in the database's volume, in no other table, log or mount, and `metadata` as a JSON string lands
-in no sink at all; none reaches the provider. Those rows are outside the
-four tables `hal expire` prunes, so the 90 days above do not cover them. LiteLLM runs at log level
-`CRITICAL`: its own logging sites and uvicorn's write no error line that could carry a provider's
-text, and a provider failure shows at the caller. One channel stays open: `logging.lastResort` and
-`warnings.warn` reach LiteLLM's standard error, and whether a real path sends a provider's text
-through them is not measured. Not measured either: whether LiteLLM's own start-up failures still
-reach its log at that level; a failed start shows as the container's exit. Memory holds the content
+with LiteLLM's own request id and in the call's spend log row, and so in the database's volume, in no other table, log or mount, and `metadata` as a JSON string lands
+in no sink at all; none reaches the provider. The daily label rows are in the
+tables `hal expire` prunes, so the 90 days above cover them; the spend log rows go with their 30 days. `logging.lastResort` and
+`warnings.warn` reach LiteLLM's standard error too, and whether a real path sends request content
+through them is not measured. Memory holds the content
 while a run is in flight, and tmpfs may be paged to swap. The Docker log driver's retention is the daemon's
-(edge#167); the census proves that no content reaches the logs, not how long they live. Any other
+(edge#167); the census proves that no content reaches the logs, a provider's error text excepted, not how long they live. Any other
 path is not covered by this.
 
-**The metadata lines are apart from the content.** The service writes its access line per request, the
-shipped LiteLLM writes no line per request, and neither the front nor the gateway keeps an access log.
+**The metadata lines are apart from the content.** The service and the front write an access line
+per request, LiteLLM an error line per refusal by an unknown key or failure at a provider (none for a plain bearer), and the gateway keeps no access log:
+its TCP routers have none, and whether Traefik can log a TCP connection there is not measured.
 Their retention is the Docker daemon's (edge#167). How long Anthropic keeps the content is stated in the
 privacy section, which owns it.
 
@@ -381,8 +410,8 @@ and the admin budget with its customer rows (the key step below).
   wrong it ends non-zero after Prisma's retries. The database password is an environment value
   of the proxy and its Prisma processes, the same holders as the provider keys.
 - **What expires.** `hal expire`, run daily at 04:00 by `hal-expire.timer` (`Persistent=true`
-  catches up a missed run), deletes in one statement, all or nothing, the daily person and tool rows
-  (`LiteLLM_DailyEndUserSpend`, `LiteLLM_DailyToolSpend`) dated more than 90 UTC days back, the tool
+  catches up a missed run), deletes in one statement, all or nothing, the daily person, tool and label
+  rows (`LiteLLM_DailyEndUserSpend`, `LiteLLM_DailyToolSpend`, `LiteLLM_DailyTagSpend`) dated more than 90 UTC days back, the tool
   rows (`LiteLLM_ToolTable`) not used for 90 days, and the customer rows (`LiteLLM_EndUserTable`)
   whose fingerprint has had no request for 90 days and whose spend is 0. A customer row linked to
   a budget, as an admin's is, stays, and so do keys, budgets and every other table. The period is
@@ -418,9 +447,8 @@ and the admin budget with its customer rows (the key step below).
   database and change without a recreate.
 - **A provider failure reaches the caller.** An upstream reset, a broken answer and Anthropic's
   refusal of a used-up balance (a 402 `billing_error`, or a 400 saying the credit balance is too
-  low) each reach the provider once, and the caller gets an error, never a 200; LiteLLM logs at
-  `CRITICAL`,
-  so no log tells them apart, and the operator checks his credit and his key. A caller that leaves
+  low) each reach the provider once, and the caller gets an error, never a 200; LiteLLM's error
+  line and the call's spend log row name the provider's error, so the logs tell them apart. A caller that leaves
   does not end the request in flight, which may finish and is billed.
 - **Rotating a provider key is a recreate.** A replaced provider key file reaches LiteLLM only
   through its recreate, until then it keeps sending the old key. Compose refuses to create LiteLLM's

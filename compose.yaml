@@ -524,8 +524,13 @@ services:
       # Prisma's version check asks checkpoint.prisma.io at every migration; the isolated network
       # lets no answer back, and S1 allows no other name than the database's.
       CHECKPOINT_DISABLE: "1"
-      # LiteLLM logs a provider's error text at ERROR, which can echo request content (E13).
-      LITELLM_LOG: CRITICAL
+      # The depth `[api] log_depth` of ~/.config/hal/config.toml, which `hal apply` passes
+      # (src/hal/stack/api_limits.py); these defaults are its "metadata". At ERROR a line names a
+      # refusal's reason, a provider's error text included; message logging stays off. At
+      # "everything" DEBUG writes each request whole.
+      LITELLM_LOG: ${HAL_LITELLM_LOG:-ERROR}
+      JSON_LOGS: "True"
+      HAL_TURN_OFF_MESSAGE_LOGGING: ${HAL_TURN_OFF_MESSAGE_LOGGING:-true}
     tmpfs:
       - /tmp:uid=1000,gid=1000,mode=0700,size=64m,nosuid,nodev
     secrets: [litellm_anthropic_key, litellm_master_key, litellm_db_password, litellm_openai_key]

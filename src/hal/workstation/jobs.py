@@ -91,7 +91,7 @@ TIMER_JOBS: tuple[TimerJob, ...] = (
     TimerJob(
         name="hal-expire",
         service_description=(
-            f"{command(Verb.EXPIRE)}: deletes what LiteLLM keeps per person or per tool once unused"
+            f"{command(Verb.EXPIRE)}: deletes what LiteLLM keeps per person, per tool or per label once unused"
             " for its retention period"
         ),
         timer_description=f"Daily {command(Verb.EXPIRE)}, 04:00",

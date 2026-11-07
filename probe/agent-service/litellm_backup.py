@@ -17,7 +17,7 @@ status, and with `--apps` naming a scratch record: the shipped `litellm` record 
 makes the person budget and the three app keys at the code defaults; steered usage puts hopin's
 key past its budget and the fingerprint P, a random canary, past the person budget. F is the fake
 provider's request log. Keys are scratch values the probe generates and never prints; the search
-of the dump prints counts only. D is the digest of hal's six tables, read while LiteLLM and its
+of the dump prints counts only. D is the digest of hal's seven tables, read while LiteLLM and its
 front are stopped, so its own writes cannot move it: just before and just after B1's backup, the
 two equal. The probe never runs `hal stop` or `hal start`, which act on the live project: it writes
 the switch marker under the scratch HOME, stops and starts its own containers, and answers the
@@ -86,14 +86,15 @@ HAL_TABLES = (
     "LiteLLM_EndUserTable",
     "LiteLLM_DailyEndUserSpend",
     "LiteLLM_DailyToolSpend",
+    "LiteLLM_DailyTagSpend",
     "LiteLLM_ToolTable",
 )
-DAILY_TABLES = ("LiteLLM_DailyEndUserSpend", "LiteLLM_DailyToolSpend")
+DAILY_TABLES = ("LiteLLM_DailyEndUserSpend", "LiteLLM_DailyToolSpend", "LiteLLM_DailyTagSpend")
 MIGRATIONS_TABLE = "_prisma_migrations"
 DUMP_SECONDS = 120
 # A TABLE or VIEW entry of `pg_restore --list`: "<id>; <oid> <oid> TABLE <schema> <name> <owner>".
 LISTED = re.compile(r'^\d+; \d+ \d+ (TABLE|VIEW) (\S+) "?([^"\s]+)"? \S+$')
-# D: hal's six tables, the keys among them.
+# D: hal's seven tables, the keys among them.
 DIGEST_TABLES = tuple(dict.fromkeys((*TABLES, *HAL_TABLES)))
 KEYS_TABLE = "LiteLLM_VerificationToken"
 # A view the dump does not hold: `--clean`'s DROP TABLE of the keys table fails on it.
@@ -316,7 +317,7 @@ class BackupProbe(KeysProbe, AdmissionProbe):
         return self.count("LiteLLM_DailyEndUserSpend", f"end_user_id = '{self.person}'")
 
     def database_digest(self) -> str:
-        """D: the digest of hal's six tables."""
+        """D: the digest of hal's seven tables."""
         return hashlib.sha256("\n".join(self.digest(DIGEST_TABLES)).encode()).hexdigest()[:12]
 
     def database_argv(self, *psql: str) -> list[str]:
@@ -489,7 +490,7 @@ class BackupProbe(KeysProbe, AdmissionProbe):
         expect(not missing, f"B2: the dump lacks {sorted(missing)}")
         self.hold("B2", f"the dump lists {len(tables)} tables and {len(listed) - len(tables)} "
                   "views of schema public, exactly those of the live litellm-db; "
-                  "_prisma_migrations and hal's six tables among them")  # fmt: skip
+                  "_prisma_migrations and hal's seven tables among them")  # fmt: skip
         rendered = self.dump_tool(dump, "--file=-")
         controls = [*(hashed(self.file_keys[app]) for app in APPS), self.person]
         found = sum(value in rendered for value in controls)
