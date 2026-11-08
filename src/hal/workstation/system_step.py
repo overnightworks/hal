@@ -38,6 +38,7 @@ DOCKER_RESTART_POLICY = ["docker", "inspect", "--format", "{{.HostConfig.Restart
 # The only policies Docker promises to start again after its own restart.
 RESTARTED_POLICIES = frozenset({"always", "unless-stopped"})
 DOCKER_DOES_NOT_ANSWER = "Docker does not answer `docker info`"
+BUILDX_DOES_NOT_ANSWER = "Docker does not answer `docker buildx inspect default`"
 DOCKER_STATUS = "systemctl status docker"
 # journalctl deletes whole archive files by the age of their oldest entry: one day for a file's span
 # and one day of slack for a PC that is off at midnight keep every line under LOG_RETENTION_DAYS.
@@ -59,7 +60,7 @@ _BINARY_UNITS = ("B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB", "ZiB", "YiB")
 
 
 def docker_size_bytes(size: str) -> int | None:
-    """The bytes of `size` as Docker's daemon reads it (go-units `RAMInBytes`, which treats every unit as binary, so `20GB` is 20 GiB); `None` for what it would not read or a size that is no positive int64."""
+    """The bytes of `size` as Docker's daemon reads it (go-units `RAMInBytes`, which treats every unit as binary, so `20GB` is 20 GiB); `None` for what hal does not admit (a stricter grammar than Docker's) or a size that is no positive int64."""
     match = _DOCKER_SIZE.fullmatch(size)
     if match is None:
         return None
@@ -433,12 +434,20 @@ class SystemStep:
             raise DockerDoesNotAnswer(DOCKER_DOES_NOT_ANSWER)
         return driver
 
+    def _answering_build_cache_limit(self) -> str:
+        limit = self.boundaries.docker_build_cache_limit()
+        if limit is None:
+            raise DockerDoesNotAnswer(BUILDX_DOES_NOT_ANSWER)
+        return limit
+
     def refuse_unless_docker_answers(self) -> None:
-        """Docker is read as the operator, so a Docker that does not answer ends the step before sudo asks for a password."""
+        """Docker is read as the operator, so a Docker that does not answer its driver or its build cache limit ends the step before sudo asks for a password;
+        the play restarts Docker for a limit that differs, which the forecast can only name when the limit was read."""
         self._answering_docker_driver()
+        self._answering_build_cache_limit()
 
     def restart_forecast(self) -> RestartForecast | None:
-        """The restart the play makes when Docker's default driver is not the journal or Docker does not report the build cache limit, `None` when it makes none; a Docker that does not answer refuses first."""
+        """The restart the play makes when Docker's default driver is not the journal or Docker does not report the build cache limit, `None` when it makes none; a Docker that does not answer its driver or its limit refuses first."""
         driver_is_the_journal = self._answering_docker_driver() == DOCKER_LOG_DRIVER
         if driver_is_the_journal and not self._build_cache_limit_differs():
             return None
@@ -446,9 +455,8 @@ class SystemStep:
         return RestartForecast(None if policies is None else sum(policy not in RESTARTED_POLICIES for policy in policies))
 
     def _build_cache_limit_differs(self) -> bool:
-        """Docker reports another limit than the configured one; a limit that cannot be read is the play's refusal, not a forecast restart."""
-        limit = self.boundaries.docker_build_cache_limit()
-        return limit is not None and limit != reported_docker_size(self.docker.build_cache_max)
+        """Docker reports another limit than the configured one; a limit that cannot be read refused before sudo."""
+        return self._answering_build_cache_limit() != reported_docker_size(self.docker.build_cache_max)
 
     def check(self) -> CheckState | TasksWouldChange:
         """At a terminal, Ansible's check mode asks for sudo once and names the tasks that would change; without what it needs nothing is read."""

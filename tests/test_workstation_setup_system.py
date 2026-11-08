@@ -224,7 +224,7 @@ def test_a_size_is_read_and_shown_the_way_docker_reads_and_shows_it(size: str, e
 
 
 @pytest.mark.parametrize("malformed", ["", "lots", "GB", "20XB", "-1GB", "0GB", "0", "20 GB", "1e3", "9" * 400, "inf", "99999999PB"])
-def test_a_size_docker_would_not_read_is_no_size(malformed: str) -> None:
+def test_a_size_hal_does_not_admit_is_no_size(malformed: str) -> None:
     assert system_step.docker_size_bytes(malformed) is None
 
 
@@ -430,6 +430,24 @@ def test_a_docker_that_does_not_answer_fails_the_dry_run_before_the_play(sandbox
     assert playbook_runs(sandbox) == []
 
 
+@pytest.mark.parametrize("dry_run", [(), ("--dry-run",)], ids=["run", "dry run"])
+def test_a_build_cache_limit_docker_does_not_report_stops_the_run_before_the_password(
+    sandbox: Sandbox, capsys: pytest.CaptureFixture[str], dry_run: tuple[str, ...]
+) -> None:
+    """The play restarts Docker for a limit it reads as root, so a limit the operator cannot read refuses before sudo and names `systemctl status docker`."""
+    run_setup(sandbox, capsys)
+    sandbox.system.build_cache_limit = None
+    sandbox.system.playbook.calls.clear()
+    code, lines, error = run_setup(sandbox, capsys, *dry_run)
+
+    assert (code, lines[3], error.splitlines()) == (
+        ExitCode.FAILURE,
+        "  ✗ system          failed         Docker does not answer `docker buildx inspect default`",
+        ["error: setup stopped at system · /etc unchanged", f"next: {system_step.DOCKER_STATUS}"],
+    )
+    assert playbook_runs(sandbox) == []
+
+
 def test_a_dry_run_without_a_terminal_reads_no_docker(sandbox: Sandbox, capsys: pytest.CaptureFixture[str]) -> None:
     """Ruled S3b-4, cell D5: `needs_first` answers before Docker is read."""
     sandbox.system.docker_driver = None
@@ -565,18 +583,18 @@ def test_a_docker_that_restarts_is_named_with_the_containers_that_stay_down_befo
 
 
 @pytest.mark.parametrize(
-    ("reported", "restarts"),
-    [("681.7GiB", True), ("", True), (None, False)],
-    ids=["another limit", "no limit", "the limit cannot be read"],
+    "reported",
+    ["681.7GiB", ""],
+    ids=["another limit", "no limit"],
 )
 def test_a_docker_that_lacks_the_limit_is_forecast_to_restart(
-    sandbox: Sandbox, capsys: pytest.CaptureFixture[str], reported: str | None, restarts: bool
+    sandbox: Sandbox, capsys: pytest.CaptureFixture[str], reported: str
 ) -> None:
-    """Docker that does not report the limit restarts although the driver is already the journal; an unreadable limit is the play's refusal, not a forecast."""
+    """Docker that does not report the limit restarts although the driver is already the journal."""
     sandbox.system.build_cache_limit = reported
     code, lines, _ = run_setup(sandbox, capsys)
 
-    assert (code, any("restarts" in line for line in lines)) == (ExitCode.OK, restarts)
+    assert (code, any("restarts" in line for line in lines)) == (ExitCode.OK, True)
 
 
 def test_a_docker_that_reports_the_limit_is_not_forecast_to_restart(sandbox: Sandbox, capsys: pytest.CaptureFixture[str]) -> None:

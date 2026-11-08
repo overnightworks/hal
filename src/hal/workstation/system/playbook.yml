@@ -21,8 +21,8 @@
 # `docker buildx inspect default` does not report the limit: with live-restore off, every container stops meanwhile and
 # one without a restart policy stays down. A malformed file, a `log-opts` key, another `log-driver`, a `builder` or
 # `builder.gc` that is no object, or a Docker that does not answer is refused before anything is written. When the
-# restart fails or Docker does not report what it should, the file is written back without what this run was putting
-# in place and Docker restarted again; that is the last task, so edge's other files are already in place.
+# restart fails or Docker does not report what it should, the file is written back as it was before this run (without what
+# this run was putting in place) and Docker restarted again; that is the last task, so edge's other files are already in place.
 #
 # It also installs msmtp and ca-certificates (never msmtp-mta) once the refusals above passed, for the mail of `hal check`.
 #
@@ -598,9 +598,9 @@
         - name: Fail again, naming what was taken back
           ansible.builtin.fail:
             msg: >-
-              Docker did not come up as asked; {{ docker_config_path }} was written back without
+              Docker did not come up as asked; {{ docker_config_path }} was written back with
               {{ ((['`log-driver`'] if docker_driver_to_take_back else []) + (['`builder.gc.defaultMaxUsedSpace`'] if docker_limit_to_take_back else [])) | join(' and ') }}
-              and Docker restarted again
+              put back as before the run and Docker restarted again
 
   handlers:
     - name: Reload systemd
