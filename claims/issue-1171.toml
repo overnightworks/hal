@@ -3,6 +3,6 @@ agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
 role = "builder"
 base = "ea054010eb4e5d11c7d90b11f9787b7f61e0a51f"
 branch = "claude/issue-1171-docker-build-cache-limit"
-scope = ["docs/architecture.md", "docs/home.md", "scripts/system-proof/drive.sh", "src/hal/config.py", "src/hal/workstation/setup.py", "src/hal/workstation/system/playbook.yml", "src/hal/workstation/system_step.py", "tests/support/workstation_support.py", "tests/test_config.py", "tests/test_hal_config.py", "tests/test_workstation_setup_system.py"]
+scope = ["docs/architecture.md", "docs/home.md", "scripts/system-proof/Dockerfile", "scripts/system-proof/drive.sh", "scripts/system-proof/run.sh", "src/hal/config.py", "src/hal/setup_commands.py", "src/hal/workstation/setup.py", "src/hal/workstation/system/playbook.yml", "src/hal/workstation/system_step.py", "tests/support/workstation_support.py", "tests/test_config.py", "tests/test_hal_config.py", "tests/test_workstation_setup_system.py", "tests/test_workstation_system_step_runner.py"]
 opened_commit = "405b1ddae3a08205871676aa5c27c26e565a7d46"
 whole_reason = "One daemon setting: the config value, the merge, the restart trigger and forecast, the rescue, the proof cells and the docs only together make the limit real and its restart visible."
