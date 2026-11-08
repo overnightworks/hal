@@ -24,8 +24,9 @@ RETENTION_SERVICE=hal-journal-retention.service
 RETENTION_TIMER=hal-journal-retention.timer
 # Docker's default log driver as the proof expects it, written here once because the proof must not read what it checks.
 WANTED_DRIVER=journald
-WANTED_LIMIT=20GB
-WANTED_LIMIT_SHOWN=20GiB
+# The default limit and the text buildx prints for it come from the installed wheel (`read_the_default_limit`), the owner of both.
+WANTED_LIMIT=
+WANTED_LIMIT_SHOWN=
 CONFIGURED_LIMIT=10GB
 CONFIGURED_LIMIT_SHOWN=10GiB
 DAEMON_JSON=/etc/docker/daemon.json
@@ -1663,6 +1664,19 @@ cell_dk3_play_refusal() {  # the operator's Docker answers (a stub) while the ro
     return
 }
 
+cell_dk3_unreadable_limit() {  # the operator's buildx does not answer while docker info does: the limit cannot be compared, so the restart cannot be forecast and the step ends before the password
+    local code real
+    real=$(command -v docker)
+    printf '%s\n' '#!/bin/sh' "case \"\$*\" in *buildx*inspect*) exit 1 ;; esac" "exec $real \"\$@\"" >"$DOCKER_SHIM"
+    chmod 755 "$DOCKER_SHIM"
+    at_terminal dk3-limit "$HAL_BIN setup"
+    code=$?
+    rm -f "$DOCKER_SHIM"
+    verdict DK3 "buildx does not answer: refused before the password with exit 3, naming buildx and systemctl status docker, nothing written" \
+        '[ $code -eq 3 ] && grep -qx "PROMPTS=0" "$EVIDENCE/dk3-limit.log" && ! grep -q "^  › system  *needs sudo" "$EVIDENCE/dk3-limit.log" && row_in_log dk3-limit system "failed +Docker does not answer `docker buildx inspect default`" && in_log dk3-limit "/etc unchanged" && in_log dk3-limit "next: systemctl status docker" && [ ! -e "$DAEMON_JSON" ] && [ "$(snapshot)" = "$(cat "$EVIDENCE/dk3-before.txt")" ]'
+    return
+}
+
 cell_dk3() {  # after cell 1, so Docker and edge's files are in place and a write would be seen
     local code started
     cell_dk3_case "log-opts" '{"log-opts": {"max-size": "10m"}}' '`log-opts`' dry
@@ -1679,6 +1693,7 @@ cell_dk3() {  # after cell 1, so Docker and edge's files are in place and a writ
     cell_dk3_play_refusal
     systemctl start docker.socket
     wait_for_engine
+    cell_dk3_unreadable_limit
     verdict DK3 "Docker does not answer: refused before the password with exit 3, naming Docker and systemctl status docker, nothing written" \
         '[ $code -eq 3 ] && grep -qx "PROMPTS=0" "$EVIDENCE/dk3-down.log" && ! grep -q "^  › system  *needs sudo" "$EVIDENCE/dk3-down.log" && row_in_log dk3-down system "failed +Docker does not answer" && in_log dk3-down "/etc unchanged" && in_log dk3-down "next: systemctl status docker" && [ ! -e "$DAEMON_JSON" ] && [ "$(snapshot)" = "$(cat "$EVIDENCE/dk3-before.txt")" ]'
     verdict DK3 "Docker does not answer: the dry run is refused the same way without a password" \
@@ -1686,18 +1701,33 @@ cell_dk3() {  # after cell 1, so Docker and edge's files are in place and a writ
     return
 }
 
+read_the_default_limit() {  # sets WANTED_LIMIT and WANTED_LIMIT_SHOWN from hal's own default setting and its reported form
+    local python
+    python=$(head -n 1 "$HAL_BIN" | sed 's/^#!//')
+    WANTED_LIMIT=$(PYTHONDONTWRITEBYTECODE=1 "$python" -I -c 'from hal.workstation.system_step import DockerSettings; print(DockerSettings().build_cache_max)')
+    WANTED_LIMIT_SHOWN=$(PYTHONDONTWRITEBYTECODE=1 "$python" -I -c 'import sys; from hal.workstation.system_step import reported_docker_size; print(reported_docker_size(sys.argv[1]))' "$WANTED_LIMIT")
+    return
+}
+
+daemon_json_only_adds_the_limit_and_the_driver() {  # <file before>: every key it holds is JSON-equal in the file now, and the file gained only the build cache limit and the log driver
+    python3 -c 'import json, sys
+before, after = (json.load(open(path)) for path in (sys.argv[1], sys.argv[2]))
+added = after.keys() - before.keys()
+sys.exit(not (all(after[key] == before[key] for key in before) and added == {"builder", "log-driver"} and after["builder"] == {"gc": {"defaultMaxUsedSpace": sys.argv[3]}} and after["log-driver"] == sys.argv[4]))' "$1" "$DAEMON_JSON" "$WANTED_LIMIT" "$WANTED_DRIVER"
+    return
+}
+
 cell_dk2_merge() {  # the PC's file keeps runtimes and gains the one line; the old bytes are in the backup
-    local code pc="$EVIDENCE/dk2-pc-daemon.json" backup changed_lines
+    local code pc="$EVIDENCE/dk2-pc-daemon.json" backup
     write_the_pcs_daemon_json "$pc"
     verdict DK2 "the PC-shaped fixture is exactly 128 bytes" '[ "$(stat -c %s "$pc")" -eq 128 ]'
     engine_on_json_file_with "$pc"
     at_terminal dk2-merge "$HAL_BIN setup"
     code=$?
     backup=$(backups_of_daemon_json | tail -1)
-    changed_lines=$(diff --unified=0 "$pc" "$DAEMON_JSON" | grep -c '^[+-][^+-]')
     verdict DK2 "the PC's file is merged: runtimes equal as JSON, log-driver and the limit added, apply exits 0" \
         '[ $code -eq 0 ] && daemon_json_is "{\"builder\": {\"gc\": {\"defaultMaxUsedSpace\": \"$WANTED_LIMIT\"}}, \"log-driver\": \"$WANTED_DRIVER\", \"runtimes\": {\"nvidia\": {\"args\": [], \"path\": \"nvidia-container-runtime\"}}}"'
-    verdict DK2 "the diff of the file is the builder block and the log-driver line" '[ "$changed_lines" -eq 6 ] && grep -qF "\"log-driver\": \"$WANTED_DRIVER\"," <(diff "$pc" "$DAEMON_JSON") && grep -qF "\"defaultMaxUsedSpace\": \"$WANTED_LIMIT\"" <(diff "$pc" "$DAEMON_JSON")'
+    verdict DK2 "every key of the PC's file is JSON-equal and only the limit and the log-driver were added" 'daemon_json_only_adds_the_limit_and_the_driver "$pc"'
     verdict DK2 "the old bytes are in the backup under /var/backups/home-setup" '[ -n "$backup" ] && cmp "$pc" "$backup"'
     return
 }
@@ -1783,7 +1813,7 @@ cell_dk7_case() {  # cell_dk7_case <name> <state of the file before the apply: c
     # The failed check is a rescued task, whose message only Ansible's text carries, so this apply runs with -v.
     at_terminal "dk7-$state-$failure" "$HAL_BIN setup -v"
     code=$?
-    verdict DK7 "$name: the apply exits 3 naming the rescue" '[ $code -eq 3 ] && in_log "dk7-$state-$failure" "was written back without" && in_log "dk7-$state-$failure" "/etc may be partial"'
+    verdict DK7 "$name: the apply exits 3 naming the rescue" '[ $code -eq 3 ] && in_log "dk7-$state-$failure" "was written back with" && in_log "dk7-$state-$failure" "/etc may be partial"'
     if [[ $failure = wrong-driver ]]; then
         verdict DK7 "$name: the apply saw Docker start and name json-file, not the journal" 'in_log "dk7-$state-$failure" "Docker reports json-file"'
     fi
@@ -1854,7 +1884,7 @@ cell_dk8() {  # the limit: merged keeping the rest, one restart, then none, and 
     code=$?
     rm -f "$DOCKER_SHIM"
     verdict DK8 "a failing limit: the apply exits 3 naming the key taken back and not the log driver" \
-        '[ $code -eq 3 ] && in_log dk8-failing "was written back without" && in_log dk8-failing "builder.gc.defaultMaxUsedSpace" && ! in_log dk8-failing "without \`log-driver\`"'
+        '[ $code -eq 3 ] && in_log dk8-failing "was written back with" && in_log dk8-failing "builder.gc.defaultMaxUsedSpace" && ! in_log dk8-failing "with \`log-driver\`"'
     verdict DK8 "a failing limit: the log driver and the other builder key stay in the file, the limit is gone" \
         'daemon_json_is "{\"builder\": {\"history\": {\"maxEntries\": 50}}, \"log-driver\": \"$WANTED_DRIVER\"}"'
     verdict DK8 "a failing limit: Docker answers on the journal after the rescue" \
@@ -2069,6 +2099,7 @@ cells_sudo() {  # cells_sudo <suffix> <alternative>: P1-P10 under one variant of
     return
 }
 
+[[ -x $HAL_BIN ]] && read_the_default_limit
 case "${1:?stage}" in
     install) install_home ;;
     fresh) cell_dk1; plant_rsyslog_files; record_rsyslog_before; cell_11; cell_12; cell_13; cell_10; cell_r0; cell_dk3_before_the_first_apply; cell_1; cells_rsyslog_purged; cell_a1_1; cell_9; cell_a1_2; cell_r4; cell_s1; cells_yes; cells_mail; cells_agent; cells_docker; cells_retention; cells_polkit; marker_on ;;
