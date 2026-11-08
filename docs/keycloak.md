@@ -295,7 +295,7 @@ counts as done. Each missing client file is created, so a later app that adds on
 `keycloak/secret-check/secret_check.py` keeps secrets out of the repository's YAML (the file's
 header and `tests/test_secret_check.py` hold its rules); CI runs it. After changing the script's
 dependencies run `uv lock --script keycloak/secret-check/secret_check.py` (not `uv lock`). The
-quality gate (`quality / hygiene`) additionally scans the whole history for literal-looking
+quality gate (`quality / check`) additionally scans the whole history for literal-looking
 secrets.
 
 ## Start and apply
