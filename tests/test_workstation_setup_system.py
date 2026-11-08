@@ -430,12 +430,14 @@ def test_a_docker_that_does_not_answer_fails_the_dry_run_before_the_play(sandbox
     assert playbook_runs(sandbox) == []
 
 
+@pytest.mark.parametrize("driver", ["journald", "json-file"], ids=["driver is the journal", "driver is not the journal"])
 @pytest.mark.parametrize("dry_run", [(), ("--dry-run",)], ids=["run", "dry run"])
 def test_a_build_cache_limit_docker_does_not_report_stops_the_run_before_the_password(
-    sandbox: Sandbox, capsys: pytest.CaptureFixture[str], dry_run: tuple[str, ...]
+    sandbox: Sandbox, capsys: pytest.CaptureFixture[str], dry_run: tuple[str, ...], driver: str
 ) -> None:
     """The play restarts Docker for a limit it reads as root, so a limit the operator cannot read refuses before sudo and names `systemctl status docker`."""
     run_setup(sandbox, capsys)
+    sandbox.system.docker_driver = driver
     sandbox.system.build_cache_limit = None
     sandbox.system.playbook.calls.clear()
     code, lines, error = run_setup(sandbox, capsys, *dry_run)

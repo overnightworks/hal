@@ -1673,7 +1673,7 @@ cell_dk3_unreadable_limit() {  # the operator's buildx does not answer while doc
     code=$?
     rm -f "$DOCKER_SHIM"
     verdict DK3 "buildx does not answer: refused before the password with exit 3, naming buildx and systemctl status docker, nothing written" \
-        '[ $code -eq 3 ] && grep -qx "PROMPTS=0" "$EVIDENCE/dk3-limit.log" && ! grep -q "^  › system  *needs sudo" "$EVIDENCE/dk3-limit.log" && row_in_log dk3-limit system "failed +Docker does not answer `docker buildx inspect default`" && in_log dk3-limit "/etc unchanged" && in_log dk3-limit "next: systemctl status docker" && [ ! -e "$DAEMON_JSON" ] && [ "$(snapshot)" = "$(cat "$EVIDENCE/dk3-before.txt")" ]'
+        '[ $code -eq 3 ] && grep -qx "PROMPTS=0" "$EVIDENCE/dk3-limit.log" && ! grep -q "^  › system  *needs sudo" "$EVIDENCE/dk3-limit.log" && row_in_log dk3-limit system "failed +Docker does not answer \`docker buildx inspect default\`" && in_log dk3-limit "/etc unchanged" && in_log dk3-limit "next: systemctl status docker" && [ ! -e "$DAEMON_JSON" ] && [ "$(snapshot)" = "$(cat "$EVIDENCE/dk3-before.txt")" ]'
     return
 }
 
@@ -1710,10 +1710,11 @@ read_the_default_limit() {  # sets WANTED_LIMIT and WANTED_LIMIT_SHOWN from hal'
 }
 
 daemon_json_only_adds_the_limit_and_the_driver() {  # <file before>: every key it holds is JSON-equal in the file now, and the file gained only the build cache limit and the log driver
+    local file_before=$1
     python3 -c 'import json, sys
 before, after = (json.load(open(path)) for path in (sys.argv[1], sys.argv[2]))
 added = after.keys() - before.keys()
-sys.exit(not (all(after[key] == before[key] for key in before) and added == {"builder", "log-driver"} and after["builder"] == {"gc": {"defaultMaxUsedSpace": sys.argv[3]}} and after["log-driver"] == sys.argv[4]))' "$1" "$DAEMON_JSON" "$WANTED_LIMIT" "$WANTED_DRIVER"
+sys.exit(not (all(after[key] == before[key] for key in before) and added == {"builder", "log-driver"} and after["builder"] == {"gc": {"defaultMaxUsedSpace": sys.argv[3]}} and after["log-driver"] == sys.argv[4]))' "$file_before" "$DAEMON_JSON" "$WANTED_LIMIT" "$WANTED_DRIVER"
     return
 }
 

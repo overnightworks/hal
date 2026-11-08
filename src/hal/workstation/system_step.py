@@ -449,7 +449,8 @@ class SystemStep:
     def restart_forecast(self) -> RestartForecast | None:
         """The restart the play makes when Docker's default driver is not the journal or Docker does not report the build cache limit, `None` when it makes none; a Docker that does not answer its driver or its limit refuses first."""
         driver_is_the_journal = self._answering_docker_driver() == DOCKER_LOG_DRIVER
-        if driver_is_the_journal and not self._build_cache_limit_differs():
+        limit_differs = self._build_cache_limit_differs()
+        if driver_is_the_journal and not limit_differs:
             return None
         policies = self.boundaries.running_restart_policies()
         return RestartForecast(None if policies is None else sum(policy not in RESTARTED_POLICIES for policy in policies))
