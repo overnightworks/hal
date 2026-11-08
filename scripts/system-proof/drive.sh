@@ -24,6 +24,8 @@ RETENTION_SERVICE=hal-journal-retention.service
 RETENTION_TIMER=hal-journal-retention.timer
 # Docker's default log driver as the proof expects it, written here once because the proof must not read what it checks.
 WANTED_DRIVER=journald
+WANTED_LIMIT=20GB
+WANTED_LIMIT_SHOWN=20GiB
 DAEMON_JSON=/etc/docker/daemon.json
 BACKUP_DIR=/var/backups/home-setup
 DOCKER_DROP_IN_DIR="$UNIT_DIR/docker.service.d"
@@ -423,8 +425,8 @@ cell_1() {
     verdict 1 "systemd-analyze verify passes" 'systemd-analyze verify cloudflared.service >"$EVIDENCE/verify.log" 2>&1'
     verdict D1 "the apply installed msmtp and ca-certificates, and msmtp-mta is not there" \
         'dpkg -s msmtp ca-certificates >/dev/null 2>&1 && ! dpkg -s msmtp-mta >/dev/null 2>&1'
-    verdict DK2 "with no daemon.json the apply created exactly the journal as default, root-owned, mode 644" \
-        'daemon_json_is "{\"log-driver\": \"$WANTED_DRIVER\"}" && [ "$(stat -c "%U %a" "$DAEMON_JSON")" = "root 644" ]'
+    verdict DK2 "with no daemon.json the apply created exactly the journal as default and the build cache limit, root-owned, mode 644" \
+        'daemon_json_is "{\"builder\": {\"gc\": {\"defaultMaxUsedSpace\": \"$WANTED_LIMIT\"}}, \"log-driver\": \"$WANTED_DRIVER\"}" && [ "$(stat -c "%U %a" "$DAEMON_JSON")" = "root 644" ]'
     verdict DK4 "after the first apply docker info says the journal" '[ "$(docker_default_driver)" = "$WANTED_DRIVER" ]'
     docker_started_at >"$EVIDENCE/dk4-started-after-cell1.txt"
     return
@@ -1691,17 +1693,17 @@ cell_dk2_merge() {  # the PC's file keeps runtimes and gains the one line; the o
     code=$?
     backup=$(backups_of_daemon_json | tail -1)
     changed_lines=$(diff --unified=0 "$pc" "$DAEMON_JSON" | grep -c '^[+-][^+-]')
-    verdict DK2 "the PC's file is merged: runtimes equal as JSON, log-driver added, apply exits 0" \
-        '[ $code -eq 0 ] && daemon_json_is "{\"log-driver\": \"$WANTED_DRIVER\", \"runtimes\": {\"nvidia\": {\"args\": [], \"path\": \"nvidia-container-runtime\"}}}"'
-    verdict DK2 "the diff of the file is the one log-driver line" '[ "$changed_lines" -eq 1 ] && grep -qF "\"log-driver\": \"$WANTED_DRIVER\"," <(diff "$pc" "$DAEMON_JSON")'
+    verdict DK2 "the PC's file is merged: runtimes equal as JSON, log-driver and the limit added, apply exits 0" \
+        '[ $code -eq 0 ] && daemon_json_is "{\"builder\": {\"gc\": {\"defaultMaxUsedSpace\": \"$WANTED_LIMIT\"}}, \"log-driver\": \"$WANTED_DRIVER\", \"runtimes\": {\"nvidia\": {\"args\": [], \"path\": \"nvidia-container-runtime\"}}}"'
+    verdict DK2 "the diff of the file is the builder block and the log-driver line" '[ "$changed_lines" -eq 6 ] && grep -qF "\"log-driver\": \"$WANTED_DRIVER\"," <(diff "$pc" "$DAEMON_JSON") && grep -qF "\"defaultMaxUsedSpace\": \"$WANTED_LIMIT\"" <(diff "$pc" "$DAEMON_JSON")'
     verdict DK2 "the old bytes are in the backup under /var/backups/home-setup" '[ -n "$backup" ] && cmp "$pc" "$backup"'
     return
 }
 
-cell_dk4_and_dk5() {  # a merged file with Docker still on json-file: one restart into the journal; running and stopped containers
+cell_dk4_and_dk5() {  # a merged file (journal and limit) with Docker still on json-file: one restart into the journal; running and stopped containers
     local code started backups_before checksum_before
     engine_on_json_file_with ""
-    printf '{\n    "log-driver": "%s"\n}' "$WANTED_DRIVER" >"$DAEMON_JSON"
+    printf '{\n    "builder": {\n        "gc": {\n            "defaultMaxUsedSpace": "%s"\n        }\n    },\n    "log-driver": "%s"\n}' "$WANTED_LIMIT" "$WANTED_DRIVER" >"$DAEMON_JSON"
     docker run --detach --restart unless-stopped --network none --name dk5-running proof-rootfs /bin/busybox sleep 100000 >"$EVIDENCE/dk5-run.log" 2>&1
     docker run --detach --restart unless-stopped --network none --name dk5-stopped proof-rootfs /bin/busybox sleep 100000 >>"$EVIDENCE/dk5-run.log" 2>&1
     docker stop dk5-stopped >>"$EVIDENCE/dk5-run.log" 2>&1
@@ -1804,12 +1806,68 @@ cells_dk7() {
     return
 }
 
+docker_reports_the_limit() {  # the last rule's `Max Used Space` line, the one the limit sets
+    docker buildx inspect default | grep 'Max Used Space:' | tail -1 | grep -qF "$WANTED_LIMIT_SHOWN"
+    return
+}
+
+install_a_docker_that_reports_another_limit() {  # Docker restarts and starts, yet its builder reports another limit
+    local real
+    real=$(command -v docker)
+    printf '%s\n' '#!/bin/sh' \
+        "case \"\$*\" in *buildx*inspect*) printf 'GC Policy rule#0:\n\tMax Used Space:\t1GiB\n'; exit 0 ;; esac" \
+        "exec $real \"\$@\"" >"$DOCKER_SHIM"
+    chmod 755 "$DOCKER_SHIM"
+    return
+}
+
+docker_on_the_journal_without_the_limit() {  # the file names the journal and a key under `builder`, Docker restarted on it
+    printf '{\n    "builder": {\n        "history": {\n            "maxEntries": 50\n        }\n    },\n    "log-driver": "%s"\n}' "$WANTED_DRIVER" >"$DAEMON_JSON"
+    systemctl reset-failed docker
+    systemctl restart docker
+    wait_for_engine
+    return
+}
+
+cell_dk8() {  # the limit: merged keeping the rest, one restart, then none, and a failing limit taken back without the log driver
+    local code started
+    docker_on_the_journal_without_the_limit
+    started=$(docker_started_at)
+    at_terminal dk8-first "$HAL_BIN setup"
+    code=$?
+    verdict DK8 "the apply on a Docker without the limit exits 0 and merges it, keeping the other builder key and the journal" \
+        '[ $code -eq 0 ] && daemon_json_is "{\"builder\": {\"gc\": {\"defaultMaxUsedSpace\": \"$WANTED_LIMIT\"}, \"history\": {\"maxEntries\": 50}}, \"log-driver\": \"$WANTED_DRIVER\"}"'
+    verdict DK8 "docker buildx inspect reports the limit after the apply" docker_reports_the_limit
+    verdict DK8 "the apply restarted Docker although the driver was the journal" '[ "$started" != "$(docker_started_at)" ]'
+    verdict DK8 "the apply names the restart before the sudo row" 'docker_row_before_sudo_row dk8-first "all containers stop"'
+    started=$(docker_started_at)
+    at_terminal dk8-second "$HAL_BIN setup"
+    code=$?
+    verdict DK8 "a second apply exits 0 and does not restart Docker" '[ $code -eq 0 ] && [ "$started" = "$(docker_started_at)" ]'
+    verdict DK8 "a second apply prints no docker row" '! after_the_yes dk8-second | grep -qP "(^|\\x1b\\[K)  ! docker "'
+    docker_on_the_journal_without_the_limit
+    install_a_docker_that_reports_another_limit
+    # The failed check is a rescued task, whose message only Ansible's text carries, so this apply runs with -v.
+    at_terminal dk8-failing "$HAL_BIN setup -v"
+    code=$?
+    rm -f "$DOCKER_SHIM"
+    verdict DK8 "a failing limit: the apply exits 3 naming the key taken back and not the log driver" \
+        '[ $code -eq 3 ] && in_log dk8-failing "was written back without" && in_log dk8-failing "builder.gc.defaultMaxUsedSpace" && ! in_log dk8-failing "without \`log-driver\`"'
+    verdict DK8 "a failing limit: the log driver and the other builder key stay in the file, the limit is gone" \
+        'daemon_json_is "{\"builder\": {\"history\": {\"maxEntries\": 50}}, \"log-driver\": \"$WANTED_DRIVER\"}"'
+    verdict DK8 "a failing limit: Docker answers on the journal after the rescue" \
+        'systemctl is-active --quiet docker && [ "$(docker_default_driver)" = "$WANTED_DRIVER" ]'
+    at_terminal dk8-converge "$HAL_BIN setup"
+    return
+}
+
 cells_docker() {
     cell_dk2_merge
     cell_dk3
     cell_dk4_and_dk5
     cell_dk6
     cells_dk7
+    cell_dk8
     return
 }
 
