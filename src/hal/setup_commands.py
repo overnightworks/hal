@@ -53,7 +53,7 @@ def _setup(arguments: argparse.Namespace) -> ExitCode:
     ports = dataclasses.replace(
         ports, timer_jobs=jobs.with_alarm_interval(ports.timer_jobs, settings.alarm.interval)
     )
-    return EXIT_OF_SETUP[setup.setup(layout, ports, arguments.dry_run)]
+    return EXIT_OF_SETUP[setup.setup(layout, ports, arguments.dry_run, settings.docker)]
 
 
 COMMANDS = (

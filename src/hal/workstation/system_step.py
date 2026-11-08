@@ -88,9 +88,6 @@ class DockerSettings:
     build_cache_max: str = "20GB"
 
 
-DEFAULT_DOCKER_SETTINGS = DockerSettings()
-
-
 class CheckState(Enum):
     """What a step's check found; only the system step can end up not checked."""
 
@@ -342,7 +339,7 @@ class Boundaries:
     operator_user: Callable[[], str]
     docker_driver: Callable[[], str | None]
     running_restart_policies: Callable[[], tuple[str, ...] | None]
-    docker_build_cache_limit: Callable[[], str | None] = lambda: None
+    docker_build_cache_limit: Callable[[], str | None]
 
 
 @dataclass(frozen=True)
@@ -402,7 +399,7 @@ TERMINAL_BOUNDARIES = Boundaries(
 class SystemStep:
     layout: Layout
     boundaries: Boundaries
-    docker: DockerSettings = DEFAULT_DOCKER_SETTINGS
+    docker: DockerSettings
 
     def extra_vars(self) -> dict[str, str | int | tuple[str, ...]]:
         """The values the playbook fills in; the tunnel id it reads itself, as root, from cloudflared's config.

@@ -28,7 +28,6 @@ from hal.workstation.secrets_setup import WalkEnd
 from hal.workstation.secrets_view import ManifestError, Presence, SecretEntry
 from hal.workstation.system_step import (
     AGENT_USER,
-    DEFAULT_DOCKER_SETTINGS,
     SYSTEM_ROW,
     DOCKER_STATUS,
     Applied,
@@ -713,7 +712,7 @@ def _go_through(steps: tuple[Step, ...], role: ExecutionRole, mode: Pass) -> lis
     return outcomes
 
 
-def setup(layout: Layout, ports: Ports, dry_run: bool, docker: DockerSettings = DEFAULT_DOCKER_SETTINGS) -> SetupEnd:
+def setup(layout: Layout, ports: Ports, dry_run: bool, docker: DockerSettings) -> SetupEnd:
     """Shows the plan, asks one yes and runs; `dry_run` only shows. Without a terminal an open row ends in a refusal before any step."""
     try:
         role = _role(ports)

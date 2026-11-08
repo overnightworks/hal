@@ -20,6 +20,7 @@ from support.workstation_support import (
     run_hal_setup,
     run_setup,
     split_at_the_prompt,
+    write_hal_config,
 )
 
 import hal.workstation
@@ -73,7 +74,7 @@ def test_the_playbook_gets_the_agents_account_name_and_the_digest_covers_it(sand
 
     (argv,) = sandbox.system.playbook.calls
     assert json.loads(argv[argv.index("--extra-vars") + 1])["agent_user"] == AGENT_USER == "agent"
-    assert "agent_user" in SystemStep(sandbox.layout, sandbox.system.boundaries).extra_vars()
+    assert "agent_user" in SystemStep(sandbox.layout, sandbox.system.boundaries, system_step.DockerSettings()).extra_vars()
 
 
 @pytest.mark.parametrize(
@@ -239,6 +240,15 @@ def test_the_playbook_is_given_the_limit_and_the_text_docker_reports_for_it(sand
     assert (extra_vars["docker_build_cache_max"], extra_vars["docker_build_cache_reported"]) == ("15GB", "15GiB")
 
 
+def test_the_limit_in_the_settings_file_reaches_the_play_of_hal_setup(sandbox: Sandbox, capsys: pytest.CaptureFixture[str]) -> None:
+    write_hal_config(sandbox.home, '[docker]\nbuild_cache_max = "15GB"\n')
+
+    run_setup(sandbox, capsys)
+
+    (argv,) = sandbox.system.playbook.calls
+    assert json.loads(argv[argv.index("--extra-vars") + 1])["docker_build_cache_max"] == "15GB"
+
+
 BUILDX_INSPECT = """Name: default
 Driver: docker
 GC Policy rule#0:
@@ -336,7 +346,7 @@ def test_the_system_steps_check_answers_with_one_of_the_three_states(
     sandbox.system.playbook.applied = applied_before
     sandbox.system.terminal = terminal
 
-    assert SystemStep(sandbox.layout, sandbox.system.boundaries).check() == expected
+    assert SystemStep(sandbox.layout, sandbox.system.boundaries, system_step.DockerSettings()).check() == expected
 
 
 @pytest.mark.parametrize(

@@ -416,7 +416,7 @@ def a_play_under_stub_sudo(
     monkeypatch.setattr(
         system_step,
         "TERMINAL_BOUNDARIES",
-        system_step.Boundaries(lambda: True, lambda _argv: system_step.run_playbook_as_root([str(playbook)]), lambda: "operator", lambda: "journald", lambda: ()),
+        system_step.Boundaries(lambda: True, lambda _argv: system_step.run_playbook_as_root([str(playbook)]), lambda: "operator", lambda: "journald", lambda: (), lambda: None),
     )
     return stub
 
