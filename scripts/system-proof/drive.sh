@@ -1704,8 +1704,9 @@ cell_dk3() {  # after cell 1, so Docker and edge's files are in place and a writ
 read_the_default_limit() {  # sets WANTED_LIMIT and WANTED_LIMIT_SHOWN from hal's own default setting and its reported form
     local python
     python=$(head -n 1 "$HAL_BIN" | sed 's/^#!//')
-    WANTED_LIMIT=$(PYTHONDONTWRITEBYTECODE=1 "$python" -I -c 'from hal.workstation.system_step import DockerSettings; print(DockerSettings().build_cache_max)')
-    WANTED_LIMIT_SHOWN=$(PYTHONDONTWRITEBYTECODE=1 "$python" -I -c 'import sys; from hal.workstation.system_step import reported_docker_size; print(reported_docker_size(sys.argv[1]))' "$WANTED_LIMIT")
+    # Root runs this, and -I ignores PYTHON* variables, so -B is what keeps root from writing bytecode into the tester's home.
+    WANTED_LIMIT=$("$python" -I -B -c 'from hal.workstation.system_step import DockerSettings; print(DockerSettings().build_cache_max)')
+    WANTED_LIMIT_SHOWN=$("$python" -I -B -c 'import sys; from hal.workstation.system_step import reported_docker_size; print(reported_docker_size(sys.argv[1]))' "$WANTED_LIMIT")
     return
 }
 
