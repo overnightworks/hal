@@ -1,0 +1,8 @@
+claim_id = "9b1ec027ea894268b91b8980f1513254"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "919e64a5e2c01826b7f8ba68a7552ad25d7fad26"
+branch = "claude/issue-1164-quality-v0-10-0"
+scope = [".github/workflows/ci.yml", ".github/workflows/codeql.yml", "AGENTS.md", "docs/keycloak.md", "quality/baseline.toml"]
+opened_commit = "d90a54b126e36036c9ee03902ea9203c1710bdd9"
+whole_reason = "One pin bump: the gate pin, its codeql twin, the local command word and the renamed job name change together, and the ceiling only if the new release reports a gone entry."
