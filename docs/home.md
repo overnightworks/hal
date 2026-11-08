@@ -715,8 +715,8 @@ below and rsyslog's conffiles are home's own and are not backed up. `/etc/docker
   offline and starts without `/etc/docker/daemon.json`. DK2 proves the merge (no file, and the PC's 128-byte file with its
   backup), DK3 the refusals and a Docker that does not answer (without a password prompt, in the run and the dry run; the image's operator is in the `docker` group), DK4 the dry run and the restart on need only, and that the restart row names the containers that stay down before the password, DK5 that a
   running `unless-stopped` container comes back, while one stopped by hand and a running one without a restart policy stay exited, and that the first two keep `json-file`, DK6 that a
-  container created afterwards is read by `docker logs`, `docker compose logs` and `journalctl CONTAINER_NAME=`, and DK7 the
-  rescue, against a proof-only `docker.service` drop-in whose flag contradicts the file. The proof runs the same 26.04 Docker
+  container created afterwards is read by `docker logs`, `docker compose logs` and `journalctl CONTAINER_NAME=`, DK7 the
+  rescue, against a proof-only `docker.service` drop-in whose flag contradicts the file, and DK8 the build cache limit: merged beside another `builder` key, one restart and then none, a value from `[docker]` in hal's settings, and a limit Docker does not report taken back without the log driver. The proof runs the same 26.04 Docker
   package as the PC, but inside a container and without a GPU. The agents' refusal cells A1-8 and A1-9 run against the engine's own `docker.socket`.
 
 ### Das Mail-Konto von `hal check`

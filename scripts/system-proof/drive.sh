@@ -26,6 +26,8 @@ RETENTION_TIMER=hal-journal-retention.timer
 WANTED_DRIVER=journald
 WANTED_LIMIT=20GB
 WANTED_LIMIT_SHOWN=20GiB
+CONFIGURED_LIMIT=10GB
+CONFIGURED_LIMIT_SHOWN=10GiB
 DAEMON_JSON=/etc/docker/daemon.json
 BACKUP_DIR=/var/backups/home-setup
 DOCKER_DROP_IN_DIR="$UNIT_DIR/docker.service.d"
@@ -1839,7 +1841,7 @@ cell_dk8() {  # the limit: merged keeping the rest, one restart, then none, and 
         '[ $code -eq 0 ] && daemon_json_is "{\"builder\": {\"gc\": {\"defaultMaxUsedSpace\": \"$WANTED_LIMIT\"}, \"history\": {\"maxEntries\": 50}}, \"log-driver\": \"$WANTED_DRIVER\"}"'
     verdict DK8 "docker buildx inspect reports the limit after the apply" docker_reports_the_limit
     verdict DK8 "the apply restarted Docker although the driver was the journal" '[ "$started" != "$(docker_started_at)" ]'
-    verdict DK8 "the apply names the restart before the sudo row" 'docker_row_before_sudo_row dk8-first "all containers stop"'
+    verdict DK8 "the apply names the restart before the sudo row" 'docker_row_before_sudo_row dk8-first "all containers stop · 0 stay down"'
     started=$(docker_started_at)
     at_terminal dk8-second "$HAL_BIN setup"
     code=$?
@@ -1857,6 +1859,13 @@ cell_dk8() {  # the limit: merged keeping the rest, one restart, then none, and 
         'daemon_json_is "{\"builder\": {\"history\": {\"maxEntries\": 50}}, \"log-driver\": \"$WANTED_DRIVER\"}"'
     verdict DK8 "a failing limit: Docker answers on the journal after the rescue" \
         'systemctl is-active --quiet docker && [ "$(docker_default_driver)" = "$WANTED_DRIVER" ]'
+    as_tester mkdir -p /home/tester/.config/hal
+    printf '[docker]\nbuild_cache_max = "%s"\n' "$CONFIGURED_LIMIT" | as_tester tee /home/tester/.config/hal/config.toml >/dev/null
+    at_terminal dk8-configured "$HAL_BIN setup"
+    code=$?
+    verdict DK8 "a value from hal's settings file reaches the file and Docker reports it" \
+        '[ $code -eq 0 ] && grep -qF "\"defaultMaxUsedSpace\": \"$CONFIGURED_LIMIT\"" "$DAEMON_JSON" && docker buildx inspect default | grep "Max Used Space:" | tail -1 | grep -qF "$CONFIGURED_LIMIT_SHOWN"'
+    as_tester rm /home/tester/.config/hal/config.toml
     at_terminal dk8-converge "$HAL_BIN setup"
     return
 }
