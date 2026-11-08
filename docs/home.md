@@ -680,23 +680,25 @@ below and rsyslog's conffiles are home's own and are not backed up. `/etc/docker
   Or roll back as described.
 - **Docker's log default.** The same run merges `"log-driver": "journald"` into `/etc/docker/daemon.json` (`DOCKER_LOG_DRIVER`
   in `src/hal/workstation/system_step.py`, which `hal check` reads too). Every other key stays, such as `runtimes.nvidia`; the file is
-  written root-owned, mode 644, with sorted keys, so the diff of a file that only holds the runtime is one new line, and it is
-  checked with `dockerd --validate` before it replaces the old one. A file that does not parse, one that is not an object, a
-  `log-opts` key, another `log-driver`, and a Docker that does not answer `docker info` are refused before anything is
+  written root-owned, mode 644, with sorted keys, and checked with `dockerd --validate` before it replaces the old one. A file that does not parse, one that is not an object, a
+  `log-opts` key, another `log-driver`, a `builder` or `builder.gc` that is not an object, and a Docker that does not answer `docker info` or `docker buildx inspect default` are refused before anything is
   written, edge's files included (hal reads `docker info` as the operator before the password and stops there; the play refuses as root too, for a Docker that stopped meanwhile); the dry run names the restart as a change, shows the diff with `-v`, and writes nothing.
   Docker restarts whenever `docker info` does not say `journald`, never while it does, so a run interrupted after the write
-  restarts on the next. `live-restore` is off: every container stops with Docker. Docker promises a start only for `always`
+  restarts on the next. The same goes for the build cache limit below, which `docker buildx inspect` must report. `live-restore` is off: every container stops with Docker. Docker promises a start only for `always`
   and `unless-stopped`; an `on-failure` container comes back only when its stop left a non-zero exit code, so the count of
   containers that stay down can name it although it returns, and one without a restart policy (`no`) stays down. The apps are unreachable meanwhile and running work
   is cut. `hal setup` does not wait for it, so run `hal setup` at a quiet time. Existing containers keep `json-file` until they are recreated.
-  **Rescue.** When the restart fails or Docker does not report `journald`, the run writes `daemon.json` back without `log-driver`
-  (`{}` when nothing else remains; the same JSON as before the run, unless the file already carried `journald`), clears the
-  unit's start limit with `systemctl reset-failed docker`, restarts Docker again and fails, saying so. No backup is read and
+  **Rescue.** When the restart fails or Docker does not report `journald` or the limit, the run writes `daemon.json` back
+  without what this run was putting in place: `log-driver` while Docker did not say `journald` (`{}` when nothing else
+  remains; the same JSON as before the run, unless the file already carried `journald`), the limit while Docker did not
+  report it. A failing limit leaves a `log-driver` that was already in the file alone. It clears the
+  unit's start limit with `systemctl reset-failed docker`, restarts Docker again and fails, naming what it took back. No backup is read and
   nothing is deleted. **Rollback.** Revert the change, land a reviewed playbook change that removes `log-driver` and restarts
-  Docker, and run `hal setup`; a plain revert removes nothing. **Residual risks:** Docker stays down, and every app
+  Docker, and run `hal setup`; a plain revert removes nothing, for the limit as for `log-driver`. **Residual risks:** Docker stays down, and every app
   with it, when the rescue's restart fails too; and a run interrupted between the write and the rescue with Docker down
   (a hanging restart skips the rescue on Ctrl-C) makes the next apply refuse, because Docker does not answer. Then remove
   `log-driver` from `/etc/docker/daemon.json` by hand; the backup holds the old bytes.
+- **Docker's build cache limit.** The same run merges `builder.gc.defaultMaxUsedSpace` into the file, keeping every other key, also under `builder` (see `[docker]` below for the value). The trigger is what `docker buildx inspect default` reports for the last GC rule, not a changed file: Docker restarts while it does not report the limit, so the limit takes effect only through that restart, and the run forecasts that restart like the driver's. Docker reads the configured text itself (`20GB` is 20 GiB, every unit binary), and buildx prints it in binary units (`20GiB`); that is the text compared. The dry run names the restart as a change. Once Docker has the limit, its own garbage collection holds the build cache at or below it. Old images are not touched and orphaned volumes are not reported: only the build cache has a limit.
 - **Proof.** `flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 scripts/system-proof/run.sh <edge checkout> <evidence dir> <part>`, once per part, each into its own evidence dir (`<evidence dir>/fresh`, `<evidence dir>/prepared`, `<evidence dir>/shapes`, since each run truncates `cells.txt`), drives
   the step in a throwaway systemd container, never on this PC. `fresh` is the first install with both reboots, `prepared` the
   second install under both sudos, and `shapes` a third one that converges once and then refuses the foreign account shapes (A1-3);
@@ -793,6 +795,14 @@ lesen sie nie. Die Datei enthält kein Geheimnis; das SMTP-Konto bleibt unter
 | `runs` | `2` | Läufe hintereinander, in denen ein Fund auftreten muss, bevor er zählt |
 
 Beide Werte sind ganze Zahlen ab 1. Ein neuer `interval` gilt nach `hal setup`; `runs` gilt beim nächsten Lauf.
+
+### `[docker]`
+
+| Schlüssel | Default | Bedeutung |
+|---|---|---|
+| `build_cache_max` | `"20GB"` | Grenze von Dockers Build-Cache, von Docker selbst gelesen (`GB` zählt binär, `20GB` sind 20 GiB) |
+
+Ein neuer Wert gilt nach `hal setup`; das startet Docker neu, und alle Container halten kurz an. `hal setup` nennt den Neustart vorher.
 
 ### `[api]` und `[api.<app>]`
 
