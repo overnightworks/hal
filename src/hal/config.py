@@ -1,5 +1,6 @@
 """hal's one settings file, `~/.config/hal/config.toml`: a table per timer job that has settings,
-and `[api]` with its `[api.<app>]` tables, the numbers LiteLLM enforces on the apps
+`[docker]` with the limit of Docker's build cache, and `[api]` with its `[api.<app>]` tables, the
+numbers LiteLLM enforces on the apps
 (`hal.stack.api_limits` decides which of them holds) and the API route's log depth.
 
 A missing file means defaults. hal only reads it; nothing here writes, moves or deletes it."""
@@ -17,6 +18,7 @@ from types import MappingProxyType
 from hal.stack.api_limits import ApiSettings, AppNumbers, LogDepth
 from hal.workstation.alarm import AlarmSettings
 from hal.workstation.check import CheckSettings
+from hal.workstation.system_step import DockerSettings, docker_size_bytes
 
 
 class Kind(Enum):
@@ -27,6 +29,7 @@ class Kind(Enum):
     COUNT = "a whole number of at least 0"
     DOLLARS = "a finite number of at least 0"
     LOG_DEPTH = " or ".join(f'"{depth.value}"' for depth in LogDepth)
+    DOCKER_SIZE = 'a size Docker reads, like "20GB"'
 
 
 CONFIG_PATH_IN_HOME = Path(".config") / "hal" / "config.toml"
@@ -34,6 +37,8 @@ CHECK_TABLE = "check"
 CHECK_KEY_KINDS: Mapping[str, Kind] = {"notify": Kind.SWITCH}
 ALARM_TABLE = "alarm"
 ALARM_KEY_KINDS: Mapping[str, Kind] = {"interval": Kind.AT_LEAST_ONE, "runs": Kind.AT_LEAST_ONE}
+DOCKER_TABLE = "docker"
+DOCKER_KEY_KINDS: Mapping[str, Kind] = {"build_cache_max": Kind.DOCKER_SIZE}
 API_TABLE = "api"
 PERSON_BUDGET_KEY = "person_budget_dollars"
 LOG_DEPTH_KEY = "log_depth"
@@ -59,6 +64,7 @@ class ConfigInvalid(Exception):
 class Settings:
     check: CheckSettings = field(default_factory=CheckSettings)
     alarm: AlarmSettings = field(default_factory=AlarmSettings)
+    docker: DockerSettings = field(default_factory=DockerSettings)
     api: ApiSettings = field(default_factory=ApiSettings)
 
 
@@ -110,6 +116,8 @@ def _admits(kind: Kind, value: object) -> bool:
         return type(value) is int and value >= 1
     if kind is Kind.COUNT:
         return type(value) is int and value >= 0
+    if kind is Kind.DOCKER_SIZE:
+        return isinstance(value, str) and docker_size_bytes(value) is not None
     if kind is Kind.LOG_DEPTH:
         return isinstance(value, str) and value in {depth.value for depth in LogDepth}
     # Compared as written: an int past float range converts to no float, so none is converted here.
@@ -158,13 +166,16 @@ def _api_settings(path: Path, table: object) -> ApiSettings:
 def load(home: Path) -> Settings:
     path = config_path(home)
     raw = _read(path)
-    _refuse_unknown(path, set(raw), frozenset({CHECK_TABLE, ALARM_TABLE, API_TABLE}))
+    _refuse_unknown(path, set(raw), frozenset({CHECK_TABLE, ALARM_TABLE, DOCKER_TABLE, API_TABLE}))
     return Settings(
         check=CheckSettings(
             **_table_values(path, CHECK_TABLE, raw.get(CHECK_TABLE, {}), CHECK_KEY_KINDS)
         ),
         alarm=AlarmSettings(
             **_table_values(path, ALARM_TABLE, raw.get(ALARM_TABLE, {}), ALARM_KEY_KINDS)
+        ),
+        docker=DockerSettings(
+            **_table_values(path, DOCKER_TABLE, raw.get(DOCKER_TABLE, {}), DOCKER_KEY_KINDS)
         ),
         api=_api_settings(path, raw.get(API_TABLE, {})),
     )

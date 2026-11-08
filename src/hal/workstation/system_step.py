@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import pwd
+import re
 import subprocess
 import sys
 from collections.abc import Callable, Sequence
@@ -29,6 +30,9 @@ LOG_RETENTION_DAYS = 30
 # The default log driver of Docker, which the play merges into daemon.json and `hal check` expects.
 DOCKER_LOG_DRIVER = "journald"
 DOCKER_DEFAULT_DRIVER = ["docker", "info", "--format", "{{.LoggingDriver}}"]
+# Each GC rule prints one `Max Used Space` line; the first rule is a small temporary-files rule and the rest hold the limit, so the last match is the one read.
+DOCKER_BUILD_CACHE_LIMIT = ["docker", "buildx", "inspect", "default"]
+DOCKER_MAX_USED_SPACE_PATTERN = r"Max Used Space:\s*(\S+)"
 DOCKER_RUNNING_CONTAINERS = ["docker", "ps", "--quiet", "--no-trunc"]
 DOCKER_RESTART_POLICY = ["docker", "inspect", "--format", "{{.HostConfig.RestartPolicy.Name}}"]
 # The only policies Docker promises to start again after its own restart.
@@ -46,6 +50,45 @@ EVENT_MARK = "\x1ehal_events "
 SUDO_REFUSED = "sudo refused"
 # The row the system step's live line and verdict row stand under; `hal setup` names its row with the same word.
 SYSTEM_ROW = "system"
+
+
+_DOCKER_SIZE = re.compile(r"(\d+(?:\.\d+)?)(?:([kmgtp])(?:i?b)?|b)?", re.IGNORECASE)
+_DOCKER_UNIT_FACTORS = {"k": 1024, "m": 1024**2, "g": 1024**3, "t": 1024**4, "p": 1024**5}
+_DOCKER_SIZE_MAX = 2**63 - 1
+_BINARY_UNITS = ("B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB", "ZiB", "YiB")
+
+
+def docker_size_bytes(size: str) -> int | None:
+    """The bytes of `size` as Docker's daemon reads it (go-units `RAMInBytes`, which treats every unit as binary, so `20GB` is 20 GiB); `None` for what it would not read or a size that is no positive int64."""
+    match = _DOCKER_SIZE.fullmatch(size)
+    if match is None:
+        return None
+    number, unit = match.groups()
+    exact = float(number) * (1 if unit is None else _DOCKER_UNIT_FACTORS[unit.lower()])
+    return int(exact) if 1 <= exact <= _DOCKER_SIZE_MAX else None
+
+
+def reported_docker_size(size: str) -> str:
+    """`size` as `docker buildx inspect` prints it (go-units `BytesSize`: binary units, four significant digits)."""
+    exact = docker_size_bytes(size)
+    if exact is None:
+        raise ValueError(f"no size Docker reads: {size!r}")
+    shown = float(exact)
+    unit_index = 0
+    while shown >= 1024 and unit_index < len(_BINARY_UNITS) - 1:
+        shown /= 1024
+        unit_index += 1
+    return f"{shown:.4g}{_BINARY_UNITS[unit_index]}"
+
+
+@dataclass(frozen=True)
+class DockerSettings:
+    """`[docker]` in hal's settings: the limit of Docker's build cache, as Docker reads it (a text like `20GB`)."""
+
+    build_cache_max: str = "20GB"
+
+
+DEFAULT_DOCKER_SETTINGS = DockerSettings()
 
 
 class CheckState(Enum):
@@ -292,13 +335,14 @@ def _running_user() -> str:
 @dataclass(frozen=True)
 class Boundaries:
     """The terminal the sudo prompt needs, Ansible itself, who runs `home`, the log driver Docker tells the operator (`None` when it does not answer),
-    and the restart policy of each running container (`None` when they cannot be read)."""
+    the restart policy of each running container (`None` when they cannot be read), and the build cache limit Docker reports (`None` when buildx does not answer)."""
 
     has_terminal: Callable[[], bool]
     run_playbook: PlaybookRunner
     operator_user: Callable[[], str]
     docker_driver: Callable[[], str | None]
     running_restart_policies: Callable[[], tuple[str, ...] | None]
+    docker_build_cache_limit: Callable[[], str | None] = lambda: None
 
 
 @dataclass(frozen=True)
@@ -334,14 +378,31 @@ def _running_restart_policies() -> tuple[str, ...] | None:
     return None if policies is None else tuple(policies.splitlines())
 
 
+def _docker_build_cache_limit() -> str | None:
+    """The limit `docker buildx inspect default` prints, empty when it prints no rule; None when buildx cannot be run or does not answer."""
+    output = _docker_output(DOCKER_BUILD_CACHE_LIMIT)
+    if output is None:
+        return None
+    limits = re.findall(DOCKER_MAX_USED_SPACE_PATTERN, output)
+    return limits[-1] if limits else ""
+
+
 # The terminal fact is the one the wizard asks: both ends are a terminal.
-TERMINAL_BOUNDARIES = Boundaries(secrets_setup.TERMINAL_BOUNDARIES.terminal.is_interactive, run_playbook_as_root, _running_user, _docker_driver, _running_restart_policies)
+TERMINAL_BOUNDARIES = Boundaries(
+    secrets_setup.TERMINAL_BOUNDARIES.terminal.is_interactive,
+    run_playbook_as_root,
+    _running_user,
+    _docker_driver,
+    _running_restart_policies,
+    _docker_build_cache_limit,
+)
 
 
 @dataclass(frozen=True)
 class SystemStep:
     layout: Layout
     boundaries: Boundaries
+    docker: DockerSettings = DEFAULT_DOCKER_SETTINGS
 
     def extra_vars(self) -> dict[str, str | int | tuple[str, ...]]:
         """The values the playbook fills in; the tunnel id it reads itself, as root, from cloudflared's config.
@@ -355,6 +416,9 @@ class SystemStep:
             "edge_tunnel_dir": str(self.layout.edge_tunnel_dir),
             "journal_vacuum_days": JOURNAL_VACUUM_DAYS,
             "docker_log_driver": DOCKER_LOG_DRIVER,
+            "docker_build_cache_max": self.docker.build_cache_max,
+            "docker_build_cache_reported": reported_docker_size(self.docker.build_cache_max),
+            "docker_max_used_space_pattern": DOCKER_MAX_USED_SPACE_PATTERN,
             "rsyslog_file_names": RSYSLOG_FILE_NAMES,
         }
 
@@ -377,11 +441,17 @@ class SystemStep:
         self._answering_docker_driver()
 
     def restart_forecast(self) -> RestartForecast | None:
-        """The restart the play makes when Docker's default driver is not the journal, `None` when it makes none; a Docker that does not answer refuses first."""
-        if self._answering_docker_driver() == DOCKER_LOG_DRIVER:
+        """The restart the play makes when Docker's default driver is not the journal or Docker does not report the build cache limit, `None` when it makes none; a Docker that does not answer refuses first."""
+        driver_is_the_journal = self._answering_docker_driver() == DOCKER_LOG_DRIVER
+        if driver_is_the_journal and not self._build_cache_limit_differs():
             return None
         policies = self.boundaries.running_restart_policies()
         return RestartForecast(None if policies is None else sum(policy not in RESTARTED_POLICIES for policy in policies))
+
+    def _build_cache_limit_differs(self) -> bool:
+        """Docker reports another limit than the configured one; a limit that cannot be read is the play's refusal, not a forecast restart."""
+        limit = self.boundaries.docker_build_cache_limit()
+        return limit is not None and limit != reported_docker_size(self.docker.build_cache_max)
 
     def check(self) -> CheckState | TasksWouldChange:
         """At a terminal, Ansible's check mode asks for sudo once and names the tasks that would change; without what it needs nothing is read."""

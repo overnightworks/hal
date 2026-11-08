@@ -28,11 +28,13 @@ from hal.workstation.secrets_setup import WalkEnd
 from hal.workstation.secrets_view import ManifestError, Presence, SecretEntry
 from hal.workstation.system_step import (
     AGENT_USER,
+    DEFAULT_DOCKER_SETTINGS,
     SYSTEM_ROW,
     DOCKER_STATUS,
     Applied,
     CheckState,
     DockerDoesNotAnswer,
+    DockerSettings,
     PlayChangedNothing,
     StepFailed,
     SystemStep,
@@ -551,9 +553,9 @@ def _path_steps(layout: Layout) -> tuple[Step, ...]:
     )
 
 
-def _system_steps(layout: Layout, ports: Ports) -> tuple[Step, ...]:
+def _system_steps(layout: Layout, ports: Ports, docker: DockerSettings) -> tuple[Step, ...]:
     run = ports.run
-    system = SystemStep(layout, ports.system)
+    system = SystemStep(layout, ports.system, docker)
     units = UserUnits(layout, ports.timer_jobs, run)
     system_row = SetupRow.SYSTEM
 
@@ -613,8 +615,8 @@ def _announce_sudo(system: SystemStep) -> tuple[Outcome, ...]:
     return (*restart, sudo)
 
 
-def _steps(layout: Layout, ports: Ports) -> tuple[Step, ...]:
-    return (*_quality_steps(layout, ports.run, ports.download), *_hook_steps(layout, ports.run), *_path_steps(layout), *_system_steps(layout, ports), _secrets_step(layout, ports))
+def _steps(layout: Layout, ports: Ports, docker: DockerSettings) -> tuple[Step, ...]:
+    return (*_quality_steps(layout, ports.run, ports.download), *_hook_steps(layout, ports.run), *_path_steps(layout), *_system_steps(layout, ports, docker), _secrets_step(layout, ports))
 
 
 def _role(ports: Ports) -> ExecutionRole:
@@ -711,7 +713,7 @@ def _go_through(steps: tuple[Step, ...], role: ExecutionRole, mode: Pass) -> lis
     return outcomes
 
 
-def setup(layout: Layout, ports: Ports, dry_run: bool) -> SetupEnd:
+def setup(layout: Layout, ports: Ports, dry_run: bool, docker: DockerSettings = DEFAULT_DOCKER_SETTINGS) -> SetupEnd:
     """Shows the plan, asks one yes and runs; `dry_run` only shows. Without a terminal an open row ends in a refusal before any step."""
     try:
         role = _role(ports)
@@ -719,7 +721,7 @@ def setup(layout: Layout, ports: Ports, dry_run: bool) -> SetupEnd:
         write_error(str(error))
         return SetupEnd.FAILED
     started = ports.clock()
-    steps = _steps(layout, ports)
+    steps = _steps(layout, ports, docker)
     planned = _go_through(steps, role, Pass.DRY_RUN if dry_run else Pass.PLAN)
     if planned is None:
         return SetupEnd.FAILED

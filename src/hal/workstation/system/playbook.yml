@@ -15,12 +15,14 @@
 # `apt install rsyslog`, puts the package back; the deleted lines stay gone, and a purge discards a conffile of
 # rsyslog that was modified.
 #
-# It merges `"log-driver": "journald"` into /etc/docker/daemon.json (every other key stays; the file is checked with
-# `dockerd --validate` and, when it changes, backed up with edge's files) and restarts Docker while `docker info` does
-# not say `docker_log_driver`: with live-restore off, every container stops meanwhile and one without a restart policy
-# stays down. A malformed file, a `log-opts` key, another `log-driver` or a Docker that does not answer is refused before
-# anything is written. When the restart fails or Docker does not say journald, the file is written back without
-# `log-driver` and Docker restarted again; that is the last task, so edge's other files are already in place.
+# It merges `"log-driver": "journald"` and the build cache limit, `builder.gc.defaultMaxUsedSpace`, into
+# /etc/docker/daemon.json (every other key stays; the file is checked with `dockerd --validate` and, when it changes,
+# backed up with edge's files) and restarts Docker while `docker info` does not say `docker_log_driver` or
+# `docker buildx inspect default` does not report the limit: with live-restore off, every container stops meanwhile and
+# one without a restart policy stays down. A malformed file, a `log-opts` key, another `log-driver`, a `builder` or
+# `builder.gc` that is no object, or a Docker that does not answer is refused before anything is written. When the
+# restart fails or Docker does not report what it should, the file is written back without what this run was putting
+# in place and Docker restarted again; that is the last task, so edge's other files are already in place.
 #
 # It also installs msmtp and ca-certificates (never msmtp-mta) once the refusals above passed, for the mail of `hal check`.
 #
@@ -244,14 +246,26 @@
           - docker_config is mapping
           - "'log-opts' not in docker_config"
           - docker_config['log-driver'] | default(docker_log_driver) == docker_log_driver
+          - docker_config['builder'] | default({}) is mapping
+          - (docker_config['builder'] | default({}))['gc'] | default({}) is mapping
         fail_msg: >-
-          {{ docker_config_path }} is not a JSON object, or carries `log-opts` or a `log-driver` other than
-          {{ docker_log_driver }}
+          {{ docker_config_path }} is not a JSON object, carries `log-opts` or a `log-driver` other than
+          {{ docker_log_driver }}, or holds a `builder` or `builder.gc` that is not an object
         quiet: true
 
-    - name: Merge the journal into the settings, keeping every other key
+    - name: Take apart the builder settings of daemon.json
       ansible.builtin.set_fact:
-        docker_config_merged: "{{ docker_config | combine({'log-driver': docker_log_driver}) | to_nice_json(indent=4) }}"
+        docker_builder_config: "{{ docker_config['builder'] | default({}) }}"
+        docker_gc_config: "{{ (docker_config['builder'] | default({}))['gc'] | default({}) }}"
+
+    - name: Merge the journal and the build cache limit into the settings, keeping every other key
+      ansible.builtin.set_fact:
+        docker_config_merged: >-
+          {{ docker_config
+             | combine({'log-driver': docker_log_driver,
+                        'builder': docker_builder_config
+                                   | combine({'gc': docker_gc_config | combine({'defaultMaxUsedSpace': docker_build_cache_max})})})
+             | to_nice_json(indent=4) }}
 
     - name: Read the default log driver Docker reports
       ansible.builtin.command:
@@ -261,11 +275,43 @@
       failed_when: false
       check_mode: false
 
+    - name: Read the build cache limit Docker reports
+      ansible.builtin.command:
+        argv: [docker, buildx, inspect, default]
+      register: docker_builder
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
     - name: Refuse before writing anything when Docker does not answer
       ansible.builtin.assert:
         that: docker_driver.rc | default(1) == 0
         fail_msg: "Docker does not answer `docker info`"
         quiet: true
+
+    - name: Refuse before writing anything when buildx cannot report the limit
+      ansible.builtin.assert:
+        that: docker_builder.rc | default(1) == 0
+        fail_msg: "`docker buildx inspect default` does not answer"
+        quiet: true
+
+    # "Added by this run" is what Docker does not yet report: the rescue takes only that back. A limit already in
+    # the file at another value goes back to it unchanged, since `docker_config` holds the file as read.
+    - name: Decide what a failed restart must take back
+      ansible.builtin.set_fact:
+        docker_driver_to_take_back: "{{ docker_driver.stdout | trim != docker_log_driver }}"
+        docker_limit_to_take_back: >-
+          {{ (docker_builder.stdout | regex_findall(docker_max_used_space_pattern) | last | default('')) != docker_build_cache_reported }}
+
+    - name: Write down the settings a failed restart returns to
+      ansible.builtin.set_fact:
+        docker_config_after_rescue: >-
+          {{ (docker_config | dict2items | rejectattr('key', 'equalto', 'log-driver') | list | items2dict
+              if docker_driver_to_take_back else docker_config)
+             | combine({'builder': docker_builder_config
+                        | combine({'gc': docker_gc_config | dict2items | rejectattr('key', 'equalto', 'defaultMaxUsedSpace') | list | items2dict})}
+                       if docker_limit_to_take_back and docker_gc_config['defaultMaxUsedSpace'] | default('') == docker_build_cache_max else {})
+             | to_nice_json(indent=4) }}
 
     # `hal check` mails its news through msmtp, which needs the system's trust store for the server certificate.
     # Recommends are off: msmtp-mta (Postfix's replacement as the system mailer) is only suggested and must stay out.
@@ -482,7 +528,7 @@
         state: started
       when: not (ansible_check_mode and retention_written.changed)
 
-    # Sorted keys put `log-driver` before `runtimes`, so the diff of the PC's file is one new line.
+    # Sorted keys put `builder` before `log-driver` before `runtimes`, so the diff of the PC's file is the new lines of those keys only.
     - name: Write Docker's daemon.json, root-owned, mode 644
       ansible.builtin.copy:
         content: "{{ docker_config_merged }}"
@@ -492,10 +538,11 @@
         mode: "0644"  # NOSONAR ansible:S2612 dockerd and the docker CLI read this as their own users; root-owned 644 is the ruled mode
         validate: dockerd --validate --config-file %s
 
-    # The trigger is the driver Docker reports, not a changed file, so a run interrupted after the write restarts next time.
-    # The rescue is one rule for every state of the file: without `log-driver`, JSON-equal to the file before this play wrote it.
-    - name: Restart Docker until it reports the journal as its default log driver
-      when: docker_driver.stdout | trim != docker_log_driver
+    # The trigger is what Docker reports, not a changed file, so a run interrupted after the write restarts next time.
+    # The rescue takes back what this run is putting in place: without `log-driver` when Docker did not say the journal,
+    # without the limit when it did not report it, JSON-equal to the file before this play wrote it.
+    - name: Restart Docker until it reports the journal and the build cache limit
+      when: docker_driver_to_take_back or docker_limit_to_take_back
       block:
         - name: Restart Docker
           ansible.builtin.systemd_service:
@@ -515,10 +562,24 @@
             fail_msg: "Docker reports {{ docker_driver_after.stdout | trim }}, not {{ docker_log_driver }}"
             quiet: true
           when: not ansible_check_mode
+
+        - name: Read the build cache limit Docker reports now
+          ansible.builtin.command:
+            argv: [docker, buildx, inspect, default]
+          register: docker_builder_after
+          changed_when: false
+          when: not ansible_check_mode
+
+        - name: Fail unless Docker reports the build cache limit now
+          ansible.builtin.assert:
+            that: (docker_builder_after.stdout | regex_findall(docker_max_used_space_pattern) | last | default('')) == docker_build_cache_reported
+            fail_msg: "Docker does not report {{ docker_build_cache_reported }} as its build cache limit"
+            quiet: true
+          when: not ansible_check_mode
       rescue:
-        - name: Write daemon.json back without log-driver
+        - name: Write daemon.json back without what this run was putting in place
           ansible.builtin.copy:
-            content: "{{ docker_config | dict2items | rejectattr('key', 'equalto', 'log-driver') | list | items2dict | to_nice_json(indent=4) }}"
+            content: "{{ docker_config_after_rescue }}"
             dest: "{{ docker_config_path }}"
             owner: root
             group: root
@@ -529,16 +590,17 @@
             argv: [systemctl, reset-failed, docker]
           changed_when: true
 
-        - name: Restart Docker without log-driver
+        - name: Restart Docker on the file written back
           ansible.builtin.systemd_service:
             name: docker
             state: restarted
 
-        - name: Fail again, with daemon.json back as it was
+        - name: Fail again, naming what was taken back
           ansible.builtin.fail:
             msg: >-
-              Docker did not come up reporting {{ docker_log_driver }}; {{ docker_config_path }} was written back without
-              `log-driver` and Docker restarted again
+              Docker did not come up as asked; {{ docker_config_path }} was written back without
+              {{ ((['`log-driver`'] if docker_driver_to_take_back else []) + (['`builder.gc.defaultMaxUsedSpace`'] if docker_limit_to_take_back else [])) | join(' and ') }}
+              and Docker restarted again
 
   handlers:
     - name: Reload systemd
