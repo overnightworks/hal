@@ -43,7 +43,7 @@ and `hal apply --local` writes it again.
   gets 404 on 8081, and Keycloak answers the master realm on 8090; Keycloak's start takes
   longest. No command checks these four facts together (a named gap on overnightworks/edge#222).
   What proves what today: `hal apply` observes the containers running; `docker compose ps` shows
-  their health; the publish phase asks each declared host's `ready` path, only for a plan with
+  their health; the publish phase asks each declared host on hal's tunnel its `ready` path, only for a plan with
   changes; `keycloak/go-live` probes 8081 and 8090.
 - **Stop.** `docker compose --profile keycloak --profile legal --profile probe down`. Without `--profile keycloak`
   Keycloak and its database keep running, without `--profile probe` a running probe `hello` stays. It

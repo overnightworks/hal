@@ -245,7 +245,7 @@ A program of another repository may read the record of `hal apply`: the last dep
 `hal apply` builds `/impressum`, `/datenschutz` and `/nutzungsbedingungen` while `services.legal` is
 enabled. The pages are not files in git: `legal/frame/` holds the markup (one skeleton per page and one
 template per block kind), `legal/sections/<unit>/<page>.html` holds the texts, and `legal/built/` (git-ignored)
-holds the result, which the legal unit serves as the rollback target; the public pages at the apex come from the platform (`docs/stack.md`). The pages take their tokens and fonts from the installed appkit: the appkit step of `hal apply` writes its static files to `appkit-<version>/` (git-ignored; the version is the lock's) in `legal/assets/`, served at `/_rechtliches/appkit-<version>/` whether or not the legal unit is enabled, and in the `resources/` of both Keycloak themes, which Keycloak serves under `/resources/<id>/`. A unit's text is a **section**; the imprint is one whole page
+holds the result, which the legal unit serves as the rollback target; the public pages at the apex come from the platform (`docs/stack.md`). The pages take their tokens and fonts from the installed appkit: the appkit step of `hal apply` writes its static files to `appkit-<version>/` (git-ignored; the version is the lock's) in `legal/assets/`, which the legal unit serves at `/_rechtliches/appkit-<version>/` (the step runs whether or not the legal unit is enabled), and in the `resources/` of both Keycloak themes, which Keycloak serves under `/resources/<id>/`. A unit's text is a **section**; the imprint is one whole page
 with no sections. A page's blocks stand as the general part (`allgemein`, edge's own), then the services
 (`litellm` under `#agent-dienst`, `keycloak` under `#anmeldung`, `speech` under `#sprachdienst`), then the apps (their catalog key
 is the anchor), each group sorted by anchor. A section directory with no catalog entry builds no block. Edge's
@@ -263,17 +263,17 @@ whose checkout or recorded commit is gone, or whose `.git` is a symlink or no re
 A **host-only app** (an entry with neither `repo` nor `run`: songmaker, which its own timer deploys, and skat and hopin, which the platform runs) brings the same
 two files, read through the same reader from its checkout `~/srv/<key>` at `git rev-parse HEAD`, taken at plan time. The
 plan names the block with the short sha where a tagged app names its tag, and a missing checkout or an invalid `.git`
-refuses before the question, naming the path. A text that reaches that checkout's HEAD goes live only at the next `hal apply`
+refuses before the question, naming the path. A text that reaches that checkout's HEAD enters `legal/built/` only at the next `hal apply`
 whose plan names it. songmaker#1880's D3 (a tag that fails `compose up --wait` stays checked out) means HEAD can be a
-release that does not run, and its text is published all the same.
+release that does not run, and its text is built all the same.
 
 What `hal apply` does: it validates every section, builds the pages and compares them with `legal/built/`. The
 plan prints one row per kind, without a heading, above `core`: `+ legal  2 new pages`, `~ legal  1 edited page` and `~ legal  3 new records` (a page that matches while its record is missing, unreadable or stale), each with the page names. Under an edited page, from a record of what the last write was made of, each block stands as a dim line, new, changed or left (`legal/sections/litellm/datenschutz.html#agent-dienst changed`; an app's block with the tag it is read at, `~/srv/presentator/legal/datenschutz.html#presentator changed at v2026.11.04.1`, and a host-only app's with its short sha, `~/srv/songmaker/legal/datenschutz.html#songmaker changed at d66c72a6`; a new tag with the same bytes changes no block; a new page lists the app blocks it first publishes, each with its tag), and a changed page frame (its skeleton or a table-of-contents template) as its own line; a missing or stale record makes every block new. It prints no legal row when nothing changes. The record is `legal-built.json` in the apply state beside `applied.json` (not beside `legal/built/`, which nginx serves), written after the pages; a page whose bytes already match is still planned (and the record written) while its entry is missing, unreadable or stale. After
-`yes`, before any unit switches, the core phase or an app, it writes each changed page (a temporary file, mode 0644, renamed over the page), so a new tag that then fails leaves the app's new text live while its old version runs,
+`yes`, before any unit switches, the core phase or an app, it writes each changed page (a temporary file, mode 0644, renamed over the page), so a new tag that then fails leaves the app's new text built while its old version runs,
 and prints `✓ legal  pages written` naming the pages whose bytes were written, `✓ legal  record written` for pages
 that gained only their record. Without an enabled `legal` unit there is no step and no line. A refusal comes before
 the question (exit 3) and changes nothing; a failed write is `✗ legal  not written` with the path and the reason, then
-partial with no unit switched (exit 3). A page goes live only that way, and a
+partial with no unit switched (exit 3). A page enters `legal/built/` only that way, and a
 wrong text is taken back by the next change of the text: there is no override.
 
 **Format.** German, UTF-8 without a byte order mark, at most 65,536 bytes, LF line ends, no control character
@@ -295,13 +295,13 @@ Refused: any other element or attribute, a second, duplicate or valueless attrib
 processing instructions; a section in a section, a link in a link, a list in a paragraph or in a list item; an
 empty paragraph or list item; text outside a paragraph, list item or heading; an unclosed element, or anything
 but whitespace after the last closing tag (none, one or several line feeds and spaces: a file normally ends with one
-LF). Between block tags any run of spaces and line feeds, or none, is free and published as written (`<ul><li>` and
+LF). Between block tags any run of spaces and line feeds, or none, is free and built as written (`<ul><li>` and
 `<ul>\n<li>` are both valid); a tab, a no-break space or a control character is refused. No script, style, image, form or external resource reaches a page.
 
 **Canonical form.** `html.parser` only tokenises; every token is checked against the grammar, and the tokens are
 written out again (lowercase tags, ` id="…"` and ` href="…"` with one space and double quotes, `<br>` without a
 slash, text escaped as `&amp;`, `&lt;`, `&gt;` only). A file whose rewritten form differs from its bytes is refused
-at the first differing line, so a section is published byte for byte or not at all (write `ä` or a no-break space
+at the first differing line, so a section is built byte for byte or not at all (write `ä` or a no-break space
 as the character, never `&nbsp;`; the line says so when it holds a reference other than `&amp;`, `&lt;` or
 `&gt;`, such as `&quot;`, and a literal `"` in text stays valid). Edge re-emits only the structural tags with its own decorations; everything
 inside them is the file's bytes.
