@@ -3,6 +3,6 @@ agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
 role = "builder"
 base = "d8e7ed4456687b5d64ea4af65eb807d87d6a9abc"
 branch = "claude/issue-1165-quality-v0-10-0-machine"
-scope = ["docs/design/hal-output.html", "docs/home.md", "scripts/system-proof/Dockerfile", "scripts/system-proof/drive.sh", "src/hal/setup_commands.py", "src/hal/workstation/check.py", "src/hal/workstation/hook_check.py", "src/hal/workstation/hooks/commit-hook", "src/hal/workstation/layout.py", "src/hal/workstation/setup.py", "tests/conftest.py", "tests/support/workstation_support.py", "tests/test_workstation_hook_check.py", "tests/test_workstation_setup.py"]
+scope = ["docs/design/hal-output.html", "docs/home.md", "scripts/system-proof/Dockerfile", "scripts/system-proof/drive.sh", "scripts/system-proof/run.sh", "src/hal/setup_commands.py", "src/hal/workstation/check.py", "src/hal/workstation/hook_check.py", "src/hal/workstation/hooks/commit-hook", "src/hal/workstation/layout.py", "src/hal/workstation/setup.py", "tests/conftest.py", "tests/support/workstation_support.py", "tests/test_workstation_hook_check.py", "tests/test_workstation_setup.py"]
 opened_commit = "c15c5ae81ca3ffc2a369443df882d91f52eaa14d"
 whole_reason = "The hook's words and quality's install must change in one hal setup, since a mismatch refuses every commit; the scanner step, its check, the docs and the proof only make sense together."
