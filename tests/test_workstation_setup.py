@@ -1,4 +1,4 @@
-"""`hal setup` against a sandboxed HOME with stub `uv`, `quality` and Ansible; the rules are those of #22 and, for the system step, #40."""
+"""`hal setup` against a sandboxed HOME with stub `uv`, `quality`, `mise` and Ansible."""
 
 from __future__ import annotations
 
@@ -29,18 +29,22 @@ from support.workstation_support import (
     cut_off_mid_transfer,
     fail_to_write,
     global_hooks_path,
+    move_stub_scanner_pins,
     plant_mise,
+    remove_stub_scanners,
     run_captured_hal_setup,
     run_hal_setup,
     run_setup,
     serve_half,
     serve_wrong_bytes,
+    stub_scanner_manifest_dir,
     time_out,
 )
 
 from hal import cli as hal_cli
 from hal.grammar import ExitCode
 from hal.workstation import ports, system_step
+from hal.workstation.layout import Layout
 from hal.workstation.secrets_setup import Boundaries, Terminal
 from hal.workstation.setup import ANSIBLE_SOURCE, HOOK_NAMES, MISE_URL, QUALITY_SOURCE, RERUN
 from hal.workstation.system_step import AGENT_USER
@@ -87,6 +91,16 @@ def uv_installs(sandbox: Sandbox) -> list[str]:
     return sandbox.uv_calls.read_text().splitlines() if sandbox.uv_calls.exists() else []
 
 
+def scanner_installs(sandbox: Sandbox) -> list[str]:
+    """The arguments of every `install` the stub mise was asked for."""
+    calls = sandbox.mise_calls.read_text().splitlines() if sandbox.mise_calls.exists() else []
+    return [call for call in calls if " install " in f"{call} "]
+
+
+def locked_install_in_the_manifest_dir(sandbox: Sandbox) -> str:
+    return f"--cd {stub_scanner_manifest_dir(sandbox.layout).resolve()} install --locked"
+
+
 def test_setup_without_apply_only_reports_and_changes_nothing(sandbox: Sandbox, capsys: pytest.CaptureFixture[str]) -> None:
     """Rule 4 and E1: `hal setup` prints what it would change; before Ansible is installed the system step is not checked."""
     code, lines, error = run_setup(sandbox, capsys, "--dry-run")
@@ -104,13 +118,14 @@ def test_setup_without_apply_only_reports_and_changes_nothing(sandbox: Sandbox, 
         "",
     )
     assert uv_installs(sandbox) == []
+    assert scanner_installs(sandbox) == []
     assert sandbox.system.playbook.calls == []
     assert global_hooks_path(sandbox) == ""
     assert not sandbox.layout.git_hooks_dir.exists()
 
 
-def test_apply_installs_pinned_quality_engines_and_both_hooks_then_activates(sandbox: Sandbox, capsys: pytest.CaptureFixture[str]) -> None:
-    """Rule 4, steps 1-4 and rule 2: the pinned sources are installed, hooks are mode 755, hooksPath is the rendered directory."""
+def test_apply_installs_pinned_quality_its_scanners_and_both_hooks_then_activates(sandbox: Sandbox, capsys: pytest.CaptureFixture[str]) -> None:
+    """Rule 4, steps 1-4 and rule 2: the pinned sources are installed, the scanners from quality's own manifest and lock, hooks are mode 755, hooksPath is the rendered directory."""
     code, lines, _ = run_setup(sandbox, capsys)
 
     layout = sandbox.layout
@@ -119,6 +134,7 @@ def test_apply_installs_pinned_quality_engines_and_both_hooks_then_activates(san
         f"tool install --force {QUALITY_SOURCE}",
         f"tool install --force {ANSIBLE_SOURCE}",
     ]
+    assert scanner_installs(sandbox) == [locked_install_in_the_manifest_dir(sandbox)]
     assert [oct((layout.git_hooks_dir / name).stat().st_mode & 0o777) for name in HOOK_NAMES] == [
         "0o755",
         "0o755",
@@ -141,6 +157,7 @@ def test_second_apply_reports_every_step_unchanged_and_reinstalls_nothing(sandbo
 
     assert (code, lines) == (ExitCode.OK, REPEATED_APPLY)
     assert len(uv_installs(sandbox)) == 2
+    assert len(scanner_installs(sandbox)) == 1
 
 
 def test_a_walk_that_stored_everything_ends_setup_with_its_verdict_and_next_hal_apply(
@@ -180,27 +197,62 @@ def test_failing_quality_install_leaves_hooks_path_untouched_and_exits_nonzero(
     assert not sandbox.layout.git_hooks_dir.exists()
 
 
-def test_failing_engines_install_stops_before_hooks_and_activation(
+def test_failing_scanner_install_stops_before_hooks_and_activation_and_names_the_install_command(
     sandbox: Sandbox, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Rule 4: apply stops at the first failure, naming the step; activation never runs after it."""
-    monkeypatch.setenv("STUB_ENGINES_FAIL", "1")
+    """Rule 4: apply stops at the first failure, naming the step and the exact command that installs the scanners; activation never runs after it."""
+    monkeypatch.setenv("STUB_MISE_INSTALL_FAIL", "1")
 
     code, lines, error = run_setup(sandbox, capsys)
 
     assert (code, lines) == (
         ExitCode.FAILURE,
         [
-            "  ✗ commit hook     failed         the quality engines did not install",
+            "  ✗ commit hook     failed         mise could not install quality's scanners",
             NOT_RUN[PATH], NOT_RUN[TIMERS], NOT_RUN[SYSTEM], NOT_RUN[SECRETS],
         ],
     )
     assert error.splitlines() == [
         "error: setup stopped at commit hook",
-        f"next: {sandbox.layout.quality_executable} engines install {sandbox.layout.quality_engines_dir}",
+        f"next: {sandbox.layout.mise_executable} {locked_install_in_the_manifest_dir(sandbox)}",
     ]
     assert global_hooks_path(sandbox) == ""
     assert not sandbox.layout.git_hooks_dir.exists()
+
+
+@pytest.mark.parametrize("damage", [move_stub_scanner_pins, remove_stub_scanners], ids=["quality pins other versions", "scanners removed"])
+def test_a_scanner_that_is_not_installed_at_the_pinned_version_is_installed_again(
+    sandbox: Sandbox, capsys: pytest.CaptureFixture[str], damage: Callable[[Layout], None]
+) -> None:
+    """Rule 4: the scanner step is current only while mise locates the hook's scanner at the version quality's manifest pins."""
+    run_setup(sandbox, capsys)
+    damage(sandbox.layout)
+
+    planned = run_setup(sandbox, capsys, "--dry-run")
+    repaired = run_setup(sandbox, capsys)
+    again = run_setup(sandbox, capsys)
+
+    assert (planned[1][0], repaired[1][0]) == ("  ~ commit hook     will change", "  ✓ commit hook     changed")
+    assert scanner_installs(sandbox) == [locked_install_in_the_manifest_dir(sandbox)] * 2
+    assert again[1] == REPEATED_APPLY
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [lambda layout: layout.quality_python.unlink(), lambda layout: (stub_scanner_manifest_dir(layout) / "mise.toml").unlink()],
+    ids=["interpreter gone", "manifest gone"],
+)
+def test_a_quality_installation_without_its_scanner_manifest_stops_before_the_hooks_and_names_the_reinstall(
+    sandbox: Sandbox, capsys: pytest.CaptureFixture[str], damage: Callable[[Layout], None]
+) -> None:
+    """Rule 4: without the manifest quality ships no scanner can be installed, so the step fails and the next line reinstalls quality."""
+    run_setup(sandbox, capsys)
+    damage(sandbox.layout)
+
+    code, lines, error = run_setup(sandbox, capsys)
+
+    assert (code, lines[0]) == (ExitCode.FAILURE, "  ✗ commit hook     failed         quality's installation shows no scanner manifest")
+    assert error.splitlines() == ["error: setup stopped at commit hook", f"next: uv tool install --force '{QUALITY_SOURCE}'"]
 
 
 def test_failing_activation_is_a_failed_last_step(sandbox: Sandbox, capsys: pytest.CaptureFixture[str]) -> None:
@@ -395,13 +447,14 @@ def test_a_drifted_or_non_executable_mise_is_replaced_by_the_pinned_one(sandbox:
     assert (code, mise.read_bytes(), oct(mise.stat().st_mode & 0o777)) == (ExitCode.OK, FAKE_MISE, "0o755")
 
 
-def test_the_agents_account_installs_mise_like_quality(sandbox: Sandbox) -> None:
-    """#679: the agents' own run needs the pinned hygiene, so it installs mise in its own home."""
+def test_the_agents_account_installs_mise_and_quality_s_scanners_in_its_own_home(sandbox: Sandbox) -> None:
+    """The agents' own run needs the pinned scan, so it installs mise and the scanners in its own home."""
     sandbox.system.user = AGENT_USER
 
     code = run_setup_with(sandbox)
 
     assert (code, sandbox.layout.mise_executable.read_bytes()) == (ExitCode.OK, FAKE_MISE)
+    assert scanner_installs(sandbox) == [locked_install_in_the_manifest_dir(sandbox)]
 
 
 @pytest.mark.parametrize("existing", [False, True], ids=["fresh", "existing binary"])

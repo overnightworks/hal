@@ -26,6 +26,8 @@ from support.workstation_support import (
     HOME_README,
     RECORDED_RECEIPT_GIT,
     STUB_QUALITY,
+    STUB_SCANNER_MANIFEST,
+    STUB_TOOL_PYTHON,
     STUB_UV,
     TEST_MANIFEST,
     TEST_TUNNEL_ID,
@@ -271,11 +273,14 @@ def sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sandbox:
     stub_bin.mkdir()
     write_executable(stub_bin / "uv", STUB_UV)
     write_executable(tmp_path / "stub-quality", STUB_QUALITY)
+    write_executable(tmp_path / "stub-tool-python", STUB_TOOL_PYTHON)
+    (tmp_path / "stub-mise.toml").write_text(STUB_SCANNER_MANIFEST)
     global_git_config = tmp_path / "global-gitconfig"
     global_git_config.write_text(
         "[user]\n\tname = Test\n\temail = test@example.invalid\n[init]\n\tdefaultBranch = main\n"
     )
     uv_calls = tmp_path / "uv-calls"
+    mise_calls = tmp_path / "mise-calls"
     for name, value in {
         "HOME": str(home),
         "XDG_CONFIG_HOME": str(home / ".config"),
@@ -283,11 +288,20 @@ def sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sandbox:
         "GIT_CONFIG_SYSTEM": os.devnull,
         "PATH": f"{stub_bin}{os.pathsep}{os.environ['PATH']}",
         "STUB_QUALITY": str(tmp_path / "stub-quality"),
+        "STUB_TOOL_PYTHON": str(tmp_path / "stub-tool-python"),
+        "STUB_SCANNER_MANIFEST": str(tmp_path / "stub-mise.toml"),
         "STUB_UV_LOG": str(uv_calls),
+        "STUB_MISE_LOG": str(mise_calls),
         "STUB_RECEIPT_GIT": RECORDED_RECEIPT_GIT,
     }.items():
         monkeypatch.setenv(name, value)
-    for name in ("STUB_UV_FAIL", "STUB_ENGINES_FAIL", "STUB_SCAN_EXIT", "HOME_GIT_HOOK_CHAINED"):
+    for name in (
+        "STUB_UV_FAIL",
+        "STUB_MISE_INSTALL_FAIL",
+        "STUB_SCAN_EXIT",
+        "HOME_GIT_HOOK_CHAINED",
+        "MISE_CEILING_PATHS",
+    ):
         monkeypatch.delenv(name, raising=False)
     # No timer job and a failing `systemctl`: no `hal setup` test reaches a user manager.
     monkeypatch.setattr(jobs, "TIMER_JOBS", ())
@@ -303,7 +317,7 @@ def sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sandbox:
     # No test downloads: the pinned mise is a stub, and its pin is the stub's hash.
     monkeypatch.setattr(home_ports, "DOWNLOAD", serve_fake_mise)
     monkeypatch.setattr(setup, "MISE_SHA256", FAKE_MISE_SHA256)
-    return Sandbox(home, global_git_config, uv_calls, system)
+    return Sandbox(home, global_git_config, uv_calls, mise_calls, system)
 
 
 @pytest.fixture
