@@ -17,6 +17,10 @@ Its program builds the turn from the wheel's own types; the tool's handler answe
 canary. The fake calls the steered tool only while no tool result came back, so the turn ends with
 the answer canary.
 
+After the turn, one more per mode that cuts the fake's stream (`stream_cut`, `stream_cut_chunked`)
+records the events the wheel gets or the stop, without judging them; a client that does not
+stream gets the whole answer. Measured: the cut turns take about 3 s.
+
 Evidence: W the throwaway's model list and turn events, F the fake's request log, C the census with
 its planted row, Q an SQL count. Exit 0: K0, W models and W held.
 """
@@ -28,6 +32,7 @@ import os
 import re
 import sys
 import sysconfig
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -56,6 +61,7 @@ from litellm_retention import (
 DOCKERFILE = REPO / "probe" / "agent-service" / "Dockerfile"
 BASE_IMAGE = re.compile(r"^FROM\s+(\S+)", re.M)
 WHEEL = "/wheel"
+CUT_MODES = ("stream_cut", "stream_cut_chunked")
 KEY_FILE = "/run/secrets/hopin-key"
 ISSUER = "https://probe.invalid/issuer"
 API_GROUP = "probe-api"
@@ -179,11 +185,54 @@ class WheelProbe(RetentionProbe):
         self.hold("W models", f"list_gateway_models through the front with hopin's key file: "
                   f"{listed}, exactly the key's models")  # fmt: skip
 
-    def cell_w(self) -> None:
-        canaries = {
-            label: canary(f"w-{label}")
-            for label in ("message", "description", "arguments", "result", "answer", "subject")
+    @staticmethod
+    def turn_canaries(prefix: str) -> dict[str, str]:
+        labels = ("message", "description", "arguments", "result", "answer", "subject")
+        return {label: canary(f"{prefix}-{label}") for label in labels}
+
+    @staticmethod
+    def turn_scenario(tool: str, canaries: dict[str, str], principal: dict) -> dict:
+        return {
+            "tool": tool, "description": canaries["description"], "message": canaries["message"],
+            "result": canaries["result"], "principal": principal, "api_group": API_GROUP,
+            "origin": ORIGIN, "key_file": KEY_FILE, "model": DEFAULT_MODEL,
+            "seconds": TURN_SECONDS,
         }  # fmt: skip
+
+    def cell_w_cuts(self) -> None:
+        """W cut: one more turn per mode that cuts the fake's stream. The events the client gets
+        are recorded and not judged; a client that does not stream gets the whole answer."""
+        started, outcomes = time.monotonic(), []
+        for mode in CUT_MODES:
+            canaries = self.turn_canaries(f"w-{mode}")
+            tool = canary("w-tool").replace("-", "_")
+            principal = {"iss": ISSUER, "sub": canaries["subject"]}
+            self.steer(mode=mode, marker=canaries["answer"], request_canary=canaries["result"],
+                       tool_use={"name": tool, "input": {"q": canaries["arguments"]}},
+                       tool_use_once=True)  # fmt: skip
+            try:
+                events = self.in_throwaway(
+                    TURN_PROGRAM, self.turn_scenario(tool, canaries, principal)
+                )
+            except ProbeFailed as failure:
+                outcomes.append(f"{mode}: the program failed: {failure}")
+                continue
+            kinds = [event["type"] for event in events]
+            spoken = "".join(event.get("text", "") for event in events if event["type"] != "final")
+            stopped = [
+                {key: event[key] for key in ("kind", "code")} for event in events
+                if event["type"] == "stopped"
+            ]  # fmt: skip
+            said = canaries["answer"] in spoken
+            outcomes.append(
+                f"{mode}: events {kinds}, stops {stopped}, answer canary in text {said}"
+            )
+        self.steer()
+        self.hold("W cut", f"{'; '.join(outcomes)} ({time.monotonic() - started:.0f} s, recorded "
+                  "and not judged)")  # fmt: skip
+
+    def cell_w(self) -> None:
+        canaries = self.turn_canaries("w")
         tool = canary("w-tool").replace("-", "_")
         principal = {"iss": ISSUER, "sub": canaries["subject"]}
         person = person_fingerprint(Principal(**principal))
@@ -192,13 +241,7 @@ class WheelProbe(RetentionProbe):
                    tool_use_once=True, declares=tool,
                    arrivals={k: canaries[k] for k in ("message", "description")})  # fmt: skip
         before = len(self.provider_requests())
-        events = self.in_throwaway(TURN_PROGRAM, {
-            "tool": tool, "description": canaries["description"], "message": canaries["message"],
-            "result": canaries["result"], "principal": principal, "api_group": API_GROUP,
-            "origin": ORIGIN,
-            "key_file": KEY_FILE,
-            "model": DEFAULT_MODEL, "seconds": TURN_SECONDS,
-        })  # fmt: skip
+        events = self.in_throwaway(TURN_PROGRAM, self.turn_scenario(tool, canaries, principal))
         self.steer()
         self.expect_the_turn(events, tool, canaries)
         rounds = self.provider_requests()[before:]
@@ -212,6 +255,7 @@ class WheelProbe(RetentionProbe):
                   "wheel's fingerprint, the first declaring the tool and carrying the message and "
                   "description canaries once, the second with a tool_result block holding the "
                   "result")  # fmt: skip
+        self.cell_w_cuts()
         self.expect_the_census(tool, person, canaries)
 
     @staticmethod

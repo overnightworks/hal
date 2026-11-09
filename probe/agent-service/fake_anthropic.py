@@ -36,16 +36,19 @@ and `marker`, which stand in for the values of `expect.json`, `secrets` (keys th
 must not arrive, counted as `secret_hits`) and `request_canary`, whose occurrences in a request the
 log line counts. `declares` (a tool name) and `arrivals` (labels with values) make the log line
 say whether `tools` declares that tool and how often each value occurs in the request body.
-A request with `"stream": true` in mode `answer`, `stream_hold` or `stream_cut` gets Anthropic's
-event stream as server-sent events, ended by closing the connection: `message_start`,
+A request with `"stream": true` in mode `answer`, `stream_hold`, `stream_cut` or
+`stream_cut_chunked` gets Anthropic's event stream as server-sent events, ended by closing the
+connection: `message_start`,
 `content_block_start`, one `text_delta` `content_block_delta` per text of `texts` (a single text,
 or the marker, goes out in two pieces), `content_block_stop`, then, when the steered answer holds
 a tool call as the non-streamed answer does, a `tool_use` `content_block_start` (empty `input`),
 its arguments' JSON in two `input_json_delta` pieces and `content_block_stop`, then
 `message_delta` with the usage (`stop_reason` `tool_use` after a tool call) and `message_stop`.
 `stream_hold` writes up to the first delta, then holds as `hold` does while the control file says
-`stream_hold`, logs the same `held` line, and writes the rest. `stream_cut` closes the stream
-after the last `content_block_stop`, before `message_delta`.
+`stream_hold`, logs the same `held` line, and writes the rest. `stream_cut` closes the connection
+after the last `content_block_stop`, before `message_delta`, in the unframed HTTP/1.0 body of the
+other modes; `stream_cut_chunked` does the same in a chunked HTTP/1.1 body (one chunk per event)
+and sends no terminating zero-length chunk.
 The error bodies are Anthropic's own shapes, https://docs.anthropic.com/en/api/errors: 401
 `authentication_error`, 500 `api_error`, 529 `overloaded_error`, 402 `billing_error`;
 `low_credit` is the other answer a used-up balance gets, as clients report it: 400
@@ -72,7 +75,9 @@ HOLD_SECONDS = 120
 HOLD_POLL_SECONDS = 0.2
 STREAM_HOLD = "stream_hold"
 STREAM_CUT = "stream_cut"
-STREAM_MODES = frozenset({"answer", STREAM_HOLD, STREAM_CUT})
+STREAM_CUT_CHUNKED = "stream_cut_chunked"
+STREAM_CUTS = frozenset({STREAM_CUT, STREAM_CUT_CHUNKED})
+STREAM_MODES = frozenset({"answer", STREAM_HOLD, *STREAM_CUTS})
 FIRST_DELTA = 3  # message_start, content_block_start and the first delta
 TEXT_BLOCK = {"type": "text", "text": ""}
 ERRORS = {
@@ -293,7 +298,7 @@ def tool_use_events(call: dict) -> list[bytes]:
 
 def stream_events(expect: dict, call: dict | None = None) -> list[bytes]:
     """Anthropic's event stream of an answer: text pieces, then the tool call's block when `call`
-    is given; `stream_cut` ends it before `message_delta`."""
+    is given; the cut modes end it before `message_delta`."""
     usage = expect.get("usage", {"input_tokens": 1, "output_tokens": 1})
     started = {
         "id": "msg_probe", "type": "message", "role": "assistant", "model": ANSWER_MODEL,
@@ -311,7 +316,7 @@ def stream_events(expect: dict, call: dict | None = None) -> list[bytes]:
         server_sent("content_block_stop", {"index": 0}),
         *(tool_use_events(call) if call else []),
     ]  # fmt: skip
-    if expect.get("mode") == STREAM_CUT:
+    if expect.get("mode") in STREAM_CUTS:
         return opening
     return [
         *opening,
@@ -331,12 +336,23 @@ def asks_for_stream(body: bytes) -> bool:
     return isinstance(document, dict) and document.get("stream") is True
 
 
+def framed(data: bytes, chunked: bool) -> bytes:
+    """`data` as one HTTP/1.1 chunk when `chunked`, else unchanged."""
+    return f"{len(data):x}\r\n".encode() + data + b"\r\n" if chunked else data
+
+
 def stream(request: http.server.BaseHTTPRequestHandler, answer: dict, call: dict | None) -> None:
     """The event stream; the first delta goes out before a `stream_hold` holds the rest."""
+    chunked = answer.get("mode") == STREAM_CUT_CHUNKED
+    if chunked:
+        request.protocol_version = "HTTP/1.1"
     request.send_response(200)
     request.send_header("Content-Type", "text/event-stream")
+    if chunked:
+        request.send_header("Transfer-Encoding", "chunked")
+        request.send_header("Connection", "close")  # the cut ends the connection, not a chunk
     request.end_headers()
-    events = stream_events(answer, call)
+    events = [framed(event, chunked) for event in stream_events(answer, call)]
     request.wfile.write(b"".join(events[:FIRST_DELTA]))
     if answer.get("mode") == STREAM_HOLD:
         seconds = answer.get("hold_seconds", HOLD_SECONDS)
