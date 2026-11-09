@@ -1,0 +1,7 @@
+claim_id = "9047436358694778b86c2051f4af41e8"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "c3a3a5634731960359775c1dc99adc00d7ea0b94"
+branch = "claude/issue-1187-hopin-host-only"
+scope = ["docs/architecture.md", "docs/home.md", "fleet.yaml"]
+opened_commit = "314f38601003ce1e4ab61ce3c917b39fa64dfded"
