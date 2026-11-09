@@ -237,41 +237,54 @@ class WheelProbe(RetentionProbe):
         tool = canary("w-tool").replace("-", "_")
         principal = {"iss": ISSUER, "sub": canaries["subject"]}
         person = person_fingerprint(Principal(**principal))
-        self.steer(marker=canaries["answer"], request_canary=canaries["result"],
-                   tool_use={"name": tool, "input": {"q": canaries["arguments"]}},
-                   tool_use_once=True, declares=tool,
-                   arrivals={k: canaries[k] for k in ("message", "description")})  # fmt: skip
+        steering = {
+            "marker": canaries["answer"], "request_canary": canaries["result"],
+            "tool_use": {"name": tool, "input": {"q": canaries["arguments"]}},
+            "tool_use_once": True, "declares": tool,
+            "arrivals": {k: canaries[k] for k in ("message", "description")},
+        }  # fmt: skip
+        self.steer(**steering)
         before = len(self.provider_requests())
         events = self.in_throwaway(TURN_PROGRAM, self.turn_scenario(tool, canaries, principal))
         self.steer()
-        self.expect_the_turn(events, tool, canaries)
+        before_the_call = self.expect_the_turn(events, tool, canaries, steering["marker"])
         rounds = self.provider_requests()[before:]
         seen = [(r["tool_result"], r["request_canary_hits"], r["user_id"]) for r in rounds]
         expect(seen == [(False, 0, person), (True, 1, person)], f"W: F saw {seen}")
         first = rounds[0]
         arrived = (first["declared_tool"], first["arrivals"])
         expect(arrived == (True, {"message": 1, "description": 1}), f"W: round 1 showed {arrived}")
-        self.hold("W turn", f"{len(events)} events: the call of the one declared tool with the "
-                  "fake's arguments, the handler's result, the answer; F saw two rounds for the "
-                  "wheel's fingerprint, the first declaring the tool and carrying the message and "
-                  "description canaries once, the second with a tool_result block holding the "
-                  "result")  # fmt: skip
+        self.hold("W turn", f"{len(events)} events: {before_the_call} text pieces before the "
+                  "call, the call of the one declared tool with the fake's arguments, the "
+                  "handler's result, the answer; F saw two rounds for the wheel's fingerprint, "
+                  "the first declaring the tool and carrying the message and description "
+                  "canaries once, the second with a tool_result block holding "
+                  "the result")  # fmt: skip
         self.cell_w_cuts()
         self.expect_the_census(tool, person, canaries)
 
     @staticmethod
-    def expect_the_turn(events: list[dict], tool: str, canaries: dict[str, str]) -> None:
+    def expect_the_turn(
+        events: list[dict], tool: str, canaries: dict[str, str], tool_round_text: str
+    ) -> int:
+        """The text pieces before the call join to the tool round's steered text, those after the
+        result to the answer canary. Returns how many pieces came before the call."""
         kinds = [event["type"] for event in events]
-        pieces = kinds.count("assistant_text")
-        wanted = ["tool_call", "tool_result", *["assistant_text"] * pieces, "final"]
-        expect(pieces >= 1 and kinds == wanted, f"W: the turn's events {kinds}: {events[-1:]}")
-        call, result, *texts, final = events
+        before_the_call = kinds.index("tool_call") if "tool_call" in kinds else len(kinds)
+        after = kinds[before_the_call + 2 : -1]
+        wanted = ["assistant_text"] * before_the_call + ["tool_call", "tool_result"]
+        wanted += ["assistant_text"] * len(after) + ["final"]
+        expect(kinds == wanted and after, f"W: the turn's events {kinds}: {events[-1:]}")
+        spoken_before = "".join(event["text"] for event in events[:before_the_call])
+        expect(not before_the_call or spoken_before == tool_round_text, "W: the tool round's text")
+        call, result, *texts, final = events[before_the_call:]
         spoken = "".join(event["text"] for event in texts)
         expect(spoken == canaries["answer"], "W: the answer's text pieces")
         expect(call["name"] == tool, "W: the call names another tool")
         expect(call["input"] == {"q": canaries["arguments"]}, "W: the call's arguments")
         expect(result["content"] == canaries["result"], "W: the tool's result")
         expect(final["text"] == canaries["answer"], "W: the answer")
+        return before_the_call
 
     def expect_the_census(self, tool: str, person: str, canaries: dict[str, str]) -> None:
         """C after the batch writes: no canary anywhere, the dump included; the tool name in the
