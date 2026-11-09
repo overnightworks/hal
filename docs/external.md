@@ -206,9 +206,12 @@ mit 302, ohne Tunnel: alles ausser den Seiten und dem Dateipraefix des Apex geht
 Query entfallen (`preserve_query_string = false`); alte Links behalten keinen Pfad (Betreiber, 18.10.2026).
 Single Redirects laufen der Reihe nach, und ein Redirect beendet die Auswertung
 ([Doku](https://developers.cloudflare.com/rules/url-forwarding/), dort auch die 10 Regeln des Free-Plans):
-je Seite steht eine Regel vor der letzten, die jede andere Schreibweise (Grossschreibung, Schraegstrich, `www`) auf den genauen Pfad am Apex leitet; die letzte Regel nimmt die Seiten und das Dateipraefix des Apex aus, sie gehen durch den Tunnel zur Einheit `legal`. Der Host gilt mit und ohne `:<port>`. Nur https wird weitergeleitet (`ssl`): `http://` geht zuerst auf demselben Host nach https (Always Use HTTPS), wie es der HSTS-Preload verlangt. Die Namen behalten proxied
-DNS-Eintraege, haben aber keine Tunnelzeile (nur der Apex hat eine, als Host von `legal`) und keinen Ausschluss; ihr Eintrag wartet auf dieses Regelwerk,
-wie auf den Ausschluss. Die Felder `action_parameters.from_value` des Providers 5.28.0:
+je Seite steht eine Regel vor der letzten, die jede andere Schreibweise (Grossschreibung, Schraegstrich, `www`) auf den genauen Pfad am Apex leitet; die letzte Regel nimmt die Seiten und das Dateipraefix des Apex aus, sie gehen durch den Tunnel `platform` zur Plattform, die sie beantwortet. Der Host gilt mit und ohne `:<port>`. Nur https wird weitergeleitet (`ssl`): `http://` geht zuerst auf demselben Host nach https (Always Use HTTPS), wie es der HSTS-Preload verlangt. Die Namen behalten proxied
+DNS-Eintraege, haben aber keine Zeile in hals Tunnel und keinen Ausschluss; ihr Eintrag wartet auf dieses Regelwerk,
+wie auf den Ausschluss. Der Apex ist der Host von `legal` mit `tunnel: platform` (oben, ein Host auf einem anderen
+Tunnel): sein Record zeigt auf den Tunnel der Plattform, der Record von `www` auf hals Tunnel. Die Einheit `legal`
+laeuft weiter, und `hal apply` baut weiter `legal/built/`, doch nichts Oeffentliches erreicht sie; bis zum Umstieg auf
+die Plattform ist sie das Ziel des Rueckwegs: den Schluessel `tunnel` zuruecknehmen, dann `hal update` und `hal apply`. Die Felder `action_parameters.from_value` des Providers 5.28.0:
 [ruleset.md](https://github.com/cloudflare/terraform-provider-cloudflare/blob/v5.28.0/docs/resources/ruleset.md).
 Gibt es den Einstiegspunkt `http_request_dynamic_redirect` der Zone schon (Dashboard-Regeln), schlaegt das
 Anlegen fehl: dann vor dem ersten `hal apply` importieren (`cloudflare_ruleset.apex_redirect[0]`, ID

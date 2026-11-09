@@ -251,7 +251,8 @@ because Keycloak gives the action by itself only to new accounts. Ask again when
 substance; a typo or a new link is no reason.
 
 The action reaches Keycloak in this order: update the checkout (`hal update`), restart Keycloak
-(Theme and language), then `hal apply`, which publishes the legal pages and applies the realm. The
+(Theme and language), then `hal apply`, which applies the realm; the public legal pages the action
+links come from the platform. The
 messages must be served before the action is on, or the page shows Keycloak's placeholder text.
 
 Switch it off with `enabled: false` and `defaultAction: false` in the block, never by deleting the block:
