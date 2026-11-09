@@ -44,7 +44,7 @@ APP_DIRECTORY = "legal"
 SERVICE_ANCHORS = {
     "keycloak": "anmeldung",
     "litellm": "agent-dienst",
-    "speech-runtime": "sprachdienst",
+    "speech": "sprachdienst",
 }
 _BUILT_MODE = 0o644  # nginx-unprivileged must read the page whatever the umask
 

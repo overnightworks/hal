@@ -711,7 +711,7 @@ networks:
       config:
         - subnet: 172.31.198.0/24
           ip_range: 172.31.198.128/25
-  # The speech service (fleet.yaml's app speech-runtime) and traefik-mcp, the service's way to
+  # The speech service (fleet.yaml's app speech) and traefik-mcp, the service's way to
   # Keycloak's key set. The service joins it and the app networks below as external networks.
   speech-issuer:
     name: hal_speech_issuer

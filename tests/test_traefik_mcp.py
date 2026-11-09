@@ -20,7 +20,7 @@ ISOLATED_MODE = {"com.docker.network.bridge.gateway_mode_ipv4": "isolated"}
 ROUTER_HOST = re.compile(r"^Host\(`([^`]+)`\)")
 ROUTER_RULE = re.compile(r"^Host\(`[^`]+`\)( && Path\(`/[^`]*`\))?$")
 ROUTER_PATH = re.compile(r"Path\(`([^`]+)`\)")
-SPEECH_NETWORK_PREFIX = "hal_speech_"  # speech-runtime's compose joins these names as external
+SPEECH_NETWORK_PREFIX = "hal_speech_"  # speech's compose joins these names as external
 KEY_SET_PATH = "/protocol/openid-connect/certs"  # Keycloak's JWKS path under a realm
 CA_DEFAULT_LIFETIME_HOURS = 24  # step-ca's default; ca.json sets no claims
 
