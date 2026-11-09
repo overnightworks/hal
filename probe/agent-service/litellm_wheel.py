@@ -237,12 +237,12 @@ class WheelProbe(RetentionProbe):
         tool = canary("w-tool").replace("-", "_")
         principal = {"iss": ISSUER, "sub": canaries["subject"]}
         person = person_fingerprint(Principal(**principal))
-        steering = dict(
-            marker=canaries["answer"], request_canary=canaries["result"],
-            tool_use={"name": tool, "input": {"q": canaries["arguments"]}},
-            tool_use_once=True, declares=tool,
-            arrivals={k: canaries[k] for k in ("message", "description")},
-        )  # fmt: skip
+        steering = {
+            "marker": canaries["answer"], "request_canary": canaries["result"],
+            "tool_use": {"name": tool, "input": {"q": canaries["arguments"]}},
+            "tool_use_once": True, "declares": tool,
+            "arrivals": {k: canaries[k] for k in ("message", "description")},
+        }  # fmt: skip
         self.steer(**steering)
         before = len(self.provider_requests())
         events = self.in_throwaway(TURN_PROGRAM, self.turn_scenario(tool, canaries, principal))
@@ -254,12 +254,12 @@ class WheelProbe(RetentionProbe):
         first = rounds[0]
         arrived = (first["declared_tool"], first["arrivals"])
         expect(arrived == (True, {"message": 1, "description": 1}), f"W: round 1 showed {arrived}")
-        self.hold("W turn", f"{len(events)} events: {before_the_call} text pieces before the call, "
-                  "the call of the one declared tool with the fake's arguments, the handler's "
-                  "result, the answer; F saw two rounds for the wheel's "
-                  "fingerprint, the first declaring the tool and carrying the message and "
-                  "description canaries once, the second with a tool_result block holding the "
-                  "result")  # fmt: skip
+        self.hold("W turn", f"{len(events)} events: {before_the_call} text pieces before the "
+                  "call, the call of the one declared tool with the fake's arguments, the "
+                  "handler's result, the answer; F saw two rounds for the wheel's fingerprint, "
+                  "the first declaring the tool and carrying the message and description "
+                  "canaries once, the second with a tool_result block holding "
+                  "the result")  # fmt: skip
         self.cell_w_cuts()
         self.expect_the_census(tool, person, canaries)
 
