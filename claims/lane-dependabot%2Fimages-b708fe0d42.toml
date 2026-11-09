@@ -1,8 +1,0 @@
-claim_id = "4049893aac924e489c5c7d53423a5127"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "a62198419a510997dd688d7f4ac3b0a26a625a02"
-branch = "dependabot/images-b708fe0d42"
-scope = ["compose.yaml", "probe/agent-service/compose.probe.yaml", "probe/keycloak/compose.probe.yaml", "src/hal/backup/images/Dockerfile"]
-opened_commit = "6a255ff0d5692317c919ec026e71cece1c3a2e1c"
-whole_reason = "One digest refresh of postgres 17.11 and python 3.14.10: every co-pinned copy moves in one commit, or the pin tests and the backup's restore image disagree with compose."
