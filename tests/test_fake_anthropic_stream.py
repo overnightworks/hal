@@ -51,9 +51,12 @@ def test_the_fakes_stream_cuts_text_into_pieces_that_join_to_the_steered_text(
     )
 
 
-@pytest.mark.parametrize("mode", ["answer", "stream_cut"])
+@pytest.mark.parametrize(
+    ("mode", "last_event", "stop_reasons"),
+    [("answer", "message_stop", ["tool_use"]), ("stream_cut", "content_block_stop", [])],
+)
 def test_the_fakes_stream_of_a_tool_call_holds_a_tool_use_block_with_the_arguments_in_pieces(
-    fake_provider, mode
+    fake_provider, mode, last_event, stop_reasons
 ):
     call = {"name": "lookup", "input": {"q": "needle-61b7"}}
 
@@ -65,9 +68,8 @@ def test_the_fakes_stream_of_a_tool_call_holds_a_tool_use_block_with_the_argumen
     assert kinds.count("content_block_delta") >= 4  # two text pieces, two argument pieces
     assert json.loads(joined(events, "input_json_delta", "partial_json")) == call["input"]
     stops = [e["delta"]["stop_reason"] for e in events if e["type"] == "message_delta"]
-    assert (kinds[-1], stops) == (
-        ("message_stop", ["tool_use"]) if mode == "answer" else ("content_block_stop", [])
-    )
+    assert kinds[-1] == last_event
+    assert stops == stop_reasons
 
 
 @pytest.mark.parametrize(
