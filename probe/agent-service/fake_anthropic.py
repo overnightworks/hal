@@ -36,11 +36,19 @@ and `marker`, which stand in for the values of `expect.json`, `secrets` (keys th
 must not arrive, counted as `secret_hits`) and `request_canary`, whose occurrences in a request the
 log line counts. `declares` (a tool name) and `arrivals` (labels with values) make the log line
 say whether `tools` declares that tool and how often each value occurs in the request body.
-A request with `"stream": true` in mode `answer` or `stream_hold` gets Anthropic's event stream as
-server-sent events, ended by closing the connection: `message_start`, `content_block_start`, one
-`content_block_delta` per text of `texts` (else the marker), `content_block_stop`, `message_delta`
-with the usage and `message_stop`. `stream_hold` writes up to the first delta, then holds as `hold`
-does while the control file says `stream_hold`, logs the same `held` line, and writes the rest.
+A request with `"stream": true` in mode `answer`, `stream_hold`, `stream_cut` or
+`stream_cut_chunked` gets Anthropic's event stream as server-sent events, ended by closing the
+connection: `message_start`, `content_block_start`, one `text_delta` `content_block_delta` per
+text of `texts` (a single text, or the marker, goes out in two pieces), `content_block_stop`,
+then, when the steered answer holds a tool call as the non-streamed answer does, a `tool_use`
+`content_block_start` (empty `input`), its arguments' JSON in two `input_json_delta` pieces and
+`content_block_stop`, then `message_delta` with the usage (`stop_reason` `tool_use` after a tool
+call) and `message_stop`.
+`stream_hold` writes up to the first delta, then holds as `hold` does while the control file says
+`stream_hold`, logs the same `held` line, and writes the rest. `stream_cut` closes the connection
+after the last `content_block_stop`, before `message_delta`, in the unframed HTTP/1.0 body of the
+other modes; `stream_cut_chunked` does the same in a chunked HTTP/1.1 body (one chunk per event)
+and sends no terminating zero-length chunk.
 The error bodies are Anthropic's own shapes, https://docs.anthropic.com/en/api/errors: 401
 `authentication_error`, 500 `api_error`, 529 `overloaded_error`, 402 `billing_error`;
 `low_credit` is the other answer a used-up balance gets, as clients report it: 400
@@ -66,7 +74,10 @@ CONTROL = "/fake/control.json"
 HOLD_SECONDS = 120
 HOLD_POLL_SECONDS = 0.2
 STREAM_HOLD = "stream_hold"
-STREAM_MODES = frozenset({"answer", STREAM_HOLD})
+STREAM_CUT = "stream_cut"
+STREAM_CUT_CHUNKED = "stream_cut_chunked"
+STREAM_CUTS = frozenset({STREAM_CUT, STREAM_CUT_CHUNKED})
+STREAM_MODES = frozenset({"answer", STREAM_HOLD, *STREAM_CUTS})
 FIRST_DELTA = 3  # message_start, content_block_start and the first delta
 TEXT_BLOCK = {"type": "text", "text": ""}
 ERRORS = {
@@ -208,10 +219,16 @@ def picture(expect: dict) -> bytes:
     }).encode()  # fmt: skip
 
 
-def message(expect: dict, body: bytes) -> bytes:
-    call = expect.get("tool_use")
+def steered_call(expect: dict, body: bytes) -> dict | None:
+    """The tool call the answer holds: steered by `tool_use`, and with `tool_use_once` only while
+    the request holds no `tool_result` block."""
     if expect.get("tool_use_once") and holds_tool_result(document_of(body)):
-        call = None
+        return None
+    return expect.get("tool_use")
+
+
+def message(expect: dict, body: bytes) -> bytes:
+    call = steered_call(expect, body)
     content = [{"type": "text", "text": expect["marker"]}]
     if call:
         content.append({"type": "tool_use", "id": "toolu_probe", **call})
@@ -252,8 +269,36 @@ def server_sent(kind: str, data: dict) -> bytes:
     return f"event: {kind}\ndata: {json.dumps({'type': kind, **data})}\n\n".encode()
 
 
-def stream_events(expect: dict) -> list[bytes]:
-    """Anthropic's event stream of an answer: one text delta per steered text."""
+def in_two(text: str) -> list[str]:
+    middle = len(text) // 2
+    return [text[:middle], text[middle:]]
+
+
+def text_pieces(expect: dict) -> list[str]:
+    """One piece per steered text; a single text (or the marker) goes out in two pieces."""
+    texts = expect.get("texts") or [expect["marker"]]
+    return in_two(texts[0]) if len(texts) == 1 else texts
+
+
+def tool_use_events(call: dict) -> list[bytes]:
+    """The content block of a tool call: its arguments' JSON arrives in two pieces."""
+    block = {"type": "tool_use", "id": "toolu_probe", "name": call["name"], "input": {}}
+    pieces = in_two(json.dumps(call.get("input", {})))
+    return [
+        server_sent("content_block_start", {"index": 1, "content_block": block}),
+        *(
+            server_sent("content_block_delta", {
+                "index": 1, "delta": {"type": "input_json_delta", "partial_json": piece},
+            })
+            for piece in pieces
+        ),
+        server_sent("content_block_stop", {"index": 1}),
+    ]  # fmt: skip
+
+
+def stream_events(expect: dict, call: dict | None = None) -> list[bytes]:
+    """Anthropic's event stream of an answer: text pieces, then the tool call's block when `call`
+    is given; the cut modes end it before `message_delta`."""
     usage = expect.get("usage", {"input_tokens": 1, "output_tokens": 1})
     started = {
         "id": "msg_probe", "type": "message", "role": "assistant", "model": ANSWER_MODEL,
@@ -262,15 +307,21 @@ def stream_events(expect: dict) -> list[bytes]:
     }  # fmt: skip
     deltas = [
         server_sent("content_block_delta", {"index": 0, "delta": {"type": "text_delta", "text": t}})
-        for t in expect.get("texts") or [expect["marker"]]
+        for t in text_pieces(expect)
     ]  # fmt: skip
-    return [
+    opening = [
         server_sent("message_start", {"message": started}),
         server_sent("content_block_start", {"index": 0, "content_block": TEXT_BLOCK}),
         *deltas,
         server_sent("content_block_stop", {"index": 0}),
+        *(tool_use_events(call) if call else []),
+    ]  # fmt: skip
+    if expect.get("mode") in STREAM_CUTS:
+        return opening
+    return [
+        *opening,
         server_sent("message_delta", {
-            "delta": {"stop_reason": "end_turn", "stop_sequence": None},
+            "delta": {"stop_reason": "tool_use" if call else "end_turn", "stop_sequence": None},
             "usage": {"output_tokens": usage["output_tokens"]},
         }),
         server_sent("message_stop", {}),
@@ -285,12 +336,23 @@ def asks_for_stream(body: bytes) -> bool:
     return isinstance(document, dict) and document.get("stream") is True
 
 
-def stream(request: http.server.BaseHTTPRequestHandler, answer: dict) -> None:
+def framed(data: bytes, chunked: bool) -> bytes:
+    """`data` as one HTTP/1.1 chunk when `chunked`, else unchanged."""
+    return f"{len(data):x}\r\n".encode() + data + b"\r\n" if chunked else data
+
+
+def stream(request: http.server.BaseHTTPRequestHandler, answer: dict, call: dict | None) -> None:
     """The event stream; the first delta goes out before a `stream_hold` holds the rest."""
+    chunked = answer.get("mode") == STREAM_CUT_CHUNKED
+    if chunked:
+        request.protocol_version = "HTTP/1.1"
     request.send_response(200)
     request.send_header("Content-Type", "text/event-stream")
+    if chunked:
+        request.send_header("Transfer-Encoding", "chunked")
+        request.send_header("Connection", "close")  # the cut ends the connection, not a chunk
     request.end_headers()
-    events = stream_events(answer)
+    events = [framed(event, chunked) for event in stream_events(answer, call)]
     request.wfile.write(b"".join(events[:FIRST_DELTA]))
     if answer.get("mode") == STREAM_HOLD:
         seconds = answer.get("hold_seconds", HOLD_SECONDS)
@@ -314,7 +376,7 @@ def handler(role: str, expect: dict) -> type[http.server.BaseHTTPRequestHandler]
                 record = provider_record({**expect, **steering}, self, body)
                 print(json.dumps(record), flush=True)  # noqa: T201 - this in-container program prints its own request log
                 if asks_for_stream(body) and steering.get("mode", "answer") in STREAM_MODES:
-                    stream(self, {**expect, **steering})
+                    stream(self, {**expect, **steering}, steered_call({**expect, **steering}, body))
                     return
                 status, reply = self.provider_answer(steering, body)
             if status:

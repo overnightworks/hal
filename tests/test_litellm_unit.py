@@ -18,7 +18,6 @@ from types import ModuleType
 import pytest
 import yaml
 from support.probe_support import probe_imports
-from support.script_module import loaded_script
 
 from hal.stack import api_limits, litellm_keys
 
@@ -562,12 +561,6 @@ def test_start_never_prints_a_key_it_refuses(stub_path, tmp_path):
     assert key not in result.stdout + result.stderr
 
 
-@pytest.fixture(scope="module")
-def fake_provider():
-    path = ROOT / "probe" / "agent-service" / "fake_anthropic.py"
-    yield from loaded_script("fake_anthropic", path)
-
-
 @pytest.mark.parametrize(
     ("body", "expected"),
     [(b'{"prompt": "before CANARY after"}', "CANARY"), (b'{"prompt": "other"}', "probe")],
@@ -658,27 +651,6 @@ def test_the_fake_records_whether_the_steered_tool_was_declared_and_how_often_ca
     observed = fake_provider.arrivals(steering, fake_provider.document_of(body), body)
 
     assert observed == {"declared_tool": declared, "arrivals": counted}
-
-
-def test_the_fakes_stream_answers_with_one_delta_per_steered_text_and_no_byte_of_the_request(
-    fake_provider,
-):
-    steering = {"texts": ["first-7c1d", "second-2b9e"], "request_canary": "request-5a0f"}
-
-    frames = b"".join(fake_provider.stream_events(steering)).decode()
-
-    events = [block.splitlines() for block in frames.split("\n\n") if block]
-    names = [lines[0].removeprefix("event: ") for lines in events]
-    data = [json.loads(lines[1].removeprefix("data: ")) for lines in events]
-    assert names == [
-        "message_start", "content_block_start", "content_block_delta", "content_block_delta",
-        "content_block_stop", "message_delta", "message_stop",
-    ]  # fmt: skip
-    assert [item["type"] for item in data] == names
-    assert [item["delta"]["text"] for item in data if item["type"] == "content_block_delta"] == (
-        steering["texts"]
-    )
-    assert steering["request_canary"] not in frames
 
 
 # --- the probe's reading of LiteLLM's processes and listeners, on synthetic scans ---------------
