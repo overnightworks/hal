@@ -16,8 +16,6 @@ services:
     hosts:
       - {name: songmaker, exposure: public, reason: "songmaker is public with its own login", target: "http://localhost:8080", deny_public: [/auth/backchannel-logout, /metrics]}
   hopin:
-    repo: {default_branch: main}
-    run: {enabled: true}
     hosts:
       - {name: hopin, exposure: public, reason: "video calls; every page needs the Keycloak login (hopin#25)", tunnel: platform, ready: /health, deny_public: [/auth/backchannel-logout]}
   skat:
