@@ -180,7 +180,8 @@ services:
       traefik.http.routers.auth-admin.rule: Host(`localhost`)
 
   # The imprint (and the other legal pages) of every app at hallucinai.de: static files from legal/,
-  # with appkit's tokens and fonts that the apply step writes into legal/assets/. The catalog gives it the apex as its host; the redirect leaves the served paths to it.
+  # with appkit's tokens and fonts that the apply step writes into legal/assets/.
+  # The catalog gives it the apex as its host, which the platform's tunnel serves, so nothing public reaches it; it is the rollback target.
   legal:
     profiles: [legal]
     image: nginxinc/nginx-unprivileged:1.30.6-alpine-slim@sha256:5d8bb9437d74a600ec5dbf90c035451c724dc33eac8d3a71078f6f8612c345f6

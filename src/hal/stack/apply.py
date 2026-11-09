@@ -45,9 +45,10 @@ newest release tag is checked out, built, started and recorded once its containe
 While `services.legal` is enabled the three legal pages are built from `legal/frame`,
 `legal/sections` and each app's own `legal/` files at its release through the validator
 (`legal_step.py`); a refused section is exit 2, and the plan names each page that is new or
-changes. After `yes` the pages are written to `legal/built/`, which the legal unit serves, before
-any unit switches and before the core phase and the apps: a new app release that fails leaves its
-new text live while the old version runs. The appkit step (`appkit_step.py`) comes
+changes. After `yes` the pages are written to `legal/built/` for hal's legal unit, the rollback
+target; the public pages are the platform's. They are written before any unit switches and before
+the core phase and the apps: a new app release that fails leaves its new text built while the old
+version runs. The appkit step (`appkit_step.py`) comes
 first and runs with or without the legal unit: it writes the installed appkit's tokens and fonts
 to `appkit-<version>/` in `legal/assets/` and in both Keycloak themes; a missing appkit is exit 2.
 

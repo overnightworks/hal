@@ -38,7 +38,7 @@ services:
     run:
       enabled: true
     hosts:
-      - {name: "@", exposure: public, reason: "static legal pages without a login", ready: /impressum}
+      - {name: "@", exposure: public, reason: "static legal pages without a login", tunnel: platform, ready: /impressum}
   litellm:
     run:
       enabled: true
