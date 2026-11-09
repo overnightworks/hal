@@ -3,6 +3,6 @@ agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
 role = "builder"
 base = "9171e92a6abdc98843ec48d208cfd1a42e4a5c0c"
 branch = "claude/issue-1199-apex-platform"
-scope = ["compose.yaml", "docs/architecture.md", "docs/external.md", "docs/keycloak.md", "docs/stack.md", "external/cloudflare.tf", "fleet.yaml", "src/hal/stack/apply.py"]
+scope = ["compose.yaml", "docs/architecture.md", "docs/external.md", "docs/keycloak.md", "docs/stack.md", "external/cloudflare.tf", "fleet.yaml", "quality/config.toml", "src/hal/stack/apply.py"]
 opened_commit = "08f2b8650e2ebeb476ebcf87b02f3a109fa1c663"
 whole_reason = "One catalog key and the sentences it makes false must land together, or the documents describe a route that no longer exists."
