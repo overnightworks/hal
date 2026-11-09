@@ -1,7 +1,0 @@
-claim_id = "d0f04c4378054765b6ec90b5b84f2b23"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "ade29c81cb2077a7e7f59aa760d70393ccb23397"
-branch = "claude/issue-1197-naming-design"
-scope = ["docs/naming.md"]
-opened_commit = "ccc8106f75cd4b4ad4bef39d0f80c4f9494ce1e8"
