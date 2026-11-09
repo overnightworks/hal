@@ -573,7 +573,7 @@ labels are coloured with the 16 base colours, each stream on its own; `NO_COLOR`
 `.git/hooks/<name>` des Repositorys aus (auch im Worktree, über
 `--git-common-dir`) und scannt danach noch einmal, weil ein Repository-Hook
 Dateien stagen kann. Exit `0` heißt sauber, `1` ein Geheimnis gefunden, `2` nicht
-beurteilbar; jeder Wert ungleich `0` bricht den Commit ab. quality sucht mise im `PATH`, den der Hook nur für diesen Aufruf um das Verzeichnis von hals mise ergänzt;
+beurteilbar; jeder Wert ungleich `0` bricht den Commit ab. quality sucht mise im `PATH`, den der Hook nur für diesen Aufruf um das Verzeichnis des mise, das hal einrichtet, ergänzt;
 fehlt mise oder der Scanner, ist das `2` mit dem Befehl, der ihn installiert. Fehlt `quality`,
 bleibt der Commit gesperrt, bis `hal setup` es wieder einrichtet. Das
 ist gewollt.

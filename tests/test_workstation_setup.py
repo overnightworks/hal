@@ -1,4 +1,4 @@
-"""`hal setup` against a sandboxed HOME with stub `uv`, `quality`, `mise` and Ansible; the rules are those of #22 and, for the system step, #40."""
+"""`hal setup` against a sandboxed HOME with stub `uv`, `quality`, `mise` and Ansible."""
 
 from __future__ import annotations
 

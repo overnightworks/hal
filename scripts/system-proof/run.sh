@@ -12,10 +12,13 @@
 # carries tunnel/; only `git archive` reads it. Give each part its own evidence dir (`<evidence dir>/fresh`,
 # `<evidence dir>/prepared`, `<evidence dir>/shapes`): each call truncates cells.txt and containers.txt there.
 # The script takes no lock: the fleet form above does. CAP 1800 plus K 30 stays within 1830, and K 30 is more than the
-# teardown of a cut run needs (it left no container within 30 s). Measured under that form on a loaded machine, in
-# seconds after the lock was taken: `shapes` 881, `fresh` 924, `prepared` 698, each exit 0 with every cell held. The
-# slowest part keeps 876 s of the 1800 s cap, 576 s of the 1500 s a part may take. The wait for a low load and every
-# stage run inside the cap, so the cap bounds them, and the EXIT trap runs on its TERM.
+# teardown of a cut run needs (it left no container within 30 s). Measured under that form on a loaded machine, each
+# part's container time (from its containers.txt to its last cell written) was `fresh` 1092 s, `shapes` 805 s,
+# `prepared` 427 s, each exit 0 with every cell held. That leaves 708 s, 995 s and 1373 s of the 1800 s cap, and
+# 408 s, 695 s and 1073 s of the 1500 s a part may take. The build and the wait for a low load come before the
+# container and count against the cap too: `fresh` took at most about 1277 s from when the lock was free (the estimate
+# from the end of `prepared`), which keeps about 523 s of the cap. Every stage runs inside the cap, so the cap bounds
+# them, and the EXIT trap runs on its TERM.
 # It keeps the container ids in the evidence dir and removes its container, with its volumes and nothing else, on exit.
 # The sudo password is generated per run.
 set -euo pipefail
