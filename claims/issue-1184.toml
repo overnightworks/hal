@@ -1,7 +1,0 @@
-claim_id = "5a3dc1df55e144a9a1133b6452a4c379"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "e9cfd36095851e444cb17b39189124f10c76f2e4"
-branch = "claude/issue-1184-exposure-allows-k3s-sockets"
-scope = ["src/hal/exposure/allow-list.toml"]
-opened_commit = "66a92c7c88702917a2b43fb47e3d66e457fd8766"
