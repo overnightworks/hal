@@ -40,7 +40,7 @@ reason = "keycloak's bootstrap and entrypoint files, bind-mounted by compose.yam
 
 [[root.allow]]
 entry = "legal/"
-reason = "the legal unit's pages and sources, bind-mounted by compose.yaml"
+reason = "the legal pages served at the apex, bind-mounted by compose.yaml"
 
 [[root.allow]]
 entry = "mcp/"

@@ -32,18 +32,16 @@ and `hal apply --local` writes it again.
 - **The legal unit.** `legal` (nginx, profile `legal`, switched by `services.legal.run.enabled`) serves
   the imprint, the privacy notice and the terms from `legal/built/` for `Host: <zone>` on `127.0.0.1:8081`; the stylesheet and appkit's
   tokens and fonts (`legal/assets/appkit-<version>/`, which `hal apply` writes from the installed appkit) answer under `/_rechtliches/`, every other path with 404. The catalog gives
-  it the apex as its host with `tunnel: platform`: the Cloudflare redirect leaves the three pages, `/favicon.ico` and
-  `/_rechtliches/` (`cloudflare.redirect.serve`) to the apex, whose record points at the platform's tunnel, so the platform serves them and
-  nothing public reaches this unit. It keeps running as the rollback target until the platform's cutover; rolling back is reverting that
-  key, then the operator's `hal update` and `hal apply`. The pages are built by `hal apply` from `legal/frame`, `legal/sections` and each app's own `legal/` files at its release (the plan names each page that is
-  new or changes), and the unit serves them once it has written them; every answer carries `Cache-Control: no-cache`, so a cache that
-  stored a page asks again before it shows it; before the first build they answer 404. The unit serves a changed stylesheet once `hal update` has brought the live checkout in; a changed `legal/nginx/default.conf` needs the container restarted with `hal stop legal` and
+  it the apex as its host, which the Cloudflare redirect leaves to it for the three pages, `/favicon.ico` (answered 404) and
+  `/_rechtliches/` (`cloudflare.redirect.serve`). The pages are built by `hal apply` from `legal/frame`, `legal/sections` and each app's own `legal/` files at its release (the plan names each page that is
+  new or changes) and go live when it has written them; every answer carries `Cache-Control: no-cache`, so a cache that
+  stored a page asks again before it shows it; before the first build they answer 404. The stylesheet goes live once `hal update` has brought the live checkout in; a changed `legal/nginx/default.conf` needs the container restarted with `hal stop legal` and
   `hal start legal`.
 - **Readiness.** The stack is ready when `127.0.0.1:8081` and `127.0.0.1:8090` listen, an unknown host
   gets 404 on 8081, and Keycloak answers the master realm on 8090; Keycloak's start takes
   longest. No command checks these four facts together (a named gap on overnightworks/edge#222).
   What proves what today: `hal apply` observes the containers running; `docker compose ps` shows
-  their health; the publish phase asks each declared host on hal's tunnel its `ready` path, only for a plan with
+  their health; the publish phase asks each declared host's `ready` path, only for a plan with
   changes; `keycloak/go-live` probes 8081 and 8090.
 - **Stop.** `docker compose --profile keycloak --profile legal --profile probe down`. Without `--profile keycloak`
   Keycloak and its database keep running, without `--profile probe` a running probe `hello` stays. It
