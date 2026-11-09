@@ -1,5 +1,5 @@
 """The speech probe's admission cells A1-A10 and A12: requests on an app's speech network with
-tokens from H's scratch Keycloak, refused or admitted as speech-runtime's wire contract
+tokens from H's scratch Keycloak, refused or admitted as speech's wire contract
 (docs/wire.md, Refusals) says, and the service's log afterwards.
 
 Every token comes from the copy's Keycloak through its edge entrypoint (H's ScratchOnlyHttp) and
@@ -18,10 +18,10 @@ from edge_copy import ProbeFailed, expect
 from service_audience_cell import SPEECH_GROUP, SPEECH_SCOPE
 from speech_docker import Answer, container_log, plain_http
 
-# speech-runtime's wire (docs/wire.md, Headers and Request): its contract, not hal's
+# speech's wire (docs/wire.md, Headers and Request): its contract, not hal's
 WORKLOAD_HEADER = "Speech-Workload-Token"
 SPEAK_PATH, HEAR_PATH = "/v1/audio/speech", "/v1/audio/transcriptions"
-MODEL, VOICE = "speech-runtime", "piper"
+MODEL, VOICE = "speech", "piper"
 SILENCE = 64  # the largest absolute 16-bit sample a WAV of silence holds
 CLIENT_RECORDING = "/run/probe/recording.wav"
 

@@ -26,7 +26,7 @@ lives only in the property `role`.
 | platform name under `mcp.internal` | a platform endpoint's own name, not an app stem: `keycloak.mcp.internal` is Keycloak's key set | `traefik-mcp` routes it like an origin, and the CA issues only this suffix |
 | a shared service's networks to its callers | `hal_<service>_<app>` per calling app and `hal_<service>_issuer` to `traefik-mcp`, with `<service>` the stem of its realm client (`hal_speech_hopin`) | the service's compose joins the fixed names as external networks; one network per app, so no app sees another's |
 | CSS / release asset | `<stem>.css`, `<stem>-<version>...` | |
-| Hosts, Keycloak groups and clients | **not derived; unchanged** unless the job changes (the app `speech-runtime` is the realm's client and group `speech-service`) | external identities. A renamed group in the YAML creates a new group and leaves the old one with its memberships (the apply deletes no undeclared top-level object and no person), and a renamed client changes the token audience |
+| Hosts, Keycloak groups and clients | **not derived; unchanged** unless the job changes (the app `speech` is the realm's client and group `speech-service`) | external identities. A renamed group in the YAML creates a new group and leaves the old one with its memberships (the apply deletes no undeclared top-level object and no person), and a renamed client changes the token audience |
 | Ecosystem-dictated names | the ecosystem's form with the stem inside: Slidev `slidev-addon-<stem>`, Claude/Codex plugin `<stem>` | the ecosystem finds them only that way |
 
 GitHub topics are to be derived from the planned service catalog `fleet.yaml`

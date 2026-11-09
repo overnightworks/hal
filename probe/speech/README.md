@@ -3,8 +3,8 @@
 `probe.py` drives the speech app through H's edge copy (`probe/keycloak/in_copy.py`): it brings
 H's stand up at the lane's base, installs the candidate with the speech app in the copy's fleet
 and runs `hal apply --local`, beside the live stack. The app comes from a scratch origin of
-speech-runtime whose newest dated tag carries the copy's network names (`release_origin.py`),
-under a probe key, never the shipped key `speech-runtime`, whose project is the live app's.
+speech whose newest dated tag carries the copy's network names (`release_origin.py`),
+under a probe key, never the shipped key `speech`, whose project is the live app's.
 
     flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \
         uv run --frozen python3 probe/speech/probe.py {transition|lifecycle} --scratch DIR

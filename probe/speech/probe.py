@@ -6,7 +6,7 @@
 Both modes first establish H's stand at the lane's base (`git show <merge-base>:<path>` for every
 path the lane changes, through H's `install`), run H's cells on it, then install the candidate
 (every changed path at HEAD) with the speech app in the copy's fleet under a probe key, from a
-scratch origin of speech-runtime (release_origin), and `hal apply` it (D5a/b). `transition` then
+scratch origin of speech (release_origin), and `hal apply` it (D5a/b). `transition` then
 drives D2, D3, N1-N5, E1-E3, K1-K6, A1-A10, A12, S1 and M1; `lifecycle` drives R1, R2 and D4. The
 app's compose configuration is checked before each apply (release_origin's SpeechApp with
 app_isolation's rule, through H's fleet), and its project is in every label sweep and check of the
