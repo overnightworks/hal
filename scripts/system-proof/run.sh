@@ -1,5 +1,5 @@
 #!/bin/bash
-# The container proof of `hal setup`'s system step (#40, cells 1-13), of its secrets step (S1) and of the agents'
+# The container proof of `hal setup`'s system step (#40, cells 1-13), of the global commit hook (H1-H3), of its secrets step (S1) and of the agents'
 # account (#331, cells A1-1 to A1-9), of the mail of `hal check` (#390, cells D1-D8), of rsyslog's removal (#422, cells R0-R7) and of a real Docker engine and the journal as its default log driver and its build cache limit (DK1-DK8, #432): a throwaway Ubuntu 26.04 with systemd as PID 1, never the live PC, never the
 # real /etc or ~/.secrets.
 #
@@ -109,11 +109,11 @@ else
 fi
 
 judge() {  # judge <part> <cells file>: every cell of the part printed a held line and none printed a failed one
-    # fresh: cells 1, 3-13 and 7o, S1, A1-1 and A1-2 and A1-4 to A1-9, D1-D8, R0-R7, DK1-DK8, T1-T5, T5b; prepared: cell 2 and P1-P10 under both sudos (suffix c and r); shapes: A1-3
+    # fresh: cells 1, 3-13 and 7o, S1, A1-1 and A1-2 and A1-4 to A1-9, D1-D8, R0-R7, DK1-DK8, T1-T5, T5b; prepared: cell 2, H1-H3 (the hook) and P1-P10 under both sudos (suffix c and r); shapes: A1-3
     local part=$1 cells=$2 cell missing=() expected
     case $part in
         fresh) expected=({1,3,4,5,6,7,7o,8,9,10,11,12,13} S1 A1-{1,2,4,5,6,7,8,9} D{1..8} R{0..7} DK{1..8} T{1..5} T5b) ;;
-        prepared) expected=(2 P{1..10}{c,r}) ;;
+        prepared) expected=(2 H{1..3} P{1..10}{c,r}) ;;
         shapes) expected=(A1-3) ;;
         *) echo "unknown part: $part (expected fresh, prepared or shapes)" >&2; return 2 ;;
     esac

@@ -480,7 +480,8 @@ hook_repo_head() {
 }
 
 stage_in_hook_repo() {  # stage_in_hook_repo <file> <line>: the line appended to the file and staged
-    as_tester bash -c 'printf "%s\n" "$3" >>"$1/$2" && git -C "$1" add "$2"' _ "$HOOK_REPO" "$1" "$2"
+    local file=$1 line=$2
+    as_tester bash -c 'printf "%s\n" "$3" >>"$1/$2" && git -C "$1" add "$2"' _ "$HOOK_REPO" "$file" "$line"
     return
 }
 
