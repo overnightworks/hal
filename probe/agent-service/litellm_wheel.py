@@ -217,9 +217,12 @@ class WheelProbe(RetentionProbe):
     @staticmethod
     def expect_the_turn(events: list[dict], tool: str, canaries: dict[str, str]) -> None:
         kinds = [event["type"] for event in events]
-        wanted = ["tool_call", "tool_result", "assistant_text", "final"]
-        expect(kinds == wanted, f"W: the turn's events {kinds}: {events[-1:]}")
-        call, result, _, final = events
+        pieces = kinds.count("assistant_text")
+        wanted = ["tool_call", "tool_result", *["assistant_text"] * pieces, "final"]
+        expect(pieces >= 1 and kinds == wanted, f"W: the turn's events {kinds}: {events[-1:]}")
+        call, result, *texts, final = events
+        spoken = "".join(event["text"] for event in texts)
+        expect(spoken == canaries["answer"], "W: the answer's text pieces")
         expect(call["name"] == tool, "W: the call names another tool")
         expect(call["input"] == {"q": canaries["arguments"]}, "W: the call's arguments")
         expect(result["content"] == canaries["result"], "W: the tool's result")
