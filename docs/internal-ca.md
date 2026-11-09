@@ -55,7 +55,7 @@ CA to listen, so the start order does not matter, also after a restart of the Do
 
 ### Keycloak's key set for the speech service
 
-The speech service (`fleet.yaml`'s app `speech-runtime`) has no route out, so it fetches Keycloak's
+The speech service (`fleet.yaml`'s app `speech`) has no route out, so it fetches Keycloak's
 key set from `https://keycloak.mcp.internal/realms/hallucinai/protocol/openid-connect/certs` and
 trusts the CA's root, which reaches it as a compose secret. `traefik-mcp` answers to that name on
 `hal_speech_issuer` (the speech service and `traefik-mcp` alone; the name is its only alias there)
@@ -75,7 +75,7 @@ them, and Compose creates only the networks of the services it starts, so the on
 whenever `step-ca` is on. The speech service's compose file declares all three as external, so it
 does not start before they exist.
 
-A rollback switches the speech service off first: `speech-runtime`'s `run.enabled: false` in
+A rollback switches the speech service off first: `speech`'s `run.enabled: false` in
 `fleet.yaml`, then `hal apply`, which removes its containers. Only then is the change reverted and
 `hal apply` run again; reverted first, the fleet entry is gone and the speech containers stay
 behind. The revert leaves the exited `speech-networks` container as an orphan: `docker rm` it. The

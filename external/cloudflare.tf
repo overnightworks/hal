@@ -28,7 +28,8 @@ locals {
   operator_group_id = length(local.operator_group_ids) == 1 ? local.operator_group_ids[0] : null
 
   # Every name that answers at the edge: the tunnel's hosts and the redirected names. A redirected
-  # name has a record and no tunnel line unless it is also a host (the serving apex).
+  # name has a record and no line in hal's ingress unless it is also a host on hal's tunnel; a host on another tunnel has its line in
+  # that tunnel's ingress.
   redirect = try(local.fleet.cloudflare.redirect, null)
   redirect_fqdns = [
     for name in try(local.redirect.hosts, []) : name == "@" ? local.fleet.cloudflare.zone : "${name}.${local.fleet.cloudflare.zone}"

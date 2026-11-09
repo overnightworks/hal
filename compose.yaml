@@ -180,7 +180,8 @@ services:
       traefik.http.routers.auth-admin.rule: Host(`localhost`)
 
   # The imprint (and the other legal pages) of every app at hallucinai.de: static files from legal/,
-  # with appkit's tokens and fonts that the apply step writes into legal/assets/. The catalog gives it the apex as its host; the redirect leaves the served paths to it.
+  # with appkit's tokens and fonts that the apply step writes into legal/assets/.
+  # The catalog gives it the apex as its host, which the platform's tunnel serves, so nothing public reaches it; it is the rollback target.
   legal:
     profiles: [legal]
     image: nginxinc/nginx-unprivileged:1.30.6-alpine-slim@sha256:5d8bb9437d74a600ec5dbf90c035451c724dc33eac8d3a71078f6f8612c345f6
@@ -711,7 +712,7 @@ networks:
       config:
         - subnet: 172.31.198.0/24
           ip_range: 172.31.198.128/25
-  # The speech service (fleet.yaml's app speech-runtime) and traefik-mcp, the service's way to
+  # The speech service (fleet.yaml's app speech) and traefik-mcp, the service's way to
   # Keycloak's key set. The service joins it and the app networks below as external networks.
   speech-issuer:
     name: hal_speech_issuer

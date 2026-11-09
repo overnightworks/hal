@@ -1,6 +1,6 @@
-"""speech-runtime's release as hal clones it in H's copy, and the app hal deploys from it.
+"""speech's release as hal clones it in H's copy, and the app hal deploys from it.
 
-The origin is a bare clone in the scratch of speech-runtime's public repository, with every branch
+The origin is a bare clone in the scratch of speech's public repository, with every branch
 and tag. Its newest dated tag (hal's grammar) is re-pointed at one commit on top of it that rewrites
 only the compose.yaml lines `name: hal_speech_*` to the copy's `<project>_speech_*`, and that commit
 is the origin's default branch, so hal plans that tag and skips the others. The scratch HOME's
@@ -40,7 +40,7 @@ from hal.exposure.docker import EDGE_NAME_LABEL
 from hal.stack import catalog, checkout, deploy_checkout, releases
 from hal.stack.realm.reconcile import KEYCLOAK, KEYCLOAK_SERVICE
 
-SPEECH_APP = "speech-runtime"  # fleet.yaml's key of the speech service: its repository's name
+SPEECH_APP = "speech"  # fleet.yaml's key of the speech service: its repository's name
 ORIGIN = "speech-origin.git"
 WORK = "speech-work"
 SPEECH_NAME_LINE = re.compile(
