@@ -233,7 +233,7 @@ clears only Cloudflare's copy; a browser that already holds the old file keeps i
 
 Every account is asked once, at its first sign-in, to accept the terms of use: `realm.yaml` declares the
 required action `TERMS_AND_CONDITIONS` as enabled and default, so a new account carries it. The page shows
-a short sentence with a link to the central terms page (`legal/sections/allgemein/nutzungsbedingungen.html`)
+a short sentence with a link to the central terms page (`https://hallucinai.de/nutzungsbedingungen`, which the platform serves)
 and Keycloak's own Accept and Decline buttons, in German or English by the browser; the words are `termsTitle`
 and `termsText` in the theme's message files. The text itself exists only on the central page. The
 acceptance counts for the whole Keycloak account, so every app at once. Decline signs nobody in and
