@@ -20,7 +20,7 @@ from support.backup_support import (
 )
 from support.host_support import write_host_shims
 from support.live_stack import LIVE_STACK_PORTS
-from support.script_module import script_module_names
+from support.script_module import loaded_script, script_module_names
 from support.workstation_support import (
     FAKE_MISE_SHA256,
     HOME_README,
@@ -263,6 +263,12 @@ def runner() -> RecordingRunner:
 @pytest.fixture
 def probe() -> FakeProbe:
     return FakeProbe()
+
+
+@pytest.fixture(scope="module")
+def fake_provider():
+    path = Path(__file__).resolve().parents[1] / "probe" / "agent-service" / "fake_anthropic.py"
+    yield from loaded_script("fake_anthropic", path)
 
 
 @pytest.fixture
