@@ -51,8 +51,8 @@ if TYPE_CHECKING:
 # Quality v0.9.2. A commit SHA cannot move; a bump is a one-line change here.
 QUALITY_SOURCE = "overnightworks-quality @ git+https://github.com/overnightworks/quality@07bdf7c478ac9cc9cd348b180abd3cbc9d873f23"
 # The release binary of mise and its sha256 (the same in the release's SHASUMS256.txt); a bump is a two-line change here.
-MISE_VERSION = "2026.10.23"
-MISE_SHA256 = "a6ac620e73fb58cefbdfef8fb154856fbd8ae08d75ae88103e4b81daef3a836e"
+MISE_VERSION = "2026.11.3"
+MISE_SHA256 = "c2f7e814cb39f60b7f67a0ff36cb805e94128bf2dff09d175309d0f095b8cc3b"
 MISE_URL = f"https://github.com/jdx/mise/releases/download/v{MISE_VERSION}/mise-v{MISE_VERSION}-linux-x64"
 # The engine of the system step; a bump is a one-line change here.
 ANSIBLE_SOURCE = "ansible-core==2.21.5"
