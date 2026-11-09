@@ -1,7 +1,0 @@
-claim_id = "b7c34510092d4d1e823862ddaaef742c"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "b08960ed2b9ee847c4f6061eee3a38b12e304314"
-branch = "docs/keycloak-terms-pointer"
-scope = ["docs/keycloak.md"]
-opened_commit = "19ec9d673a092a9231496ea3945453686168e952"
