@@ -27,3 +27,21 @@ protocol = "udp"
 owner = "chrome"
 port = 5353
 reason = "Chrome joins the mDNS multicast group 224.0.0.251 to discover cast and local devices"
+
+[[allow]]
+protocol = "tcp"
+port = 6443
+owner = "k3s.service"
+reason = "the k3s API server; the platform's k3s binds it to every interface and the host firewall drops inbound traffic from beyond the host"
+
+[[allow]]
+protocol = "tcp"
+port = 10250
+owner = "k3s.service"
+reason = "the k3s kubelet; the platform's k3s binds it to every interface and the host firewall drops inbound traffic from beyond the host"
+
+[[allow]]
+protocol = "udp"
+port = 8472
+owner = "k3s.service"
+reason = "the flannel VXLAN of k3s; the platform's k3s binds it to every interface and the host firewall drops inbound traffic from beyond the host"
