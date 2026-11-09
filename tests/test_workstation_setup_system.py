@@ -20,6 +20,7 @@ from support.workstation_support import (
     run_hal_setup,
     run_setup,
     split_at_the_prompt,
+    write_hal_config,
 )
 
 import hal.workstation
@@ -73,7 +74,7 @@ def test_the_playbook_gets_the_agents_account_name_and_the_digest_covers_it(sand
 
     (argv,) = sandbox.system.playbook.calls
     assert json.loads(argv[argv.index("--extra-vars") + 1])["agent_user"] == AGENT_USER == "agent"
-    assert "agent_user" in SystemStep(sandbox.layout, sandbox.system.boundaries).extra_vars()
+    assert "agent_user" in SystemStep(sandbox.layout, sandbox.system.boundaries, system_step.DockerSettings()).extra_vars()
 
 
 @pytest.mark.parametrize(
@@ -202,6 +203,78 @@ def test_the_playbook_is_given_the_journal_as_docker_log_driver(sandbox: Sandbox
     assert extra_vars["docker_log_driver"] == system_step.DOCKER_LOG_DRIVER == "journald"
 
 
+@pytest.mark.parametrize(
+    ("size", "exact_bytes", "reported"),
+    [
+        ("20GB", 20 * 1024**3, "20GiB"),
+        ("20gib", 20 * 1024**3, "20GiB"),
+        ("20G", 20 * 1024**3, "20GiB"),
+        ("1.5GB", int(1.5 * 1024**3), "1.5GiB"),
+        ("512MiB", 512 * 1024**2, "512MiB"),
+        ("1024MB", 1024**3, "1GiB"),
+        ("1TB", 1024**4, "1TiB"),
+        ("1k", 1024, "1KiB"),
+        ("2000", 2000, "1.953KiB"),
+        ("1B", 1, "1B"),
+    ],
+)
+def test_a_size_is_read_and_shown_the_way_docker_reads_and_shows_it(size: str, exact_bytes: int, reported: str) -> None:
+    """Docker's parseGCPolicy reads every unit as binary (go-units RAMInBytes), so `20GB` is 20 GiB, and buildx shows that as `20GiB`."""
+    assert (system_step.docker_size_bytes(size), system_step.reported_docker_size(size)) == (exact_bytes, reported)
+
+
+@pytest.mark.parametrize("malformed", ["", "lots", "GB", "20XB", "-1GB", "0GB", "0", "20 GB", "1e3", "9" * 400, "inf", "99999999PB"])
+def test_a_size_hal_does_not_admit_is_no_size(malformed: str) -> None:
+    assert system_step.docker_size_bytes(malformed) is None
+
+
+def test_an_unreadable_size_cannot_be_shown() -> None:
+    with pytest.raises(ValueError, match="lots"):
+        system_step.reported_docker_size("lots")
+
+
+def test_the_playbook_is_given_the_limit_and_the_text_docker_reports_for_it(sandbox: Sandbox) -> None:
+    """The file gets the configured text; the restart compares with what buildx prints for it."""
+    extra_vars = system_step.SystemStep(sandbox.layout, sandbox.system.boundaries, system_step.DockerSettings("15GB")).extra_vars()
+
+    assert (extra_vars["docker_build_cache_max"], extra_vars["docker_build_cache_reported"]) == ("15GB", "15GiB")
+
+
+def test_the_limit_in_the_settings_file_reaches_the_play_of_hal_setup(sandbox: Sandbox, capsys: pytest.CaptureFixture[str]) -> None:
+    write_hal_config(sandbox.home, '[docker]\nbuild_cache_max = "15GB"\n')
+
+    run_setup(sandbox, capsys)
+
+    (argv,) = sandbox.system.playbook.calls
+    assert json.loads(argv[argv.index("--extra-vars") + 1])["docker_build_cache_max"] == "15GB"
+
+
+BUILDX_INSPECT = """Name: default
+Driver: docker
+GC Policy rule#0:
+\tAll:\tfalse
+\tFilters:\ttype==source.local
+\tKeep Duration:\t48h0m0s
+\tMax Used Space:\t11.84GiB
+GC Policy rule#3:
+\tAll:\ttrue
+\tReserved Space:\t85.68GiB
+\tMax Used Space:\t681.7GiB
+\tMin Free Space:\t170.4GiB
+"""
+
+
+@pytest.mark.parametrize(
+    ("output", "expected"),
+    [(BUILDX_INSPECT, "681.7GiB"), ("Name: default\n", ""), (None, None)],
+    ids=["the limit is the last rule's, not the temporary-files rule's", "no rule", "buildx does not answer"],
+)
+def test_the_limit_is_read_from_the_last_gc_rule_buildx_prints(monkeypatch: pytest.MonkeyPatch, output: str | None, expected: str | None) -> None:
+    monkeypatch.setattr(system_step, "run_command", lambda _argv: output)
+
+    assert system_step.TERMINAL_BOUNDARIES.docker_build_cache_limit() == expected
+
+
 def test_the_playbook_ships_inside_the_package() -> None:
     """Rule 3: the playbook is read from beside the module, so a non-editable install carries it."""
     assert system_step.PLAYBOOK.is_file()
@@ -273,7 +346,7 @@ def test_the_system_steps_check_answers_with_one_of_the_three_states(
     sandbox.system.playbook.applied = applied_before
     sandbox.system.terminal = terminal
 
-    assert SystemStep(sandbox.layout, sandbox.system.boundaries).check() == expected
+    assert SystemStep(sandbox.layout, sandbox.system.boundaries, system_step.DockerSettings()).check() == expected
 
 
 @pytest.mark.parametrize(
@@ -354,6 +427,26 @@ def test_a_docker_that_does_not_answer_fails_the_dry_run_before_the_play(sandbox
 
     assert (code, lines[3:]) == (ExitCode.FAILURE, [DOCKER_SILENT, NOT_RUN[SECRETS]])
     assert error.splitlines() == ["error: setup stopped at system · /etc unchanged", f"next: {system_step.DOCKER_STATUS}"]
+    assert playbook_runs(sandbox) == []
+
+
+@pytest.mark.parametrize("driver", ["journald", "json-file"], ids=["driver is the journal", "driver is not the journal"])
+@pytest.mark.parametrize("dry_run", [(), ("--dry-run",)], ids=["run", "dry run"])
+def test_a_build_cache_limit_docker_does_not_report_stops_the_run_before_the_password(
+    sandbox: Sandbox, capsys: pytest.CaptureFixture[str], dry_run: tuple[str, ...], driver: str
+) -> None:
+    """The play restarts Docker for a limit it reads as root, so a limit the operator cannot read refuses before sudo and names `systemctl status docker`."""
+    run_setup(sandbox, capsys)
+    sandbox.system.docker_driver = driver
+    sandbox.system.build_cache_limit = None
+    sandbox.system.playbook.calls.clear()
+    code, lines, error = run_setup(sandbox, capsys, *dry_run)
+
+    assert (code, lines[3], error.splitlines()) == (
+        ExitCode.FAILURE,
+        "  ✗ system          failed         Docker does not answer `docker buildx inspect default`",
+        ["error: setup stopped at system · /etc unchanged", f"next: {system_step.DOCKER_STATUS}"],
+    )
     assert playbook_runs(sandbox) == []
 
 
@@ -489,6 +582,27 @@ def test_a_docker_that_restarts_is_named_with_the_containers_that_stay_down_befo
 
     assert (code, lines) == (ExitCode.OK, [*FRESH_APPLY[:3], docker_restarts(consequence), *FRESH_APPLY[3:]])
     assert sandbox.system.driver_reads == 1
+
+
+@pytest.mark.parametrize(
+    "reported",
+    ["681.7GiB", ""],
+    ids=["another limit", "no limit"],
+)
+def test_a_docker_that_lacks_the_limit_is_forecast_to_restart(
+    sandbox: Sandbox, capsys: pytest.CaptureFixture[str], reported: str
+) -> None:
+    """Docker that does not report the limit restarts although the driver is already the journal."""
+    sandbox.system.build_cache_limit = reported
+    code, lines, _ = run_setup(sandbox, capsys)
+
+    assert (code, any("restarts" in line for line in lines)) == (ExitCode.OK, True)
+
+
+def test_a_docker_that_reports_the_limit_is_not_forecast_to_restart(sandbox: Sandbox, capsys: pytest.CaptureFixture[str]) -> None:
+    code, lines, _ = run_setup(sandbox, capsys)
+
+    assert (code, any("restarts" in line for line in lines)) == (ExitCode.OK, False)
 
 
 def test_a_play_that_fails_after_the_restart_was_named_ends_with_the_red_row_and_etc_unchanged(sandbox: Sandbox, capsys: pytest.CaptureFixture[str]) -> None:

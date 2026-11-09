@@ -8,9 +8,9 @@ jobs). Its required check is `quality / verdict`; the gate's SonarCloud scan is
 the one scanner, and it reads `sonar-project.properties` and the tests job's
 `coverage` artifact.
 
-Before pushing, after the last merge of main, a builder or fixer runs the gate's pinned hygiene:
-`uvx --from "git+https://github.com/overnightworks/quality@07bdf7c478ac9cc9cd348b180abd3cbc9d873f23" quality hygiene .`
-It must print `hygiene: clean`.
+Before pushing, after the last merge of main, a builder or fixer runs the gate's pinned check:
+`uvx --from "git+https://github.com/overnightworks/quality@2d2b68bf3916b34f6f2c72a540c1e3d8a947b750" quality check`
+Its closing line starts with `✓ clean`.
 
 ## Commits
 

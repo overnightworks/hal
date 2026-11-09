@@ -520,7 +520,7 @@ come before the system step, which is the one that asks for sudo:
    edge's files from `~/srv/hal/tunnel/` and the journal retention timer, see below.
    It also installs `msmtp` and `ca-certificates` for the mail of `hal check`, purges `rsyslog`
    with its six log files, and makes the journal Docker's default log driver in `/etc/docker/daemon.json`,
-   restarting Docker while it does not report `journald`.
+   restarting Docker while it does not report `journald` or the build cache limit.
    It runs as root under one `sudo` call, which asks once; Ansible asks for nothing, and `sudo -k` follows
    the call, so `hal setup` leaves no cached sudo ticket. The shell under sudo writes one marked line before it starts Ansible; a run with no marked line at all and a non-zero exit is a sudo that refused (three wrong passwords, Ctrl-D at the prompt), never an Ansible that died. Ansible's stderr joins its output inside sudo; sudo's password
    prompt stays on the terminal, and the password never passes through hal. Without `-v` none of Ansible's text is shown;
@@ -533,7 +533,7 @@ come before the system step, which is the one that asks for sudo:
    failed or unreachable host; hal reads no recap text. When the counts name a failed or unreachable host, the message
    of the last such result is the fact of the red `system` row; every other unfinished run, a failure a rescue caught
    included, shows `Ansible did not finish · hal setup -v shows why` (`hal setup --dry-run -v` for the check; under `-v`
-   itself, `its output above says why`); a refused sudo shows `sudo refused`, and a Docker that does not answer the operator's `docker info` before the password shows ``Docker does not answer `docker info` `` (the play asserts the same as root). Root executes the operator-writable
+   itself, `its output above says why`); a refused sudo shows `sudo refused`, and a Docker that does not answer the operator's `docker info` or `docker buildx inspect default` before the password shows ``Docker does not answer `docker info` `` or ``Docker does not answer `docker buildx inspect default` `` (the play asserts the same as root). Root executes the operator-writable
    `~/.local/bin/ansible-playbook` and `hal_events.py` from the operator's uv tool directory. The same account already
    controls both and the whole ansible-core tool root, so no new principal changes what root runs (#510 decision 5): the
    same trust the operator's Ansible had as the producer of root's modules until the agents get their own user.
@@ -680,23 +680,25 @@ below and rsyslog's conffiles are home's own and are not backed up. `/etc/docker
   Or roll back as described.
 - **Docker's log default.** The same run merges `"log-driver": "journald"` into `/etc/docker/daemon.json` (`DOCKER_LOG_DRIVER`
   in `src/hal/workstation/system_step.py`, which `hal check` reads too). Every other key stays, such as `runtimes.nvidia`; the file is
-  written root-owned, mode 644, with sorted keys, so the diff of a file that only holds the runtime is one new line, and it is
-  checked with `dockerd --validate` before it replaces the old one. A file that does not parse, one that is not an object, a
-  `log-opts` key, another `log-driver`, and a Docker that does not answer `docker info` are refused before anything is
-  written, edge's files included (hal reads `docker info` as the operator before the password and stops there; the play refuses as root too, for a Docker that stopped meanwhile); the dry run names the restart as a change, shows the diff with `-v`, and writes nothing.
-  Docker restarts whenever `docker info` does not say `journald`, never while it does, so a run interrupted after the write
+  written root-owned, mode 644, with sorted keys, and checked with `dockerd --validate` before it replaces the old one. A file that does not parse, one that is not an object, a
+  `log-opts` key, another `log-driver`, a `builder` or `builder.gc` that is not an object, and a Docker that does not answer `docker info` or `docker buildx inspect default` are refused before anything is
+  written, edge's files included (hal reads `docker info` and `docker buildx inspect default` as the operator before the password and stops there; the play refuses as root too, for a Docker that stopped meanwhile); the dry run names the restart as a change, shows the diff with `-v`, and writes nothing.
+  Docker restarts whenever `docker info` does not say `journald` or `docker buildx inspect default` does not report the build cache limit below, never while both hold, so a run interrupted after the write
   restarts on the next. `live-restore` is off: every container stops with Docker. Docker promises a start only for `always`
   and `unless-stopped`; an `on-failure` container comes back only when its stop left a non-zero exit code, so the count of
   containers that stay down can name it although it returns, and one without a restart policy (`no`) stays down. The apps are unreachable meanwhile and running work
   is cut. `hal setup` does not wait for it, so run `hal setup` at a quiet time. Existing containers keep `json-file` until they are recreated.
-  **Rescue.** When the restart fails or Docker does not report `journald`, the run writes `daemon.json` back without `log-driver`
-  (`{}` when nothing else remains; the same JSON as before the run, unless the file already carried `journald`), clears the
-  unit's start limit with `systemctl reset-failed docker`, restarts Docker again and fails, saying so. No backup is read and
-  nothing is deleted. **Rollback.** Revert the change, land a reviewed playbook change that removes `log-driver` and restarts
-  Docker, and run `hal setup`; a plain revert removes nothing. **Residual risks:** Docker stays down, and every app
+  **Rescue.** When the restart fails or Docker does not report `journald` or the limit, the run writes `daemon.json` back
+  without what this run was putting in place: `log-driver` while Docker did not say `journald` (`{}` when nothing else
+  remains; the same JSON as before the run, unless the file already carried `journald`), the limit while Docker did not
+  report it. A failing limit leaves a `log-driver` that was already in the file alone. It clears the
+  unit's start limit with `systemctl reset-failed docker`, restarts Docker again and fails, naming what it put back (the limit put back as it was when the file held another one before this run). No backup is read and
+  nothing is deleted. **Rollback.** Revert the change, land a reviewed playbook change that removes `log-driver` (and, to give up the limit, `builder.gc.defaultMaxUsedSpace`) and restarts
+  Docker, and run `hal setup`; a plain revert removes nothing, for the limit as for `log-driver`. **Residual risks:** Docker stays down, and every app
   with it, when the rescue's restart fails too; and a run interrupted between the write and the rescue with Docker down
   (a hanging restart skips the rescue on Ctrl-C) makes the next apply refuse, because Docker does not answer. Then remove
-  `log-driver` from `/etc/docker/daemon.json` by hand; the backup holds the old bytes.
+  from `/etc/docker/daemon.json` by hand what the interrupted run was putting in place: `log-driver` when Docker had not said `journald`, `builder.gc.defaultMaxUsedSpace` (or restore the earlier value) when it had not reported the limit; the backup holds the old bytes.
+- **Docker's build cache limit.** The same run merges `builder.gc.defaultMaxUsedSpace` into the file, keeping every other key, also under `builder` (see `[docker]` below for the value). The trigger is what `docker buildx inspect default` reports for the last GC rule, not a changed file: Docker restarts while it does not report the limit, so the limit takes effect only through that restart, and the run forecasts that restart like the driver's. Docker reads the configured text itself (`20GB` is 20 GiB, every unit binary), and buildx prints it in binary units (`20GiB`); that is the text compared. The dry run names the restart as a change. Once Docker has the limit, its own garbage collection holds the build cache at or below it. Old images are not touched and orphaned volumes are not reported: only the build cache has a limit.
 - **Proof.** `flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 scripts/system-proof/run.sh <edge checkout> <evidence dir> <part>`, once per part, each into its own evidence dir (`<evidence dir>/fresh`, `<evidence dir>/prepared`, `<evidence dir>/shapes`, since each run truncates `cells.txt`), drives
   the step in a throwaway systemd container, never on this PC. `fresh` is the first install with both reboots, `prepared` the
   second install under both sudos, and `shapes` a third one that converges once and then refuses the foreign account shapes (A1-3);
@@ -713,8 +715,8 @@ below and rsyslog's conffiles are home's own and are not backed up. `/etc/docker
   offline and starts without `/etc/docker/daemon.json`. DK2 proves the merge (no file, and the PC's 128-byte file with its
   backup), DK3 the refusals and a Docker that does not answer (without a password prompt, in the run and the dry run; the image's operator is in the `docker` group), DK4 the dry run and the restart on need only, and that the restart row names the containers that stay down before the password, DK5 that a
   running `unless-stopped` container comes back, while one stopped by hand and a running one without a restart policy stay exited, and that the first two keep `json-file`, DK6 that a
-  container created afterwards is read by `docker logs`, `docker compose logs` and `journalctl CONTAINER_NAME=`, and DK7 the
-  rescue, against a proof-only `docker.service` drop-in whose flag contradicts the file. The proof runs the same 26.04 Docker
+  container created afterwards is read by `docker logs`, `docker compose logs` and `journalctl CONTAINER_NAME=`, DK7 the
+  rescue, against a proof-only `docker.service` drop-in whose flag contradicts the file, and DK8 the build cache limit: merged beside another `builder` key, one restart and then none, a value from `[docker]` in hal's settings, and a limit Docker does not report taken back without the log driver. The proof runs the same 26.04 Docker
   package as the PC, but inside a container and without a GPU. The agents' refusal cells A1-8 and A1-9 run against the engine's own `docker.socket`.
 
 ### Das Mail-Konto von `hal check`
@@ -793,6 +795,14 @@ lesen sie nie. Die Datei enthält kein Geheimnis; das SMTP-Konto bleibt unter
 | `runs` | `2` | Läufe hintereinander, in denen ein Fund auftreten muss, bevor er zählt |
 
 Beide Werte sind ganze Zahlen ab 1. Ein neuer `interval` gilt nach `hal setup`; `runs` gilt beim nächsten Lauf.
+
+### `[docker]`
+
+| Schlüssel | Default | Bedeutung |
+|---|---|---|
+| `build_cache_max` | `"20GB"` | Grenze von Dockers Build-Cache, von Docker selbst gelesen (`GB` zählt binär, `20GB` sind 20 GiB) |
+
+Ein neuer Wert gilt nach `hal setup`; das startet Docker neu, und alle Container halten kurz an. `hal setup` nennt den Neustart vorher.
 
 ### `[api]` und `[api.<app>]`
 

@@ -13,6 +13,7 @@ from hal import config as hal_config
 from hal.stack.api_limits import ApiSettings, AppNumbers, LogDepth
 from hal.workstation.alarm import AlarmSettings
 from hal.workstation.check import CheckSettings
+from hal.workstation.system_step import DockerSettings
 
 
 def test_an_empty_file_gives_the_defaults(tmp_path: Path) -> None:
@@ -42,6 +43,18 @@ def test_a_missing_alarm_table_gives_five_minutes_and_two_runs(tmp_path: Path) -
 def test_every_setting_of_the_alarm_is_a_known_key() -> None:
     assert {field.name for field in dataclasses.fields(AlarmSettings)} == set(
         hal_config.ALARM_KEY_KINDS
+    )
+
+
+def test_a_docker_table_sets_the_build_cache_limit(tmp_path: Path) -> None:
+    write_hal_config(tmp_path, '[docker]\nbuild_cache_max = "15GiB"\n')
+
+    assert hal_config.load(tmp_path).docker == DockerSettings("15GiB")
+
+
+def test_every_setting_of_docker_is_a_known_key() -> None:
+    assert {field.name for field in dataclasses.fields(DockerSettings)} == set(
+        hal_config.DOCKER_KEY_KINDS
     )
 
 
@@ -117,6 +130,7 @@ HUGE_WHOLE_NUMBER = 10**400
 DIGIT_LIMIT = sys.get_int_max_str_digits()
 PAST_THE_DIGIT_LIMIT = DIGIT_LIMIT + 1
 TOO_LONG = f"an integer of more than {DIGIT_LIMIT} digits"
+DOCKER_SIZE = 'a size Docker reads, like "20GB"'
 
 
 @pytest.mark.parametrize(
@@ -127,6 +141,17 @@ TOO_LONG = f"an integer of more than {DIGIT_LIMIT} digits"
         ("[alarm]\nruns = false\n", "runs must be a whole number of at least 1, got False"),
         ("[alarm]\ninterval = 0\n", "interval must be a whole number of at least 1, got 0"),
         ("alarm = 5\n", "[alarm] must be a table"),
+        ("[docker]\nspeed = 3\n", "unknown key(s) or table(s): speed"),
+        ("docker = 5\n", "[docker] must be a table"),
+        ("[docker]\nbuild_cache_max = 20\n", f"build_cache_max must be {DOCKER_SIZE}, got 20"),
+        (
+            '[docker]\nbuild_cache_max = "lots"\n',
+            f"build_cache_max must be {DOCKER_SIZE}, got 'lots'",
+        ),
+        (
+            '[docker]\nbuild_cache_max = "0GB"\n',
+            f"build_cache_max must be {DOCKER_SIZE}, got '0GB'",
+        ),
         ("[check]\nnotify = 1\n", "notify must be true or false, got 1"),
         ('[api]\nbudget_dollars = "6"\n', f"budget_dollars must be {DOLLARS}, got '6'"),
         ("[api]\nbudget_dollars = true\n", f"budget_dollars must be {DOLLARS}, got True"),
