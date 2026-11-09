@@ -1,8 +1,0 @@
-claim_id = "72b1cd671a4e414c888ca9c7eca7298c"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "b08960ed2b9ee847c4f6061eee3a38b12e304314"
-branch = "fix/revert-apex-platform"
-scope = ["compose.yaml", "docs/architecture.md", "docs/external.md", "docs/keycloak.md", "docs/stack.md", "external/cloudflare.tf", "fleet.yaml", "quality/config.toml", "src/hal/stack/apply.py"]
-opened_commit = "8f697b9249d621445dba67fd28b6e3158a3a8ab3"
-whole_reason = "The revert of #1200 as one commit: the key and every sentence it made true move back together."
