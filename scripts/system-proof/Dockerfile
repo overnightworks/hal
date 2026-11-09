@@ -6,7 +6,7 @@
 # rsyslog, postfix (preseeded to "No configuration", so /etc/postfix/main.cf is absent as on the PC, where its sendmail
 # logs a fatal every night) and kerneloops are Ubuntu's own packages as the PC has them, for the cells R0-R7 (#422): the
 # apply purges rsyslog, and the proof checks what that leaves. docker.io is the engine itself, with the root:docker socket the
-# agents' refusal cells (A1-8, A1-9) need and the cells DK1-DK7 drive; docker-compose-v2 is the `docker compose` of DK6;
+# agents' refusal cells (A1-8, A1-9) need and the cells DK1-DK8 drive; docker-buildx reports the build cache limit of DK8; docker-compose-v2 is the `docker compose` of DK6;
 # busybox-static makes the rootfs it imports, so no image is pulled at proof time.
 # 26.04 makes sudo-rs the default `sudo`. The image carries both, and the `sudo` alternative defaults to classic sudo
 # (/usr/bin/sudo.ws); the sudo stages pin their own variant.
@@ -26,6 +26,7 @@ RUN echo "postfix postfix/main_mailer_type select No configuration" | debconf-se
         ca-certificates \
         curl \
         dbus \
+        docker-buildx \
         docker-compose-v2 \
         docker.io \
         expect \

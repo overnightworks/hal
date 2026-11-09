@@ -444,6 +444,8 @@ class FakeSystem:
     docker_driver: str | None = "journald"  # what `docker info` tells the operator, None when Docker does not answer
     running_policies: tuple[str, ...] | None = ()  # the restart policy of each running container, None when they cannot be read
     driver_reads: int = 0  # how often `docker info` was asked
+    # What `docker buildx inspect default` reports as the limit, None when it cannot be read.
+    build_cache_limit: str | None = system_step.reported_docker_size(system_step.DockerSettings().build_cache_max)
 
     def _read_docker_driver(self) -> str | None:
         self.driver_reads += 1
@@ -451,7 +453,7 @@ class FakeSystem:
 
     @property
     def boundaries(self) -> system_step.Boundaries:
-        return system_step.Boundaries(lambda: self.terminal, self.playbook, lambda: self.user, self._read_docker_driver, lambda: self.running_policies)
+        return system_step.Boundaries(lambda: self.terminal, self.playbook, lambda: self.user, self._read_docker_driver, lambda: self.running_policies, lambda: self.build_cache_limit)
 
 
 class FakeClock:
