@@ -89,6 +89,11 @@ rule = "test-layout"
 reason = "it tests the in-container retention census, outside src/hal, which no module of src/hal mirrors"
 
 [[layout.allow]]
+path = "tests/test_fake_anthropic_stream.py"
+rule = "test-layout"
+reason = "it tests probe/agent-service/fake_anthropic.py, outside src/hal, which no module of src/hal mirrors"
+
+[[layout.allow]]
 path = "tests/test_keycloak_agents_client.py"
 rule = "test-layout"
 reason = "it tests the agents client of keycloak/realm.yaml against fleet.yaml, which no module of src/hal mirrors"
