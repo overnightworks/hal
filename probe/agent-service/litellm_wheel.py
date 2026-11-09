@@ -53,6 +53,7 @@ from litellm_key_files import APP_KEYS_FOLDER
 from litellm_retention import (
     FINGERPRINT_TABLES,
     TOOL_TABLE,
+    TOOL_TABLES,
     RetentionProbe,
     canary,
     front_user_agent,
@@ -274,22 +275,27 @@ class WheelProbe(RetentionProbe):
 
     def expect_the_census(self, tool: str, person: str, canaries: dict[str, str]) -> None:
         """C after the batch writes: no canary anywhere, the dump included; the tool name in the
-        tool table alone, the fingerprint in the end-user tables alone; Q: no tag row of hopin's
-        key once the tag job has run past the turn."""
+        tool table and at most the spend tables that carry tool names, the fingerprint in the
+        end-user tables alone; Q: no tag row of
+        hopin's key once the tag job has run past the turn."""
         self.wait_for_tool(tool)
         self.wait_for_row("LiteLLM_DailyEndUserSpend", "end_user_id", person)
         found = self.planted_sweep({**canaries, "tool": tool, "fingerprint": person})
         held = sorted(set(canaries) & set(found))
         expect(not held, f"W: canaries retained: {held}: {[found[label] for label in held]}")
-        for label, tables in (("tool", {TOOL_TABLE}), ("fingerprint", FINGERPRINT_TABLES)):
+        for label, holds in (
+            ("tool", lambda landed: TOOL_TABLE in landed <= TOOL_TABLES),
+            ("fingerprint", lambda landed: landed == FINGERPRINT_TABLES),
+        ):
             sinks = found.get(label, ())
             landed, outside = self.dump_tables(sinks), self.outside_the_database(sinks)
-            expect(landed == tables and not outside, f"W: the {label} in {landed} and {outside}")
+            expect(holds(landed) and not outside, f"W: the {label} in {landed} and {outside}")
         agents = self.tool_user_agents(tool)
         expect(agents == {front_user_agent()}, f"W: the tool row's user agents {agents}")
         self.hold("W census", f"none of {len(canaries)} canaries in any sink, the dump included; "
-                  f"the planted row found; the tool name in {TOOL_TABLE} alone with the front's "
-                  f"user agent; the fingerprint in {sorted(FINGERPRINT_TABLES)} alone")  # fmt: skip
+                  f"the planted row found; the tool name in {TOOL_TABLE}, at most also the spend "
+                  f"tables that carry tool names, with the front's user agent; "
+                  f"the fingerprint in {sorted(FINGERPRINT_TABLES)} alone")  # fmt: skip
         self.tag_barrier("W")
         hopin = self.count(self.tag_rows_of(self.key))
         control = self.count(self.tag_rows_of(self.file_keys["presentator"]))
