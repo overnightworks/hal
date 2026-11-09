@@ -114,9 +114,8 @@ Plan.
 - **Zurueck** gilt fuer den Host einer App oder Einheit, die hal betreibt: die Zeile `tunnel:`
   entfernen, `hal apply`; Record und Tunnel-Zeile kehren zu hals Tunnel zurueck. Ihr Container
   muss vor diesem `hal apply` laufen und gesund sein, denn die Publish-Phase prueft `ready` ueber
-  hals Traefik und verweigert den Lauf sonst. Wurde er gestoppt, kommt `hal start <app>` zuerst;
-  hopins Umzug hat ihn gestoppt.
-- **Ein Host ohne `repo` und `run`** (heute `skat`): hal betreibt nichts dahinter. Der Besitzer des
+  hals Traefik und verweigert den Lauf sonst. Wurde er gestoppt, kommt `hal start <app>` zuerst.
+- **Ein Host ohne `repo` und `run`** (heute `skat` und `hopin`): hal betreibt nichts dahinter. Der Besitzer des
   Tunnels bedient ihn und stoppt oder startet ihn; hal haelt nur Record, `deny_public` und Access.
   Der Rueckweg ist seiner, und `hal stop` und `hal start` kennen den Host nicht.
 - **Gibt es den genannten Tunnel nicht mehr** (geloescht, umbenannt oder doppelt), scheitert jeder
