@@ -38,12 +38,12 @@ log line counts. `declares` (a tool name) and `arrivals` (labels with values) ma
 say whether `tools` declares that tool and how often each value occurs in the request body.
 A request with `"stream": true` in mode `answer`, `stream_hold`, `stream_cut` or
 `stream_cut_chunked` gets Anthropic's event stream as server-sent events, ended by closing the
-connection: `message_start`,
-`content_block_start`, one `text_delta` `content_block_delta` per text of `texts` (a single text,
-or the marker, goes out in two pieces), `content_block_stop`, then, when the steered answer holds
-a tool call as the non-streamed answer does, a `tool_use` `content_block_start` (empty `input`),
-its arguments' JSON in two `input_json_delta` pieces and `content_block_stop`, then
-`message_delta` with the usage (`stop_reason` `tool_use` after a tool call) and `message_stop`.
+connection: `message_start`, `content_block_start`, one `text_delta` `content_block_delta` per
+text of `texts` (a single text, or the marker, goes out in two pieces), `content_block_stop`,
+then, when the steered answer holds a tool call as the non-streamed answer does, a `tool_use`
+`content_block_start` (empty `input`), its arguments' JSON in two `input_json_delta` pieces and
+`content_block_stop`, then `message_delta` with the usage (`stop_reason` `tool_use` after a tool
+call) and `message_stop`.
 `stream_hold` writes up to the first delta, then holds as `hold` does while the control file says
 `stream_hold`, logs the same `held` line, and writes the rest. `stream_cut` closes the connection
 after the last `content_block_stop`, before `message_delta`, in the unframed HTTP/1.0 body of the

@@ -22,7 +22,7 @@ records the events the wheel gets or the stop, without judging them; a client th
 stream gets the whole answer. Measured: the cut turns take about 3 s.
 
 Evidence: W the throwaway's model list and turn events, F the fake's request log, C the census with
-its planted row, Q an SQL count. Exit 0: K0, W models and W held.
+its planted row, Q an SQL count. Exit 0: K0, W models, W turn, W cut, W census and W tags held.
 """
 
 from __future__ import annotations
@@ -276,8 +276,8 @@ class WheelProbe(RetentionProbe):
     def expect_the_census(self, tool: str, person: str, canaries: dict[str, str]) -> None:
         """C after the batch writes: no canary anywhere, the dump included; the tool name in the
         tool table and at most the spend tables that carry tool names, the fingerprint in the
-        end-user tables alone; Q: no tag row of
-        hopin's key once the tag job has run past the turn."""
+        end-user tables alone; Q: no tag row of hopin's key once the tag job has run past the
+        turn."""
         self.wait_for_tool(tool)
         self.wait_for_row("LiteLLM_DailyEndUserSpend", "end_user_id", person)
         found = self.planted_sweep({**canaries, "tool": tool, "fingerprint": person})
