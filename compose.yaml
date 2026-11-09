@@ -30,7 +30,7 @@ x-keycloak-keys-address: &keycloak-keys-address 172.31.198.10
 # What both Postgres databases share: one image digest and one hardening. The alpine image's
 # postgres user owns the data directory a named volume inherits.
 x-postgres: &postgres
-  image: postgres:17.11-alpine@sha256:266d3c257594e195b309ae9d1805e54c788f1d7b375f56bf6c367aac6c917e7b
+  image: postgres:17.11-alpine@sha256:3540c0362c809df084ffac0ae69fe794515f9de92692f02178bcdce0ef0302ac
   restart: unless-stopped
   user: "70:70"
   read_only: true
@@ -274,7 +274,7 @@ services:
   # with `--members PATH`, which prints the issuer and the subjects of the group at PATH.
   realm-observer:
     # The probe's python pin (probe/keycloak/compose.probe.yaml); ci.yml checks the two are equal.
-    image: python:3.14.10-alpine@sha256:eb2c62658b8d51bff0acc408504b76521d02030de56a8a3c1e830083e89b89d2
+    image: python:3.14.10-alpine@sha256:a18b20ad69e74df6cf6d2e1b1a260d7a1ecf5380fd83b310f83ba88c461cf894
     profiles: [apply]
     logging: *one-off-logging
     user: "65534:65534"
@@ -305,7 +305,7 @@ services:
   # members as JSON on stdin (`null` for no members), or with `--write` and the changes on stdin.
   litellm-keys:
     # realm-observer's python pin; tests/test_stack_litellm_admin.py holds the two equal.
-    image: python:3.14.10-alpine@sha256:eb2c62658b8d51bff0acc408504b76521d02030de56a8a3c1e830083e89b89d2
+    image: python:3.14.10-alpine@sha256:a18b20ad69e74df6cf6d2e1b1a260d7a1ecf5380fd83b310f83ba88c461cf894
     profiles: [apply]
     logging: *one-off-logging
     # litellm's user, which owns the key files the secrets bind.
@@ -549,7 +549,7 @@ services:
   # `compose run -T --rm agent-canary --marker TEXT`, nothing on stdin.
   agent-canary:
     # realm-observer's python pin; tests/test_stack_litellm_admin_service.py holds the two equal.
-    image: python:3.14.10-alpine@sha256:eb2c62658b8d51bff0acc408504b76521d02030de56a8a3c1e830083e89b89d2
+    image: python:3.14.10-alpine@sha256:a18b20ad69e74df6cf6d2e1b1a260d7a1ecf5380fd83b310f83ba88c461cf894
     profiles: [apply]
     logging: *one-off-logging
     user: "65534:65534"
