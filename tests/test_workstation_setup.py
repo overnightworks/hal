@@ -448,7 +448,7 @@ def test_a_drifted_or_non_executable_mise_is_replaced_by_the_pinned_one(sandbox:
 
 
 def test_the_agents_account_installs_mise_and_quality_s_scanners_in_its_own_home(sandbox: Sandbox) -> None:
-    """#679: the agents' own run needs the pinned scan, so it installs mise and the scanners in its own home."""
+    """The agents' own run needs the pinned scan, so it installs mise and the scanners in its own home."""
     sandbox.system.user = AGENT_USER
 
     code = run_setup_with(sandbox)

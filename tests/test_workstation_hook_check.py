@@ -232,7 +232,7 @@ def pin_other_scanner_versions(machine: Machine) -> None:
 def test_a_damaged_installation_is_found_with_the_setup_command_and_clean_after_it(
     machine: Machine, damage: Callable[[Machine], None], rule: str, subject: str
 ) -> None:
-    """#23 rule 2.2, 2.3, 2.4 and #679: a damaged hook file, quality, mise or a scanner not at quality's pin gets the setup command and is clean after it."""
+    """Rules 2.2, 2.3 and 2.4: a damaged hook file, quality, mise or a scanner not at quality's pin gets the setup command and is clean after it."""
     damage(machine)
 
     findings = machine.findings()
