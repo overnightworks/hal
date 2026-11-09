@@ -59,12 +59,17 @@ class Layout:
         return self.local_dir / "bin" / "mise"
 
     @property
-    def quality_engines_dir(self) -> Path:
-        return self.data_dir / "quality" / "engines"
+    def quality_tool_dir(self) -> Path:
+        """The environment `uv tool install` made for quality."""
+        return self.data_dir / "uv" / "tools" / "overnightworks-quality"
+
+    @property
+    def quality_python(self) -> Path:
+        return self.quality_tool_dir / "bin" / "python"
 
     @property
     def quality_uv_receipt(self) -> Path:
-        return self.data_dir / "uv" / "tools" / "overnightworks-quality" / "uv-receipt.toml"
+        return self.quality_tool_dir / "uv-receipt.toml"
 
     @property
     def ansible_playbook_executable(self) -> Path:

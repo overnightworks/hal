@@ -1,5 +1,5 @@
 #!/bin/bash
-# The container proof of `hal setup`'s system step (#40, cells 1-13), of its secrets step (S1) and of the agents'
+# The container proof of `hal setup`'s system step (#40, cells 1-13), of the global commit hook (H1-H3), of its secrets step (S1) and of the agents'
 # account (#331, cells A1-1 to A1-9), of the mail of `hal check` (#390, cells D1-D8), of rsyslog's removal (#422, cells R0-R7) and of a real Docker engine and the journal as its default log driver and its build cache limit (DK1-DK8, #432): a throwaway Ubuntu 26.04 with systemd as PID 1, never the live PC, never the
 # real /etc or ~/.secrets.
 #
@@ -12,10 +12,13 @@
 # carries tunnel/; only `git archive` reads it. Give each part its own evidence dir (`<evidence dir>/fresh`,
 # `<evidence dir>/prepared`, `<evidence dir>/shapes`): each call truncates cells.txt and containers.txt there.
 # The script takes no lock: the fleet form above does. CAP 1800 plus K 30 stays within 1830, and K 30 is more than the
-# teardown of a cut run needs (it left no container within 30 s). Measured under that form on a loaded machine, in
-# seconds after the lock was taken: `shapes` 881, `fresh` 924, `prepared` 383, each exit 0 with every cell held. The
-# slowest part keeps 876 s of the 1800 s cap, 576 s of the 1500 s a part may take. The wait for a low load and every
-# stage run inside the cap, so the cap bounds them, and the EXIT trap runs on its TERM.
+# teardown of a cut run needs (it left no container within 30 s). Measured under that form on a loaded machine, each
+# part's container time (from its containers.txt to its last cell written) was `fresh` 1092 s, `shapes` 805 s,
+# `prepared` 427 s, each exit 0 with every cell held. That leaves 708 s, 995 s and 1373 s of the 1800 s cap, and
+# 408 s, 695 s and 1073 s of the 1500 s a part may take. The build and the wait for a low load come before the
+# container and count against the cap too: `fresh` took at most about 1277 s from when the lock was free (the estimate
+# from the end of `prepared`), which keeps about 523 s of the cap. Every stage runs inside the cap, so the cap bounds
+# them, and the EXIT trap runs on its TERM.
 # It keeps the container ids in the evidence dir and removes its container, with its volumes and nothing else, on exit.
 # The sudo password is generated per run.
 set -euo pipefail
@@ -109,11 +112,11 @@ else
 fi
 
 judge() {  # judge <part> <cells file>: every cell of the part printed a held line and none printed a failed one
-    # fresh: cells 1, 3-13 and 7o, S1, A1-1 and A1-2 and A1-4 to A1-9, D1-D8, R0-R7, DK1-DK8, T1-T5, T5b; prepared: cell 2 and P1-P10 under both sudos (suffix c and r); shapes: A1-3
+    # fresh: cells 1, 3-13 and 7o, S1, A1-1 and A1-2 and A1-4 to A1-9, D1-D8, R0-R7, DK1-DK8, T1-T5, T5b; prepared: cell 2, H1-H3 (the hook) and P1-P10 under both sudos (suffix c and r); shapes: A1-3
     local part=$1 cells=$2 cell missing=() expected
     case $part in
         fresh) expected=({1,3,4,5,6,7,7o,8,9,10,11,12,13} S1 A1-{1,2,4,5,6,7,8,9} D{1..8} R{0..7} DK{1..8} T{1..5} T5b) ;;
-        prepared) expected=(2 P{1..10}{c,r}) ;;
+        prepared) expected=(2 H{1..3} P{1..10}{c,r}) ;;
         shapes) expected=(A1-3) ;;
         *) echo "unknown part: $part (expected fresh, prepared or shapes)" >&2; return 2 ;;
     esac

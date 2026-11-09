@@ -168,11 +168,11 @@ snapshot() {
 }
 
 # What a declined or refused `hal setup` must leave alone beyond the system files: the user units, the tool installs (uv's
-# receipts), the hook files and the global git config, the secrets directory and the Docker settings.
+# receipts and mise's scanners), the hook files and the global git config, the secrets directory and the Docker settings.
 home_snapshot() {
     snapshot
     sha256sum /home/tester/.gitconfig /etc/docker/daemon.json 2>&1
-    find /home/tester/.config/systemd /home/tester/.local/share/home /home/tester/.local/share/quality /home/tester/.secrets /home/tester/.local/share/uv/tools /etc/docker /etc/systemd/system/docker.service.d \
+    find /home/tester/.config/systemd /home/tester/.local/share/home /home/tester/.local/share/mise /home/tester/.secrets /home/tester/.local/share/uv/tools /etc/docker /etc/systemd/system/docker.service.d \
         -maxdepth 3 -printf '%p %y %s %T@\n' 2>&1 | sort
     return
 }
@@ -458,6 +458,86 @@ cell_s1() {  # the secrets step: verified with every fake secret in place; the d
     verdict S1 "a dry run names the missing secret $dropped and exits 0" \
         '[ $code -eq 0 ] && row_in_log cell-s1 secrets missing && in_log cell-s1 "$dropped"'
     plant_fake_secrets >/dev/null
+    return
+}
+
+# The hook cells (H1-H3): commits as the operator, in a login shell as at a terminal, through the hook `hal setup`
+# installed, which runs the installed quality and its scanner. H2's key is put together here at run time, so no file of
+# the repository holds one.
+HOOK_REPO=/home/tester/git/hook-proof
+CHECK_REPORT=/home/tester/.local/state/hal/check-report.md
+
+in_hook_repo() {  # in_hook_repo <log> <git arguments>: git as the operator in the hook repository; the exit code is git's
+    local log=$1
+    shift
+    timeout 300 su - tester -c "cd $HOOK_REPO && git -c user.name=proof -c user.email=proof@example.invalid $*" </dev/null >"$EVIDENCE/$log.log" 2>&1
+    return
+}
+
+hook_repo_head() {
+    as_tester git -C "$HOOK_REPO" rev-parse -q --verify HEAD
+    return
+}
+
+stage_in_hook_repo() {  # stage_in_hook_repo <file> <line>: the line appended to the file and staged
+    local file=$1 line=$2
+    as_tester bash -c 'printf "%s\n" "$3" >>"$1/$2" && git -C "$1" add "$2"' _ "$HOOK_REPO" "$file" "$line"
+    return
+}
+
+cell_h1() {  # the first commit of a new repository, without a key
+    local code
+    as_tester git init -q "$HOOK_REPO"
+    stage_in_hook_repo note.txt clean
+    in_hook_repo h1 commit -q -m clean
+    code=$?
+    verdict H1 "a clean commit passes the installed hook, which scanned the staged change" \
+        '[ $code -eq 0 ] && [ -n "$(hook_repo_head)" ] && in_log h1 "staged change"'
+    return
+}
+
+cell_h2() {  # a staged key: the scan finds it, the commit is refused and no output shows the value
+    local key before found code
+    key=$(printf 'gh%s_%s' p "$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 36)")
+    before=$(hook_repo_head)
+    stage_in_hook_repo settings.txt "token = $key"
+    in_hook_repo h2-hook hook run pre-commit
+    found=$?
+    in_hook_repo h2 commit -q -m leak
+    code=$?
+    verdict H2 "a staged key is a finding (exit 1), the commit is refused and HEAD stays" \
+        '[ $found -eq 1 ] && [ $code -ne 0 ] && [ "$(hook_repo_head)" = "$before" ]'
+    verdict H2 "neither run shows the key" '! grep -qF -- "$key" "$EVIDENCE/h2-hook.log" "$EVIDENCE/h2.log"'
+    as_tester bash -c 'git -C "$1" rm -q --cached settings.txt && rm "$1/settings.txt"' _ "$HOOK_REPO"
+    return
+}
+
+cell_h3() {  # the scanner removed: the hook cannot judge, the check names it with the setup command, and setup puts it back
+    local judged code repaired committed
+    find /home/tester/.local/share/mise/installs -mindepth 1 -maxdepth 1 -name '*gitleaks*' -exec rm -rf {} +
+    stage_in_hook_repo note.txt more
+    in_hook_repo h3-hook hook run pre-commit
+    judged=$?
+    in_hook_repo h3 commit -q -m more
+    code=$?
+    verdict H3 "without its scanner the hook cannot judge (exit 2) and refuses the commit" '[ $judged -eq 2 ] && [ $code -ne 0 ]'
+    without_terminal h3-check "$HAL_BIN check"
+    verdict H3 "hal check names the missing scanner with hal setup as its fix" \
+        'grep -qE "^\| scanner \| .* \| \`hal setup\` \|$" "$CHECK_REPORT"'
+    at_terminal h3-setup "$HAL_BIN setup"
+    repaired=$?
+    without_terminal h3-check-after "$HAL_BIN check"
+    in_hook_repo h3-after commit -q -m more
+    committed=$?
+    verdict H3 "hal setup installs the scanner again: the check names none and the commit passes" \
+        '[ $repaired -eq 0 ] && row_in_log h3-setup "commit hook" changed && ! grep -q "^| scanner |" "$CHECK_REPORT" && [ $committed -eq 0 ]'
+    return
+}
+
+cells_hook() {
+    cell_h1
+    cell_h2
+    cell_h3
     return
 }
 
@@ -2107,7 +2187,7 @@ case "${1:?stage}" in
     fresh) cell_dk1; plant_rsyslog_files; record_rsyslog_before; cell_11; cell_12; cell_13; cell_10; cell_r0; cell_dk3_before_the_first_apply; cell_1; cells_rsyslog_purged; cell_a1_1; cell_9; cell_a1_2; cell_r4; cell_s1; cells_yes; cells_mail; cells_agent; cells_docker; cells_retention; cells_polkit; marker_on ;;
     after-marker-reboot) cell_7; cell_a1_9; cell_r2_after_boot; marker_off; cell_7o ;;
     after-unmarked-reboot) cell_8; cell_r5 ;;
-    prepared) wait_for_engine; prepare_today; cell_2 ;;
+    prepared) wait_for_engine; prepare_today; cell_2; cells_hook ;;
     sudo-classic) cells_sudo c "$SUDO_CLASSIC" ;;
     sudo-rs) cells_sudo r "$SUDO_RS" ;;
     shapes) at_terminal shapes-converge "$HAL_BIN setup"; cell_a1_3 ;;

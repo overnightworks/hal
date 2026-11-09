@@ -265,7 +265,7 @@ RULE_REPORTS: dict[tuple[str, str], RuleReport] = {
     ("hook", "hooks-path"): HOOK_BROKEN,
     ("hook", "hook-file"): HOOK_BROKEN,
     ("hook", "quality"): HOOK_BROKEN,
-    ("hook", "engines"): HOOK_BROKEN,
+    ("hook", "scanner"): HOOK_BROKEN,
     ("hook", "mise"): RuleReport(
         ACTION, "mise is missing or not the pinned one; the quality gate cannot install its scanners.", SETUP_APPLY,
         resolved="mise is the pinned one again.", describes_shared_state=True,
