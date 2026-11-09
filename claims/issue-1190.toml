@@ -1,0 +1,7 @@
+claim_id = "b6a2fef72d71406892c561ef3b0539bf"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "6b3b2e65ec721ca1ad3b286acb40efd6978903d3"
+branch = "claude/issue-1190-wheel-tool-round-pieces"
+scope = ["probe/agent-service/litellm_wheel.py"]
+opened_commit = "384a454c4301eefa246eb66afb3cb903143c7890"
