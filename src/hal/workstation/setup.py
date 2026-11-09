@@ -390,7 +390,8 @@ def _open_name(entry: SecretEntry, found: Presence) -> str:
 
 
 def render_hook(layout: Layout) -> str:
-    return HOOK_TEMPLATE.read_text().replace("@QUALITY@", quote(str(layout.quality_executable)))
+    hook = HOOK_TEMPLATE.read_text().replace("@QUALITY@", quote(str(layout.quality_executable)))
+    return hook.replace("@MISE_DIRECTORY@", quote(str(layout.mise_executable.parent)))
 
 
 def _is_executable(path: Path) -> bool:

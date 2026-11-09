@@ -2,11 +2,13 @@
 # Template for the global pre-commit and pre-merge-commit hooks; `hal setup`
 # renders it with the absolute path below. Edit the template, not a copy.
 # git runs the hook in the work tree, where quality scans what the commit records.
+# quality finds mise on PATH, which a git client may not carry, so only its call gets hal's mise directory.
 quality=@QUALITY@
+mise_directory=@MISE_DIRECTORY@
 hook=${0##*/}
 
 scan_staged() {
-    "$quality" check secrets --staged
+    PATH="$PATH:$mise_directory" "$quality" check secrets --staged
 }
 
 if [ ! -x "$quality" ]; then

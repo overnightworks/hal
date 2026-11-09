@@ -157,6 +157,20 @@ def test_clean_commit_passes_without_a_repository_hook(repo: Path) -> None:
     assert git(repo, "commit", "-m", "x").returncode == 0
 
 
+def test_commit_reaches_the_scanner_when_the_git_client_has_no_mise_on_its_path(
+    repo: Path, hooked: Sandbox, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """quality finds mise on PATH: the hook gives its call the directory of hal's mise, though the client's PATH lacks it."""
+    directories = os.environ["PATH"].split(os.pathsep)
+    monkeypatch.setenv("PATH", os.pathsep.join(d for d in directories if not (Path(d) / "mise").exists()))
+    hooked.layout.quality_executable.write_text('#!/bin/sh\ncommand -v mise >/dev/null || exit 2\n')
+    (repo / "note.txt").write_text("note\n")
+    git(repo, "add", "note.txt")
+
+    assert shutil.which("mise") is None
+    assert git(repo, "commit", "-m", "x").returncode == 0
+
+
 def test_unstaged_key_does_not_block_a_commit_of_other_files(repo: Path) -> None:
     """Rule 3: only the staged change is scanned."""
     leak(repo, stage=False)
