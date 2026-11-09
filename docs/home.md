@@ -38,7 +38,7 @@ Commit protection, Secrets, Server logs, Exposure). Die Stufe und der Satz je Re
 |---|---|---|
 | `platform` | `container-restarting`, `container-dead`, `container-unhealthy`, `container-exited`, `docker-unreadable`, `job-failed`, `systemd-unreadable`, `disk-low` | `reboot-pending` |
 | `backup` | `backup-stale`, `backup-failed`, `backup-status-unreadable`, `backup-crashed` | – |
-| `hook` | `hooks-path`, `hook-file`, `quality`, `mise`, `engines` | `hidden-hook` |
+| `hook` | `hooks-path`, `hook-file`, `quality`, `mise`, `scanner` | `hidden-hook` |
 | `secrets` | `loose-mode`, `symlinked-folder`, `symlinked-file`, `revocation-unconfirmed`, `verification-failed`, ein fehlendes Passwort eines Menschen (`SecretKind.HUMAN_PASSWORD`, als Regel `missing-password` gemerkt) | `missing` (sonst), `not-a-folder`, `closed-folder`, `presence-unknown`, `verification-unreachable`, `unknown-file` |
 | `logs` | `journal-age`, `journal-unreadable`, `docker-unreadable` | `container-json-file`, `docker-default-driver`, `rsyslog-file` |
 | `exposure` | `reachable-beyond-loopback` (Veröffentlichung oder Listener jenseits von Loopback, ein Fund je Prozess oder Container), `routing-name-unusable` (`routed-without-edge-name`, `invalid-edge-name`, `duplicate-edge-name`) | – |
@@ -129,7 +129,8 @@ Korrektur:
   nicht `QUALITY_SOURCE` aufgezeichnet (`hal setup`).
 - **mise nicht wie festgelegt.** `~/.local/bin/mise` fehlt, ist nicht ausführbar oder sein sha256 weicht
   von `MISE_SHA256` ab (`hal setup`); der Bericht nennt es als eigene Aufgabe, nicht als kaputten Commit-Schutz.
-- **Engines.** `quality engines verify` scheitert (`hal setup`).
+- **Scanner nicht wie festgelegt.** mise findet gitleaks nicht in der Version, die das Manifest der
+  installierten quality festlegt, gefragt wie im Schritt Scanner (`hal setup`).
 - **Verdeckter Repository-Hook.** `.git/hooks` enthält eine Datei außer
   `*.sample`, `pre-commit` und `pre-merge-commit`; der globale Pfad verdeckt sie.
 
@@ -474,14 +475,18 @@ come before the system step, which is the one that asks for sudo:
    wird sie 755 und per `os.replace` nach `~/.local/bin/mise` gelegt. Jeder Fehler (Timeout,
    abgeschnittener Download, falscher Hash, Schreib- oder Umbenennfehler) entfernt die Staging-Datei
    und lässt ein vorhandenes `mise` unberührt. Der Schritt läuft auch, wenn die Datei fehlt, nicht
-   ausführbar ist oder einen anderen sha256 hat; ohne mise läuft `quality hygiene` nicht.
+   ausführbar ist oder einen anderen sha256 hat; ohne mise lassen sich quality's Scanner weder installieren noch finden.
 2. **quality.** `uv tool install --force` mit `QUALITY_SOURCE` aus
    `src/hal/workstation/setup.py`, dem Commit-SHA eines Tags von overnightworks/quality
    (eine neue Version ist eine Zeile). Der Schritt
    läuft auch, wenn `~/.local/bin/quality` fehlt oder nicht ausführbar ist.
-3. **Engines.** `quality engines install` nach
-   `~/.local/share/quality/engines`, wenn `quality engines verify` es verlangt;
-   danach gilt der Schritt erst, wenn `verify` besteht.
+3. **Scanner.** `mise --cd <Manifest> install --locked` mit quality's eigenem Manifest und Lock.
+   `<Manifest>` ist `quality/mise` in der Installation; wo das liegt, sagt der Interpreter von quality's
+   uv-Tool (`importlib.util.find_spec("quality")`), hal importiert nichts von quality. Der Schritt gilt,
+   wenn `mise --cd <Manifest> which gitleaks --tool <key>@<version>` gelingt, gefragt wie quality selbst
+   fragt: Schlüssel und Version aus der `mise.toml` des Manifests, `MISE_CEILING_PATHS` an dessen
+   Elternverzeichnis, damit keine andere mise-Konfiguration mitredet. Scheitert die Installation,
+   nennt `next:` genau diesen `install`-Befehl.
 4. **Hook-Dateien.** `pre-commit` und `pre-merge-commit` in
    `~/.local/share/home/git-hooks/`, atomar geschrieben, Modus 755. Ein
    Inhalt, der abweicht, ein verlorenes Ausführungsrecht oder ein anderer Modus als 755 wird
@@ -542,13 +547,13 @@ come before the system step, which is the one that asks for sudo:
    `sudo rm -rf ~/.ansible` recovers it. The operator runs `hal setup` as themselves, never `sudo hal`.
 
 **Who runs it.** `hal setup` resolves a role from the running user. Exactly the account `agent`
-(`AGENT_USER` in `src/hal/workstation/system_step.py`) is the agent role: mise, quality, Engines, Hook-Dateien and
+(`AGENT_USER` in `src/hal/workstation/system_step.py`) is the agent role: mise, quality, Scanner, Hook-Dateien and
 Aktivierung run, and PATH link, User units, Ansible, System and Geheimnisse are skipped (`path  skipped  the operator's step`, likewise `timers`; the agents hold no secrets), with exit 0 and no sudo. Everyone else, root
 and a sudoers-only admin included, is the operator role, and a system step that cannot run still exits 3.
 If the running uid has more than one passwd name and one of them is `agent`, `hal setup` does not guess: it exits 3 with a line saying so.
 
 **The rows.** The ten steps print as five rows, in the form of
-[docs/design/hal-output.html](design/hal-output.html): `commit hook` (mise, quality, Engines,
+[docs/design/hal-output.html](design/hal-output.html): `commit hook` (mise, quality, Scanner,
 Hook-Dateien, Aktivierung), `path` (der Link `~/.local/bin/hal`; `unchanged`, solange das `bin/hal` des Live-Checkouts fehlt), `timers` (User units), `system` (Ansible, System) and `secrets`. A row's
 event is its worst step's: failed or not started, then needs you, then changed, then unchanged,
 then skipped. After the yes a row says `changed` or `unchanged` (`stored` or `complete` for the
@@ -560,15 +565,16 @@ presence `stat` cannot tell). The last line is the verdict, counted over the fiv
 or `✓ setup up to date · 5 unchanged · 21s`. The run time is whole seconds rounded down (`<1s` under one second, `1m05s` from
 a minute, `1h02m` from an hour) and stands after the counts and before the hint; a failed run ends with the error pair and shows none. A step that fails prints its row as `failed` with its own
 sentence, every later row as `not run`, and then `error: setup stopped at <row>` and `next: <command>`:
-the command that failed (quality, Engines, Aktivierung, Ansible) or `hal setup`. For the
+the command that failed (quality, Scanner, Aktivierung, Ansible) or `hal setup`. For the
 system row the error says what /etc is left as: `/etc unchanged` after a failed check, `/etc unchanged` after a sudo that never started the play (a refused password), `/etc unchanged` with `next: systemctl status docker` when `docker info` does not answer before the password (hal reads it as the operator, so the operator must reach Docker without sudo; it asks no password), `/etc unchanged` after an Ansible apply that stopped before its first change (counts of `changed=0` and no failed task that changed), `/etc may be partial` after an apply that changed something or reported no counts, and after a failed `sudo -k` (the ticket may still be valid). A Ctrl-C in the play leaves the live line on screen and prints `✗ system  interrupted` on the line below it (with the ticket sentence as its fact when `sudo -k` failed after it), the later rows as `not run`, the same pair and exits 130. The secrets row does not fail when the wizard leaves a secret open: it prints `! secrets  N open  a, b (by hand)` from what the disk shows after the walk, and the error says `setup stopped at secrets · N secret(s) still open`; a refused store (`~/.secrets` or a group folder that is a file, a symlink or too open, or a symlink at the secret's own place, fixed by `rm`) stops the walk at the first entry with one `✗ <entry>  not stored  <reason>` row, `error: setup stopped at secrets · nothing stored for <entry>` and the bare fix as `next:` (`next: hal setup` when the secret's file appeared while the page was open); another wizard exit ends with the wizard's own error pair; setup prints no second pair. After the yes the `system` row is preceded by `› system  needs sudo` and what the play does, right before the system's own sudo prompt (`[sudo] Passwort für <user>:` or sudo-rs's `[sudo: authenticate] Passwort:`); it is not counted in the verdict and is not printed for the agent role or in a dry run. When Docker's default log driver is not `journald`, the play will restart Docker, and a row `! docker  restarts  all containers stop · N stay down` comes first (N counts the running containers whose restart policy is neither `always` nor `unless-stopped`, read as the operator; `1 stays down` for one, no count when the policies cannot be read); it asks nothing, is not counted in the verdict, and is not printed for the agent role, in a dry run or while Docker reports `journald`. A second
 `--dry-run` changes nothing and downloads nothing. On a terminal the glyphs, the verdict and the `error:`/`next:`
 labels are coloured with the 16 base colours, each stream on its own; `NO_COLOR` (non-empty), `TERM=dumb` and a pipe print the plain bytes. Der Hook ist die Vorlage `src/hal/workstation/hooks/commit-hook`
-(POSIX sh). Er ruft `quality scan-staged`, führt danach den eigenen
+(POSIX sh). Er ruft im Arbeitsbaum `quality check secrets --staged`, führt danach den eigenen
 `.git/hooks/<name>` des Repositorys aus (auch im Worktree, über
 `--git-common-dir`) und scannt danach noch einmal, weil ein Repository-Hook
 Dateien stagen kann. Exit `0` heißt sauber, `1` ein Geheimnis gefunden, `2` nicht
-beurteilbar; jeder Wert ungleich `0` bricht den Commit ab. Fehlt `quality`,
+beurteilbar; jeder Wert ungleich `0` bricht den Commit ab. quality sucht mise im `PATH`;
+fehlt mise oder der Scanner, ist das `2` mit dem Befehl, der ihn installiert. Fehlt `quality`,
 bleibt der Commit gesperrt, bis `hal setup` es wieder einrichtet. Das
 ist gewollt.
 
@@ -702,7 +708,10 @@ below and rsyslog's conffiles are home's own and are not backed up. `/etc/docker
 - **Proof.** `flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 scripts/system-proof/run.sh <edge checkout> <evidence dir> <part>`, once per part, each into its own evidence dir (`<evidence dir>/fresh`, `<evidence dir>/prepared`, `<evidence dir>/shapes`, since each run truncates `cells.txt`), drives
   the step in a throwaway systemd container, never on this PC. `fresh` is the first install with both reboots, `prepared` the
   second install under both sudos, and `shapes` a third one that converges once and then refuses the foreign account shapes (A1-3);
-  each part is one container, and a part that nears the lock's 1800 s cap is cut, not given more time; the measured times per part are in the header of `scripts/system-proof/run.sh`. Its cells D1-D8 also drive the mail of `hal check` there:
+  each part is one container, and a part that nears the lock's 1800 s cap is cut, not given more time; the measured times per part are in the header of `scripts/system-proof/run.sh`.
+  Its cells H1-H3, in `prepared`, commit through the installed hook, which runs quality with its scanner: a clean first commit passes, a key
+  put together at run time is refused without its value in any output, and a removed scanner refuses the commit as unjudgeable,
+  is named by `hal check` with `hal setup`, which installs it again. Its cells D1-D8 also drive the mail of `hal check` there:
   the real `msmtp` against a throwaway SMTP sink and a test CA, with STARTTLS, implicit TLS, no TLS, an untrusted certificate,
   a rejected login and a stalled server. Its cells R0-R7 drive rsyslog's removal there: the image carries rsyslog, an
   unconfigured postfix and kerneloops like the PC, the six files with archives are planted before the first refused run, and
