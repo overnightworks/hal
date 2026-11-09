@@ -20,6 +20,9 @@ services:
     run: {enabled: true}
     hosts:
       - {name: hopin, exposure: public, reason: "video calls; every page needs the Keycloak login (hopin#25)", tunnel: platform, ready: /health, deny_public: [/auth/backchannel-logout]}
+  skat:
+    hosts:
+      - {name: skat, exposure: public, reason: "skat is public behind its own Keycloak login", tunnel: platform, ready: /health, deny_public: [/auth/backchannel-logout]}
   presentator:
     repo: {default_branch: main}
     run: {enabled: true}
