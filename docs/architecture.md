@@ -161,12 +161,13 @@ services:
       enabled: true              # Dienst an/aus: the one switch
       # setup: step-ca/init      # only where a unit needs key material (step-ca, keycloak)
     hosts:
-      - name: hopin              # hopin.hallucinai.de → container labelled edge.name=hopin
+      - name: hopin              # hopin.hallucinai.de
         exposure: public         # own login; the * Access app would otherwise cover it
         reason: "video calls; every page needs the Keycloak login (hopin#25)"
-        ready: /health           # optional: the path X8a asks before it publishes the host
+        ready: /health           # required for app hosts; with tunnel, readiness belongs to that tunnel's owner
         deny_public: [/auth/backchannel-logout]   # Cloudflare refuses the route at its edge
-        # target: http://127.0.0.1:8081   # optional; this is the default (Traefik)
+        tunnel: platform         # another tunnel of the account serves the host; hal's ingress has no line for it
+        # target: http://127.0.0.1:8081   # optional; without tunnel the default is Traefik; never with tunnel
 ```
 
 Planned and not accepted by `catalog.py` yet: `run.login_group` (a group of `keycloak/realm.yaml`, checked by CI) and `run.health` (the LOOK page's path). An app's `run` takes only `enabled` (no `setup`, no `build`), its `repo` only `default_branch`, and `github.org` names the organisation of its repository.
@@ -181,7 +182,7 @@ Planned and not accepted by `catalog.py` yet: `run.login_group` (a group of `key
 | `ready` | path | none | starts with one `/`; the publish guard of X8a |
 | `target` | `http://127.0.0.1:<port>` or `http://localhost:<port>` | `http://127.0.0.1:8081` (Traefik) | never `:8090` (the admin entrypoint); another target only for a gap-35 host (songmaker's `songmaker`) |
 | `tunnel` | string | hal's own tunnel | one lowercase DNS label naming another tunnel of the zone's account that serves the host; not together with `target`, not on `*` (`docs/external.md`) |
-| `deny_public` | list of paths | none | each lowercase and absolute (`[a-z0-9._~-]` segments), no query, no trailing slash. Cloudflare refuses these paths at its edge, before the tunnel, one rule per path for every host listing it, with their encoded, cased and multi-slash variants (`docs/external.md`); songmaker's one host lists `/auth/backchannel-logout` (#213) and `/metrics` (#342), hopin's host and both presentator hosts list `/auth/backchannel-logout` |
+| `deny_public` | list of paths | none | each lowercase and absolute (`[a-z0-9._~-]` segments), no query, no trailing slash. Cloudflare refuses these paths at its edge, before the tunnel, one rule per path for every host listing it, with their encoded, cased and multi-slash variants (`docs/external.md`); songmaker's one host lists `/auth/backchannel-logout` (#213) and `/metrics` (#342), hopin's host, skat's host and both presentator hosts list `/auth/backchannel-logout` |
 
 The apex and `www` are hosts only as the catalog's `cloudflare.redirect` (the apex also as `legal`'s host while `serve` is set) (validated next to the hosts by `src/hal/stack/catalog.py`): `hosts` (`@` or labels, none of them a service host except the apex while `serve` is set), `target` (an https URL) and `serve` (`pages`, lowercase paths, and `files`, a lowercase prefix ending in `/`, which the apex answers itself through its tunnel line; the apex then needs an enabled host). Cloudflare answers 302 at its edge, for https only (`http://` first goes to https on the same host): everything but the served paths goes to `target`, path and query dropped; old links keep no path (operator ruling of 18.10.2026). The names keep proxied records and have no tunnel line, except the serving apex, whose host is `legal` (`docs/external.md`). Keycloak's bare address already redirects to the account console, so `target` is `https://auth.hallucinai.de/`; `/impressum`, `/datenschutz`, `/nutzungsbedingungen`, `/favicon.ico` (the browser's own request, which must not go to auth; the unit answers it 404) and everything under `/_rechtliches/` are served by `legal` at the apex (every other form of a page, such as another case, a trailing slash or `www`, goes to the exact apex path).
 
@@ -259,7 +260,7 @@ services (`speech-runtime`), edge's section is its text while the release brings
 when the release brings one. So does a stopped or disabled app
 whose checkout or recorded commit is gone, or whose `.git` is a symlink or no repository, naming the path.
 
-A **host-only app** (an entry with neither `repo` nor `run`: songmaker, which its own timer deploys) brings the same
+A **host-only app** (an entry with neither `repo` nor `run`: songmaker, which its own timer deploys, and skat, which the platform runs) brings the same
 two files, read through the same reader from its checkout `~/srv/<key>` at `git rev-parse HEAD`, taken at plan time. The
 plan names the block with the short sha where a tagged app names its tag, and a missing checkout or an invalid `.git`
 refuses before the question, naming the path. A text that reaches that checkout's HEAD goes live only at the next `hal apply`
@@ -442,6 +443,7 @@ Every app goes live from a release tag, never from a landing on `main`. A releas
 |---|---|
 | **hopin**, **presentator**, **speech-runtime** | `hal apply`, after the operator's `yes` (below). presentator's backup is the SQLite record in `backup/apps.toml` (`docs/backup.md`) |
 | **songmaker** | its own timer, outside `hal apply` (below). Its host bypasses Traefik (gap 35) |
+| **skat** | the platform (overnightworks/platform); hal only fronts its host and reads its legal text |
 
 ### hopin, presentator and speech-runtime: `hal apply`
 
@@ -541,10 +543,10 @@ They survive a dead PC because they live at the provider.
 | 1 | The secrets list | `~/README.md` table (stale: names atelier2, tidy-home, `cloudflared/config`) and `secrets_manifest.toml` | home-tools#10, slice S2 |
 | 2 | Tunnel credentials | `~/.secrets/cloudflared/<id>.json` and `/etc/cloudflared/<id>.json` | home-tools#21, but D6 keeps the JSON credential; which copy is the one stays with home-tools#21. #21 plans to delete the `~/.secrets` copy, which a re-setup needs unless its value is in platform-secrets |
 | 3 | Tunnel ingress | the catalog (its lines written by the publish phase of `hal apply`), the `ingress:` of `/etc/cloudflared/config.yml` (serving until the switch) | E3 slices X6 and X8, in the mode D6 ruled. The catalog is the owner; the `config.yml` cleanup is #144 (B7) |
-| 4 | App groups | `keycloak/realm.yaml` (`/apps/songmaker`, `presentator`, `hopin`) and the catalog's `login_group` | **new slice in E3**: the catalog's CI checks against `realm.yaml` and `apps.toml` (section 3) |
+| 4 | App groups | `keycloak/realm.yaml` (the `/apps/*` groups) and the catalog's `login_group` | **new slice in E3**: the catalog's CI checks against `realm.yaml` and `apps.toml` (section 3) |
 | 5 | Org secret reach | home-tools#10 line 19 (repo-list drift) and E3 X5 (`fleet.yaml` org secrets) | home-tools#10 (drop its drift view) and E3 X5 (keep it) |
 | 6 | Alert channels: three today | songmaker's e-mail (`songmaker-alert@`), Alertmanager inside songmaker, `hal check`'s desktop notification | edge#4: **one e-mail channel** (ruled 24.10.2026: `msmtp`, run as the operator, over the SMTP account songmaker uses). `hal check` mails its news itself; Gatus ("is it OK now?") and Alertmanager ("why, since when?") both send into it; songmaker's own e-mail alert goes |
-| 7 | Deploy | hopin, presentator and speech-runtime through `hal apply` from their release tag; songmaker by its own timer from its release tag (section 5) | [#1016](https://github.com/overnightworks/hal/issues/1016): one release rule for all apps |
+| 7 | Deploy | hopin, presentator and speech-runtime through `hal apply` from their release tag; songmaker by its own timer from its release tag; skat by the platform (section 5) | [#1016](https://github.com/overnightworks/hal/issues/1016): one release rule for all apps |
 | 8 | Deploy checkout = work clone | closed in songmaker: it deploys from `~/srv/songmaker` (section 5), and its `scripts/auto-deploy.sh` refuses a checkout on a branch. What is left is the landing clone `~/git/songmaker-land`, which songmaker may retire now that it deploys from `~/srv/songmaker` | songmaker |
 | 9 | Monitoring stack | Prometheus, Grafana and Alertmanager live in songmaker's compose, though they serve the platform | edge#4: **ruled 16.10.2026:** they move into edge and serve every service. songmaker keeps only its metrics endpoint and its dashboards as files edge loads |
 | 10 | Two publishers | E3 X8 lets `keycloak/go-live` call `edge external apply`; section 6 publishes in `edge apply` | E3 X8, changed once (section 3): go-live never publishes |
