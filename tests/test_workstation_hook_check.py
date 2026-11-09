@@ -11,12 +11,12 @@ from datetime import datetime
 from pathlib import Path
 
 import pytest
-from support.workstation_support import Sandbox, home_check, run_hal_setup
+from support.workstation_support import Sandbox, home_check, move_stub_scanner_pins, remove_stub_scanners, run_hal_setup
 
 from hal.grammar import ExitCode
 from hal.workstation import hook_check
 from hal.workstation.hook_check import HookCheckUnavailable
-from hal.workstation.setup import HOOK_NAMES
+from hal.workstation.setup import HOOK_NAMES, HOOK_SCANNER
 from hal.workstation.layout import Layout, run_command
 
 NOW = datetime(2026, 10, 16, 12, 0)
@@ -192,8 +192,12 @@ def drift_mise(machine: Machine) -> None:
     machine.layout.mise_executable.write_bytes(b"#!/bin/sh\necho another mise\n")
 
 
-def break_engines(machine: Machine) -> None:
-    shutil.rmtree(machine.layout.quality_engines_dir)
+def remove_scanners(machine: Machine) -> None:
+    remove_stub_scanners(machine.layout)
+
+
+def pin_other_scanner_versions(machine: Machine) -> None:
+    move_stub_scanner_pins(machine.layout)
 
 
 @pytest.mark.parametrize(
@@ -208,7 +212,8 @@ def break_engines(machine: Machine) -> None:
         (delete_mise, "mise", "mise"),
         (make_mise_not_executable, "mise", "mise"),
         (drift_mise, "mise", "mise"),
-        (break_engines, "engines", "engines"),
+        (remove_scanners, "scanner", HOOK_SCANNER),
+        (pin_other_scanner_versions, "scanner", HOOK_SCANNER),
     ],
     ids=[
         "hooks directory missing",
@@ -220,20 +225,21 @@ def break_engines(machine: Machine) -> None:
         "mise missing",
         "mise not executable",
         "mise at another hash",
-        "engines fail",
+        "scanners removed",
+        "scanner at another version",
     ],
 )
 def test_a_damaged_installation_is_found_with_the_setup_command_and_clean_after_it(
     machine: Machine, damage: Callable[[Machine], None], rule: str, subject: str
 ) -> None:
-    """#23 rule 2.2, 2.3, 2.4 and #679: a damaged hook file, quality, mise or engines gets the setup command and is clean after it."""
+    """#23 rule 2.2, 2.3, 2.4 and #679: a damaged hook file, quality, mise or a scanner not at quality's pin gets the setup command and is clean after it."""
     damage(machine)
 
     findings = machine.findings()
 
     layout = machine.layout
-    owners = {"hook-file": layout.git_hooks_dir, "quality": layout.quality_executable, "mise": layout.mise_executable, "engines": layout.quality_engines_dir}
-    expected_subject = owners[rule] / subject if rule == "hook-file" else owners[rule]
+    owners = {"hook-file": layout.git_hooks_dir / subject, "quality": layout.quality_executable, "mise": layout.mise_executable, "scanner": subject}
+    expected_subject = owners[rule]
     assert findings[(rule, str(expected_subject))] == "`hal setup`"
     machine.apply_setup()
     assert machine.findings() == {}

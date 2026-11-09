@@ -1,6 +1,6 @@
 """`hal check`'s hook check: sees when the global commit hook stops applying, because git fails open when it drifts.
 
-`setup.py` owns the expected state (the rendered hook, the pinned quality, the hooks directory); this module only compares
+`setup.py` owns the expected state (the rendered hook, the pinned quality and its scanner, the hooks directory); this module only compares
 the machine against it and names the fix command of each difference. A tool that cannot be run raises, so the check
 shows up as broken and never as clean.
 """
@@ -15,7 +15,7 @@ from pathlib import Path
 from shlex import quote
 
 from hal.workstation.report import findings_count, markdown_table
-from hal.workstation.setup import HOOK_NAMES, _has_hook_mode, _is_executable, _recorded_quality_source_matches, mise_hash_is_pinned, render_hook
+from hal.workstation.setup import HOOK_NAMES, HOOK_SCANNER, _has_hook_mode, _is_executable, _recorded_quality_source_matches, hook_scanner_installed, mise_hash_is_pinned, render_hook
 from hal.workstation.layout import CommandRunner, Layout, is_git_repo, registered_worktrees
 from hal.output.command import Verb, command
 
@@ -141,9 +141,8 @@ def _quality_findings(layout: Layout, run: CommandRunner) -> list[HookFinding]:
     findings = []
     if not _recorded_quality_source_matches(layout):
         findings.append(HookFinding("quality", str(quality), "not pinned to QUALITY_SOURCE", SETUP_APPLY))
-    engines_dir = layout.quality_engines_dir
-    if run([str(quality), "engines", "verify", str(engines_dir)]) is None:
-        findings.append(HookFinding("engines", str(engines_dir), "`quality engines verify` fails", SETUP_APPLY))
+    if not hook_scanner_installed(layout, run):
+        findings.append(HookFinding("scanner", HOOK_SCANNER, "mise does not locate it at the version quality pins", SETUP_APPLY))
     return findings
 
 

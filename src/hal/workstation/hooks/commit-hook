@@ -1,12 +1,12 @@
 #!/bin/sh
 # Template for the global pre-commit and pre-merge-commit hooks; `hal setup`
-# renders it with the two absolute paths below. Edit the template, not a copy.
+# renders it with the absolute path below. Edit the template, not a copy.
+# git runs the hook in the work tree, where quality scans what the commit records.
 quality=@QUALITY@
-engines=@ENGINES@
 hook=${0##*/}
 
 scan_staged() {
-    "$quality" scan-staged --engines "$engines"
+    "$quality" check secrets --staged
 }
 
 if [ ! -x "$quality" ]; then

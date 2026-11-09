@@ -226,10 +226,11 @@ class RecordingRunner:
 
 
 class RunnerWithRealGitAndQuality(RecordingRunner):
-    """The hook check reads git and the stub quality, so these two run for real; every other tool stays as in RecordingRunner."""
+    """The hook check reads git, and quality's scanner through quality's interpreter and mise (under `env`), so these run
+    for real; every other tool stays as in RecordingRunner."""
 
     def __call__(self, argv: Sequence[str]) -> str | None:
-        if Path(argv[0]).name in {"git", "quality"}:
+        if Path(argv[0]).name in {"git", "python", "env"}:
             self.calls.append(list(argv))
             return run_command(argv)
         return super().__call__(argv)
@@ -257,35 +258,44 @@ class ProbeThatCannotStart(FakeProbe):
 # What the stub scanner refuses; assembled from parts, as every fake key in these tests is.
 FAKE_KEY = "FAKE" + "KEY-" + "0000"
 
+# Stands in for quality: it answers only the commit hook's call, inside a repository; any other call is exit 2, as a
+# wrong invocation is.
 STUB_QUALITY = """\
 #!/bin/sh
-case "$1" in
-scan-staged)
-    [ -n "$STUB_SCAN_EXIT" ] && exit "$STUB_SCAN_EXIT"
-    if git diff --cached | grep -q "FAKE""KEY-"; then
-        echo "quality: secret.txt fake-key sha256=0000 (Wert nicht gezeigt)"
-        exit 1
-    fi
-    ;;
-engines)
-    case "$2" in
-    install)
-        [ -n "$STUB_ENGINES_FAIL" ] && exit 1
-        mkdir -p "$3" && touch "$3/installed"
-        ;;
-    verify) [ -e "$3/installed" ] || exit 1 ;;
-    esac
-    ;;
-esac
+[ "$*" = "check secrets --staged" ] && git rev-parse --show-toplevel >/dev/null 2>&1 || exit 2
+[ -n "$STUB_SCAN_EXIT" ] && exit "$STUB_SCAN_EXIT"
+if git diff --cached | grep -q "FAKE""KEY-"; then
+    echo "quality: secret.txt fake-key sha256=0000 (Wert nicht gezeigt)"
+    exit 1
+fi
 exit 0
+"""
+
+# The site-packages of the stub's quality tool environment, below the tool directory uv made.
+STUB_SITE_PACKAGES = Path("lib/python3/site-packages")
+
+# Stands in for the interpreter of quality's tool environment: real Python in isolated mode, whose import path starts
+# at the tool's site-packages, where the stub uv put an empty `quality` package with its scanner manifest.
+STUB_TOOL_PYTHON = f"""\
+#!/bin/sh
+[ "$1 $2" = "-I -c" ] || exit 2
+exec python3 -I -c 'import sys; sys.path.insert(0, sys.argv.pop(1)); exec(sys.argv[1])' "${{0%/bin/*}}/{STUB_SITE_PACKAGES}" "$3"
+"""
+
+# The scanner manifest the stub quality ships: the hook's scanner beside another, at versions of this scenario only.
+STUB_SCANNER_MANIFEST = """\
+[tools]
+"aqua:stub/actionlint" = "0.0.2-stub"
+"aqua:stub/gitleaks" = "0.0.1-stub"
 """
 
 # The `git` value real uv 0.10.9 wrote to uv-receipt.toml after installing QUALITY_SOURCE's pinned SHA; only the revision follows the pin.
 RECORDED_RECEIPT_GIT = f"https://github.com/overnightworks/quality?rev={QUALITY_SOURCE.rpartition('@')[2]}"
 
-# Writes what `uv tool install` leaves behind for the requirement it is given: the tool's executable and uv's receipt for it.
+# Writes what `uv tool install` leaves behind for the requirement it is given: the tool's executable and uv's receipt for it;
+# for quality also the tool's interpreter and its package with the scanner manifest.
 # Ansible's executable is a dummy, since the sandbox hands the system step a FakePlaybook instead of running it.
-STUB_UV = """\
+STUB_UV = f"""\
 #!/bin/sh
 echo "$@" >> "$STUB_UV_LOG"
 [ -n "$STUB_UV_FAIL" ] && exit 1
@@ -294,23 +304,66 @@ case "$4" in
 ansible-core==*)
     mkdir -p "$HOME/.local/share/uv/tools/ansible-core"
     printf '#!/bin/sh\\nexit 1\\n' > "$HOME/.local/bin/ansible-playbook" && chmod 755 "$HOME/.local/bin/ansible-playbook"
-    printf '[tool]\\nrequirements = [{ name = "ansible-core", specifier = "==%s" }]\\n' "${4#ansible-core==}" \\
+    printf '[tool]\\nrequirements = [{{ name = "ansible-core", specifier = "==%s" }}]\\n' "${{4#ansible-core==}}" \\
         > "$HOME/.local/share/uv/tools/ansible-core/uv-receipt.toml"
     ;;
 *)
-    mkdir -p "$HOME/.local/share/uv/tools/overnightworks-quality"
+    tool="$HOME/.local/share/uv/tools/overnightworks-quality"
+    mkdir -p "$tool/bin" "$tool/{STUB_SITE_PACKAGES}/quality/mise"
     cp "$STUB_QUALITY" "$HOME/.local/bin/quality" && chmod 755 "$HOME/.local/bin/quality"
-    printf '[tool]\\nrequirements = [{ name = "overnightworks-quality", git = "%s" }]\\n' "$STUB_RECEIPT_GIT" \\
-        > "$HOME/.local/share/uv/tools/overnightworks-quality/uv-receipt.toml"
+    cp "$STUB_TOOL_PYTHON" "$tool/bin/python" && chmod 755 "$tool/bin/python"
+    : > "$tool/{STUB_SITE_PACKAGES}/quality/__init__.py"
+    cp "$STUB_SCANNER_MANIFEST" "$tool/{STUB_SITE_PACKAGES}/quality/mise/mise.toml"
+    printf '[tool]\\nrequirements = [{{ name = "overnightworks-quality", git = "%s" }}]\\n' "$STUB_RECEIPT_GIT" \\
+        > "$tool/uv-receipt.toml"
     ;;
 esac
 """
 
 
-# The bytes the sandbox's download serves as the pinned mise; the sandbox pins their hash.
-FAKE_MISE = b"#!/bin/sh\necho mise\n"
+# Where the stub mise records the manifest it installed, below the home.
+STUB_MISE_INSTALLED = Path(".local/share/mise/stub-installed.toml")
+
+# The bytes the sandbox's download serves as the pinned mise; the sandbox pins their hash. Every call is logged.
+# `install --locked` in a directory records its manifest as installed; `which <name> --tool <key>@<version>` answers,
+# as mise does, only for a tool installed at that version, and only under the ceiling quality sets: the parent of the
+# manifest directory, so no mise config above it takes part.
+FAKE_MISE = f"""\
+#!/bin/sh
+echo "$@" >> "$STUB_MISE_LOG"
+[ "$1" = --cd ] || exit 2
+installed="$HOME/{STUB_MISE_INSTALLED}"
+case "$3 $4 $5" in
+"install --locked ")
+    [ -n "$STUB_MISE_INSTALL_FAIL" ] && exit 1
+    mkdir -p "${{installed%/*}}" && cp "$2/mise.toml" "$installed"
+    ;;
+"which "*" --tool")
+    [ "$MISE_CEILING_PATHS" = "${{2%/*}}" ] || exit 1
+    grep -qxF "\\"${{6%@*}}\\" = \\"${{6##*@}}\\"" "$installed" 2>/dev/null || exit 1
+    echo "$HOME/.local/share/mise/installs/$4/${{6##*@}}/$4"
+    ;;
+*) exit 2 ;;
+esac
+""".encode()
 FAKE_MISE_SHA256 = hashlib.sha256(FAKE_MISE).hexdigest()
 STALE_MISE = b"#!/bin/sh\necho stale\n"
+
+
+def stub_scanner_manifest_dir(layout: Layout) -> Path:
+    """Where the stub uv put quality's scanner manifest in that home."""
+    return layout.quality_tool_dir / STUB_SITE_PACKAGES / "quality" / "mise"
+
+
+def move_stub_scanner_pins(layout: Layout) -> None:
+    """quality's manifest pins other versions than mise installed, as a new release of quality does."""
+    manifest = stub_scanner_manifest_dir(layout) / "mise.toml"
+    manifest.write_text(manifest.read_text().replace('-stub"', '-next-stub"'))
+
+
+def remove_stub_scanners(layout: Layout) -> None:
+    """The scanners mise installed are gone."""
+    (layout.home / STUB_MISE_INSTALLED).unlink()
 
 
 def serve_fake_mise(_url: str, writer: BinaryIO) -> None:
@@ -470,11 +523,12 @@ class FakeClock:
 
 @dataclass(frozen=True)
 class Sandbox:
-    """A throwaway HOME whose global git config, `uv`, scanner and system step are stubs; nothing reaches the operator's own or sudo."""
+    """A throwaway HOME whose global git config, `uv`, quality, mise and system step are stubs; nothing reaches the operator's own or sudo."""
 
     home: Path
     global_git_config: Path
     uv_calls: Path
+    mise_calls: Path
     system: FakeSystem
 
     @property

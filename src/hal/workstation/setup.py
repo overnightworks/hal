@@ -1,4 +1,4 @@
-"""`hal setup`: quality, its engines and the global commit hook, then the user units, Ansible, the system step and the secrets.
+"""`hal setup`: quality, its scanners and the global commit hook, then the user units, Ansible, the system step and the secrets.
 
 It shows its plan, asks one `yes` and only then runs; `--dry-run` only shows. Nothing, and no sudo, comes before the yes.
 
@@ -48,8 +48,8 @@ from hal.workstation.user_units import UnitsApplied, UnitsPartial, UserUnits
 if TYPE_CHECKING:
     from hal.workstation.ports import Downloader, Ports
 
-# Quality v0.9.2. A commit SHA cannot move; a bump is a one-line change here.
-QUALITY_SOURCE = "overnightworks-quality @ git+https://github.com/overnightworks/quality@07bdf7c478ac9cc9cd348b180abd3cbc9d873f23"
+# Quality v0.10.0. A commit SHA cannot move; a bump is a one-line change here.
+QUALITY_SOURCE = "overnightworks-quality @ git+https://github.com/overnightworks/quality@2d2b68bf3916b34f6f2c72a540c1e3d8a947b750"
 # The release binary of mise and its sha256 (the same in the release's SHASUMS256.txt); a bump is a two-line change here.
 MISE_VERSION = "2026.11.3"
 MISE_SHA256 = "c2f7e814cb39f60b7f67a0ff36cb805e94128bf2dff09d175309d0f095b8cc3b"
@@ -60,6 +60,12 @@ HOOK_NAMES = ("pre-commit", "pre-merge-commit")
 HOOK_TEMPLATE = Path(__file__).parent / "hooks" / "commit-hook"
 HOOK_MODE = 0o755
 MISE_MODE = 0o755
+# The scanner the hook's `quality check secrets --staged` runs, pinned by the manifest in `mise/` beside quality's package;
+# quality's own interpreter says where that is, so hal imports none of quality's code, and mise locates it as quality does.
+HOOK_SCANNER = "gitleaks"
+SCANNER_MANIFEST = "mise.toml"
+MISE_CEILING_VARIABLE = "MISE_CEILING_PATHS"
+QUALITY_PACKAGE_ORIGIN = 'import importlib.util; print(importlib.util.find_spec("quality").origin)'
 HOOK_WHY = "without the hook no commit is checked for secrets"
 MISE_WHY = "without mise the pinned quality gate cannot install its scanners"
 PATH_WHY = "without the link your terminal finds no hal, or the one of a checkout that has moved"
@@ -138,6 +144,14 @@ EVENT_LOOK: dict[SetupEvent, EventLook] = {
     SetupEvent.NEEDS_SUDO: EventLook(Glyph.ANNOUNCE, 0, None),
     SetupEvent.RESTARTS: EventLook(Glyph.NEEDS_YOU, 0, None),
 }
+
+
+class FailedAtCommand(StepFailed):
+    """A step that failed at a command known only while it runs; `next_command` is that command, ready to paste."""
+
+    def __init__(self, sentence: str, next_command: str) -> None:
+        super().__init__(sentence)
+        self.next_command = next_command
 
 
 class SecretsStillOpen(StepFailed):
@@ -376,8 +390,7 @@ def _open_name(entry: SecretEntry, found: Presence) -> str:
 
 
 def render_hook(layout: Layout) -> str:
-    template = HOOK_TEMPLATE.read_text()
-    return template.replace("@QUALITY@", quote(str(layout.quality_executable))).replace("@ENGINES@", quote(str(layout.quality_engines_dir)))
+    return HOOK_TEMPLATE.read_text().replace("@QUALITY@", quote(str(layout.quality_executable)))
 
 
 def _is_executable(path: Path) -> bool:
@@ -451,20 +464,58 @@ def _install_mise(layout: Layout, download: Downloader) -> bool:
     return True
 
 
+@dataclass(frozen=True)
+class ScannerManifest:
+    """quality's scanner manifest as its installation ships it: the directory, and the hook scanner's `<key>@<version>`."""
+
+    directory: Path
+    hook_scanner_pin: str
+
+    def install_command(self, layout: Layout) -> list[str]:
+        return [str(layout.mise_executable), "--cd", str(self.directory), "install", "--locked"]
+
+    def locate_command(self, layout: Layout) -> list[str]:
+        ceiling = f"{MISE_CEILING_VARIABLE}={self.directory.parent}"
+        return ["env", ceiling, str(layout.mise_executable), "--cd", str(self.directory), "which", HOOK_SCANNER, "--tool", self.hook_scanner_pin]
+
+
+def scanner_manifest(layout: Layout, run: CommandRunner) -> ScannerManifest | None:
+    """None while quality's installation shows no manifest that pins the hook's scanner."""
+    origin = Path((run([str(layout.quality_python), "-I", "-c", QUALITY_PACKAGE_ORIGIN]) or "").strip())
+    if not origin.is_absolute():
+        return None
+    directory = origin.resolve().parent / "mise"
+    try:
+        tools = tomllib.loads((directory / SCANNER_MANIFEST).read_text())["tools"]
+    except (OSError, tomllib.TOMLDecodeError, KeyError):
+        return None
+    pin = next((f"{key}@{version}" for key, version in tools.items() if key.rsplit("/", 1)[-1] == HOOK_SCANNER), None)
+    return None if pin is None else ScannerManifest(directory, pin)
+
+
+def hook_scanner_installed(layout: Layout, run: CommandRunner) -> bool:
+    """Whether mise locates the hook's scanner at the version quality's installation pins."""
+    manifest = scanner_manifest(layout, run)
+    return manifest is not None and run(manifest.locate_command(layout)) is not None
+
+
 def _quality_steps(layout: Layout, run: CommandRunner, download: Downloader) -> tuple[Step, ...]:
-    quality, engines_dir = str(layout.quality_executable), str(layout.quality_engines_dir)
+    quality_install = ["uv", "tool", "install", "--force", QUALITY_SOURCE]
 
     def quality_current() -> bool:
         return _recorded_quality_source_matches(layout) and _is_executable(layout.quality_executable)
 
     def install_quality() -> bool:
-        return run(["uv", "tool", "install", "--force", QUALITY_SOURCE]) is not None and _is_executable(layout.quality_executable)
+        return run(quality_install) is not None and _is_executable(layout.quality_executable)
 
-    def engines_current() -> bool:
-        return _is_executable(layout.quality_executable) and run([quality, "engines", "verify", engines_dir]) is not None
-
-    def install_engines() -> bool:
-        return run([quality, "engines", "install", engines_dir]) is not None and engines_current()
+    def install_scanners() -> bool:
+        manifest = scanner_manifest(layout, run)
+        if manifest is None:
+            return False
+        install = manifest.install_command(layout)
+        if run(install) is None or not hook_scanner_installed(layout, run):
+            raise FailedAtCommand("mise could not install quality's scanners", shell_join(install))
+        return True
 
     return (
         _local_step(
@@ -482,16 +533,16 @@ def _quality_steps(layout: Layout, run: CommandRunner, download: Downloader) -> 
             install_quality,
             HOOK_WHY,
             "uv could not install quality",
-            shell_join(["uv", "tool", "install", "--force", QUALITY_SOURCE]),
+            shell_join(quality_install),
         ),
         _local_step(
-            "Engines",
+            "Scanner",
             SetupRow.COMMIT_HOOK,
-            engines_current,
-            install_engines,
+            lambda: hook_scanner_installed(layout, run),
+            install_scanners,
             HOOK_WHY,
-            "the quality engines did not install",
-            shell_join([quality, "engines", "install", engines_dir]),
+            "quality's installation shows no scanner manifest",
+            shell_join(quality_install),
         ),
     )
 
@@ -673,6 +724,12 @@ def _failure_detail(row: SetupRow, error: OSError | StepFailed, step: Step, mode
     return ""
 
 
+def _next_command(stopped: _RowStopped) -> str:
+    if isinstance(stopped.error, DockerDoesNotAnswer):
+        return DOCKER_STATUS
+    return stopped.error.next_command if isinstance(stopped.error, FailedAtCommand) else stopped.step.next_step
+
+
 def _stop_after_failure(rows: list[SetupRow], position: int, stopped: _RowStopped, mode: Pass) -> None:
     step = stopped.step
     match stopped.error:
@@ -690,7 +747,7 @@ def _stop_after_failure(rows: list[SetupRow], position: int, stopped: _RowStoppe
     write_row(outcome.row(rows[position]), fresh_line=outcome.event is SetupEvent.INTERRUPTED)
     for later in rows[position + 1 :]:
         write_row(Outcome(SetupEvent.NOT_RUN).row(later))
-    _stopped(rows[position], DOCKER_STATUS if isinstance(stopped.error, DockerDoesNotAnswer) else step.next_step, detail)
+    _stopped(rows[position], _next_command(stopped), detail)
     if outcome.event is SetupEvent.INTERRUPTED:
         raise KeyboardInterrupt from stopped
 
