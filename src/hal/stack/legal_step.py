@@ -35,7 +35,6 @@ from hal.stack.legal_section import PAGES, LegalError, parse_fragment, parse_gen
 from hal.stack.unit_plans import Fleet, NotWritten, Progress
 
 LEGAL_UNIT = "legal"
-APEX_HOST = "@"
 GENERAL_UNIT = "allgemein"
 SECTIONS_DIRECTORY = "legal/sections"
 BUILT_DIRECTORY = "legal/built"
@@ -151,7 +150,7 @@ def plan_legal(
 
 
 def _serves_apex(unit: catalog.Unit) -> bool:
-    return not any(host.name == APEX_HOST for host in unit.served_elsewhere)
+    return not any(host.name == catalog.APEX for host in unit.served_elsewhere)
 
 
 def _shown_release_blocks(

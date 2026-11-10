@@ -42,7 +42,8 @@ so a changed depth shows as a recreate of `litellm` in the plan.
 An app (an entry with `repo`) is planned last, in the same plan and under the same `yes`: its
 newest release tag is checked out, built, started and recorded once its containers are settled
 (`apps.py`).
-While `services.legal` is enabled the three legal pages are built from `legal/frame`,
+While `services.legal` is enabled and no other tunnel serves its apex (a `tunnel:` on its `@`
+host) the three legal pages are built from `legal/frame`,
 `legal/sections` and each app's own `legal/` files at its release through the validator
 (`legal_step.py`); a refused section is exit 2, and the plan names each page that is new or
 changes. After `yes` the pages are written to `legal/built/` for hal's legal unit, the rollback
