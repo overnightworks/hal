@@ -137,7 +137,7 @@ def test_a_sqlite_record_naming_a_files_key_is_refused_as_an_unknown_key(key):
     ],
 )
 def test_apps_toml_refuses_audio_that_is_not_declared_whole(dropped):
-    """#107 T2: a reference table without a volume (or the reverse) is refused at load."""
+    """A reference table without a volume (or the reverse) is refused at load."""
     text = "\n".join(
         line
         for line in SONGMAKER_TOML.splitlines()

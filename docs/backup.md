@@ -407,8 +407,8 @@ reports neither `backup-failed` nor `backup-stale` for it, because a backup run 
 entry of an app that is no longer declared. `hal restore songmaker` refuses with `songmaker is not
 declared`. A snapshot is restored by hand with restic against the repository `~/backups/restic` and
 the password file `~/.secrets/restic/password`: `snapshots --host hal --tag songmaker` lists them,
-`restore <ID> --target <new directory>` writes `db/db.dump` and `audio/`, which are loaded into
-the platform's songmaker by hand. The snapshots are deleted only on the operator's yes.
+`restore <ID>:/backup/songmaker --target <new directory>` writes `db/db.dump` and `audio/`, which are
+loaded into the platform's songmaker by hand. The snapshots are deleted only on the operator's yes.
 
 ### Restore Keycloak
 

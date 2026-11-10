@@ -104,6 +104,10 @@ def test_a_backup_run_drops_the_status_entry_of_an_app_that_is_no_longer_declare
     first = edge_backup(*declare_two_apps(home), "backup")
     assert first.exit_code == 0, first.err
     machine.clock.moment += timedelta(days=7)
+    machine.db_containers = ["c0ffee", "c0ffee2"]
+    failed = edge_backup(*declare_two_apps(home), "backup")
+    assert (failed.status["state"], failed.status["failing_app"]) == ("failed", "songmaker")
+    machine.db_containers = [SONGMAKER_CONTAINER]
 
     outcome = edge_backup(*declare_apps(home, declaration), *command)
 
@@ -427,10 +431,6 @@ def test_host_run_returns_stdout_or_writes_it_into_a_new_private_file(tmp_path):
     assert target.read_bytes() == b"filed"
 
 
-def _fail_radio_readiness(machine: Machine) -> None:
-    machine.other_db_containers[("radio", "postgres")] = ["beef01", "beef02"]
-
-
 def test_an_app_that_fails_to_back_up_keeps_the_others_and_every_earlier_success(
     edge_backup, machine, home
 ):
@@ -440,7 +440,7 @@ def test_an_app_that_fails_to_back_up_keeps_the_others_and_every_earlier_success
     assert first.exit_code == 0, first.err
     assert first.status["failing_app"] is None
     machine.calls.clear()
-    _fail_radio_readiness(machine)
+    machine.other_db_containers[("radio", "postgres")] = ["beef01", "beef02"]
     machine.clock.moment += timedelta(days=7)
 
     outcome = edge_backup(*two_apps, "backup")
