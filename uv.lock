@@ -402,9 +402,9 @@ wheels = [
 ]
 
 [[package]]
-name = "overnightworks-agent-runtime-client"
-version = "0.28.0"
-source = { git = "https://github.com/overnightworks/agent-runtime?rev=v0.28.0#5c611629826985e829d37f353bd6c31ebf50893a" }
+name = "overnightworks-agents"
+version = "0.30.0"
+source = { git = "https://github.com/overnightworks/agents?rev=v0.30.0#350bc834f18f04b13b33d20206558c035349709e" }
 dependencies = [
     { name = "pydantic" },
     { name = "ruamel-yaml" },
@@ -428,7 +428,7 @@ name = "overnightworks-hal"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "overnightworks-agent-runtime-client" },
+    { name = "overnightworks-agents" },
     { name = "overnightworks-appkit" },
     { name = "pyyaml" },
 ]
@@ -436,7 +436,7 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "ansible-core" },
-    { name = "overnightworks-agent-runtime-client", extra = ["backend"] },
+    { name = "overnightworks-agents", extra = ["backend"] },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "ruff" },
@@ -444,7 +444,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "overnightworks-agent-runtime-client", git = "https://github.com/overnightworks/agent-runtime?rev=v0.28.0" },
+    { name = "overnightworks-agents", git = "https://github.com/overnightworks/agents?rev=v0.30.0" },
     { name = "overnightworks-appkit", url = "https://github.com/overnightworks/appkit/releases/download/v0.15.0/overnightworks_appkit-0.15.0-py3-none-any.whl" },
     { name = "pyyaml", specifier = ">=6" },
 ]
@@ -452,7 +452,7 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "ansible-core", specifier = "==2.21.5" },
-    { name = "overnightworks-agent-runtime-client", extras = ["backend"] },
+    { name = "overnightworks-agents", extras = ["backend"] },
     { name = "pytest", specifier = ">=8" },
     { name = "pytest-cov", specifier = ">=6" },
     { name = "ruff", specifier = ">=0.15" },

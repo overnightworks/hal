@@ -17,7 +17,7 @@ printed line carries a fingerprint or a member.
 The admin budget has no limit and the person budget's period, so LiteLLM resets its rows' spend
 each month and no person budget binds them. Its rows are exactly those of the members of the
 Keycloak group ADMIN_GROUP, read through the realm observer at each plan, each fingerprint the
-agent-runtime client's `person_fingerprint` of the realm's issuer and the member's id: a member's
+agents library's `person_fingerprint` of the realm's issuer and the member's id: a member's
 row is made or linked, and a row on the admin budget that is no member's is unlinked. Other rows
 are never touched. With Keycloak held the admin rows are held; with its members not read they
 stay as they are, and the run ends partial.
@@ -360,7 +360,7 @@ def fingerprints(members: reconcile.Members) -> Fingerprints:
     fails a check fails the read, naming the check alone."""
     # Imported here alone: the probes that import this module run on a Python without the
     # client, and no other hal command pays for pydantic's import.
-    from agent_runtime_client.turn import Principal, person_fingerprint
+    from agents.turn import Principal, person_fingerprint
 
     try:
         computed = {

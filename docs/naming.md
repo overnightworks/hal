@@ -38,7 +38,7 @@ topics are not set at all.
 
 They matter only inside one environment. Tools (`aco`, `hal`, `quality`)
 run in their own uv environments. Only the libraries (`webauth`,
-`agent_runtime*`) enter foreign environments. Each change proves its import
+`agents`) enter foreign environments. Each change proves its import
 with `python -I -c "import X; print(X.__file__)"` resolving into our tree, and
 with no foreign distribution named like the import in the affected `uv.lock`
 files.
@@ -70,7 +70,7 @@ The `hal` command's name and verbs have one code owner, `hal.output.command`; ev
 | `quality` ✓ | `overnightworks-quality` | `quality` | `quality` | check `quality / verdict` ✓ | ✓ | none |
 | `atelier` (marketplace) | `overnightworks-atelier` (dev only) | none | plugin and marketplace `atelier` ✓ | none | `overnightworks_atelier` | none |
 | `webauth` ✓ | ✓ | ✓ | none | none | ✓ | none |
-| `agent-runtime` (agent-providers) | `overnightworks-agent-runtime`, `overnightworks-agent-runtime-client`, `overnightworks-agent-runtime-service` | `agent_runtime`, `agent_runtime_client`, `agent_runtime_service` | `agent-runtime-service` | none | `overnightworks_agent-runtime` | none |
+| `agents` (was `agent-runtime`, agent-providers) | `overnightworks-agents` | `agents` | none | none | `overnightworks_agents` | none |
 | `design` (appkit, ui-style) | `overnightworks-design`; npm `overnightworks-design` | `design` | none | none | `overnightworks_design` | none |
 | `presentator` (agent-presentator) | `overnightworks-presentator`, `overnightworks-presentator-copresenter`, `overnightworks-presentator-speech`; npm `slidev-addon-presentator` ✓ | `presentator` ✓, `presentator_copresenter`, `presentator_speech` | `presentator`, `presentator-copresenter`, `presentator-speech` ✓ | `presentator-copresenter`, `presentator-speech` ✓ | `overnightworks_presentator` | `presentator.hallucinai.de`, `/apps/presentator` |
 | `redphone` (claudebot) | `overnightworks-redphone` | `redphone` | none | `redphone` (was `agent-telegram`) | `overnightworks_redphone` | none |

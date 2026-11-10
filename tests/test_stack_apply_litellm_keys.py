@@ -7,7 +7,7 @@ import re
 import subprocess
 
 import pytest
-from agent_runtime_client.turn import Principal, person_fingerprint
+from agents.turn import Principal, person_fingerprint
 from support.stack_apply import (
     APP_KEYS,
     DISABLED,
