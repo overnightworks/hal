@@ -1,5 +1,5 @@
-"""The names the step-ca probe (probe.py) and its cell modules (mcp_networks.py, the songmaker
-route, and traefik_mcp_follows.py) share: the compose project and file, the origins and their
+"""The names the step-ca probe (probe.py) and its cell modules (mcp_networks.py, the network
+split, and traefik_mcp_follows.py) share: the compose project and file, the origins and their
 URLs, the intermediate certificate's place and the curl exit codes the cells read."""
 
 PROJECT = "edge-stepca-probe"
