@@ -1,0 +1,7 @@
+claim_id = "f834fc48d8e64271867b137d953d2b46"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "357a0f2fa53a6f8b0c3bcbd1b7f7e19af9d5a51b"
+branch = "fix/offline-help-platform-tunnel"
+scope = ["src/hal/stack_commands.py"]
+opened_commit = "294902b692041604d277bd5fbdb6555814359def"
