@@ -35,8 +35,7 @@ _EXPONENT_NUMBER = re.compile(r"^[-+]?\d+[eE][-+]?\d+$")
 _OCTAL_NUMBER = re.compile(r"^0o[0-7]+$")
 
 DEFAULT_TARGET = "http://127.0.0.1:8081"  # Traefik
-ADMIN_PORT = 8090
-_HOST_KEYS = {"name", "exposure", "reason", "ready", "target", "deny_public", "tunnel"}
+_HOST_KEYS = {"name", "exposure", "reason", "ready", "deny_public", "tunnel"}
 # Lowercase unreserved segments, no query or trailing slash: the rendering embeds it in a rule.
 _DENIED_PATH = re.compile(r"(/[a-z0-9._~-]+)+")
 _HTTPS_URL = re.compile(r"https://[a-z0-9.-]+(:\d+)?(/[a-z0-9._~/-]*)?")
@@ -51,13 +50,9 @@ _APP_KEY = re.compile(r"[a-z0-9][a-z0-9_-]*")
 _GITHUB_ORGANISATION = re.compile(r"[A-Za-z0-9]([A-Za-z0-9-]{0,37}[A-Za-z0-9])?")
 # What `git check-ref-format --branch` accepts, narrowed to what never needs quoting.
 _BRANCH = re.compile(r"\w[\w.-]*(/\w[\w.-]*)*", re.ASCII)
-_LOOPBACK_HOSTNAMES = {"127.0.0.1", "localhost"}
 APEX = "@"
 WILDCARD = "*"
 PROBE_NAME = "edge-host-check"  # the host check asks the wildcard here (#154)
-# Gap 35 (docs/architecture.md section 7): these hosts still bypass Traefik. Their `target` stands
-# once, in fleet.yaml. Deleted when the songmaker cutover (X11) lands.
-GAP_35_HOSTS = frozenset({("songmaker", "songmaker")})
 
 
 class CatalogError(Exception):
@@ -428,7 +423,7 @@ def _host(service: str, path: str, item: Any, zone: str) -> Host:
         exposure=exposure,
         reason=_reason(path, item.get("reason"), exposure),
         ready=_ready(path, item),
-        target=_target(path, service, name, item.get("target", DEFAULT_TARGET)),
+        target=DEFAULT_TARGET,
         deny_public=_deny_public(path, item.get("deny_public", [])),
         tunnel=_tunnel(path, fqdn, item),
     )
@@ -499,46 +494,15 @@ def _deny_public(path: str, denied: Any) -> tuple[str, ...]:
 
 
 def _tunnel(path: str, fqdn: str, item: dict) -> str | None:
-    """The other tunnel that serves the host; `target` is only hal's ingress target, and the
-    wildcard stays with hal's Access and tunnel."""
+    """The other tunnel that serves the host; the wildcard stays with hal's Access and tunnel."""
     if "tunnel" not in item:
         return None
     tunnel = item["tunnel"]
     if not isinstance(tunnel, str) or not _TUNNEL_NAME.fullmatch(tunnel):
         raise CatalogError(f"{path}.tunnel: must be one lowercase DNS label")
-    if "target" in item:
-        raise CatalogError(f"{path}.tunnel: {fqdn} takes no target on another tunnel")
     if item.get("name") == WILDCARD:
         raise CatalogError(f"{path}.tunnel: the wildcard {fqdn} stays on hal's tunnel")
     return tunnel
-
-
-def _loopback_port(target: Any) -> int | None:
-    """The port of a loopback `target` (127.0.0.1 or localhost, explicit port); else None."""
-    if not isinstance(target, str):
-        return None
-    parts = urlsplit(target)
-    try:
-        port = parts.port
-    except ValueError:
-        return None
-    spelled_out = f"{parts.scheme}://{parts.netloc}"
-    if parts.scheme != "http" or parts.hostname not in _LOOPBACK_HOSTNAMES or not port:
-        return None
-    return port if target == spelled_out and parts.netloc == f"{parts.hostname}:{port}" else None
-
-
-def _target(path: str, service: str, name: str, target: Any) -> str:
-    port = _loopback_port(target)
-    if port is None:
-        raise CatalogError(
-            f"{path}.target: must be http://127.0.0.1:<port> or http://localhost:<port>"
-        )
-    if port == ADMIN_PORT:
-        raise CatalogError(f"{path}.target: must not be the admin entrypoint :{ADMIN_PORT}")
-    if target != DEFAULT_TARGET and (service, name) not in GAP_35_HOSTS:
-        raise CatalogError(f"{path}.target: only gap-35 hosts may differ from {DEFAULT_TARGET}")
-    return target
 
 
 def _check_together(enabled_hosts: list[tuple[str, Host]]) -> None:
