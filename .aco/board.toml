@@ -5,7 +5,6 @@ dependency_paths = [
   "probe/agent-service/Dockerfile",
   "probe/agent-service/compose.probe.yaml",
   "probe/keycloak/compose.probe.yaml",
-  "probe/step-ca/compose.short-lived.probe.yaml",
   "scripts/system-proof/Dockerfile",
   "src/hal/backup/images/Dockerfile",
 ]
