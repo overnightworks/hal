@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 import yaml
-from agent_runtime_client import turn as client_turn
-from agent_runtime_client.turn import Principal, person_fingerprint
+from agents import turn as client_turn
+from agents.turn import Principal, person_fingerprint
 from support.stack_litellm_found import (
     APPS,
     BUDGET_ID,

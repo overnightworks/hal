@@ -1,5 +1,5 @@
-"""Probe of the wheel cell (HAL-2.8w): `GatewayBackend` from hal's own pin of the agent-runtime
-client runs one tool turn from a throwaway on hopin's network, with hopin's key as a file, through
+"""Probe of the wheel cell (HAL-2.8w): `GatewayBackend` from hal's own pin of the agents
+library runs one tool turn from a throwaway on hopin's network, with hopin's key as a file, through
 the real front and LiteLLM to the fake Anthropic; 2.8's census (litellm_retention.py) then
 searches the route for the turn's canaries. Before the turn, the same throwaway runner
 calls the wheel's `list_gateway_models` through the front (HAL-2.6m's W models).
@@ -37,7 +37,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from agent_runtime_client.turn import Principal, person_fingerprint
+from agents.turn import Principal, person_fingerprint
 from litellm import (
     DEFAULT_MODEL,
     FRONT,
@@ -84,8 +84,8 @@ def show(record):
 LIST_PROGRAM = (
     WHEEL_PREAMBLE
     + """\
-from agent_runtime_client.backend.gateway import ModelListUnavailable, list_gateway_models
-from agent_runtime_client.config import ChatGateway
+from agents.backend.gateway import ModelListUnavailable, list_gateway_models
+from agents.config import ChatGateway
 async def main():
     gateway = ChatGateway(origin=SCENARIO["origin"], key_file=SCENARIO["key_file"])
     try:
@@ -101,12 +101,12 @@ asyncio.run(main())
 TURN_PROGRAM = (
     WHEEL_PREAMBLE
     + """\
-from agent_runtime_client.agents import TurnRequest
-from agent_runtime_client.backend import TurnPerson, TurnStopped
-from agent_runtime_client.backend.gateway import GatewayBackend
-from agent_runtime_client.config import AgentConfig, ChatGateway
-from agent_runtime_client.tools import HandTool, ToolDeclaration, ToolEffect, ToolOutcome
-from agent_runtime_client.turn import Principal, Turn, TurnMessage
+from agents.agent_file import TurnRequest
+from agents.backend import TurnPerson, TurnStopped
+from agents.backend.gateway import GatewayBackend
+from agents.config import AgentConfig, ChatGateway
+from agents.tools import HandTool, ToolDeclaration, ToolEffect, ToolOutcome
+from agents.turn import Principal, Turn, TurnMessage
 async def answer(principal, arguments):
     return ToolOutcome(content=SCENARIO["result"], is_error=False)
 async def groups():

@@ -7,7 +7,7 @@ requires-python = ">=3.14"
 dependencies = [
     "pyyaml>=6",
     "overnightworks-appkit @ https://github.com/overnightworks/appkit/releases/download/v0.15.0/overnightworks_appkit-0.15.0-py3-none-any.whl#sha256=710bed31c5b3fa693e401dfd77b6ac6305b91a1c16b2cc52836e05cd3b516ec2",
-    "overnightworks-agent-runtime-client @ git+https://github.com/overnightworks/agent-runtime@v0.28.0",
+    "overnightworks-agents @ git+https://github.com/overnightworks/agents@v0.30.0",
 ]
 
 [project.scripts]
@@ -16,7 +16,7 @@ hal = "hal.cli:main"
 [dependency-groups]
 dev = [
     "ansible-core==2.21.5",
-    "overnightworks-agent-runtime-client[backend]",
+    "overnightworks-agents[backend]",
     "pytest>=8",
     "pytest-cov>=6",
     "ruff>=0.15",
@@ -29,7 +29,7 @@ build-backend = "uv_build"
 [tool.uv]
 # The overnightworks client library is built from its git tag; a named package
 # overrides a global --no-build, so every other package still installs as a wheel.
-no-binary-package = ["overnightworks-agent-runtime-client"]
+no-binary-package = ["overnightworks-agents"]
 # Its build backend runs with these exact tools.
 build-constraint-dependencies = ["setuptools==84.2.1", "wheel==0.48.0"]
 
