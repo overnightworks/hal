@@ -35,7 +35,7 @@ and `hal apply --local` writes it again.
   it the apex as its host with `tunnel: platform`: the Cloudflare redirect leaves the three pages, `/favicon.ico` and
   `/_rechtliches/` (`cloudflare.redirect.serve`) to the apex, whose record points at the platform's tunnel, so the platform serves them and
   nothing public reaches this unit. It keeps running as the rollback target until the platform's cutover; rolling back is reverting that
-  key, then the operator's `hal update` and `hal apply`. The pages are built by `hal apply` from `legal/frame`, `legal/sections` and each app's own `legal/` files at its release (the plan names each page that is
+  key, then the operator's `hal update` and `hal apply`. While the apex is on another tunnel, `hal apply` builds nothing for it and the unit keeps its last build as the rollback target; a rollback that moves the apex back builds again. Only while hal's tunnel serves the apex are the pages built by `hal apply` from `legal/frame`, `legal/sections` and each app's own `legal/` files at its release (the plan names each page that is
   new or changes), and the unit serves them once it has written them; every answer carries `Cache-Control: no-cache`, so a cache that
   stored a page asks again before it shows it; before the first build they answer 404. The unit serves a changed stylesheet once `hal update` has brought the live checkout in; a changed `legal/nginx/default.conf` needs the container restarted with `hal stop legal` and
   `hal start legal`.
