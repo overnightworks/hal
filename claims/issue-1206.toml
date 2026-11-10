@@ -3,6 +3,6 @@ agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
 role = "builder"
 base = "6516886be2891443ebe0791d2b5e5d34aa311c42"
 branch = "claude/issue-1206-songmaker-mcp-route-leaves"
-scope = [".github/workflows/ci.yml", "compose.yaml", "docs/architecture.md", "docs/internal-ca.md", "mcp/dynamic/songmaker.yml", "probe/keycloak/compose.probe.yaml", "probe/step-ca", "tests/test_traefik_mcp.py"]
+scope = [".aco/board.toml", ".github/workflows/ci.yml", "compose.yaml", "docs/architecture.md", "docs/internal-ca.md", "mcp/dynamic/songmaker.yml", "probe/keycloak/compose.probe.yaml", "probe/step-ca", "tests/test_traefik_mcp.py"]
 opened_commit = "b57322dff121a87d8f971ed19c5773ca861cebc3"
 whole_reason = "The route, its network and every pin and sentence of them leave together; split, CI's network pin or the probe would name a network that is gone."
