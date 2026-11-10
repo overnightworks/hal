@@ -121,7 +121,7 @@ jobs:
             docker compose --file compose.yaml --file keycloak/bootstrap.compose.yaml \
             --file probe/keycloak/compose.probe.yaml --profile keycloak --profile apply config -q
           PROBE_CA_JSON=/nonexistent docker compose --file compose.yaml \
-            --file probe/step-ca/compose.probe.yaml --profile probe --profile step-ca config -q
+            --file probe/step-ca/compose.short-lived.probe.yaml --profile probe --profile step-ca config -q
           PROBE_EGRESS_STATIC=/nonexistent docker compose --file compose.yaml \
             --file probe/agent-service/compose.probe.yaml \
             --profile litellm config -q
@@ -130,7 +130,7 @@ jobs:
         run: |
           python3 -c 'import sys, yaml; [yaml.safe_load(open(f)) for f in sys.argv[1:]]' \
             traefik.yml keycloak/master.yaml keycloak/realm.yaml \
-            keycloak/bootstrap.compose.yaml probe/keycloak/compose.probe.yaml probe/step-ca/compose.probe.yaml step-ca/ca.json \
+            keycloak/bootstrap.compose.yaml probe/keycloak/compose.probe.yaml probe/step-ca/compose.short-lived.probe.yaml step-ca/ca.json \
             traefik-mcp.yml mcp/dynamic/* agent-service/egress/traefik.yml agent-service/egress/dynamic/* \
             agent-service/litellm/config.yaml agent-service/litellm/front/traefik.yml \
             agent-service/litellm/front/dynamic/*
