@@ -40,14 +40,11 @@ A second Traefik, the gateway to the MCP origins and the speech service's one wa
 set. It has no host networking and no Docker API, and
 listens on 443 inside internal networks, none with a route out: `mcp-ca` (step-ca and
 `traefik-mcp`), `mcp` (`traefik-mcp` alone), `mcp-backends` (`traefik-mcp` and the
-probe's MCP server) and one network per app that serves an MCP origin, `hal_mcp_songmaker` for
-songmaker (`traefik-mcp` and the app's web service, which joins it as an external network). It is the
+probe's MCP server). It is the
 only container on all of them. Two more internal, isolated networks carry the key set (next section). It answers to `<app>.mcp.internal` on `mcp-ca`
 and `mcp`, gets a 24-hour certificate per name from step-ca over TLS-ALPN-01 (trusting only the CA's root,
 `~/.secrets/step-ca/root_ca.crt`) and renews it by itself. `traefik-mcp.yml` is its static configuration;
-`mcp/dynamic/` holds one router file per app (`hello.yml` is the probe's; `songmaker.yml` routes
-`https://songmaker.mcp.internal/mcp`, the exact path, to `songmaker-web:8080` with the Host header
-unchanged) and is watched. The
+`mcp/dynamic/` holds one router file per app (`hello.yml` is the probe's) and is watched. The
 certificates live in the volume `traefik-mcp-acme`, which is not backed up because they are issued again.
 Traefik reads `traefik-mcp.yml` only when it starts, so `hal apply` recreates `traefik-mcp` alone when
 that file or its compose definition changed (rules in [stack.md](stack.md)). `traefik-mcp` waits for the
@@ -65,8 +62,7 @@ path, and nothing else of Keycloak, to `keycloak:8080` on `keycloak-keys`, a net
 is pinned and `traefik-mcp` finds it through `extra_hosts`, so an app on another of its networks
 cannot answer as `keycloak` with a forged key set. Traefik routes by Host and SNI, not by network, so
 the speech service reaches every router of `mcp/dynamic/`: `hello` (whose backend runs only in the
-probe), `songmaker` (its `/mcp` path alone) and `keycloak`; none routes
-to the speech service.
+probe) and `keycloak`; none routes to the speech service.
 
 The speech service's networks to its callers, `hal_speech_hopin` and `hal_speech_presentator`, are
 internal and isolated, each joined by its app and the service alone. No running service of hal joins
@@ -89,12 +85,11 @@ A new app adds its name to the `x-mcp-origins` list in `compose.yaml`, a router 
 **Proof:** `probe/step-ca/probe.py` starts a throwaway project under a throwaway `HOME` and holds the
 proofs of the CA (init modes and silence, the ACME directory, no root key in the volume, restart and
 partial-state behaviour) and of the gateway (reachable only with the root, 24-hour certificates, plain
-http refused, the network split as ruled, songmaker's route (exactly `/mcp`, no other path or
-name reaches the stand-in), no new host listener, renewal without restart, apply on and off
+http refused, the network split as ruled, no new host listener, renewal without restart, apply on and off
 keeping both volumes, the emergency switch, setup asked by apply, the follower recreate rules). Its
 compose calls and `step-ca/init` run from a copy of `compose.yaml` whose fixed network and volume names are moved into the
 probe's project, and each checks first that it resolves no other network or volume, so it never touches a live
-one. It takes 13 to 20 minutes and, like every probe stack, runs under `/tmp/probe-stack.lock` with a time cap (its
+one. Most of its run is the wait for a renewal; like every probe stack, it runs under `/tmp/probe-stack.lock` with a time cap (its
 docstring gives the command line). Re-run it for every step-ca or Traefik upgrade.
 
 ## agent-egress

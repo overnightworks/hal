@@ -1,5 +1,5 @@
 """Probe of the internal CA and of traefik-mcp (#38 proofs 1-5, #48 proofs 6-9, #52 proof 10,
-#60 proof 11, #69 proof 12, #89 proof 13, #346 cells P14-P27): a throwaway compose project and a
+#60 proof 11, #69 proof 12, #89 proof 13): a throwaway compose project and a
 throwaway HOME.
 
 It runs a copy of `step-ca/init` against the scratch HOME, starts the real `step-ca`, `traefik-mcp`
@@ -16,9 +16,8 @@ them runs from a throwaway container on the network a client would sit on. Needs
 --scratch directory and leaves it empty, passed or failed (`edge_copy`). Proof 9 waits for a
 renewal, 10 runs three applies, 11 drives the emergency switch, 12 runs the setup from `hal apply`,
 13 lets traefik-mcp follow its file and definition through about ten applies
-(traefik_mcp_follows.py), and 14 drives songmaker's route (#346 P14-P27, mcp_networks.py): 13 to 20
-minutes measured, 10 of them proof 9's renewal wait, bounded by the 1800 s cap above, so a run that
-needs longer is cut, not given more. Needs `uv`: proof 8 runs
+(traefik_mcp_follows.py). Most of the run is proof 9's renewal wait; it is bounded by the 1800 s cap
+above, so a run that needs longer is cut, not given more. Needs `uv`: proof 8 runs
 `hal check exposure` through it, proofs 10 to 13 `uv sync` in a copy of the repository. The copy
 is a clean `main` with a bare remote under the scratch directory, and every edit a proof makes
 there is published (committed and pushed) before the apply that follows it (#95 P3).
@@ -109,7 +108,6 @@ RENEWAL_POLL_INTERVAL = 15
 FOREIGN_UID = 12345
 STEP_CA_SWITCH = re.compile(r"( {2}step-ca:\n {4}run:\n {6}enabled: )(?:true|false)")
 ASKING_SWITCHES = re.compile(r"( {2}(?:keycloak|litellm):\n {4}run:\n {6}enabled: )\w+")
-STAND_IN_OVERLAY = REPO / "probe" / "step-ca" / "compose.probe.yaml"
 SHORT_LIVED_OVERLAY = REPO / "probe" / "step-ca" / "compose.short-lived.probe.yaml"
 
 
@@ -130,7 +128,7 @@ class Probe(McpNetworks, TraefikMcpFollows):
         self.scratch = scratch
         self.compose_file = edge_copy.write_namespaced_compose(REPO, scratch, PROJECT)
         self.init_script = edge_copy.shipped_script_copy(REPO, scratch, "step-ca/init")
-        self.compose_files = [self.compose_file, STAND_IN_OVERLAY]
+        self.compose_files = [self.compose_file]
         self.guard = edge_copy.NetworkGuard(PROJECT, lambda command: self.run(command).stdout)
         self.listeners_before: set[str] = set()
         self.exposure_before: list[dict] = []
@@ -562,7 +560,7 @@ class Probe(McpNetworks, TraefikMcpFollows):
         short_ca = self.scratch / "ca-short-lived.json"
         short_ca.write_text(json.dumps(ca))
         self.environment["PROBE_CA_JSON"] = str(short_ca)
-        self.compose_files = [self.compose_file, STAND_IN_OVERLAY, SHORT_LIVED_OVERLAY]
+        self.compose_files = [self.compose_file, SHORT_LIVED_OVERLAY]
 
     @property
     def state_directory(self) -> Path:
@@ -819,7 +817,6 @@ def prove(probe: Probe) -> int:
         probe.proof_6_gateway()
         probe.proof_7_network_split()
         probe.proof_8_no_host_listener()
-        probe.proof_14_songmaker_route()
         probe.proof_9_renewal()
         probe.proof_10_apply_cycle()
         probe.proof_11_emergency_switch()

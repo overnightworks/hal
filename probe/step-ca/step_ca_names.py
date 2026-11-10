@@ -19,13 +19,6 @@ ORIGIN_URL = f"https://{ORIGIN}/"
 ORIGIN_ANSWER = f"Host: {ORIGIN}"  # the backend (whoami) echoes the request's Host header
 # The backend speaks plain http by design, inside the compose network.
 BACKEND_URL = "http://hello-mcp/"  # NOSONAR(S5332)
-# songmaker's MCP origin: compose.yaml's `hal_mcp_songmaker`, moved into the project, and the
-# stand-in for its web service (whoami on 8080, overlay compose.probe.yaml).
-SONGMAKER_NETWORK = "mcp_songmaker"
-SONGMAKER_ORIGIN = "songmaker.mcp.internal"
-SONGMAKER_URL = f"https://{SONGMAKER_ORIGIN}/mcp"
-STAND_IN = "songmaker-web"
-STAND_IN_URL = f"http://{STAND_IN}:8080/"  # NOSONAR(S5332)
 STEP_HOME = "/home/step"
 INTERMEDIATE_CERTIFICATE = "certs/intermediate_ca.crt"
 INTERMEDIATE_IN_VOLUME = f"{STEP_HOME}/{INTERMEDIATE_CERTIFICATE}"
