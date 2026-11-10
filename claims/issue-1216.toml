@@ -1,8 +1,0 @@
-claim_id = "46ce6decf1c24b5a99fcb65349bfbbd5"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "c2f7b8a96fe381040824805f49adfe6e5ac7c73b"
-branch = "claude/issue-1216-docs-songmaker-off-the-pc"
-scope = ["docs/agent-service.md", "docs/architecture.md", "docs/home.md", "docs/keycloak.md", "docs/naming.md"]
-opened_commit = "e8e0d3f0de7ffeab1bd751480bd0c1ed9b584afa"
-whole_reason = "One sweep of one fact through five documents; split per file, the same sentences would be reviewed five times."
