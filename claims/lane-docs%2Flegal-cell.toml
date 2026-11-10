@@ -1,0 +1,7 @@
+claim_id = "009bc488672347268cb120fa1de3c64d"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "7a06a7a5596e8840baee0234da94052ff3d662df"
+branch = "docs/legal-cell"
+scope = ["docs/architecture.md"]
+opened_commit = "224f4045e5a995d9dd7215c56286044d8f47245b"
