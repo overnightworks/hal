@@ -3,7 +3,8 @@ sections of `legal/sections` and each app's own `legal/` files at the release it
 (`apps.ShownRelease`; a host-only app's is HEAD of its checkout), compared with `legal/built`, and
 written there after the operator's `yes`.
 
-The step runs only while `services.legal` is in the catalog and enabled. Every refusal comes at
+The step runs only while `services.legal` is in the catalog and enabled and its apex host is
+served by hal's own tunnel. Every refusal comes at
 plan time, before the question, and nothing is written on one.
 """
 
@@ -34,6 +35,7 @@ from hal.stack.legal_section import PAGES, LegalError, parse_fragment, parse_gen
 from hal.stack.unit_plans import Fleet, NotWritten, Progress
 
 LEGAL_UNIT = "legal"
+APEX_HOST = "@"
 GENERAL_UNIT = "allgemein"
 SECTIONS_DIRECTORY = "legal/sections"
 BUILT_DIRECTORY = "legal/built"
@@ -114,8 +116,11 @@ def plan_legal(
     released: apps.AppsPlan,
     run_git: checkout.Runner = checkout.run_git,
 ) -> LegalPlan:
-    """What the step would write; a plan without pages while the legal unit does not run."""
-    if not any(unit.key == LEGAL_UNIT and unit.enabled for unit in fleet.units):
+    """What the step would write; a plan without pages while the legal unit does not run or
+    another tunnel serves its apex (the unit then keeps its last build as the rollback target)."""
+    if not any(
+        unit.key == LEGAL_UNIT and unit.enabled and _serves_apex(unit) for unit in fleet.units
+    ):
         return LegalPlan(repository, record, {}, {})
     release_blocks = _shown_release_blocks(repository, released)
     git = checkout.Git(repository, run_git)
@@ -143,6 +148,10 @@ def plan_legal(
                     one for one in block_changes(page, None, fingerprints[page], tags) if one.tag
                 )
     return LegalPlan(repository, record, pages, changed, named, fingerprints)
+
+
+def _serves_apex(unit: catalog.Unit) -> bool:
+    return not any(host.name == APEX_HOST for host in unit.served_elsewhere)
 
 
 def _shown_release_blocks(
