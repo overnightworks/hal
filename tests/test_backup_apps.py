@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from support.backup_support import SQLITE_TOML
+from support.backup_support import SONGMAKER_TOML, SQLITE_TOML
 
 from hal.backup.apps import PRE_APPLY_TAG, App, AppsError, PostgresDatabase, parse_apps
 from hal.backup.cli import DEFAULT_APPS
@@ -126,3 +126,49 @@ def test_a_sqlite_record_naming_a_files_key_is_refused_as_an_unknown_key(key):
 
     with pytest.raises(AppsError, match="unknown key"):
         parse_apps(record)
+
+
+@pytest.mark.parametrize(
+    "dropped",
+    [
+        pytest.param(["volume"], id="references-without-a-volume"),
+        pytest.param(["audio_reference_table", "audio_reference_column"], id="volume-alone"),
+        pytest.param(["audio_reference_column"], id="a-table-without-its-column"),
+    ],
+)
+def test_apps_toml_refuses_audio_that_is_not_declared_whole(dropped):
+    """#107 T2: a reference table without a volume (or the reverse) is refused at load."""
+    text = "\n".join(
+        line
+        for line in SONGMAKER_TOML.splitlines()
+        if not any(line.startswith(f"{key} =") for key in dropped)
+    )
+
+    with pytest.raises(AppsError, match="audio needs volume and audio_reference_table"):
+        parse_apps(text)
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        (("dump", '"sh -c pg_dump"'), "dump must be one of"),
+        (("volume", '"audio files"'), "volume must match"),
+        (("hook", '"rm -rf /"'), "unknown key; only ["),
+        (("db_name", '"x; DROP TABLE songs"'), "db_name must match"),
+    ],
+)
+def test_apps_toml_accepts_only_validated_records(change, message):
+    key, value = change
+    lines = [line for line in SONGMAKER_TOML.splitlines() if not line.startswith(f"{key} =")]
+    lines.insert(lines.index("[app.songmaker]") + 1, f"{key} = {value}")
+    text = "\n".join(lines)
+
+    with pytest.raises(AppsError, match=re.escape(message)):
+        parse_apps(text)
+
+
+def test_apps_toml_rejects_an_unsafe_sql_identifier():
+    text = SONGMAKER_TOML.replace('"songs"', '"songs\\"; --"')
+
+    with pytest.raises(AppsError, match="count_table must match"):
+        parse_apps(text)

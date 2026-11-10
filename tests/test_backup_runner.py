@@ -19,11 +19,13 @@ from support.backup_support import (
     RESTORE_SERVER_ID,
     SHIPPED_APPS,
     SONGMAKER_CONTAINER,
+    SONGMAKER_TOML,
     STATUS_KEYS,
     Machine,
     app_history,
     declare_apps,
     declare_shipped_apps,
+    declare_songmaker_and_keycloak,
     declare_two_apps,
     mode_of,
     mount_of,
@@ -82,6 +84,35 @@ def test_backup_of_one_app_touches_only_that_app(edge_backup, machine, home):
         machine.argv_of("restic forget").index("--tag") + 1
     ] == ("radio")
     assert list(outcome.status["apps"]) == ["radio"]
+
+
+@pytest.mark.parametrize(
+    ("declaration", "command", "apps_after"),
+    [
+        pytest.param(RADIO_TOML, ("backup",), ["radio"], id="app no longer declared"),
+        pytest.param(
+            SONGMAKER_TOML + RADIO_TOML,
+            ("backup", "radio"),
+            ["radio", "songmaker"],
+            id="declared app outside the run's targets",
+        ),
+    ],
+)
+def test_a_backup_run_drops_the_status_entry_of_an_app_that_is_no_longer_declared(
+    edge_backup, machine, home, declaration, command, apps_after
+):
+    first = edge_backup(*declare_two_apps(home), "backup")
+    assert first.exit_code == 0, first.err
+    machine.clock.moment += timedelta(days=7)
+
+    outcome = edge_backup(*declare_apps(home, declaration), *command)
+
+    assert outcome.exit_code == 0, outcome.err
+    assert (outcome.status["state"], outcome.status["failing_app"]) == ("ok", None)
+    assert sorted(outcome.status["apps"]) == apps_after
+    assert outcome.status["apps"].get("songmaker") == (
+        first.status["apps"]["songmaker"] if "songmaker" in apps_after else None
+    )
 
 
 def test_restore_test_of_one_app_keeps_the_other_apps_status_and_reads_no_data(
@@ -165,8 +196,8 @@ def test_dump_runs_fixed_pg_dump_in_the_container_found_by_compose_labels(edge_b
     ]  # fmt: skip
 
 
-def test_every_container_runs_a_digest_pinned_image(edge_backup, machine):
-    shipped = declare_shipped_apps()
+def test_every_container_runs_a_digest_pinned_image(edge_backup, machine, home):
+    shipped = declare_apps(home, cli.DEFAULT_APPS.read_text() + SONGMAKER_TOML)
     edge_backup(*shipped, "backup")
     edge_backup(*shipped, "restore", "--test")
 
@@ -478,16 +509,6 @@ def test_a_status_write_failure_stops_the_run_before_the_next_app(edge_backup, m
 
     assert machine.labels().count("pg_dump") == 1
     assert "restic forget" not in machine.labels()
-
-
-def test_an_app_removed_from_apps_toml_keeps_its_entry(edge_backup, machine, home):
-    """#71 rule 8: an app removed from apps.toml keeps its entry unchanged."""
-    radio = app_history(edge_backup(*declare_two_apps(home), "backup").status, "radio")
-
-    outcome = edge_backup("backup")
-
-    assert outcome.exit_code == 0, outcome.err
-    assert app_history(outcome.status, "radio") == radio
 
 
 def test_a_failed_check_keeps_the_last_successful_backup(edge_backup, machine):
@@ -969,26 +990,6 @@ def test_the_projects_apps_toml_parses():
     assert parse_apps(cli.DEFAULT_APPS.read_text())
 
 
-@pytest.mark.parametrize(
-    "dropped",
-    [
-        pytest.param(["volume"], id="references-without-a-volume"),
-        pytest.param(["audio_reference_table", "audio_reference_column"], id="volume-alone"),
-        pytest.param(["audio_reference_column"], id="a-table-without-its-column"),
-    ],
-)
-def test_apps_toml_refuses_audio_that_is_not_declared_whole(dropped):
-    """#107 T2: a reference table without a volume (or the reverse) is refused at load."""
-    text = "\n".join(
-        line
-        for line in cli.DEFAULT_APPS.read_text().splitlines()
-        if not any(line.startswith(f"{key} =") for key in dropped)
-    )
-
-    with pytest.raises(AppsError, match="audio needs volume and audio_reference_table"):
-        parse_apps(text)
-
-
 @pytest.mark.parametrize("major", ["15", "[17]", "true", '"17"'])
 def test_apps_toml_refuses_a_postgres_major_without_a_restore_image(major):
     """#107 rule 2: a major that is no pinned plain integer is refused at load."""
@@ -1104,12 +1105,12 @@ def test_an_app_never_backed_up_is_named_so_by_restore_and_restore_test(edge_bac
 
 
 def test_keycloak_reported_failed_while_songmaker_is_still_backed_up_when_keycloak_db_is_down(
-    edge_backup, machine
+    edge_backup, machine, home
 ):
     """#107 T7: keycloak is recorded failed, songmaker is still backed up."""
     machine.lose_keycloak_database()
-    shipped = {app.name for app in parse_apps(cli.DEFAULT_APPS.read_text())}
-    outcome = edge_backup(*declare_shipped_apps(), "backup")
+    declared = {"songmaker", "keycloak"}
+    outcome = edge_backup(*declare_songmaker_and_keycloak(home), "backup")
 
     assert outcome.exit_code == 3
     assert "no database container" in outcome.out
@@ -1117,7 +1118,7 @@ def test_keycloak_reported_failed_while_songmaker_is_still_backed_up_when_keyclo
         "keycloak",
         "not-ready",
     )
-    assert {s["app"] for s in machine.snapshots} == shipped - {"keycloak"}
+    assert {s["app"] for s in machine.snapshots} == declared - {"keycloak"}
     assert app_history(outcome.status)["last_snapshot_id"] == machine.snapshots[0]["id"]
 
 
@@ -1138,33 +1139,3 @@ def test_no_output_or_status_holds_the_dump(edge_backup, machine):
 
     shown = "".join(run.out + run.err for run in runs) + machine.status_file.read_text()
     assert DUMP.decode() not in shown
-
-
-@pytest.mark.parametrize(
-    ("change", "message"),
-    [
-        (("dump", '"sh -c pg_dump"'), "dump must be one of"),
-        (("volume", '"audio files"'), "volume must match"),
-        (("hook", '"rm -rf /"'), "unknown key; only ["),
-        (("db_name", '"x; DROP TABLE songs"'), "db_name must match"),
-    ],
-)
-def test_apps_toml_accepts_only_validated_records(change, message):
-    key, value = change
-    lines = [
-        line
-        for line in cli.DEFAULT_APPS.read_text().splitlines()
-        if not line.startswith(f"{key} =")
-    ]
-    lines.insert(lines.index("[app.songmaker]") + 1, f"{key} = {value}")
-    text = "\n".join(lines)
-
-    with pytest.raises(AppsError, match=re.escape(message)):
-        parse_apps(text)
-
-
-def test_apps_toml_rejects_an_unsafe_sql_identifier():
-    text = cli.DEFAULT_APPS.read_text().replace('"songs"', '"songs\\"; --"')
-
-    with pytest.raises(AppsError, match="count_table must match"):
-        parse_apps(text)
