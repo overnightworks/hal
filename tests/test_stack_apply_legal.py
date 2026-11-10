@@ -452,21 +452,26 @@ def test_without_an_enabled_legal_unit_there_is_no_step_and_no_line(world, servi
     assert world.built_names() == [".gitkeep"]
 
 
-def test_while_another_tunnel_serves_the_apex_the_step_reads_no_text_and_builds_nothing(world):
-    """The refusal of a text comes only while hal's tunnel serves the apex (the case of
-    `test_a_refused_section_stops_the_run_before_the_question_and_writes_nothing`)."""
-    legal_on_the_platform = FLEET.replace(
+@pytest.mark.parametrize(
+    ("tunnel", "exit_code_expected", "refused"),
+    [(", tunnel: platform", 0, False), ("", 2, True)],
+    ids=["another-tunnel", "hal-tunnel"],
+)
+def test_a_text_is_read_and_refused_only_while_hal_s_tunnel_serves_the_apex(
+    world, tunnel, exit_code_expected, refused
+):
+    apex_host = FLEET.replace(
         "  legal:\n    run: {enabled: true}\n",
         "  legal:\n    run: {enabled: true}\n"
-        '    hosts: [{name: "@", exposure: public, reason: pages, tunnel: platform}]\n',
+        f'    hosts: [{{name: "@", exposure: public, reason: pages{tunnel}}}]\n',
     )
-    write_fleet(world.repository, legal_on_the_platform)
+    write_fleet(world.repository, apex_host)
     world.edit(PRIVACY, link_to_a_missing_id)
 
     exit_code, out, err = world.switch()
 
-    assert exit_code == 0
-    assert "cannot plan" not in err
+    assert exit_code == exit_code_expected
+    assert (f"cannot plan, legal: {PRIVACY}: line 2: link to #nirgends" in err) is refused
     assert "page" not in plain(out)
     assert world.built_names() == [".gitkeep"]
 
