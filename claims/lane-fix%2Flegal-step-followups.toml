@@ -1,8 +1,0 @@
-claim_id = "1ccd633bee8d488eb51fa5be1e5f6f6e"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "518d29a85232fa2f49ef6ffe14c84bf19dbd733b"
-branch = "fix/legal-step-followups"
-scope = ["README.md", "src/hal/stack/apply.py", "src/hal/stack/legal_step.py", "tests/test_stack_apply_legal.py"]
-opened_commit = "e4d3be6b046d63aff9f998bcac9195f5a588d100"
-whole_reason = "Four small review follow-ups of one landed change; split, each would cost its own review."
