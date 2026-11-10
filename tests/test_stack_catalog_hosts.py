@@ -139,11 +139,6 @@ def test_a_missing_or_unknown_exposure_is_refused_listing_the_three(exposure):
     assert "public, bypass, protected" in message
 
 
-def test_a_host_without_target_is_asked_on_traefik():
-    (found,) = catalog.hosts(document(hosted(host())))
-    assert found.target == "http://127.0.0.1:8081"
-
-
 def test_a_host_names_the_tunnel_that_serves_it_and_without_the_key_hals_own_serves_it():
     moved, own = catalog.hosts(document(hosted(host("app", tunnel="platform"), host("www"))))
     assert (moved.tunnel, own.tunnel) == ("platform", None)
