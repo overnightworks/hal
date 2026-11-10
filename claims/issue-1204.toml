@@ -3,6 +3,6 @@ agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
 role = "builder"
 base = "357a0f2fa53a6f8b0c3bcbd1b7f7e19af9d5a51b"
 branch = "claude/issue-1204-songmaker-platform-tunnel"
-scope = ["docs/architecture.md", "external/hosts.tf", "fleet.yaml", "src/hal/stack/catalog.py", "tests/test_stack_catalog_hosts.py"]
+scope = ["docs/architecture.md", "docs/external.md", "external/hosts.tf", "fleet.yaml", "src/hal/stack/catalog.py", "tests/test_stack_catalog_hosts.py"]
 opened_commit = "f09b3d800b096efc6d1c871aab892b132dda79f6"
 whole_reason = "The catalog key, the predecessor's exception and the sentences they make false must land together."
