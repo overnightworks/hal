@@ -48,10 +48,7 @@ files.
 - songmaker and hopin keep every name they have, including their unprefixed
   distributions `songmaker` and `hopin`. Both names are free on PyPI and run
   only from their own checkout. Their Sonar keys `overnightworks_songmaker`
-  and `overnightworks_hopin` already follow the rule. songmaker's units
-  (`songmaker`, `songmaker-autodeploy`, `songmaker-cli-credentials-mirror`,
-  `songmaker-alert@`) and compose services (`songmaker-web`,
-  `songmaker-music-worker`, `songmaker-scoring-worker`) stay as they are. Their
+  and `overnightworks_hopin` already follow the rule. Their
   clone and worktree paths (`~/git/songmaker`, `~/git/hopin`, `-worktrees/`)
   already follow the rule.
 - ACE-Step-1.5 is upstream and keeps its upstream names.
@@ -76,7 +73,7 @@ The `hal` command's name and verbs have one code owner, `hal.output.command`; ev
 | `redphone` (claudebot) | `overnightworks-redphone` | `redphone` | none | `redphone` (was `agent-telegram`) | `overnightworks_redphone` | none |
 | `gmail-cleanup` ✓ | `overnightworks-gmail-cleanup` | ✓ | none | none | ✓ | none |
 | `kiln` ✓ | unpublished Rust crates `kiln-<component>` ✓ | none | none | none | none | none |
-| `songmaker`, `hopin`, `ACE-Step-1.5` | unchanged (fixed point, upstream): `songmaker`, `hopin` | | | songmaker: see Fixed points | `overnightworks_songmaker`, `overnightworks_hopin` (already conform) | `songmaker`, `/apps/songmaker`, `/apps/hopin` |
+| `songmaker`, `hopin`, `ACE-Step-1.5` | unchanged (fixed point, upstream): `songmaker`, `hopin` | | | none | `overnightworks_songmaker`, `overnightworks_hopin` (already conform) | `songmaker`, `/apps/songmaker`, `/apps/hopin` |
 | `atelier-1` (the archived former atelier) | archived, renamed so marketplace can take `atelier` | none | none | none | none | none |
 | `atelier-2`, `foreman` (archived) | unchanged | none | none | none | none | none |
 

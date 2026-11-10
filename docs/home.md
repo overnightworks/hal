@@ -738,8 +738,7 @@ Zwei Dateien, beide von Hand angelegt, beide Modus 0600, beide im Geheimnis-Mani
 
 `msmtp` läuft als du und liest das Passwort beim Senden selbst (`--passwordeval`); `hal` öffnet die Datei nie, und das
 Passwort steht in keinem Terminal, Log, keiner Mail, keinem Argument und keiner Zustandsdatei. Rotieren heißt die Datei
-ersetzen (neues App-Passwort anlegen, das alte widerrufen); die Kopie in songmakers `.env` ziehst du von Hand nach, bis
-songmaker die Datei selbst liest. Akzeptiertes Risiko: Jeder Prozess, der als du läuft, Agenten eingeschlossen, kann über
+ersetzen (neues App-Passwort anlegen, das alte widerrufen). Akzeptiertes Risiko: Jeder Prozess, der als du läuft, Agenten eingeschlossen, kann über
 dieses Konto senden; darum ein App-Passwort nur dafür, widerrufbar.
 
 Die Mail geht nur über TLS (STARTTLS auf 587, implizites TLS auf 465), das Serverzertifikat wird gegen den System-Trust-Store
@@ -752,8 +751,7 @@ Die Zusage ist enger als „jeder Commit“:
 
 - Nicht erfasst: `--no-verify` bei `git commit` und `git merge`; Commits aus
   rebase, cherry-pick, revert und `git am`; Plumbing wie `git commit-tree`; ein
-  einzelner Befehl mit `-c core.hooksPath=…` oder `GIT_CONFIG_*` (songmakers
-  Deploy-Skript tut das absichtlich); ein anderer OS-Benutzer oder ein anderes
+  einzelner Befehl mit `-c core.hooksPath=…` oder `GIT_CONFIG_*`; ein anderer OS-Benutzer oder ein anderes
   HOME.
 - Rückhalt: die Agentenregel „nie `--no-verify`“ (`AGENTS.md`), Push Protection
   auf den öffentlichen Repositories und das CI-History-Gate dort, wo es

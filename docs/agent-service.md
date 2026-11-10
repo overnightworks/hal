@@ -79,7 +79,8 @@ per app and per person, when that is deleted, how long the backup keeps it and t
 ## An app's side
 
 An app reaches `litellm-front` by joining its own agent network, `hal_agent_<app>` (`hal_agent_songmaker`,
-`hal_agent_presentator`, `hal_agent_hopin`), as an external network. The names are fixed, so the project's rename does not
+`hal_agent_presentator`, `hal_agent_hopin`), as an external network. songmaker runs on the platform, so nothing on the PC joins
+`hal_agent_songmaker`. The names are fixed, so the project's rename does not
 move them, and no app sees another's network:
 
 ```yaml
@@ -87,7 +88,7 @@ services:
   app:
     networks: [default, agent]
 networks:
-  agent: {external: true, name: hal_agent_songmaker}
+  agent: {external: true, name: hal_agent_presentator}
 ```
 
 An app holds only its own key, the file `~/.secrets/litellm/apps/<app>` (`songmaker`,
