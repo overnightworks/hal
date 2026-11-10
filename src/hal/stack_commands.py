@@ -149,7 +149,8 @@ COMMANDS = (
     ),
     Command(
         Verb.OFFLINE,
-        "stop the tunnel, so the PC is off the internet (no terminal needed)",
+        "stop hal's tunnel, so hal's hosts are off the internet; "
+        "the platform's tunnel stays up (no terminal needed)",
         _offline,
         _configure_nothing,
         json=False,
