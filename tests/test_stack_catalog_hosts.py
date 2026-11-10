@@ -59,9 +59,7 @@ def test_the_reader_yields_what_tofu_is_held_to(fixture):
 
 
 def test_a_host_carries_its_service_fqdn_and_all_five_fields():
-    found = catalog.hosts(
-        document(hosted(host("app", ready="/health", target="http://127.0.0.1:8081")))
-    )
+    found = catalog.hosts(document(hosted(host("app", ready="/health"))))
     assert found == (
         catalog.Host(
             service="app",
@@ -127,7 +125,7 @@ def test_a_malformed_deny_path_is_refused_naming_the_key(denied):
     assert message.startswith("services.app.hosts[0].deny_public:")
 
 
-@pytest.mark.parametrize("unknown", ["port", "ready_path", "record"])
+@pytest.mark.parametrize("unknown", ["port", "ready_path", "record", "target"])
 def test_an_unknown_host_key_is_refused_naming_it(unknown):
     message = refusal(document(hosted(host(**{unknown: 1}))))
     assert message == f"services.app.hosts[0].{unknown}: unknown key"
@@ -141,66 +139,14 @@ def test_a_missing_or_unknown_exposure_is_refused_listing_the_three(exposure):
     assert "public, bypass, protected" in message
 
 
-def test_a_host_without_target_is_asked_on_traefik():
-    (found,) = catalog.hosts(document(hosted(host())))
-    assert found.target == "http://127.0.0.1:8081"
-
-
-@pytest.mark.parametrize(
-    "service,name,target,accepted",
-    [
-        pytest.param("app", "app", "http://localhost:8080", False, id="not-a-declared-pair"),
-        pytest.param("songmaker", "@", "http://localhost:8080", False, id="apex-left-the-tunnel"),
-        pytest.param("songmaker", "songmaker", "http://localhost:8080", True, id="declared-host"),
-        pytest.param("songmaker", "www", "http://127.0.0.1:8080", False, id="www-left-the-tunnel"),
-        pytest.param("songmaker", "songmaker", "http://localhost:8090", False, id="admin-port"),
-        pytest.param("app", "app", "http://127.0.0.1:8090", False, id="admin-port-anywhere"),
-        pytest.param("songmaker", "songmaker", "http://example.com:8080", False, id="not-loopback"),
-        pytest.param("songmaker", "songmaker", "https://localhost:8080", False, id="not-http"),
-        pytest.param("songmaker", "songmaker", "http://localhost", False, id="no-port"),
-        pytest.param("songmaker", "songmaker", "http://localhost:8080/x", False, id="with-path"),
-        pytest.param("songmaker", "songmaker", "http://localhost:8080?x", False, id="with-query"),
-        pytest.param(
-            "songmaker", "songmaker", "http://me@localhost:8080", False, id="with-user-info"
-        ),
-        pytest.param(
-            "songmaker", "songmaker", "http://localhost:99999", False, id="port-out-of-range"
-        ),
-        pytest.param("app", "app", "http://127.0.0.1:8081", True, id="the-default-anywhere"),
-    ],
-)
-def test_a_target_is_loopback_http_and_only_gap_35_hosts_may_leave_traefik(
-    service, name, target, accepted
-):
-    catalog_document = document(hosted(host(name, "public", target=target), key=service))
-    if accepted:
-        (found,) = catalog.hosts(catalog_document)
-        assert found.target == target
-    else:
-        assert refusal(catalog_document).startswith(f"services.{service}.hosts[0].target:")
-
-
 def test_a_host_names_the_tunnel_that_serves_it_and_without_the_key_hals_own_serves_it():
     moved, own = catalog.hosts(document(hosted(host("app", tunnel="platform"), host("www"))))
     assert (moved.tunnel, own.tunnel) == ("platform", None)
 
 
-@pytest.mark.parametrize(
-    ("listed", "message"),
-    [
-        pytest.param(
-            host("app", tunnel="platform", target=catalog.DEFAULT_TARGET),
-            f"services.app.hosts[0].tunnel: app.{ZONE} takes no target on another tunnel",
-            id="with-target",
-        ),
-        pytest.param(
-            {"name": "*", "exposure": "protected", "tunnel": "platform"},
-            f"services.app.hosts[0].tunnel: the wildcard *.{ZONE} stays on hal's tunnel",
-            id="on-the-wildcard",
-        ),
-    ],
-)
-def test_a_tunnel_beside_a_target_or_on_the_wildcard_is_refused_naming_the_host(listed, message):
+def test_a_tunnel_on_the_wildcard_is_refused_naming_the_host():
+    listed = {"name": "*", "exposure": "protected", "tunnel": "platform"}
+    message = f"services.app.hosts[0].tunnel: the wildcard *.{ZONE} stays on hal's tunnel"
     assert refusal(document(hosted(listed))) == message
     assert refusal(document(hosted(listed, run={"enabled": False}))) == message
 

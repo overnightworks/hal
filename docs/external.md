@@ -63,7 +63,7 @@ Allowlist-Umgebung, dieselbe State-Passphrase).
   Identitaetspruefung: ein Agent kann ein pty oeffnen und `yes` tippen, erst D14 macht daraus "nur der
   Betreiber".
 - **`ready`-Schutz.** Hat der Plan Aenderungen, fragt `apply` vor dem `yes` jeden aktivierten Host mit
-  `ready` (`fleet.yaml`) nach diesem Pfad auf seinem `target` (`GET`, `Host` = FQDN, kein Redirect,
+  `ready` (`fleet.yaml`) nach diesem Pfad ueber hals Traefik (`GET`, `Host` = FQDN, kein Redirect,
   10 s, kein Retry); nur 2xx zaehlt. Antwortet einer nicht, endet es mit Exit 1 vor dem `yes`: jeder
   nicht antwortende Host steht mit Pfad, Ziel und Status auf stderr, `tofu apply` laeuft nie, die
   Plan-Datei wird geloescht. Das gilt auch fuer eine ganz andere Aenderung (Host gestoppt, abgestuerzt,
@@ -100,7 +100,7 @@ spielen keine Rolle, ausser ein Host nennt einen davon (unten). Fehlt die Datei 
 keine ID, oder hat kein lebender Tunnel die ID, endet der Lauf mit einem Fehler.
 
 **Ein Host auf einem anderen Tunnel.** Ein Host im Katalog kann mit `tunnel: <name>` einen anderen
-Tunnel im Konto der Zone nennen (ein kleingeschriebenes DNS-Label; nicht neben `target`, nicht auf
+Tunnel im Konto der Zone nennen (ein kleingeschriebenes DNS-Label, nicht auf
 `*`). `apply` sucht jeden genannten Tunnel einmal ueber seinen Namen unter den lebenden Tunneln und
 richtet den Record des Hosts auf ihn; der Host verliert nur seine Zeile in hals Tunnel, die der
 Besitzer des anderen Tunnels in dessen Ingress schreibt. Record, `deny_public`, Access und der
@@ -115,7 +115,7 @@ Plan.
   entfernen, `hal apply`; Record und Tunnel-Zeile kehren zu hals Tunnel zurueck. Ihr Container
   muss vor diesem `hal apply` laufen und gesund sein, denn die Publish-Phase prueft `ready` ueber
   hals Traefik und verweigert den Lauf sonst. Wurde er gestoppt, kommt `hal start <app>` zuerst.
-- **Ein Host ohne `repo` und `run`** (heute `skat` und `hopin`): hal betreibt nichts dahinter. Der Besitzer des
+- **Ein Host ohne `repo` und `run`** (heute `songmaker`, `skat` und `hopin`): hal betreibt nichts dahinter. Der Besitzer des
   Tunnels bedient ihn und stoppt oder startet ihn; hal haelt nur Record, `deny_public` und Access.
   Der Rueckweg ist seiner, und `hal stop` und `hal start` kennen den Host nicht.
 - **Gibt es den genannten Tunnel nicht mehr** (geloescht, umbenannt oder doppelt), scheitert jeder
