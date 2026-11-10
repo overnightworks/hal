@@ -120,23 +120,6 @@ def test_the_mcp_network_gets_no_address_on_the_host(compose):
     assert compose["networks"]["mcp"]["driver_opts"] == ISOLATED_MODE
 
 
-def test_songmakers_mcp_network_is_internal_isolated_and_joined_by_traefik_mcp_alone(compose):
-    """P25: hal_mcp_songmaker has no route out and no host address, and no service of the
-    stack but traefik-mcp joins it (songmaker-web joins it as an external network)."""
-
-    network = compose["networks"]["mcp-songmaker"]
-    members = [
-        name
-        for name, service in compose["services"].items()
-        if "mcp-songmaker" in (service.get("networks") or [])
-    ]
-
-    assert network["internal"] is True
-    assert network["driver_opts"] == ISOLATED_MODE
-    assert members == ["traefik-mcp"]
-    assert "aliases" not in (compose["services"]["traefik-mcp"]["networks"]["mcp-songmaker"] or {})
-
-
 def test_traefik_mcp_is_the_only_service_on_all_three_networks(compose):
     """#48 rule 1: only traefik-mcp bridges the three networks."""
 

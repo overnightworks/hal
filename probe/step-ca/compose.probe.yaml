@@ -1,8 +1,0 @@
-# Probe overlay (probe/step-ca/probe.py): songmaker's MCP server, a stand-in that answers on 8080
-# and logs each request, on the MCP network of songmaker alone. Never used live.
-services:
-  songmaker-web:
-    image: traefik/whoami:v1.12.0@sha256:c4717a8d1f0134a7444e24f881160e033991f23027c6c5a9a3f8fd22e70d1d44
-    profiles: [probe]
-    command: ["--port", "8080", "--verbose"]
-    networks: [mcp-songmaker]

@@ -49,8 +49,6 @@ services:
 networks:
   # compose.yaml gives these networks fixed names; here they belong to the probe's project, on
   # every profile, the realm engine's `*` included.
-  mcp-songmaker:
-    name: ${COMPOSE_PROJECT_NAME}_mcp_songmaker
   agent-songmaker:
     name: ${COMPOSE_PROJECT_NAME}_agent_songmaker
   agent-presentator:

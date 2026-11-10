@@ -12,7 +12,7 @@ x-traefik: &traefik
 # challenge there) and on mcp (the clients). step-ca/ca.json's policy allows exactly this suffix.
 # keycloak.mcp.internal is no MCP server but Keycloak's key set for the speech service
 # (mcp/dynamic/keycloak.yml), which needs a certificate of the same CA.
-x-mcp-origins: &mcp-origins [hello.mcp.internal, songmaker.mcp.internal, keycloak.mcp.internal]
+x-mcp-origins: &mcp-origins [hello.mcp.internal, keycloak.mcp.internal]
 
 # The egress gateway's address (agent-service/egress/), on the network LiteLLM shares with it: the
 # entrypoint `litellm` of agent-service/egress/traefik.yml. LiteLLM finds its providers through
@@ -24,8 +24,8 @@ x-litellm-egress-address: &litellm-egress-address 172.31.239.10
 # shares the app networks, where an app could claim the name `litellm` in Docker's DNS.
 x-litellm-backend-address: &litellm-backend-address 172.31.199.10
 # Keycloak's address on keycloak-keys, where traefik-mcp finds it through extra_hosts: traefik-mcp
-# shares hal_mcp_songmaker with an app, which could claim the name `keycloak` in Docker's DNS and
-# serve a forged key set to the speech service.
+# shares mcp-backends with the MCP servers and speech-issuer with the speech service, which could
+# claim the name `keycloak` in Docker's DNS and serve a forged key set to the speech service.
 x-keycloak-keys-address: &keycloak-keys-address 172.31.198.10
 # What both Postgres databases share: one image digest and one hardening. The alpine image's
 # postgres user owns the data directory a named volume inherits.
@@ -421,7 +421,6 @@ services:
       mcp-ca: {aliases: *mcp-origins}
       mcp: {aliases: *mcp-origins}
       mcp-backends: {}
-      mcp-songmaker: {}
       # The speech service finds traefik-mcp here by this one name.
       speech-issuer: {aliases: [keycloak.mcp.internal]}
       keycloak-keys: {}
@@ -643,12 +642,6 @@ networks:
   # traefik-mcp and the apps' MCP servers.
   mcp-backends:
     internal: true
-  # songmaker's MCP server and traefik-mcp alone (mcp/dynamic/songmaker.yml); the app joins it as an
-  # external network. The fixed name survives the project's rename to `hal`.
-  mcp-songmaker:
-    name: hal_mcp_songmaker
-    internal: true
-    driver_opts: *isolated-bridge
   # One app's callers and the front of LiteLLM; each app joins its own network
   # as an external network, so no app sees another's.
   agent-songmaker:
