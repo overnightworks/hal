@@ -5,13 +5,15 @@ import json
 import pytest
 from support.backup_support import (
     DUMP,
+    SONGMAKER_TOML,
     Machine,
     app_history,
-    declare_shipped_apps,
+    declare_apps,
     declare_two_apps,
     schema_one_status,
 )
 
+from hal.backup import cli
 from hal.backup.settings import RESTIC_IMAGE, RESTORE_IMAGES
 
 
@@ -76,9 +78,9 @@ def test_restore_refuses_without_the_last_successful_snapshot_and_names_the_newe
 )
 @pytest.mark.parametrize("command", ["backup", "restore --test"])
 def test_a_pruned_pinned_image_is_pulled_by_its_digest_and_the_run_goes_on(
-    edge_backup, machine, command, image
+    edge_backup, machine, home, command, image
 ):
-    shipped = declare_shipped_apps()
+    shipped = declare_apps(home, cli.DEFAULT_APPS.read_text() + SONGMAKER_TOML)
     edge_backup(*shipped, "backup")
     machine.missing_images = {image}
 
