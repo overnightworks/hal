@@ -41,6 +41,7 @@ flowchart TB
         DNS["Cloudflare DNS<br/>hallucinai.de and *.hallucinai.de"]
         ACC["Cloudflare Access<br/>planned (X8b): * = operator only, Google + MFA<br/>today: no Zero Trust, auth goes live as public"]
         TUN["Cloudflare Tunnel<br/>ingress per D6 (planned, X6a #168)"]
+        PKC["Platform's Keycloak<br/>auth.hallucinai.de: the one login, served by the platform's tunnel"]
         GH["GitHub overnightworks<br/>repos, rulesets, Actions, org secrets"]
         SC["SonarCloud<br/>projects by hand"]
     end
@@ -75,15 +76,18 @@ flowchart TB
 
     VIS --> DNS
     OP --> DNS
+    VIS -->|"login: auth.hallucinai.de"| PKC
     DNS --> ACC --> TUN --> CFD
-    CFD -->|"every name"| TRF
-    TRF -->|"container label edge.name"| KC & PRES & HOP & LOOK & MON
-    SONG & PRES & HOP -.->|"check the ID themselves: webauth, OIDC, group /apps/name"| KC
+    CFD -->|"every name but auth"| TRF
+    TRF -->|"container label edge.name"| PRES & HOP & LOOK & MON
+    TRF -.->|"rollback only: auth"| KC
+    SONG & PRES & HOP -.->|"check the ID themselves: webauth, OIDC, group /apps/name"| PKC
     MON -.->|"metrics"| PRES & HOP & KC
     TMC -->|"ACME TLS-ALPN-01, 24 h certificates"| CA
     TMC --- MCPN
 
-    OP ==>|"PEOPLE: Keycloak admin"| ADM
+    OP ==>|"PEOPLE: the platform's Keycloak admin"| PKC
+    OP -.->|"rollback only"| ADM
     ADM --> KC
     OP ==>|"LOOK"| LOOK
     LOOK -.->|"one e-mail channel"| OP
@@ -100,13 +104,14 @@ flowchart TB
     BAK --> DATA
 
     class LOOK,MON,AGT planned
-    class LOOK,ADM place
+    class LOOK,PKC place
 ```
 
 **What the picture says, in six sentences:**
 1. **The way in.** Every name ends in hal's tunnel, unless its catalog host names another tunnel of the zone's account (`tunnel: <name>`), whose owner writes that name's ingress; hal's OpenTofu still owns its record, the deny rules and Access ([external.md](external.md)). Cloudflare Access is planned to block every name that is not explicitly opened (`*` = operator only, X8b on #30); the operator ruled on 20.10.2026 that Zero Trust is not needed for now and can be added at any time, so today `auth` goes live as `public` and the `*` protection waits for X8b. Traefik on loopback hands each name to the container with that `edge.name` label, and the alias of that container (`edge.alias`) too.
 2. **The login.** The platform's Keycloak at `auth.hallucinai.de` is the one login page; hal's Keycloak is the stopped rollback target ([keycloak.md](keycloak.md)). Every app checks the ID itself through webauth and its group `/apps/<name>`. songmaker joins only through its own cutover (section 3); until then it keeps its own login. Tools without their own login will sit behind Access (X8b); no login-less tool is published before it.
-3. **PEOPLE.** People and their groups exist only in the Keycloak admin, `http://localhost:8090/admin/`, on this PC (later via Tailscale).
+3. **PEOPLE.** People and their groups are managed in the platform's Keycloak admin, not in hal's stopped rollback unit (see [keycloak.md](keycloak.md)).
+
 4. **CHANGE.** Every change is a pull request. A release is a `vYYYY.MM.DD.N` tag: `hal apply` deploys presentator and speech at their newest one after the operator's `yes`, and the platform runs songmaker, skat and hopin (section 5); whether the service is then reachable depends on its state (section 8 state table). The platform (edge) and the external services change when the operator runs `hal apply`.
 5. **LOOK.** One traffic-light page answers "is it OK now?" for every service, the backup, the drift checks and the secrets. Grafana answers "why, and since when?" for every service. Both send alerts through one e-mail channel.
 6. **Agents.** Today agents run as the operator's user and can do whatever he can. Every "an agent may not" in this document is a request until D14 gives them their own user.
