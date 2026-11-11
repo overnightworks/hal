@@ -20,7 +20,6 @@ unit, not to the live login: it reaches that unit's admin console and master rea
 PC only, is never routed through the tunnel, and answers only while the unit runs. Administering the
 live login is the platform's, not this door's.
 
-
 The secrets (the database password, the password of the tool that applies the
 configuration, and a temporary admin password) are three files in
 `~/.secrets/keycloak/`; each confidential app client has one more file of its own in
@@ -52,7 +51,6 @@ The catalog host `auth` carries `tunnel: platform`: its record points at the pla
 which serves `auth.<EDGE_DOMAIN>`, and the platform's Keycloak answers it. This unit is switched
 off (`hal stop keycloak`) and stays in the catalog as the rollback target until hal stops. `hal apply`
 leaves it stopped, holds the realm step and the LiteLLM admin rows, and points the record of `auth` at the platform's tunnel and removes `auth` from hal's tunnel ingress;
-
 it does not ask `auth`'s `ready` path, because a host on another tunnel is not asked. Rolling back
 is `hal start keycloak`, then reverting the key, then `hal update` and `hal apply`. hal's speech
 service and the MCP servers behind traefik-mcp read the key set from this Keycloak at
@@ -121,7 +119,7 @@ The answers belong to this Keycloak version: the probe holds only that each ran,
 
 The cell N1 is not version-bound: webauth's group check (`current_groups`) refuses a refreshed ID token with a `nonce` key, so each app client's refreshed ID tokens must have none, and a Keycloak upgrade that adds the key fails the probe.
 
-Every login app follows the same shape. It gets its own client in `realm.yaml`, with its secret in its own file under `~/.secrets/keycloak/clients/`. Its `backchannel.logout.url` is `http://<app>.hallucinai.de:<port>/auth/backchannel-logout`, with `backchannel.logout.session.required: "false"`; the host is an alias the app's web service gives itself. The call travels over the app's own internal network `hal_backchannel_<app>`, which only `keycloak` joins on edge's side and the app joins as an external network, so no app sees another's. The public host lists the path in `deny_public` (`fleet.yaml`). An app that holds a refresh token per session names `use.refresh.tokens: "true"` (hopin); one without the line keeps Keycloak's default. Skat, songmaker and HopIn are the exception: they run on the platform, which this Keycloak's call does not reach, so after a rollback a sign-out ends their sessions only at their lifetime. The platform's Keycloak owns their back-channel logout today. Skat's client has no `backchannel.logout.url`; songmaker's and HopIn's clients keep theirs, with the networks below, and no app joins those networks.
+Every login app follows the same shape. It gets its own client in `realm.yaml`, with its secret in its own file under `~/.secrets/keycloak/clients/`. Its `backchannel.logout.url` is `http://<app>.hallucinai.de:<port>/auth/backchannel-logout`, with `backchannel.logout.session.required: "false"`; the host is an alias the app's web service gives itself. The call travels over the app's own internal network `hal_backchannel_<app>`, which only `keycloak` joins on edge's side and the app joins as an external network, so no app sees another's. The public host lists the path in `deny_public` (`fleet.yaml`). An app that holds a refresh token per session names `use.refresh.tokens: "true"` (hopin); one without the line keeps Keycloak's default. Skat, songmaker and HopIn are the exception: they run on the platform, which this Keycloak's call does not reach, so after a rollback a sign-out ends their sessions only at their lifetime. Skat's client has no `backchannel.logout.url`; songmaker's and HopIn's clients keep theirs, with the networks below, and no app joins those networks.
 
 songmaker's client declares the back-channel logout call
 `http://songmaker.hallucinai.de:8080/auth/backchannel-logout` (the name is an alias a songmaker web
@@ -156,7 +154,6 @@ presentator's client declares the same call over its own internal network `hal_b
 `session.required: "false"`, and keeps Keycloak's default refresh token. The platform's Keycloak
 cannot reach that network, so a central sign-out ends presentator's session on hal only at its own
 limit; the call travels only while this Keycloak runs.
-
 
 ### Theme and language
 
