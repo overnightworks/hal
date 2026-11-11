@@ -6,7 +6,7 @@ It never carries raw output, command lines, paths, file names or content.
 import json
 import os
 import tempfile
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from enum import StrEnum
@@ -112,6 +112,12 @@ class Status:
             last_attempt=started,
             apps=self.apps,
             unattributed=self.unattributed,
+        )
+
+    def without_undeclared(self, declared: Collection[str]) -> Self:
+        """An app the declaration no longer names keeps no history, so nothing in it can age."""
+        return replace(
+            self, apps={name: kept for name, kept in self.apps.items() if name in declared}
         )
 
     def snapshot_of(self, app: str) -> str | None:

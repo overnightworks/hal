@@ -51,7 +51,7 @@ Allow by `owner` alone only when the service opens random ports.
 
 ## hal backup and hal restore
 
-A weekly encrypted backup of the declared apps (Songmaker, Keycloak, LiteLLM and presentator) into a local restic repository,
+A weekly encrypted backup of the declared apps (Keycloak, LiteLLM and presentator) into a local restic repository,
 and a monthly test that restores the last successful backup's snapshot and proves it is good.
 
 **What it protects against:** accidental deletion and corruption. The repository `~/backups/restic` sits
@@ -65,7 +65,7 @@ on the same disk as the data, so it does **not** protect against losing the disk
 - *Restore goes to a new folder.* `hal restore --target` refuses a directory that exists. The only form that changes a live database is `hal restore <app> --live`: it loads a DB-only app's snapshot into its live database while the app is switched off (below).
 - *0 rows is valid.* The restore test requires rows only where the record says `require_rows = true`.
 - *One retention.* Every app's snapshots follow the same policy, 4 weekly and 3 monthly, and pre-apply snapshots keep their own last 10, and each forget of an app drops those older than 90 days (below). There is no per-app retention of backup snapshots; privacy values are app-owned (architecture.md, section 2).
-- *No secrets backup.* hal builds none: `~/.secrets` is in no backup. Deploy values survive a disk loss in the platform's repository platform-secrets, encrypted with SOPS and age, as each app moves there; the age key sits in the password manager. Personal tokens are issued again at their provider. The data backup has its own restic password and lives on this disk only: a dead disk loses it, people enrol again and songmaker's data is gone. A re-setup brings the deploy values back from platform-secrets (architecture.md, section 6).
+- *No secrets backup.* hal builds none: `~/.secrets` is in no backup. Deploy values survive a disk loss in the platform's repository platform-secrets, encrypted with SOPS and age, as each app moves there; the age key sits in the password manager. Personal tokens are issued again at their provider. The data backup has its own restic password and lives on this disk only: a dead disk loses it, people enrol again, and the repository's snapshots of songmaker are gone with it. A re-setup brings the deploy values back from platform-secrets (architecture.md, section 6).
 
 `backup/apps.toml` declares each app as a validated record (compose project, database service, dump kind,
 database user and name, the Postgres major, the audio volume with the table that names its files, and
@@ -218,7 +218,7 @@ the staging directory during a backup, the restore test's directory during a res
 staging directory of `hal restore keycloak --live` (all three removed when the run ends), and the
 target of `hal restore keycloak --target`, which you delete yourself.
 If Keycloak is off or its database is down, the weekly run waits 10 minutes, reports keycloak as failed
-and still backs up and forgets Songmaker and checks the repository; Keycloak's snapshots stay untouched
+and still backs up and forgets LiteLLM and presentator and checks the repository; Keycloak's snapshots stay untouched
 in that run.
 
 LiteLLM's dump is its whole database `litellm`: each app key's hash, the person budget, the month
@@ -261,12 +261,11 @@ and checks:
 
 - `pg_restore --list` reads the dump;
 - the dump loads with `pg_restore --exit-on-error --single-transaction` into a throwaway PostgreSQL
-  container without network, of the major the app's database runs (16 for Songmaker, 17 for Keycloak
-  and LiteLLM),
+  container without network, of the major the app's database runs (17 for Keycloak and LiteLLM),
   each image a stage of `src/hal/backup/images/Dockerfile`; the pin of major 17 equals `keycloak-db` in
   `compose.yaml` and a test fails when they differ. The server's diagnostics are discarded because
   PostgreSQL quotes row values in them: a failure shows the step and the exit code only;
-- the row count of the app's table (`songs`, Keycloak's `realm`, LiteLLM's
+- the row count of the app's table (Keycloak's `realm`, LiteLLM's
   `LiteLLM_VerificationToken`) answers; for Keycloak and LiteLLM (`require_rows = true`) it is above
   zero: a LiteLLM without a key is no backup;
 - for a SQLite app there is no throwaway server: a container of the `sqlite` stage mounts only the
@@ -376,11 +375,8 @@ end and prints its real outcome.
 
 ### Restore one app
 
-Songmaker's block below stays until its live restore exists (`docs/architecture.md` gap 18;
-follow-up on overnightworks/edge#222): it copies audio, which `hal restore <app> --live` does not.
-
 ```sh
-hal restore songmaker --target ~/restore-songmaker   # a new directory, not under ~/.cache/edge-backup
+hal restore keycloak --target ~/restore-keycloak   # a new directory, not under ~/.cache/edge-backup
 ```
 
 It restores the snapshot of that app's **last successful backup**
@@ -397,52 +393,22 @@ with `hal restore --list`, then choose a snapshot of that app by the
 first 8 or more characters of its ID:
 
 ```sh
-hal restore songmaker --snapshot 1a2b3c4d --target ~/restore-songmaker
+hal restore keycloak --snapshot 1a2b3c4d --target ~/restore-keycloak
 ```
 
 An ID that is unknown, ambiguous, another app's or from another host is refused
-with one line. The target holds
-`db/db.dump` and `audio/`. Loading them into the live app is a deliberate
-manual step. Stop every Songmaker container except its database,
-load the dump, copy the audio back into the volume, start them again. Paste the
-block as a whole: it runs in a subshell that stops at the first failing command,
-so a failed load or copy never goes on to the other half or restarts the app:
+with one line. The target holds `db/db.dump` and, for an app with audio, `audio/`.
 
-```sh
-(
-set -euo pipefail
-restored=~/restore-songmaker
-# The copy runs in the backup runner's own restic image, pinned by version and digest: no
-# unpinned image ever gets write access to the live audio volume.
-image=$(cd ~/srv/hal && .venv/bin/python -c \
-  'from hal.backup.settings import RESTIC_IMAGE; print(RESTIC_IMAGE)')
-pg=$(docker ps --quiet --filter label=com.docker.compose.project=songmaker \
-  --filter label=com.docker.compose.service=postgres \
-  --filter label=com.docker.compose.oneoff=False)
-[ "$(wc -w <<<"$pg")" -eq 1 ] \
-  || { echo "need exactly one Songmaker database container, found: ${pg:-none}" >&2; exit 1; }
-stopped=$(docker ps --quiet --filter label=com.docker.compose.project=songmaker \
-  | { grep -vx "$pg" || true; })
-[ -n "$stopped" ] || { echo "no running Songmaker container to stop" >&2; exit 1; }
-docker stop $stopped
-docker exec -i "$pg" pg_restore --username songmaker --dbname songmaker \
-  --clean --if-exists --single-transaction --exit-on-error < "$restored/db/db.dump"
-docker run --rm --network none \
-  --mount type=bind,source="$restored/audio",target=/from,readonly \
-  --mount type=volume,source=songmaker_audiofiles,target=/to \
-  --entrypoint cp "$image" -a /from/. /to/
-docker start $stopped
-)
-```
+### Songmaker's snapshots
 
-When it stops, Songmaker stays down; `docker stop` printed the IDs of the
-containers it stopped. A failed load changed nothing (`--single-transaction`),
-so `docker start` with those IDs brings the old state back. After a failed copy
-the database is already restored: fix the cause and copy again before you start
-them.
-
-`cp -a` adds and overwrites; audio written after the snapshot stays in the
-volume. The copied files keep the owner restic restored them with (your user).
+Songmaker runs on the platform. It is not declared in `backup/apps.toml`: hal takes no new snapshot
+of it, keeps the ones in the repository (no forget runs for an app that is not declared) and
+reports neither `backup-failed` nor `backup-stale` for it, because a backup run drops the status
+entry of an app that is no longer declared. `hal restore songmaker` refuses with `songmaker is not
+declared`. A snapshot is restored by hand with restic against the repository `~/backups/restic` and
+the password file `~/.secrets/restic/password`: `snapshots --host hal --tag songmaker` lists them,
+`restore <ID>:/backup/songmaker --target <new directory>` writes `db/db.dump` and `audio/`, which are
+loaded into the platform's songmaker by hand. The snapshots are deleted only on the operator's yes.
 
 ### Restore Keycloak
 

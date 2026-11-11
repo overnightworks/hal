@@ -157,6 +157,9 @@ class Run:
     def last_backup_of(self, app: str) -> datetime | None:
         return self._status.last_backup_of(app)
 
+    def forget_undeclared(self, apps: tuple[App, ...]) -> None:
+        self._record(self._status.without_undeclared({app.name for app in apps}))
+
     def attribute_legacy_evidence(self, settings: Settings, apps: tuple[App, ...]) -> None:
         attributed = attributed_status(settings, self._status, apps)
         if attributed is not self._status:
@@ -229,6 +232,7 @@ def backup(
     """Every declared app, or `only` that one; `pre_apply` tags its snapshot and thins those.
     `report` gets a row as each app ends and for the repository."""
     targets = _targets(apps, only)
+    run.forget_undeclared(apps)
     with run.phase(Phase.PREPARE, failing=ExitCategory.CONFIGURATION):
         require_secret_and_repository(settings)
     first_readiness = Deadline.start(READINESS_TIMEOUT)
