@@ -1,0 +1,7 @@
+claim_id = "96e7893de3104b61b7ae653d06803d2a"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "d4837e2dc931d0e37acdb0b5973810bd9cd72d30"
+branch = "dependabot/images-0841a92fa2"
+scope = ["compose.yaml"]
+opened_commit = "6783d5fe2be3120cd6ede4b0bf96401b9b45f1d6"
