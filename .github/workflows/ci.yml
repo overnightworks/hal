@@ -14,8 +14,8 @@ permissions:
 
 # A newer push to a pull request cancels that pull request's older run; a push to main never is.
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.sha }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event.pull_request.number != null }}
 
 jobs:
   check:
@@ -47,6 +47,7 @@ jobs:
         # pytest and pytest-cov come from the lock file, installed by the sync step above;
         # pyproject.toml's pythonpath makes src, scripts, probe and agent-service importable.
         # probe/edge_subnets.py is measured by its module name, the one its tests import it under.
+        # pytest-workers: the lock file carries no pytest-xdist, so the suite runs serially.
         run: uv run --no-sync --no-build pytest --cov=src --cov=scripts --cov=probe/agent-service --cov=agent-service --cov=probe/speech --cov=edge_subnets --cov-report=xml:coverage.xml
 
       # home's, hal's and hal.output's floor: edge's own code carries none, so the floor is per path, not a global fail_under.
@@ -433,6 +434,7 @@ jobs:
         run: uv sync --locked --no-build --no-install-project
 
       - name: The front forwards only POST /v1/chat/completions, POST /v1/images/generations and GET /v1/models
+        # pytest-workers: the lock file carries no pytest-xdist, so the suite runs serially.
         run: uv run --no-sync --no-build pytest tests/test_litellm_front.py
 
   quality:
@@ -441,7 +443,7 @@ jobs:
     permissions:
       contents: read
       actions: read
-    uses: overnightworks/quality/.github/workflows/gate.yml@2d2b68bf3916b34f6f2c72a540c1e3d8a947b750 # v0.10.0
+    uses: overnightworks/quality/.github/workflows/gate.yml@f7723bafb716c987013d40b5e0eaba18e58f311c # v0.11.0
     with:
       coverage-artifact: coverage
     secrets:
