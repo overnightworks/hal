@@ -495,7 +495,7 @@ services:
   # agent-egress, the providers. A change of its files reaches it only through a recreate. The
   # unit `litellm` of fleet.yaml starts it.
   litellm:
-    image: ghcr.io/berriai/litellm:v1.106.7@sha256:be24d7da11f4063ca23fbff6689bac5ded14fe4fc645e07f36588636969f1c27
+    image: ghcr.io/berriai/litellm:v1.106.8@sha256:4dd7304246709e36744aa277d3d033629ad3288c02be35d8215a7d7ad4335f59
     profiles: [litellm]
     user: "1000:1000"
     init: true
