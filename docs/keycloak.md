@@ -15,9 +15,11 @@ passwords.
 It has two doors. The **public door** is the login page at
 `auth.<EDGE_DOMAIN>`; it comes through the platform's Cloudflare tunnel, where
 the platform's Keycloak answers it, and shows only what a login needs (see
-[Doors](#doors-issuers-and-configuration)). The **admin door** is `http://localhost:8090`; it reaches
-the admin console and the master realm, works on this PC only and is never
-routed through the tunnel.
+[Doors](#doors-issuers-and-configuration)). The **admin door** `http://localhost:8090` belongs to hal's own Keycloak, the stopped rollback
+unit, not to the live login: it reaches that unit's admin console and master realm, works on this
+PC only, is never routed through the tunnel, and answers only while the unit runs. Administering the
+live login is the platform's, not this door's.
+
 
 The secrets (the database password, the password of the tool that applies the
 configuration, and a temporary admin password) are three files in
