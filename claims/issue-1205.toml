@@ -1,8 +1,0 @@
-claim_id = "ff2b6095fc9845219e545e6f407571ae"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "c2f7b8a96fe381040824805f49adfe6e5ac7c73b"
-branch = "claude/issue-1205-songmaker-backup-kept-only"
-scope = ["backup/apps.toml", "docs/backup.md", "src/hal/backup/runner.py", "src/hal/backup/status.py", "tests/test_backup_apps.py", "tests/test_backup_restore_safety.py", "tests/test_backup_runner.py"]
-opened_commit = "853209124ca3579f8de4a9f443f566c71b2d0066"
-whole_reason = "The declaration, the status rule that silences its alerts and the document that names the restore are one ruled change; apart, the alert or a false sentence stays."
