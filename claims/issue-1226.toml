@@ -1,0 +1,8 @@
+claim_id = "bcaeb7d3ba5347eab88f6f95c69762af"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "883181bd94374af58413640652e5232b79dbfed2"
+branch = "claude/issue-1226-auth-moves-to-platform-tunnel"
+scope = ["docs/architecture.md", "docs/keycloak.md", "docs/stack.md", "fleet.yaml"]
+opened_commit = "da6b17751916070e4b0c5b7d2a8050833ab021d2"
+whole_reason = "One key and the sentences in three documents that it makes untrue land together, so the documents never describe a tunnel that does not serve auth."
