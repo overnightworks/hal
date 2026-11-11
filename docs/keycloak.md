@@ -118,15 +118,15 @@ The answers belong to this Keycloak version: the probe holds only that each ran,
 
 The cell N1 is not version-bound: webauth's group check (`current_groups`) refuses a refreshed ID token with a `nonce` key, so each app client's refreshed ID tokens must have none, and a Keycloak upgrade that adds the key fails the probe.
 
-Every login app follows the same shape. It gets its own client in `realm.yaml`, with its secret in its own file under `~/.secrets/keycloak/clients/`. Its `backchannel.logout.url` is `http://<app>.hallucinai.de:<port>/auth/backchannel-logout`, with `backchannel.logout.session.required: "false"`; the host is an alias the app's web service gives itself. The call travels over the app's own internal network `hal_backchannel_<app>`, which only `keycloak` joins on edge's side and the app joins as an external network, so no app sees another's. The public host lists the path in `deny_public` (`fleet.yaml`). An app that holds a refresh token per session names `use.refresh.tokens: "true"` (hopin); one without the line keeps Keycloak's default. Skat, songmaker and HopIn are the exception: they run on the platform and Keycloak here reaches an app only on a Docker network, so a sign-out in Keycloak ends their sessions only at their lifetime. Skat's client has no `backchannel.logout.url`; songmaker's and HopIn's clients keep theirs, with the networks below, and no app joins those networks.
+Every login app follows the same shape. It gets its own client in `realm.yaml`, with its secret in its own file under `~/.secrets/keycloak/clients/`. Its `backchannel.logout.url` is `http://<app>.hallucinai.de:<port>/auth/backchannel-logout`, with `backchannel.logout.session.required: "false"`; the host is an alias the app's web service gives itself. The call travels over the app's own internal network `hal_backchannel_<app>`, which only `keycloak` joins on edge's side and the app joins as an external network, so no app sees another's. The public host lists the path in `deny_public` (`fleet.yaml`). An app that holds a refresh token per session names `use.refresh.tokens: "true"` (hopin); one without the line keeps Keycloak's default. Skat, songmaker and HopIn are the exception: they run on the platform, which this Keycloak's call does not reach, so after a rollback a sign-out ends their sessions only at their lifetime. The platform's Keycloak owns their back-channel logout today. Skat's client has no `backchannel.logout.url`; songmaker's and HopIn's clients keep theirs, with the networks below, and no app joins those networks.
 
 songmaker's client declares the back-channel logout call
 `http://songmaker.hallucinai.de:8080/auth/backchannel-logout` (the name is an alias a songmaker web
 service gives itself) over the internal network `hal_backchannel_songmaker`, which only `keycloak` joins
 on edge's side. songmaker ignores the session id and ends every session of the person, so the
 client does not require one. The public tunnel denies the path, matched on the recursively decoded
-path and on the host with any port. songmaker runs on the platform, where the call does not reach it,
-so a sign-out ends a songmaker session only at its own limit.
+path and on the host with any port. songmaker runs on the platform, where this Keycloak's call does not reach it,
+so after a rollback a sign-out ends a songmaker session only at its own limit. The platform's Keycloak owns its back-channel logout today.
 
 Which console actions send that back-channel logout was measured on Keycloak 26.8.1 (cell LA1 of
 the Keycloak probe). For each action a fresh user signed in to a client with HopIn's ruled
@@ -141,8 +141,8 @@ an app ends or erases an account on a sign-out is the app's own (hopin#79 S4).
 HopIn's client declares the same call over its own internal network `hal_backchannel_hopin`, which
 only `keycloak` joins on edge's side: `backchannel.logout.url`
 `http://hopin.hallucinai.de:8080/auth/backchannel-logout` and `session.required: "false"`. HopIn
-runs on the platform, where the call does not reach it, so a sign-out ends a HopIn session only at
-its own limit. HopIn
+runs on the platform, where this Keycloak's call does not reach it, so after a rollback a sign-out ends a HopIn session only at
+its own limit. The platform's Keycloak owns its back-channel logout today. HopIn
 holds a refresh token per session in memory (operator ruling of 27.10.2026, #506, which reverses
 hopin#79 finding 28), so its client names `use.refresh.tokens: "true"` instead of leaving the line
 out: a line deleted from the file may survive in a live client that the import merges.
@@ -152,7 +152,8 @@ presentator's client declares the same call over its own internal network `hal_b
 `backchannel.logout.url` `http://presentator.hallucinai.de:8000/auth/backchannel-logout` and
 `session.required: "false"`, and keeps Keycloak's default refresh token. The platform's Keycloak
 cannot reach that network, so a central sign-out ends presentator's session on hal only at its own
-limit, like the apps on the platform; the call travels only while this Keycloak runs.
+limit; the call travels only while this Keycloak runs.
+
 
 ### Theme and language
 
