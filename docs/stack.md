@@ -53,7 +53,8 @@ and `hal apply --local` writes it again.
 - **Switching Keycloak off** (`enabled: false` through a pull request, `hal update`, `hal apply`) stops and
   removes `keycloak-db` and `keycloak` and keeps the volume `keycloak-db`, `~/.secrets/keycloak` and the
   `keycloak` network; switching it on again uses the same database. Removing the entry from `fleet.yaml`
-  is not "off": apply then leaves Keycloak as it is. Whether `auth` and `127.0.0.1:8090` answer depends
+  is not "off": apply then leaves Keycloak as it is. `auth` is answered by the platform's tunnel
+  whatever this unit does ([keycloak.md](keycloak.md)); whether `127.0.0.1:8090` answers depends
   on Traefik, which `hal apply` recreates only for a changed `traefik.yml` or compose definition and
   never starts.
 - **Switching an app off at once** (`hal stop <app>`, no terminal) records the marker, then writes and

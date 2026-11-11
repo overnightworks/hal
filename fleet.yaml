@@ -47,4 +47,4 @@ services:
       enabled: true
       setup: keycloak/go-live
     hosts:
-      - {name: auth, exposure: public, reason: "Keycloak's pages are public; its login protects them", ready: /realms/hallucinai/.well-known/openid-configuration}
+      - {name: auth, exposure: public, reason: "Keycloak's pages are public; its login protects them", tunnel: platform, ready: /realms/hallucinai/.well-known/openid-configuration}
