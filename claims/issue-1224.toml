@@ -1,7 +1,0 @@
-claim_id = "f908323c75e34cacb0a89ae69d1f0c1d"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "883181bd94374af58413640652e5232b79dbfed2"
-branch = "claude/issue-1224-move-to-quality-v0-11-0-the-gate-pins-an"
-scope = [".github/workflows/ci.yml", ".github/workflows/codeql.yml", "AGENTS.md"]
-opened_commit = "4ebaad1fd850729b9cd1d41893dea016cc598871"
