@@ -5,8 +5,7 @@ It reads secret files by `stat` only and never opens them. The one probe runs
 group when it hangs past a timeout or the run is stopped (Ctrl-C, SIGTERM, SIGHUP).
 Without options it only displays: it writes nothing but its report under
 ~/.local/state/home/. Anything under ~/.secrets the manifest does not name is
-reported as unknown and left alone, except the files in OPERATOR_KEPT_PATTERNS, which the
-operator deletes by hand and which are no finding; loose modes are reported, never changed.
+reported as unknown and left alone; loose modes are reported, never changed.
 
 Exit code: 0 when nothing needs attention, 1 when a finding exists, 2 when the
 manifest is invalid, 3 when the run broke on an unexpected error.
