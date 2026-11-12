@@ -1,7 +1,6 @@
 """`hal check`: what is wrong with this PC. Bare, it is the daily check, run in process:
-rows, verdict, report and the news it delivers. With an area, `exposure` (what reaches
-beyond loopback, local) or `hosts` (what Cloudflare holds against the hosts `fleet.yaml` declares,
-up to 10 s per host), the area does the checking; this module adds the grammar, the JSON wrapper
+rows, verdict, report and the news it delivers. With the area `exposure` (what reaches
+beyond loopback, local), the area does the checking; this module adds the grammar, the JSON wrapper
 keyed by the area, and the exit code."""
 
 import argparse
@@ -14,16 +13,12 @@ from hal.exposure import exposure, inspection
 from hal.grammar import Asks, Command, ExitCode
 from hal.output import write_error, write_line
 from hal.output.command import Verb, command
-from hal.stack.external import cli as external
-from hal.stack.external import host_check
-from hal.stack_commands import own_tunnel
 from hal.workstation import check as daily_check
 from hal.workstation.exposure_check import ExposureRule
 from hal.workstation.ports import build_layout_and_ports
 from hal.workstation.report import Finding
 
 EXPOSURE = "exposure"
-HOSTS = "hosts"
 
 
 CHECK = command(Verb.CHECK)
@@ -33,40 +28,19 @@ HELP = f"""\
                       timer's run does
                       settings: ~/.config/hal/config.toml, table [check] (docs/home.md)
 {command(Verb.CHECK, EXPOSURE)}    what reaches beyond loopback on this PC
-{command(Verb.CHECK, HOSTS)}       what Cloudflare holds against the hosts fleet.yaml declares
 """
 
 
 def _configure(parser: argparse.ArgumentParser) -> None:
     parser.formatter_class = argparse.RawDescriptionHelpFormatter
     parser.description = HELP
-    parser.add_argument("area", nargs="?", choices=(EXPOSURE, HOSTS), help="the area to check")
+    parser.add_argument("area", nargs="?", choices=(EXPOSURE,), help="the area to check")
     parser.add_argument(
         "--allow-list",
         type=Path,
         help=f"{EXPOSURE} only: known listeners beyond loopback "
         f"(default: {inspection.DEFAULT_ALLOW_LIST})",
     )
-
-
-_HOST_CHECK_EXIT = {
-    host_check.CheckExit.CLEAN: ExitCode.OK,
-    host_check.CheckExit.FINDINGS: ExitCode.FINDINGS,
-    host_check.CheckExit.CANNOT_CHECK: ExitCode.FAILURE,
-    external.INTERRUPTED: ExitCode.INTERRUPTED,
-}
-
-
-def _run_hosts(as_json: bool) -> ExitCode:
-    def emit(text: str) -> None:
-        write_line(json.dumps({HOSTS: json.loads(text)}, indent=2) if as_json else text)
-
-    outcome = external.run_host_check(
-        Path.home(), own_tunnel=own_tunnel, as_json=as_json, emit=emit
-    )
-    for line in outcome.cause:
-        write_error(f"{CHECK}: {HOSTS}: cannot check, {line}")
-    return _HOST_CHECK_EXIT[outcome.exit_code]
 
 
 EXPOSURE_RULES = {
@@ -112,8 +86,6 @@ def _run(arguments: argparse.Namespace) -> ExitCode:
             write_error("--json belongs to one area", command(Verb.CHECK, EXPOSURE, "--json"))
             return ExitCode.USAGE
         return _run_daily()
-    if arguments.area == HOSTS:
-        return _run_hosts(arguments.json)
     try:
         findings = inspection.inspect(arguments.allow_list or inspection.DEFAULT_ALLOW_LIST)
     except inspection.ExposureCheckError as error:
@@ -129,7 +101,7 @@ def _run(arguments: argparse.Namespace) -> ExitCode:
 COMMANDS = (
     Command(
         Verb.CHECK,
-        "run the daily check, or one area: what reaches beyond loopback, what Cloudflare holds",
+        "run the daily check, or one area: what reaches beyond loopback",
         _run,
         _configure,
         json=True,

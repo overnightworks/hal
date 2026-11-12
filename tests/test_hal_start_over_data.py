@@ -8,6 +8,11 @@ from pathlib import Path
 import pytest
 import support.hal_stack_commands as hal_stack_commands_support
 import yaml
+from support.hal_stack_commands import (
+    home,  # noqa: F401 the fixture, requested by name below
+    live_checkout,  # noqa: F401 the fixture, requested by name below
+    repository,  # noqa: F401 the fixture, requested by name below
+)
 from support.stack_apply import (
     ENABLED,
     LITELLM_ON,
@@ -19,13 +24,6 @@ from support.stack_apply import (
     state,  # noqa: F401 the fixture, requested by name below
     switch_off,
     write_fleet,
-)
-from support.stack_apply_publish import (
-    repository,  # noqa: F401 the fixture, requested by name below
-)
-from support.stack_external import (
-    home,  # noqa: F401 the fixture, requested by name below
-    live_checkout,  # noqa: F401 the fixture, requested by name below
 )
 from support.stack_global_stop import hosts_asked  # noqa: F401 the fixture, used by `fakes`
 

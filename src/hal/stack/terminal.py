@@ -1,4 +1,4 @@
-"""The operator guard shared by the publish and `hal apply`.
+"""The operator guard of the commands that ask a person at the terminal.
 
 It stops accidental and non-interactive runs; it does not identify the operator (D14).
 """

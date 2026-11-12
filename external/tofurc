@@ -1,1 +1,0 @@
-# Deliberately no provider_installation block: the wrapper passes this file as TF_CLI_CONFIG_FILE so ~/.tofurc cannot override a provider.

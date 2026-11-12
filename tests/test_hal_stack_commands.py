@@ -20,6 +20,15 @@ from support.hal_stack_commands import (
     UNIT,
     Guard,
     ctrl_c,
+    failing_app,  # noqa: F401 the fixture, requested by name below
+    home,  # noqa: F401 the fixture, requested by name below
+    live_checkout,  # noqa: F401 the fixture, requested by name below
+    lock_held,
+    not_on_main,
+    nothing,
+    repository,  # noqa: F401 the fixture, requested by name below
+    start_fails,
+    world,  # noqa: F401 the fixture, requested by name below
 )
 from support.stack_apply import (
     SWITCHED_OFF_AT,
@@ -32,24 +41,9 @@ from support.stack_apply import (
     state,  # noqa: F401 the fixture, requested by name below
     write_fleet,
 )
-from support.stack_apply_publish import (
-    failing_app,  # noqa: F401 the fixture, requested by name below
-    fake_tofu,  # noqa: F401 the fixture, requested by name below
-    lock_held,
-    not_on_main,
-    nothing,
-    repository,  # noqa: F401 the fixture, requested by name below
-    start_fails,
-    world,  # noqa: F401 the fixture, requested by name below
-)
-from support.stack_external import (
-    CHANGING_PLAN,
-    home,  # noqa: F401 the fixture, requested by name below
-    live_checkout,  # noqa: F401 the fixture, requested by name below
-)
 from support.stack_global_stop import hosts_asked  # noqa: F401 the fixture, used by `fakes`
 from support.stack_plan_rows import find_row, plain
-from support.workstation_support import TEST_TUNNEL_ID, write_hal_config
+from support.workstation_support import write_hal_config
 
 from hal import cli, stack_commands
 from hal.grammar import ExitCode
@@ -187,7 +181,7 @@ def test_the_emergency_verbs_end_every_outcome_with_the_exit_they_always_had(
 )
 def test_every_outcome_of_apply_has_one_exit_of_hal(monkeypatch, home, stack_exit, hal_exit):  # noqa: F811
     """#784 D1, D2: declined 1, a guard 4, cannot plan, failed and partial 3."""
-    monkeypatch.setattr(stack, "apply_units", lambda _api, _own_tunnel: stack_exit)
+    monkeypatch.setattr(stack, "apply_units", lambda _api: stack_exit)
 
     assert cli.main(["apply"]) == hal_exit
 
@@ -229,14 +223,14 @@ def test_the_verbs_beside_apply_never_read_the_settings_file(
     ids=lambda value: value.name,
 )
 def test_every_end_of_the_update_has_its_public_exit(monkeypatch, update_end, hal_exit):
-    """#783 D1: the grammar's codes, one per end."""
+    """The grammar's codes, one per end."""
     monkeypatch.setattr(stack, "update_checkout", lambda: update_end)
 
     assert cli.main(["update"]) == hal_exit
 
 
 def test_the_update_table_names_every_member_of_its_enum():
-    """#783 D1: an end added without an exit fails here."""
+    """An end added without an exit fails here."""
     assert set(stack_commands.EXIT_OF_UPDATE) == set(UpdateEnd)
 
 
@@ -259,48 +253,26 @@ def test_a_ctrl_c_the_stack_does_not_catch_ends_with_130_and_no_traceback(hal, m
 # --- hal apply -------------------------------------------------------------------------------
 
 
-def test_apply_at_a_terminal_applies_the_local_part_then_publishes(hal, applying):
-    """A1"""
-    applying.fake_tofu.configure(**CHANGING_PLAN)
-
-    result = hal("apply", answers=("yes", "yes"))
+@pytest.mark.parametrize("arguments", [("apply",), ("apply", "--local")], ids=["bare", "local"])
+def test_apply_at_a_terminal_applies_the_local_part_and_ends_on_its_verdict(
+    hal, applying, arguments
+):
+    """One question, the units switched, nothing said on stderr; `--local` is the same."""
+    result = hal(*arguments, answers=("yes",))
 
     assert result.exit_code == ExitCode.OK
-    assert "hal apply: done" in result.err
-    assert "✓ applied" not in result.out
-    assert applying.fake_tofu.call("apply")
-
-
-def test_apply_plans_on_the_tunnel_the_machines_tunnel_config_names(hal, applying):
-    applying.fake_tofu.configure(**CHANGING_PLAN)
-
-    hal("apply", answers=("yes", "yes"))
-
-    assert f"-var=tunnel_id={TEST_TUNNEL_ID}" in applying.fake_tofu.call("plan")["argv"]
-
-
-def test_apply_without_a_tunnel_config_plans_nothing_and_the_line_names_it(
-    hal, applying, stand_in_tunnel_config
-):
-    stand_in_tunnel_config.unlink()
-
-    result = hal("apply", answers=("yes",))
-
-    assert result.exit_code == ExitCode.FAILURE
-    assert str(stand_in_tunnel_config) in result.err
-    assert "No such file" in result.err
-    assert applying.fake_tofu.calls() == []
+    assert find_row(result.out, "step-ca", ResultEvent.SWITCHED_ON)
+    assert result.err == ""
 
 
 @pytest.mark.usefixtures("failing_app")
-def test_apply_with_an_app_failing_health_is_exit_3_and_publishes_nothing(hal, applying):
+def test_apply_with_an_app_failing_health_is_exit_3(hal, applying):
     """#255 A21: edge's 1 for the partial app step is hal's 3."""
     result = hal("apply", answers=("yes",))
 
     assert result.exit_code == ExitCode.FAILURE
     assert "partial, hopin failed" in result.err
     assert "not healthy at" in result.out
-    assert applying.publish_never_began()
 
 
 def test_apply_while_another_apply_runs_changes_nothing(hal, applying):
@@ -311,13 +283,11 @@ def test_apply_while_another_apply_runs_changes_nothing(hal, applying):
 
     assert result.exit_code == ExitCode.REFUSED
     assert "another `hal apply` or `hal update` is running; nothing changed" in result.err
-    assert "hal apply: nothing published" in result.err
     assert applying.scripted.changing_verbs() == []
-    assert applying.publish_never_began()
 
 
-def test_apply_behind_origin_names_hal_update_and_publishes_nothing(hal, applying, monkeypatch):
-    """#783 F2: the full apply ends with 3 and `nothing published`, no plan and no question."""
+def test_apply_behind_origin_names_hal_update(hal, applying, monkeypatch):
+    """The apply ends with 3, no plan and no question."""
     monkeypatch.setattr(checkout.Git, "divergence", lambda _self, _sha: (0, 2))
 
     result = hal("apply", answers=("yes",))
@@ -325,22 +295,18 @@ def test_apply_behind_origin_names_hal_update_and_publishes_nothing(hal, applyin
     assert result.exit_code == ExitCode.FAILURE
     assert "2 commits wait on origin main; nothing changed" in result.err
     assert "next: hal update" in result.err
-    assert "hal apply: nothing published" in result.err
     assert applying.scripted.changing_verbs() == []
-    assert applying.publish_never_began()
 
 
-def test_apply_interrupted_at_the_plan_publishes_nothing_and_ends_with_3(hal, applying):
-    """A3 (E2): the stack catches the Ctrl-C, so the exit is the stack's, not 130."""
+def test_apply_interrupted_at_the_plan_ends_with_130(hal, applying):
+    """Ctrl-C at the question ends the run as it ends any command."""
     result = hal("apply", answers=("yes",), while_prompt_waits=ctrl_c)
 
-    assert result.exit_code == ExitCode.FAILURE
-    assert "hal apply: interrupted, nothing published" in result.err
+    assert result.exit_code == ExitCode.INTERRUPTED
     assert "Traceback" not in result.err
-    assert applying.publish_never_began()
 
 
-def test_apply_whose_compose_up_fails_is_partial_and_publishes_nothing(hal, applying):
+def test_apply_whose_compose_up_fails_is_partial(hal, applying):
     """A4"""
     start_fails(applying)
 
@@ -348,8 +314,6 @@ def test_apply_whose_compose_up_fails_is_partial_and_publishes_nothing(hal, appl
 
     assert result.exit_code == ExitCode.FAILURE
     assert "error: partial, step-ca failed\nnext: hal apply" in result.err
-    assert "nothing published" in result.err
-    assert applying.publish_never_began()
 
 
 def test_apply_without_a_terminal_is_refused_with_4_and_touches_nothing(
@@ -360,16 +324,6 @@ def test_apply_without_a_terminal_is_refused_with_4_and_touches_nothing(
 
     assert result.returncode == ExitCode.REFUSED
     assert "refused, stdin and stdout must be a terminal" in result.stderr
-    assert "nothing published" in result.stderr
-
-
-def test_apply_local_applies_the_local_part_alone(hal, applying):
-    """A6"""
-    result = hal("apply", "--local", answers=("yes",))
-
-    assert result.exit_code == ExitCode.OK
-    assert find_row(result.out, "step-ca", ResultEvent.SWITCHED_ON)
-    assert applying.publish_never_began()
 
 
 VERDICT_PATTERN = re.compile(r"^✓ applied · (\d+) changes? · (<1s|\d+s|\d+m\d\ds|\d+h\d\dm)$")
@@ -377,7 +331,7 @@ ASKED_PATTERN = re.compile(r"Type yes to apply (\d+) changes?")
 
 
 def test_a_clean_local_run_ends_on_the_verdict_with_the_asked_count_and_a_time(hal, applying):
-    result = hal("apply", "--local", answers=("yes",))
+    result = hal("apply", answers=("yes",))
 
     out = plain(result.out)
     verdict = VERDICT_PATTERN.match(out.rstrip("\n").splitlines()[-1])
@@ -388,7 +342,7 @@ def test_a_clean_local_run_ends_on_the_verdict_with_the_asked_count_and_a_time(h
 
 @pytest.mark.usefixtures("failing_app")
 def test_a_failed_local_run_prints_no_verdict(hal, applying):
-    result = hal("apply", "--local", answers=("yes",))
+    result = hal("apply", answers=("yes",))
 
     assert result.exit_code == ExitCode.FAILURE
     assert "✓ applied" not in result.out
@@ -402,9 +356,7 @@ def test_apply_with_the_plan_declined_ends_with_1_and_changes_nothing(hal, apply
 
     assert result.exit_code == ExitCode.FINDINGS
     assert "aborted, nothing changed" in result.err
-    assert "nothing published" in result.err
     assert applying.scripted.changing_verbs() == []
-    assert applying.publish_never_began()
 
 
 def test_apply_from_a_checkout_that_is_not_a_clean_main_is_refused(hal, applying):
@@ -415,9 +367,7 @@ def test_apply_from_a_checkout_that_is_not_a_clean_main_is_refused(hal, applying
 
     assert result.exit_code == ExitCode.REFUSED
     assert "runs only on main" in result.err
-    assert "nothing published" in result.err
     assert applying.scripted.changing_verbs() == []
-    assert applying.publish_never_began()
 
 
 PAST_THE_DIGIT_LIMIT = sys.get_int_max_str_digits() + 1
@@ -453,7 +403,6 @@ def test_apply_with_a_malformed_settings_file_ends_2_before_any_guard(
     assert not any(run in result.err for run in re.findall(r"[0-9a-f]{50,}", text))
     assert applying.scripted.calls == []
     assert applying.scripted_git.calls == []
-    assert applying.publish_never_began()
 
 
 # --- hal start <unit> ------------------------------------------------------------------------

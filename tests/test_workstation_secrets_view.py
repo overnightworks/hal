@@ -547,48 +547,6 @@ def test_by_service_inverts_read_by_under_a_declared_dependencies_heading(clean_
     assert not Layout(clean_home).state_dir.exists()
 
 
-@pytest.mark.parametrize(
-    ("state_mode", "loose_findings"),
-    [
-        (0o600, {}),
-        (0o664, {"~/.secrets/opentofu/fleet.tfstate": ["has mode 664; at most 600 allowed", "`chmod 600 ~/.secrets/opentofu/fleet.tfstate`"]}),
-    ],
-    ids=["owner-only state", "loose state is still reported"],
-)
-def test_the_files_edge_external_leaves_under_opentofu_are_known_and_only_a_loose_mode_is_a_finding(
-    tmp_path: Path, probe: FakeProbe, capsys, state_mode: int, loose_findings: dict[str, list[str]]
-) -> None:
-    """#159 T2/T3: state, its backup, plans and tmp are declared; the loose-mode check still fires."""
-    home = tmp_path / "home"
-    plant_secrets(home)
-    opentofu = home / ".secrets" / "opentofu"
-    for directory in ("plans", "tmp"):
-        (opentofu / directory).unlink()
-        (opentofu / directory).mkdir(mode=0o700)
-    for name, mode in (("fleet.tfstate", state_mode), ("fleet.tfstate.backup", 0o600)):
-        (opentofu / name).write_text("encrypted state")
-        (opentofu / name).chmod(mode)
-    (opentofu / "plans" / "fleet.tfplan").write_text("encrypted plan")
-    (opentofu / "plans" / "fleet.tfplan").chmod(0o600)
-
-    run_hal_secrets(home, probe, now=NOW)
-
-    output = report_of(home)
-    assert findings_of(output, "unknown-file") == {}
-    assert findings_of(output, "loose-mode") == loose_findings
-
-
-def test_a_stray_copy_of_the_state_beside_it_is_still_an_unknown_file(tmp_path: Path, probe: FakeProbe, capsys) -> None:
-    """#159 T4: the state's files are named exactly, so a plaintext `tofu state pull` copy does not hide."""
-    home = tmp_path / "home"
-    plant_secrets(home)
-    stray = home / ".secrets" / "opentofu" / "fleet.tfstate.json"
-    stray.write_text("plaintext state")
-    stray.chmod(0o600)
-    run_hal_secrets(home, probe, now=NOW)
-    assert set(findings_of(report_of(home), "unknown-file")) == {"~/.secrets/opentofu/fleet.tfstate.json"}
-
-
 def test_every_file_the_packaged_manifest_plants_is_known(tmp_path: Path, probe: FakeProbe, capsys) -> None:
     """#42 M1: no planted file is an unknown file."""
     home = tmp_path / "home"

@@ -29,10 +29,7 @@ lives only in the property `role`.
 | Hosts, Keycloak groups and clients | **not derived; unchanged** unless the job changes (the app `speech` is the realm's client and group `speech-service`) | external identities. A renamed group in the YAML creates a new group and leaves the old one with its memberships (the apply deletes no undeclared top-level object and no person), and a renamed client changes the token audience |
 | Ecosystem-dictated names | the ecosystem's form with the stem inside: Slidev `slidev-addon-<stem>`, Claude/Codex plugin `<stem>` | the ecosystem finds them only that way |
 
-GitHub topics are to be derived from the planned service catalog `fleet.yaml`
-by OpenTofu and never set by hand (overnightworks/edge#20, building block 5).
-The file exists (`fleet.yaml`); its topics follow with overnightworks/edge#30, and until then
-topics are not set at all.
+GitHub topics are not set at all; hal derives none from the service catalog `fleet.yaml`.
 
 ### Import clashes
 

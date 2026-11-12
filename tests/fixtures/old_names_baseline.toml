@@ -1,6 +1,6 @@
 [edge-verb]
-"docs/architecture.md" = 9
-"docs/design/hal-output.html" = 16
+"docs/architecture.md" = 2
+"docs/design/hal-output.html" = 15
 "src/hal/stack/barrier.py" = 2
 "src/hal/stack/environment.py" = 1
 "tests/test_stack_barrier.py" = 2
@@ -21,9 +21,8 @@
 "docs/design/hal-output.html" = 1
 
 [home-tools]
-"docs/architecture.md" = 38
+"docs/architecture.md" = 37
 "docs/backup.md" = 1
-"docs/external.md" = 1
 "docs/home.md" = 1
 "pyproject.toml" = 3
 "scripts/system-proof/run.sh" = 2

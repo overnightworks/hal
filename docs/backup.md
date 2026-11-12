@@ -10,8 +10,7 @@ hold the mechanics. The data layer and the re-setup path they serve: [architectu
 A read-only alarm: it fails loudly when something on this PC reaches beyond loopback. Docker's loopback default is not set yet (edge#291), so a publication can bind every
 interface; the daily `hal check` reports it as its exposure area.
 Run `hal check exposure` (one row for each process or container, then a verdict) or `hal check exposure --json` (the same findings for
-machines). It has two areas, `exposure` (local) and `hosts` (reads Cloudflare, see
-docs/external.md), one per run. A bare `hal check` is not an area: it is the daily check, which also
+machines). `exposure` is the one area of `hal check`. A bare `hal check` is not an area: it is the daily check, which also
 mails and pops up what is new (docs/home.md), and takes no `--json`.
 
 It runs `docker ps --all`, `docker inspect` and `ss -H -ltnupe` (fixed arguments, no shell, nothing

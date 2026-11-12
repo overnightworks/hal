@@ -14,11 +14,8 @@
 "tests/test_keycloak_go_live.py" = 1715
 "tests/test_keycloak_probe.py" = 955
 "tests/test_stack_apply.py" = 3695
-"tests/test_stack_cloudflare_read.py" = 883
-"tests/test_stack_external.py" = 2230
-"tests/test_stack_host_check.py" = 817
 "tests/test_stack_realm_reconcile.py" = 929
-"tests/test_workstation_secrets_view.py" = 911
+"tests/test_workstation_secrets_view.py" = 869
 
 [function_lines."probe/keycloak/probe.py"]
 "Probe.admin_console_only_on_loopback" = 74
@@ -26,9 +23,6 @@
 "Probe.only_logins_and_failed_logins_are_stored" = 65
 "Probe.public_issuer_and_paths" = 86
 "Probe.the_realm_step" = 127
-
-[function_lines."src/hal/stack/external/cli.py"]
-"apply_command" = 70
 
 [function_lines."tests/support/realm_fake.py"]
 "hallucinai" = 96

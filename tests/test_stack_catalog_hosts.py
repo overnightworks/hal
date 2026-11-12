@@ -1,7 +1,6 @@
 """The catalog's host shape (#131): one reader, one decision about `run.enabled`."""
 
 import json
-import re
 from pathlib import Path
 
 import pytest
@@ -10,7 +9,7 @@ import yaml
 from hal.stack import catalog
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-FIXTURES = PROJECT_ROOT / "external" / "tests" / "fixtures"
+FIXTURES = PROJECT_ROOT / "tests" / "fixtures"
 ZONE = "edge-fixture.invalid"
 PROFILES = {"songmaker": ("songmaker",), "kc": ("kc",)}
 
@@ -51,8 +50,7 @@ def as_expectation(found: tuple[catalog.Host, ...]) -> dict:
 
 
 @pytest.mark.parametrize("fixture", sorted(path.stem for path in FIXTURES.glob("hosts-*.yaml")))
-def test_the_reader_yields_what_tofu_is_held_to(fixture):
-    """C6: both sides assert the same expectation file."""
+def test_the_reader_yields_the_hosts_a_fixture_expects(fixture):
     expected = json.loads((FIXTURES / f"{fixture}.expected.json").read_text())
     found = catalog.hosts(catalog.read(FIXTURES / f"{fixture}.yaml"))
     assert as_expectation(found) == expected
@@ -86,16 +84,6 @@ def test_songmaker_alone_refuses_its_metrics_publicly():
     assert {one.fqdn for one in found if "/metrics" in one.deny_public} == {
         "songmaker.hallucinai.de"
     }
-
-
-def test_every_dns_record_waits_for_the_public_deny_and_redirect_rulesets():
-    """A deny or redirect that fails to apply must publish no record; `depends_on` says so."""
-    source = (PROJECT_ROOT / "external" / "cloudflare.tf").read_text()
-    block = source.split('resource "cloudflare_dns_record" "host" {')[1].split("\n}\n")[0]
-    record = re.sub(r"(?m)^\s*(#|//).*$", "", block)
-    waits_for = record.split("depends_on", 1)[1]
-    assert "cloudflare_ruleset.deny_public" in waits_for
-    assert "cloudflare_ruleset.apex_redirect" in waits_for
 
 
 @pytest.mark.parametrize("denied", [["/a"], ["/auth/backchannel-logout", "/x.y_z~1-2"], []])
@@ -218,20 +206,10 @@ def test_the_cross_host_rules_refuse_naming_the_rule(hosts_of_the_catalog, rule)
     [
         pytest.param(host("*", "public"), "wildcard must be protected", id="public-wildcard"),
         pytest.param(host("app", "protected"), "only the wildcard", id="protected-label"),
-        pytest.param(host(catalog.PROBE_NAME), "reserved for the host check", id="probe-name"),
     ],
 )
 def test_the_single_host_rules_hold_for_a_disabled_entry(disabled_host, rule):
-    """PB7 (the probe-name row), C-cells for the others."""
     assert rule in refusal(document(hosted(disabled_host, run={"enabled": False})))
-
-
-def test_the_probe_name_is_reserved_for_the_host_check():
-    """PB7: the wildcard is asked there, so no enabled entry may own it."""
-    assert catalog.PROBE_NAME == "edge-host-check"
-    assert refusal(document(hosted(host(catalog.PROBE_NAME)))) == (
-        "services.app.hosts[0].name: reserved for the host check"
-    )
 
 
 def test_the_same_fqdn_across_entries_is_refused():
@@ -347,7 +325,7 @@ def test_a_name_that_is_no_apex_wildcard_or_label_is_refused(name):
 
 
 @pytest.mark.parametrize("written", ["1e3", "0o17"])
-def test_a_label_that_tofu_reads_as_a_number_is_refused(written, tmp_path):
+def test_a_label_that_reads_as_a_number_is_refused(written, tmp_path):
     (tmp_path / catalog.FLEET_FILE).write_text(
         f"cloudflare:\n  zone: {ZONE}\nservices:\n  app:\n    hosts:\n"
         f"      - {{name: {written}, exposure: bypass, reason: own login}}\n"
@@ -357,7 +335,7 @@ def test_a_label_that_tofu_reads_as_a_number_is_refused(written, tmp_path):
         catalog.hosts(catalog_document)
 
 
-@pytest.mark.parametrize("name", ["hopin", "a", "a" * 63, "a-b", "9"])
+@pytest.mark.parametrize("name", ["hopin", "a", "a" * 63, "a-b", "9", "edge-host-check"])
 def test_a_lowercase_label_is_accepted(name):
     (found,) = catalog.hosts(document(hosted(host(name))))
     assert found.fqdn == f"{name}.{ZONE}"
@@ -395,12 +373,6 @@ def with_redirect(redirect, *more_entries: dict) -> dict:
 
 def test_a_redirect_of_the_zones_names_is_accepted():
     assert [one.fqdn for one in catalog.hosts(with_redirect(REDIRECT))] == [f"app.{ZONE}"]
-
-
-def test_the_redirected_names_are_the_zones_apex_and_labels_and_none_without_a_redirect():
-    redirected = catalog.redirected_fqdns(with_redirect({**REDIRECT, "hosts": ["@", "www"]}))
-    assert redirected == {ZONE, f"www.{ZONE}"}
-    assert catalog.redirected_fqdns(document(hosted(host("app")))) == frozenset()
 
 
 @pytest.mark.parametrize(
@@ -522,10 +494,7 @@ def test_b6_an_app_host_without_ready_is_refused_and_with_ready_is_read(tunnel):
     app = {"repo": {"default_branch": "master"}, "run": {"enabled": True}}
     unready = document(hosted(host("app", **tunnel), key="app", **app))
 
-    assert (
-        refusal(unready)
-        == "services.app.hosts[0].ready: an app's host needs the path the publish asks"
-    )
+    assert refusal(unready) == "services.app.hosts[0].ready: an app's host needs a `ready` path"
     ready = document(hosted(host("app", ready="/health"), key="app", **app))
     assert [one.ready for one in catalog.hosts(ready)] == ["/health"]
 

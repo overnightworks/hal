@@ -31,10 +31,6 @@ entry = "dynamic/"
 reason = "traefik's dynamic configuration directory, bind-mounted by compose.yaml"
 
 [[root.allow]]
-entry = "external/"
-reason = "terraform for the external Cloudflare zone"
-
-[[root.allow]]
 entry = "keycloak/"
 reason = "keycloak's bootstrap and entrypoint files, bind-mounted by compose.yaml"
 
@@ -227,11 +223,6 @@ reason = "drive.sh calls it by this name to answer prompts at a pseudo-terminal"
 path = "step-ca/init"
 rule = "script-name"
 reason = "the operator runs it by this name (docs/internal-ca.md)"
-
-[[layout.allow]]
-path = "external/tofurc"
-rule = "file-suffix"
-reason = "hal's tofu wrapper passes it by this name as TF_CLI_CONFIG_FILE"
 
 [[compose.allow]]
 file = "compose.yaml"

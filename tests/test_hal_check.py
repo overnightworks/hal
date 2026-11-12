@@ -1,25 +1,18 @@
 """`hal check` driven through `hal.cli.main`, with a fake `docker` and `ss` first on PATH."""
 
-import errno
-import io
 import json
-import os
 import re
 import shutil
-import signal
 import subprocess
-import sys
-from collections.abc import Collection
 from pathlib import Path
 
 import pytest
 from support.git_support import elsewhere, hal_command, hal_environment, hal_program, run_hal
-from support.workstation_support import TEST_TUNNEL_ID, RunnerWithCleanLogs, home_check
+from support.workstation_support import RunnerWithCleanLogs, home_check
 
 from hal import check_commands, cli, exposure_rows
 from hal.exposure import host, inspection
 from hal.exposure.exposure import Finding, Problem, Protocol
-from hal.stack.external import cloudflare_read, host_probe, tofu
 from hal.workstation import check
 from hal.workstation.exposure_check import ExposureRule
 from hal.workstation.layout import Layout
@@ -51,16 +44,16 @@ def run_hal_check(fake_host, tmp_path, capsys):
     return run
 
 
-@pytest.mark.parametrize("area", ["exposure", "hosts"])
-def test_an_area_runs_without_the_daily_check(area, hosts_home, fake_host, monkeypatch, capsys):
-    """The areas leave the daily check's report and remembered findings alone."""
-    monkeypatch.setattr(cloudflare_read, "CloudflareClient", FakeCloudflare(CLEAN_SNAPSHOT))
-    monkeypatch.setattr(host_probe, "HttpProber", AnsweringProber())
+def test_an_area_runs_without_the_daily_check(tmp_path, fake_host, monkeypatch, capsys):
+    """The area leaves the daily check's report and remembered findings alone."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
     fake_host()
 
-    assert cli.main(["check", area]) == 0
+    assert cli.main(["check", "exposure"]) == 0
     assert capsys.readouterr().err == ""
-    layout = Layout(hosts_home)
+    layout = Layout(home)
     assert not layout.check_report_file.exists()
     assert not layout.check_findings_file.exists()
 
@@ -152,9 +145,10 @@ def test_a_bare_check_with_an_allow_list_is_a_usage_error(run_hal_check):
     assert err.splitlines()[-1] == "next: hal check exposure --allow-list FILE"
 
 
-def test_an_area_that_does_not_exist_is_a_usage_error(run_hal_check):
+@pytest.mark.parametrize("area", ["services", "hosts"])
+def test_an_area_that_does_not_exist_is_a_usage_error(run_hal_check, area):
     """E1, cell 5."""
-    exit_code, out, _ = run_hal_check("services")
+    exit_code, out, _ = run_hal_check(area)
 
     assert (exit_code, out) == (2, "")
 
@@ -254,336 +248,6 @@ def test_every_kind_of_finding_shows_in_the_rows_and_in_json(problem):
 
 def test_every_protocol_has_a_port_label():
     assert set(exposure_rows.PORT_LABELS) == set(Protocol)
-
-
-SENTINEL = "sentinel-4b1d-never-print-me"
-ZONE_TARGET = "t-1.cfargotunnel.com"
-DECLARED_HOSTS = """\
-cloudflare: {zone: example.test}
-services:
-  site:
-    hosts:
-      - {name: "@", exposure: public, reason: the site}
-"""
-
-
-def snapshot_with(*records: cloudflare_read.Record) -> cloudflare_read.Snapshot:
-    return cloudflare_read.Snapshot("t-1", records, (), ())
-
-
-CLEAN_SNAPSHOT = snapshot_with(cloudflare_read.Record("example.test", "CNAME", ZONE_TARGET, True))
-FINDING_SNAPSHOT = snapshot_with(
-    cloudflare_read.Record("example.test", "A", SENTINEL, True),
-    cloudflare_read.Record("stray.example.test", "CNAME", ZONE_TARGET, True),
-)
-
-
-class FakeCloudflare:
-    """Stands in for `CloudflareClient`: answers a snapshot, raises, or runs a callable first."""
-
-    def __init__(self, outcome) -> None:
-        self.outcome = outcome
-        self.tunnels_asked: list[cloudflare_read.OwnTunnel] = []
-        self.tunnel_names_asked: list[set[str]] = []
-
-    def __call__(self, _token: str, tunnel: cloudflare_read.OwnTunnel) -> FakeCloudflare:
-        self.tunnels_asked.append(tunnel)
-        return self
-
-    def read(self, _zone: str, tunnel_names: Collection[str]):
-        self.tunnel_names_asked.append(set(tunnel_names))
-        if isinstance(self.outcome, BaseException):
-            raise self.outcome
-        if callable(self.outcome):
-            self.outcome()
-            return CLEAN_SNAPSHOT
-        return self.outcome
-
-
-class AnsweringProber:
-    def __init__(self, answer=None) -> None:
-        self.answer = answer or host_probe.Answer(200, None, True, False)
-
-    def __call__(self) -> AnsweringProber:
-        return self
-
-    def ask(self, _name: str, _path: str = "/"):
-        return self.answer
-
-
-@pytest.fixture
-def hosts_home(tmp_path, monkeypatch) -> Path:
-    """A temporary HOME whose read-token file holds the sentinel, and a one-host catalog."""
-    home = tmp_path / "home"
-    token_file = home / ".secrets/cloudflare/fleet-read"
-    token_file.parent.mkdir(parents=True)
-    token_file.write_text(SENTINEL + "\n")
-    tree = tmp_path / "tree"
-    tree.mkdir()
-    (tree / "fleet.yaml").write_text(DECLARED_HOSTS)
-    monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setattr(tofu, "PROJECT_ROOT", tree)
-    return home
-
-
-@pytest.fixture
-def run_hosts(hosts_home, monkeypatch, capsys):
-    def run(
-        *arguments: str, reads=CLEAN_SNAPSHOT, prober=None, cloudflare=None
-    ) -> tuple[int, str, str]:
-        monkeypatch.setattr(
-            cloudflare_read, "CloudflareClient", cloudflare or FakeCloudflare(reads)
-        )
-        monkeypatch.setattr(host_probe, "HttpProber", prober or AnsweringProber())
-        try:
-            exit_code = cli.main(["check", "hosts", *arguments])
-        except SystemExit as usage_error:
-            exit_code = usage_error.code
-        captured = capsys.readouterr()
-        return exit_code, captured.out, captured.err
-
-    return run
-
-
-def test_clean_hosts_say_how_many_and_exit_0(run_hosts):
-    assert run_hosts() == (0, "no findings (1 hosts)\n", "")
-
-
-def test_hosts_are_checked_against_the_tunnel_the_machines_tunnel_config_names(
-    run_hosts, stand_in_tunnel_config
-):
-    cloudflare = FakeCloudflare(CLEAN_SNAPSHOT)
-
-    assert run_hosts(cloudflare=cloudflare)[0] == 0
-    assert cloudflare.tunnels_asked == [
-        cloudflare_read.OwnTunnel(TEST_TUNNEL_ID, stand_in_tunnel_config)
-    ]
-
-
-def test_without_a_tunnel_config_the_hosts_cannot_be_checked_and_the_line_names_it(
-    run_hosts, stand_in_tunnel_config
-):
-    stand_in_tunnel_config.unlink()
-    cloudflare = FakeCloudflare(CLEAN_SNAPSHOT)
-
-    exit_code, out, err = run_hosts(cloudflare=cloudflare)
-
-    assert (exit_code, out, cloudflare.tunnels_asked) == (3, "", [])
-    assert str(stand_in_tunnel_config) in err
-
-
-def test_clean_hosts_in_json_are_an_empty_list_keyed_by_the_area(run_hosts):
-    exit_code, out, err = run_hosts("--json")
-
-    assert (exit_code, json.loads(out), err) == (0, {"hosts": []}, "")
-
-
-def test_findings_exit_1_and_never_print_the_token_in_text(run_hosts):
-    exit_code, out, err = run_hosts(reads=FINDING_SNAPSHOT)
-
-    assert (exit_code, err) == (1, "")
-    assert out.splitlines()[0].startswith("record-wrong example.test: ")
-    assert SENTINEL not in out
-
-
-MOVED_HOSTS = (
-    DECLARED_HOSTS
-    + """\
-  moved:
-    hosts:
-      - {name: there, exposure: public, reason: moved, tunnel: platform}
-      - {name: back, exposure: public, reason: moved, tunnel: platform}
-      - {name: own, exposure: public, reason: not moved}
-"""
-)
-
-
-def record_to(name: str, target: str) -> cloudflare_read.Record:
-    return cloudflare_read.Record(name, "CNAME", target, True)
-
-
-def test_each_record_is_held_to_the_tunnel_its_host_names_which_is_looked_up_once(run_hosts):
-    """A moved host on its tunnel is clean; one on hal's, or an own host on the other, is wrong."""
-    (tofu.PROJECT_ROOT / "fleet.yaml").write_text(MOVED_HOSTS)
-    other = "platform-id.cfargotunnel.com"
-    records = (
-        record_to("example.test", ZONE_TARGET),
-        record_to("there.example.test", other),
-        record_to("back.example.test", ZONE_TARGET),
-        record_to("own.example.test", other),
-    )
-    reads = cloudflare_read.Snapshot("t-1", records, (), (), {"platform": "platform-id"})
-    cloudflare = FakeCloudflare(reads)
-
-    exit_code, out, _ = run_hosts("--json", cloudflare=cloudflare)
-
-    assert exit_code == 1
-    assert [(item["problem"], item["subject"]) for item in json.loads(out)["hosts"]] == [
-        ("record-wrong", "back.example.test"),
-        ("record-wrong", "own.example.test"),
-    ]
-    assert cloudflare.tunnel_names_asked == [{"platform"}]
-
-
-def test_findings_in_json_are_one_object_keyed_by_the_area_without_the_token(run_hosts):
-    exit_code, out, err = run_hosts("--json", reads=FINDING_SNAPSHOT)
-
-    assert (exit_code, err) == (1, "")
-    assert [item["problem"] for item in json.loads(out)["hosts"]] == [
-        "record-wrong",
-        "undeclared-record",
-    ]
-    assert SENTINEL not in out
-
-
-@pytest.mark.parametrize(
-    "reads, prober, problem, next_step",
-    [
-        (snapshot_with(), None, "record-missing", "`hal apply`"),
-        (
-            snapshot_with(cloudflare_read.Record("example.test", "A", "192.0.2.1", True)),
-            None,
-            "record-wrong",
-            "`hal apply` shows the Cloudflare plan before its yes; nothing is converted (D12), "
-            "so fix a foreign type by hand",
-        ),
-        (
-            CLEAN_SNAPSHOT,
-            AnsweringProber(host_probe.Answer(200, None, False, False)),
-            "answer-wrong",
-            "`hal apply` shows the Cloudflare plan before its yes",
-        ),
-    ],
-)
-def test_a_finding_that_apply_fixes_or_shows_names_hal_apply_as_its_next_step(
-    run_hosts, reads, prober, problem, next_step
-):
-    _, out, _ = run_hosts("--json", reads=reads, prober=prober)
-
-    hosts = {item["problem"]: item["next"] for item in json.loads(out)["hosts"]}
-    assert hosts[problem] == next_step
-
-
-@pytest.mark.parametrize(
-    "outcome, problem",
-    [
-        (host_probe.Unreachable(host_probe.FailureKind.TIMEOUT), "unreachable"),
-        (host_probe.Answer(200, None, False, False), "answer-wrong"),
-    ],
-)
-def test_a_host_that_answers_wrong_or_not_at_all_is_a_finding_in_text_and_json(
-    run_hosts, outcome, problem
-):
-    text = run_hosts(prober=AnsweringProber(outcome))
-    as_json = run_hosts("--json", prober=AnsweringProber(outcome))
-
-    assert text[0] == as_json[0] == 1
-    assert text[1].startswith(f"{problem} example.test: ")
-    assert json.loads(as_json[1])["hosts"][0]["problem"] == problem
-
-
-@pytest.mark.parametrize(
-    "failure, cause",
-    [
-        (cloudflare_read.CloudflareReadError(f"/zones: {SENTINEL}"), "/zones: ***"),
-        (OSError(errno.EIO, SENTINEL), "OSError: "),
-        (ValueError(SENTINEL), "ValueError"),
-    ],
-    ids=["read error", "os error", "value error"],
-)
-@pytest.mark.parametrize("flags", [(), ("--json",)], ids=["text", "json"])
-def test_a_reader_failure_exits_3_names_the_cause_without_the_token_and_prints_no_stdout(
-    run_hosts, failure, cause, flags
-):
-    exit_code, out, err = run_hosts(*flags, reads=failure)
-
-    assert (exit_code, out) == (3, "")
-    assert err.splitlines()[0].startswith(f"error: hal check: hosts: cannot check, {cause}")
-    assert len(err.splitlines()) == 1
-    assert SENTINEL not in err
-
-
-def test_a_missing_token_file_exits_3_naming_it(run_hosts, hosts_home):
-    token_file = hosts_home / ".secrets/cloudflare/fleet-read"
-    token_file.unlink()
-
-    exit_code, out, err = run_hosts("--json")
-
-    assert (exit_code, out) == (3, "")
-    assert err.splitlines()[0] == (
-        f"error: hal check: hosts: cannot check, cannot read {token_file}: "
-        "No such file or directory"
-    )
-
-
-def test_an_invalid_catalog_exits_3_before_any_token_is_read(run_hosts, hosts_home):
-    (tofu.PROJECT_ROOT / "fleet.yaml").write_text("services: 3\n")
-    (hosts_home / ".secrets/cloudflare/fleet-read").unlink()
-
-    exit_code, out, err = run_hosts()
-
-    assert (exit_code, out) == (3, "")
-    assert err.startswith("error: hal check: hosts: cannot check, ")
-    assert "fleet-read" not in err
-
-
-@pytest.mark.parametrize("interrupt", [signal.SIGINT, signal.SIGTERM])
-@pytest.mark.parametrize("flags", [(), ("--json",)], ids=["text", "json"])
-def test_an_interrupt_before_the_output_exits_130_with_stdout_empty(run_hosts, interrupt, flags):
-    reads = lambda: os.kill(os.getpid(), interrupt)  # noqa: E731
-
-    exit_code, out, err = run_hosts(*flags, reads=reads)
-
-    assert (exit_code, out) == (130, "")
-    assert SENTINEL not in err
-
-
-@pytest.mark.parametrize("interrupt", [signal.SIGINT, signal.SIGTERM])
-def test_an_interrupt_while_the_output_is_written_leaves_the_whole_document_and_the_verdict(
-    hosts_home, monkeypatch, interrupt
-):
-    class InterruptedHalfway(io.StringIO):
-        delivered = False
-
-        def write(self, text: str) -> int:
-            if self.delivered or len(text) < 2:
-                return super().write(text)
-            self.delivered = True
-            middle = len(text) // 2
-            super().write(text[:middle])
-            os.kill(os.getpid(), interrupt)
-            return middle + super().write(text[middle:])
-
-    stdout = InterruptedHalfway()
-    monkeypatch.setattr(sys, "stdout", stdout)
-    monkeypatch.setattr(cloudflare_read, "CloudflareClient", FakeCloudflare(FINDING_SNAPSHOT))
-    monkeypatch.setattr(host_probe, "HttpProber", AnsweringProber())
-
-    exit_code = cli.main(["check", "hosts", "--json"])
-
-    assert exit_code == 1
-    assert len(json.loads(stdout.getvalue())["hosts"]) == 2
-
-
-def test_the_allow_list_belongs_to_the_exposure_area(run_hosts):
-    exit_code, out, err = run_hosts("--allow-list", "ALLOW_LIST")
-
-    assert (exit_code, out) == (2, "")
-    assert err.splitlines()[-1] == "next: hal check exposure --allow-list FILE"
-
-
-def test_the_exposure_area_reads_no_cloudflare(fake_host, hosts_home, monkeypatch, capsys):
-    allow_list = hosts_home / "allow-list.toml"
-    allow_list.write_text("", encoding="utf-8")
-
-    def forbidden(*_arguments, **_keywords):
-        raise AssertionError("Cloudflare was read")
-
-    monkeypatch.setattr(cloudflare_read, "CloudflareClient", forbidden)
-    fake_host()
-
-    assert cli.main(["check", "exposure", "--allow-list", str(allow_list)]) == 0
-    assert capsys.readouterr().err == ""
 
 
 @pytest.mark.usefixtures("quiet_pc")

@@ -7,8 +7,7 @@ an app: its key is its repository's name under `github.org`, its compose project
 and `apps()` ignore them; `host_only_keys()` reads those with no `repo` either, the apps edge only
 fronts. `hosts()` is the separate reader of every entry's `hosts` list (an entry without `run` is
 enabled). `units()` also reads each unit's hosts, enabled or not, and needs a valid
-`cloudflare.zone` once a unit declares one. The top-level `cloudflare:` and `github:` keys belong
-to OpenTofu, which reads the same file and must agree with these readers.
+`cloudflare.zone` once a unit declares one.
 """
 
 import os
@@ -30,7 +29,7 @@ _BOOL_TAG = "tag:yaml.org,2002:bool"
 _TRUE_OR_FALSE = re.compile(r"^(?:true|false)$")
 _FLOAT_TAG = "tag:yaml.org,2002:float"
 _INT_TAG = "tag:yaml.org,2002:int"
-# Forms tofu reads as numbers and PyYAML leaves as strings, so they must not pass as labels.
+# Forms other YAML readers take as numbers and PyYAML leaves as strings: not labels.
 _EXPONENT_NUMBER = re.compile(r"^[-+]?\d+[eE][-+]?\d+$")
 _OCTAL_NUMBER = re.compile(r"^0o[0-7]+$")
 
@@ -43,7 +42,7 @@ _REDIRECT_KEYS = {"hosts", "target", "serve"}
 _SERVE_KEYS = {"pages", "files"}
 _FILES_PREFIX = re.compile(r"(/[a-z0-9._~-]+)+/")
 _LABEL = re.compile(r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?")
-# A tunnel's name goes unquoted into Cloudflare's tunnel query and into OpenTofu's lookup key.
+# A tunnel's name is a DNS label, the same shape as a host's name.
 _TUNNEL_NAME = _LABEL
 # A compose project name: it is also the repository and the directory name of an app.
 _APP_KEY = re.compile(r"[a-z0-9][a-z0-9_-]*")
@@ -52,7 +51,6 @@ _GITHUB_ORGANISATION = re.compile(r"[A-Za-z0-9]([A-Za-z0-9-]{0,37}[A-Za-z0-9])?"
 _BRANCH = re.compile(r"\w[\w.-]*(/\w[\w.-]*)*", re.ASCII)
 APEX = "@"
 WILDCARD = "*"
-PROBE_NAME = "edge-host-check"  # the host check asks the wildcard here (#154)
 
 
 class CatalogError(Exception):
@@ -60,11 +58,11 @@ class CatalogError(Exception):
 
 
 class _CatalogLoader(yaml.SafeLoader):
-    """Only `true` and `false` are booleans, and the numbers tofu reads are no strings.
+    """Only `true` and `false` are booleans, and the numbers other readers take are no strings.
 
-    tofu's `yamldecode` also reads YAML 1.1 words (`yes`, `no`, `on`, `off`, `y`, `n`, `True`)
-    as booleans and PyYAML disagrees on some of them; only `true` and `false` mean the same to
-    both readers, so every other spelling is refused.
+    YAML 1.1 words (`yes`, `no`, `on`, `off`, `y`, `n`, `True`) read as booleans in some YAML
+    readers and PyYAML disagrees on some of them; only `true` and `false` mean the same to every
+    reader, so every other spelling is refused.
     """
 
 
@@ -96,7 +94,7 @@ class App:
 
 
 def read(catalog_file: Path) -> Any:
-    """The catalog's document, read the way tofu reads it."""
+    """The catalog's document."""
     return parse(read_bytes(catalog_file), catalog_file.name)
 
 
@@ -346,16 +344,6 @@ def hosts(document: Any) -> tuple[Host, ...]:
     return tuple(host for _, host in enabled_hosts)
 
 
-def redirected_fqdns(document: Any) -> frozenset[str]:
-    """The names `cloudflare.redirect` answers at the edge; they hold the tunnel record too.
-
-    Valid once `hosts` has accepted the document.
-    """
-    zone_name = zone(document)
-    redirect = document["cloudflare"].get("redirect") or {}
-    return frozenset(fqdn_of(name, zone_name) for name in redirect.get("hosts", []))
-
-
 def fqdn_of(name: str, zone: str) -> str:
     """The full name of a catalog host name: '@' is the zone's apex."""
     return zone if name == APEX else f"{name}.{zone}"
@@ -377,10 +365,10 @@ def _is_dotted_labels(zone: str) -> bool:
 
 def _require_ready(entered: list[tuple[str, Host]]) -> None:
     """An app's host needs its `ready` path, so planning refuses one without it before anything
-    starts: the publish phase asks it there, or the tunnel's owner does before the host moves."""
+    starts: the tunnel's owner asks it there before the host moves."""
     for path, one in entered:
         if one.ready is None:
-            raise CatalogError(f"{path}.ready: an app's host needs the path the publish asks")
+            raise CatalogError(f"{path}.ready: an app's host needs a `ready` path")
 
 
 def _entry_enabled(key: str, entry: dict) -> bool:
@@ -432,8 +420,6 @@ def _host(service: str, path: str, item: Any, zone: str) -> Host:
 def _name(path: str, name: Any) -> str:
     if not isinstance(name, str) or not (name in (APEX, WILDCARD) or _LABEL.fullmatch(name)):
         raise CatalogError(f"{path}.name: must be '@', '*' or one lowercase DNS label")
-    if name == PROBE_NAME:
-        raise CatalogError(f"{path}.name: reserved for the host check")
     return name
 
 
@@ -521,7 +507,7 @@ def _check_together(enabled_hosts: list[tuple[str, Host]]) -> None:
 def _check_redirect(document: dict, zone: str, taken: set[str]) -> None:
     """`cloudflare.redirect`: the zone's names that leave the tunnel for a redirect at the edge.
 
-    OpenTofu renders it (external/cloudflare.tf); a malformed one is refused before tofu starts.
+    A malformed one is refused when the catalog is read.
     """
     redirect = document["cloudflare"].get("redirect")
     if redirect is None:

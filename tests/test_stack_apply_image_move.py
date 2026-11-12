@@ -31,7 +31,6 @@ from support.stack_plan_rows import detail_lines, find_row, plain, row_at
 from hal import cli
 from hal.grammar import ExitCode
 from hal.stack import apply, compose, litellm_keys, switches
-from hal.stack.external import cli as external_cli
 from hal.stack.plan_rows import KeysEvent, PlanEvent
 from hal.stack.realm.reconcile import KEYCLOAK, REALM_UNIT
 from hal.stack.result_rows import ResultEvent
@@ -161,8 +160,7 @@ def plain_apply(
     database_units, repository, scripted, setup_check, setup_run, ingress, scripted_git,  # noqa: F811
     realm_backup, state, home, at_terminal, capsys, monkeypatch,  # noqa: F811
 ):  # fmt: skip
-    """Plain `hal apply` through its composer: the local part on the scripted boundaries, the
-    publish a spy that counts its calls."""
+    """`hal apply` through its door: the local part on the scripted boundaries."""
     collaborators = apply.Collaborators(
         engine=compose.Compose(scripted.run, repository),
         check=setup_check,
@@ -177,19 +175,12 @@ def plain_apply(
         apply.apply_local, repository=repository, home=home, collaborators=collaborators
     )
     monkeypatch.setattr(apply, "apply_local", local)
-    published: list[object] = []
 
-    def publish(*arguments: object, **_keywords: object) -> int:
-        published.append(arguments)
-        return 0
-
-    monkeypatch.setattr(external_cli, "apply_command", publish)
-
-    def run() -> tuple[int, str, list[object]]:
+    def run() -> tuple[int, str]:
         at_terminal("yes")
         exit_code = cli.main(["apply"])
         terminal_output = sys.stdout.getvalue()  # `at_terminal` made stdout a StringIO
-        return exit_code, terminal_output + capsys.readouterr().err, published
+        return exit_code, terminal_output + capsys.readouterr().err
 
     return run
 
@@ -210,31 +201,13 @@ def test_a_failed_snapshot_keeps_the_old_container_and_ends_partial(
     realm_backup.failing = failing
     ids = dict(scripted.container_ids)
 
-    exit_code, output, published = plain_apply()
+    exit_code, output = plain_apply()
 
     assert exit_code == ExitCode.FAILURE
     assert find_row(output, "keycloak", ResultEvent.FAILED, f"{failing} broke")
     assert ("pre-apply snapshot ab12cd34" in output) == names_the_snapshot
     assert scripted.container_ids == ids
     assert [step for step in steps(scripted) if step[0] == "up"] == []
-    assert published == []
-
-
-def test_plain_hal_apply_publishes_nothing_after_a_failed_snapshot(
-    plain_apply,
-    scripted,  # noqa: F811
-    realm_backup,
-):
-    """C9: the local part is `hal apply --local`'s; its failure stops the publish. The exit is
-    the public one `hal` ends with, which C3 and the docs name."""
-    scripted.change_image(KEYCLOAK.service, KEYCLOAK_BUMP)
-    realm_backup.failing = "backup"
-
-    exit_code, output, published = plain_apply()
-
-    assert exit_code == ExitCode.FAILURE
-    assert "nothing published" in output
-    assert published == []
 
 
 @pytest.mark.usefixtures("database_units")
@@ -523,7 +496,7 @@ def test_a_switch_on_over_data_starts_the_database_alone_and_the_app_after_the_p
     scripted.change_image(unit.service, bump)
     database = scripted.container_ids.get(unit.database)
 
-    exit_code, output, _ = plain_apply()
+    exit_code, output = plain_apply()
 
     assert exit_code == ExitCode.OK, output
     assert switch_on_steps(scripted) == [
@@ -540,7 +513,7 @@ def test_a_switch_on_over_data_starts_the_database_alone_and_the_app_after_the_p
     )
     scripted.calls.clear()
 
-    exit_code, _, _ = plain_apply()
+    exit_code, _ = plain_apply()
 
     assert exit_code == ExitCode.OK
     assert "nothing to change" in plain(sys.stdout.getvalue())
@@ -565,7 +538,7 @@ def test_a_failed_switch_on_snapshot_creates_no_app_and_names_no_restore(
     removed(scripted, *LITELLM_SERVICES)
     realm_backup.failing = failing
 
-    exit_code, output, published = plain_apply()
+    exit_code, output = plain_apply()
 
     assert exit_code == ExitCode.FAILURE
     assert f"{failing} broke" in output
@@ -573,7 +546,6 @@ def test_a_failed_switch_on_snapshot_creates_no_app_and_names_no_restore(
     assert "hal restore" not in output
     assert switch_on_steps(scripted)[-1] != LITELLM_UP
     assert LITELLM.service not in scripted.containers
-    assert published == []
 
 
 @pytest.mark.usefixtures("database_units")
@@ -585,7 +557,7 @@ def test_a_fresh_switch_on_with_no_volume_takes_no_snapshot(
     """S4."""
     removed(scripted, *LITELLM_SERVICES)
 
-    exit_code, _, _ = plain_apply()
+    exit_code, _ = plain_apply()
 
     assert exit_code == ExitCode.OK
     assert switch_on_steps(scripted) == [LITELLM_UP]
@@ -659,7 +631,7 @@ def test_a_switch_on_stopped_after_its_snapshot_names_it_and_the_restore_once_th
     if in_the_start:
         in_the_start(scripted)
 
-    exit_code, output, _ = plain_apply()
+    exit_code, output = plain_apply()
 
     assert exit_code == ExitCode.FAILURE
     assert line in output
@@ -683,7 +655,7 @@ def test_a_switch_on_that_creates_only_the_database_names_its_snapshot_and_no_re
     removed(scripted, LITELLM.database)
     _ctrl_c_in_the_apps_start(scripted)
 
-    exit_code, output, _ = plain_apply()
+    exit_code, output = plain_apply()
 
     assert exit_code == ExitCode.FAILURE
     assert find_row(output, LITELLM.key, ResultEvent.INTERRUPTED)
@@ -719,7 +691,7 @@ def test_a_partial_switch_on_names_the_way_back_of_every_unit_that_holds_a_snaps
     removed(scripted, *keycloak_gone, *LITELLM_SERVICES)
     realm_backup.failing, realm_backup.failing_unit = "backup", LITELLM.key
 
-    exit_code, output, _ = plain_apply()
+    exit_code, output = plain_apply()
 
     assert exit_code == ExitCode.FAILURE
     assert find_row(output, LITELLM.key, ResultEvent.FAILED, "backup broke")
@@ -738,7 +710,7 @@ def test_a_switch_on_whose_later_key_step_fails_still_names_its_snapshot(
     removed(scripted, *KEYCLOAK_SERVICES)
     scripted.keys.fail_at = 0
 
-    exit_code, output, _ = plain_apply()
+    exit_code, output = plain_apply()
 
     assert exit_code == ExitCode.FAILURE
     assert "pre-apply snapshot ab12cd34" in output
