@@ -1,7 +1,0 @@
-claim_id = "3e9a866eb0b041e2aa96f93f68cd609e"
-agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
-role = "builder"
-base = "015cfb4e84c207b6a3392b7d75f26e7a27c970e9"
-branch = "dependabot/images-dfc9644ca1"
-scope = ["compose.yaml", "probe/agent-service/Dockerfile"]
-opened_commit = "66d905309b6775c031ea21c8df7407ca72c0e2aa"
