@@ -288,7 +288,8 @@ So liest sich die Tabelle des Berichts (und, ohne Expiry, die von `-v`):
 Funde sind: ein fehlender Eintrag (außer einem optionalen) oder ein unbekannter, ein zurückgezogenes
 Geheimnis, dessen Widerruf unbestätigt ist, eine fehlgeschlagene oder nicht
 mögliche Prüfung, eine Datei oder ein Ordner unter `~/.secrets`, den kein
-Eintrag nennt („unknown“; bleibt unangetastet), und Rechte lockerer als
+Eintrag nennt („unknown“; bleibt unangetastet; ausgenommen sind die Cloudflare-Token-Dateien und der
+Ordner der Zonen-Verwaltung unter `~/.secrets`, die der Betreiber von Hand löscht), und Rechte lockerer als
 `600` für Dateien oder `700` für Ordner unter `~/.secrets`, ein Ordner dort,
 den sein Besitzer nicht lesen, betreten oder beschreiben kann („closed-folder“;
 was darin liegt, ist „unknown“), ein Symlink
