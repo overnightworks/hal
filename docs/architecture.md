@@ -230,7 +230,7 @@ What the file declares belongs to the file: a console change to a declared objec
 
 **Today's switch** is different: "off" means removing a tunnel line by hand, and only a Cloudflare-managed tunnel reads the lines (`docs/external.md`). Planned with X6a (#168): the ingress comes from the catalog, so a line is no longer removed by hand. Both presentator hosts are `exposure: public`, are served by the platform's tunnel and sit behind presentator's own Keycloak login; no Access app stands in front of them. The wildcard `*` protection is X8b.
 
-**Emergency switches are separate:** `hal stop presentator` takes it offline at once without a code change. Guards: section 8 state table.
+**Emergency switches are separate:** `hal stop presentator` stops hal's rollback copy at once without a code change; both public hosts stay served by the platform's tunnel. Guards: section 8 state table.
 
 ### The deployed record: a read-only interface
 
