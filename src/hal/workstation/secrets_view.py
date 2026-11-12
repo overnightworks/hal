@@ -47,7 +47,6 @@ PROBE_STOP_SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
 HOME_PREFIX = "~/"
 WILDCARD_CHARACTERS = frozenset("*?[")
 LOOSEST_FILE_MODE = 0o600
-OPERATOR_KEPT_PATTERNS = tuple(PurePosixPath(".secrets", place) for place in ("cloudflare/fleet-read", "cloudflare/fleet-write", "opentofu/*"))  # the operator deletes these by hand
 LOOSEST_DECLARABLE_FILE_MODE = 0o644  # a container user reads the file; the 0700 folder keeps everyone else out
 LOOSEST_DIRECTORY_MODE = 0o700
 EXPIRY_UNKNOWN = "expiry unknown"
@@ -722,10 +721,11 @@ def build_view(manifest: tuple[SecretEntry, ...], observation: Observation) -> S
     statuses = tuple(
         SecretStatus(entry, presence(entry, observation.matches), _verification(entry, observation.probe_codes)) for entry in manifest
     )
-    patterns = (*(pattern for entry in manifest for pattern in entry.paths), *OPERATOR_KEPT_PATTERNS)
+    patterns = tuple(pattern for entry in manifest for pattern in entry.paths)
     unknown = (
         SecretFinding(FindingRule.UNKNOWN_FILE, f"{HOME_PREFIX}{fact.relative}", fix=f"add {HOME_PREFIX}{fact.relative} to the manifest or delete it")
-        for fact in observation.tree if not _is_named(fact.relative, patterns)
+        for fact in observation.tree
+        if not _is_named(fact.relative, patterns)
     )
     findings = (
         *(f for status in statuses for f in _entry_findings(status)),
