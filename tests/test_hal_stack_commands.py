@@ -223,14 +223,14 @@ def test_the_verbs_beside_apply_never_read_the_settings_file(
     ids=lambda value: value.name,
 )
 def test_every_end_of_the_update_has_its_public_exit(monkeypatch, update_end, hal_exit):
-    """#783 D1: the grammar's codes, one per end."""
+    """The grammar's codes, one per end."""
     monkeypatch.setattr(stack, "update_checkout", lambda: update_end)
 
     assert cli.main(["update"]) == hal_exit
 
 
 def test_the_update_table_names_every_member_of_its_enum():
-    """#783 D1: an end added without an exit fails here."""
+    """An end added without an exit fails here."""
     assert set(stack_commands.EXIT_OF_UPDATE) == set(UpdateEnd)
 
 
@@ -287,7 +287,7 @@ def test_apply_while_another_apply_runs_changes_nothing(hal, applying):
 
 
 def test_apply_behind_origin_names_hal_update(hal, applying, monkeypatch):
-    """#783 F2: the apply ends with 3, no plan and no question."""
+    """The apply ends with 3, no plan and no question."""
     monkeypatch.setattr(checkout.Git, "divergence", lambda _self, _sha: (0, 2))
 
     result = hal("apply", answers=("yes",))
