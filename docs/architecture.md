@@ -175,7 +175,7 @@ Planned and not accepted by `catalog.py` yet: `run.login_group` (a group of `key
 
 | Field | Type | Default | Rule |
 |---|---|---|---|
-| `name` | string, required | none | `@` (the zone's apex), `*` (the wildcard) or one lowercase DNS label, no dot; `edge-host-check` is reserved, also in a disabled entry |
+| `name` | string, required | none | `@` (the zone's apex), `*` (the wildcard) or one lowercase DNS label, no dot |
 | `exposure` | `public` \| `bypass` \| `protected`, required | none | `protected` only on `*`, and `*` only `protected`; `public` on a label is refused while `*` exists (it needs its own `bypass`); one FQDN once |
 | `reason` | string | none | required and non-blank for `public` and `bypass` |
 | `ready` | path | none | starts with one `/`; no command reads it |

@@ -51,7 +51,6 @@ _GITHUB_ORGANISATION = re.compile(r"[A-Za-z0-9]([A-Za-z0-9-]{0,37}[A-Za-z0-9])?"
 _BRANCH = re.compile(r"\w[\w.-]*(/\w[\w.-]*)*", re.ASCII)
 APEX = "@"
 WILDCARD = "*"
-PROBE_NAME = "edge-host-check"  # the host check asks the wildcard here (#154)
 
 
 class CatalogError(Exception):
@@ -421,8 +420,6 @@ def _host(service: str, path: str, item: Any, zone: str) -> Host:
 def _name(path: str, name: Any) -> str:
     if not isinstance(name, str) or not (name in (APEX, WILDCARD) or _LABEL.fullmatch(name)):
         raise CatalogError(f"{path}.name: must be '@', '*' or one lowercase DNS label")
-    if name == PROBE_NAME:
-        raise CatalogError(f"{path}.name: reserved for the host check")
     return name
 
 

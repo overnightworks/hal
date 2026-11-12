@@ -33,13 +33,11 @@ from enum import Enum, StrEnum
 from pathlib import Path
 
 from hal.output import Stream, printable, write_line
-from hal.output.command import Verb, command
 from hal.stack import compose
 
 LIVE_CHECKOUT = "~/srv/hal"
 MAIN = "main"
 DIRTY_TREE = "the live checkout has local changes, nothing changed"
-PULL_REQUEST_ROUTE = f"a change reaches it through a pull request and `{command(Verb.UPDATE)}`"
 _BRANCH_PREFIX = "refs/heads/"
 _ISOLATION = (
     "-c", "core.hooksPath=/dev/null",

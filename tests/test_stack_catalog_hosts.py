@@ -206,20 +206,10 @@ def test_the_cross_host_rules_refuse_naming_the_rule(hosts_of_the_catalog, rule)
     [
         pytest.param(host("*", "public"), "wildcard must be protected", id="public-wildcard"),
         pytest.param(host("app", "protected"), "only the wildcard", id="protected-label"),
-        pytest.param(host(catalog.PROBE_NAME), "reserved for the host check", id="probe-name"),
     ],
 )
 def test_the_single_host_rules_hold_for_a_disabled_entry(disabled_host, rule):
-    """PB7 (the probe-name row), C-cells for the others."""
     assert rule in refusal(document(hosted(disabled_host, run={"enabled": False})))
-
-
-def test_the_probe_name_is_reserved_for_the_host_check():
-    """PB7: the wildcard is asked there, so no enabled entry may own it."""
-    assert catalog.PROBE_NAME == "edge-host-check"
-    assert refusal(document(hosted(host(catalog.PROBE_NAME)))) == (
-        "services.app.hosts[0].name: reserved for the host check"
-    )
 
 
 def test_the_same_fqdn_across_entries_is_refused():
@@ -345,7 +335,7 @@ def test_a_label_that_reads_as_a_number_is_refused(written, tmp_path):
         catalog.hosts(catalog_document)
 
 
-@pytest.mark.parametrize("name", ["hopin", "a", "a" * 63, "a-b", "9"])
+@pytest.mark.parametrize("name", ["hopin", "a", "a" * 63, "a-b", "9", "edge-host-check"])
 def test_a_lowercase_label_is_accepted(name):
     (found,) = catalog.hosts(document(hosted(host(name))))
     assert found.fqdn == f"{name}.{ZONE}"
