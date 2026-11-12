@@ -32,8 +32,7 @@ console. Change the YAML and apply it again, and the running Keycloak follows.
 
 Going live needs you in one place only: in the browser, to create your own
 admin with a second factor (a machine must not hold that). Everything else is
-`keycloak/go-live` (see [Go-live](#go-live)), and `hal apply`
-publishes the record of the public door afterwards. The sections below are the reference.
+`keycloak/go-live` (see [Go-live](#go-live)). The sections below are the reference.
 
 ## Doors, issuers and configuration
 
@@ -377,8 +376,7 @@ admin. An agent never runs it against the live project and never holds an admin 
 `keycloak/go-live --help` lists its steps, each skipped when already done, so it can be run again
 after any interruption; a failure ends with one line naming the step and exit code 1, and it never
 prints a secret. Your own part is in the browser (step 7): a machine must not hold your second
-factor. `hal apply` publishes the record of `auth.<EDGE_DOMAIN>` afterwards, once the catalog declares it;
-`fleet.yaml` names `keycloak/go-live` as Keycloak's setup, so `hal apply` asks and runs it in
+factor. `fleet.yaml` names `keycloak/go-live` as Keycloak's setup, so `hal apply` asks and runs it in
 your terminal on yes while it is not done.
 
 While `~/.local/state/edge/stopped/keycloak` exists (`hal stop keycloak`), go-live refuses and

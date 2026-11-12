@@ -6,24 +6,23 @@ carries the label `edge.name=<name>` (a container with `edge.alias` is routed un
 is never a tunnel target. Traefik never sees the Docker socket: a GET-only socket proxy hands it the
 container list and events.
 
-Nothing here is reachable from outside until the operator publishes it with `hal apply`, which puts
-the catalog's hosts on the tunnel. `auth` goes live as `public` (see
+Nothing here is reachable from outside except through a tunnel: overnightworks/platform owns the
+zone and its DNS records, and `hal apply` changes only this PC. `auth` goes live as `public` (see
 [docs/keycloak.md](docs/keycloak.md)). There is no Zero Trust for now (operator, 20.10.2026); the
 wildcard protection is X8b on overnightworks/edge#30. The platform picture (layers, services,
 secrets, deploy, re-setup, operations, decisions) is [docs/architecture.md](docs/architecture.md).
 
 ## Start
 
-The first `hal apply --local` writes `.env`, plans, asks to run each setup still missing (for example
+The first `hal apply` writes `.env`, plans, asks to run each setup still missing (for example
 `keycloak/go-live`, which itself starts the socket proxy and Traefik), asks `yes` and switches the
 catalog's units on. Apply never starts a stopped core service, so Traefik and the socket proxy are
-started by hand; `hal apply` then publishes, and `hal online` opens the tunnel, which `hal setup`
+started by hand; `hal online` then opens hal's tunnel, which `hal setup`
 installs disabled. Readiness and stop are in [docs/stack.md](docs/stack.md).
 
 ```sh
-hal apply --local
-docker compose up -d --no-recreate socket-proxy traefik
 hal apply
+docker compose up -d --no-recreate socket-proxy traefik
 hal online
 ```
 
@@ -48,7 +47,7 @@ renamed repository's clones on this PC, asks one `yes` before it moves, and ends
 findings), 3 or 4 ([docs/naming.md](docs/naming.md), P1).
 `hal apply` ends 0, 1 (declined), 4 (a guard said no) or 3 (cannot plan, a failed step, a partial run;
 the printed line says which), and 2 or 130 as the grammar says. Of the six stack commands, `hal update`
-keeps the grammar's codes; `hal apply` deviates only by Exception E2, E3 and the publish's 3; `stop`, `start`, `offline`, `online` and `hal setup` deviate from it (Exception E
+keeps the grammar's codes; `hal apply` deviates only by Exception E2 and E3; `stop`, `start`, `offline`, `online` and `hal setup` deviate from it (Exception E
 in [docs/stack.md](docs/stack.md)); `hal setup` prints five rows, a verdict
 and, when it stops, an `error:`/`next:` pair, asks one `yes` before it acts (`--dry-run` only shows), and ends 0, 1 (declined), 3 or 4 (no terminal).
 
@@ -82,13 +81,12 @@ container environment values; review evidence must not dump those payloads.
 
 ## Where things live
 
-`compose.yaml`, `traefik.yml` and `fleet.yaml` (the service catalog: which units run, and the
-OpenTofu inputs) hold the stack; `dynamic/` holds routes for host processes and the emergency
+`compose.yaml`, `traefik.yml` and `fleet.yaml` (the service catalog: which units run, and
+their hosts) hold the stack; `dynamic/` holds routes for host processes and the emergency
 barriers `hal stop` writes. `keycloak/` is the realms as code, `step-ca/` and `traefik-mcp.yml` the
 internal CA and the MCP gateway, `agent-service/` LiteLLM, its front and its egress gateway and the live canaries,
 `legal/` the legal unit's frame and sections (imprint, privacy notice, terms; unless another tunnel serves the apex, `hal apply` builds the pages into `legal/built/`), stylesheet and nginx config, `tunnel/` the cloudflared unit and its polkit rule, `backup/` the declared backups (their timers are declared in `src/hal/workstation/jobs.py`). The commands are Python under `src/` (`edge`, `hal`;
-a bare `hal check` is the daily check (it also mails and pops up what is new), `hal check exposure` reports what reaches beyond loopback and `hal check hosts` compares Cloudflare with `fleet.yaml`, `hal backup` and `hal restore` run the backup runner; `bin/hal` is the launcher), the OpenTofu
-root is `external/`, the probes that prove each service on a throwaway stack are under `probe/`, and
+a bare `hal check` is the daily check (it also mails and pops up what is new), `hal check exposure` reports what reaches beyond loopback, `hal backup` and `hal restore` run the backup runner; `bin/hal` is the launcher), the probes that prove each service on a throwaway stack are under `probe/`, and
 `tests/` holds the rest.
 
 ## Documentation
@@ -97,7 +95,6 @@ root is `external/`, the probes that prove each service on a throwaway stack are
 |---|---|
 | [docs/architecture.md](docs/architecture.md) | the platform picture, decisions, operations |
 | [docs/stack.md](docs/stack.md) | run, apply, stop, catalog on and off, the emergency switch, rollback |
-| [docs/external.md](docs/external.md) | Cloudflare as code (the publish phase of `hal apply`) |
 | [docs/keycloak.md](docs/keycloak.md) | the login, the realm as code, go-live, upgrade |
 | [docs/backup.md](docs/backup.md) | `hal check`, `hal backup`, `hal restore`, what a backup holds, restore |
 | [docs/people.md](docs/people.md) | what an app offers so one person can be exported and erased |

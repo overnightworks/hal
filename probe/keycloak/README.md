@@ -97,7 +97,7 @@ stack behind, ends with `PROBE FAILED` and exit 1.
   list nothing only in Keycloak and hold every pinned built-in, so a Keycloak upgrade that adds or
   drops a built-in fails it. Proof EV2 (#181) signs in, sends a wrong
   password and logs out through the edge entrypoint, sending `Forwarded` the way Cloudflare's
-  rule sets it (`external/cloudflare.tf`) next to a forged `X-Forwarded-For`, and holds when the
+  rule sets it next to a forged `X-Forwarded-For`, and holds when the
   user's stored events are exactly one LOGIN and one LOGIN_ERROR, both with exactly the
   `Forwarded` address, a wrong password from an IPv6 address stores that address, and the logout
   stores none. The probe simulates the rule; it does not prove that Cloudflare applies it (#190).

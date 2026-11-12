@@ -388,7 +388,7 @@ def tunnel_request_url(edge_url: str, method: str, url: str, **kwargs: Any) -> R
 
 
 def cloudflare_forwarded(address: str) -> str:
-    """The `Forwarded` value external/cloudflare.tf sets: RFC 7239 brackets and quotes IPv6."""
+    """The `Forwarded` value Cloudflare's rule sets: RFC 7239 brackets and quotes IPv6."""
     node = f'"[{address}]"' if ipaddress.ip_address(address).version == 6 else address
     return f"for={node};proto=https"
 

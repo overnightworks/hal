@@ -21,7 +21,7 @@ hal check           # alle Prüfungen lesend, ein Bericht, höchstens eine Benac
 `hal secrets`, die Hook-Prüfung, die Log-Prüfung, die Backup-Prüfung, die Plattform-Prüfung und die Exposure-Prüfung (was von außerhalb dieses PCs erreichbar ist, dieselbe Suche wie `hal check exposure`; `hal` führt sie aus und reicht die Funde herunter) — und schreibt einen gemeinsamen
 Bericht nach `~/.local/state/hal/check-report.md`; dort stehen die Zahlen und jeder Fund im Einzelnen.
 
-Von Hand getippt liefert ein nacktes `hal check` Neuigkeiten aus wie der Timer: derselbe Bericht, dieselbe Mail und Benachrichtigung, dasselbe Merken der Funde; einen Probelauf ohne Zustellung gibt es nicht. Exit 0 sauber, 1 Funde, 2 Manifest oder `config.toml` sind ungültig (`error: <Datei>: …`), 3 ein Bereich konnte nicht prüfen, 130 unterbrochen; `--json` gehört nur zu `hal check exposure` und `hal check hosts` (Exit 2).
+Von Hand getippt liefert ein nacktes `hal check` Neuigkeiten aus wie der Timer: derselbe Bericht, dieselbe Mail und Benachrichtigung, dasselbe Merken der Funde; einen Probelauf ohne Zustellung gibt es nicht. Exit 0 sauber, 1 Funde, 2 Manifest oder `config.toml` sind ungültig (`error: <Datei>: …`), 3 ein Bereich konnte nicht prüfen, 130 unterbrochen; `--json` gehört nur zu `hal check exposure` (Exit 2).
 
 Auf dem Terminal steht davon eine englische Zeile je Bereich in der Reihenfolge der Mail (`ok`, `N action(s)`,
 `N note(s)` mit dem Satz des ersten Funds und `+N more`, oder `not checked`) und ein Urteil, das sagt, ob eine Mail
@@ -310,10 +310,8 @@ Vorhandensein sich nicht feststellen lässt. Mit `--dry-run` nennt er die offene
 Weg zum Assistenten; `hal secrets` zeigt nur. Ein Eintrag mit
 `loosest_mode` landet mit diesem Modus (0644) in seinem 0700-Ordner, alle anderen mit 0600.
 
-Der Assistent geht die fehlenden Einträge des Manifests der Reihe nach durch,
-zuerst die drei der Publish-Phase von `hal apply`:
-`cloudflare/fleet-read` und `opentofu/state-passphrase` zuerst, danach
-`cloudflare/fleet-write`. Es läuft nur am
+Der Assistent geht die fehlenden Einträge des Manifests der Reihe nach durch.
+Es läuft nur am
 eigenen Terminal (stdin und stdout); ohne Terminal fragt `hal setup` kein yes und endet nach dem Plan mit Exit-Code `4`;
 der Assistent läuft erst nach dem yes. Agenten fahren ihn nie.
 
@@ -352,8 +350,7 @@ Mensch, alles andere der Assistent. Je Token:
    nächsten Eintrag. Die Ordner prüft er dabei noch einmal; `hal` setzt keine
    Rechte.
 
-Die State-Passphrase erzeugt er zufällig und schreibt sie, ohne sie zu zeigen.
-Ebenso erzeugt er den LiteLLM-Schlüssel jeder App (`~/.secrets/litellm/apps/songmaker`, `hopin`, `presentator`) mit dem Präfix `sk-` (Manifest-Schlüssel `value_prefix`), Modus 0644 im 0700-Ordner, und nur, wenn die Datei fehlt.
+Den LiteLLM-Schlüssel jeder App (`~/.secrets/litellm/apps/songmaker`, `hopin`, `presentator`) erzeugt er zufällig und schreibt ihn, ohne ihn zu zeigen, mit dem Präfix `sk-` (Manifest-Schlüssel `value_prefix`), Modus 0644 im 0700-Ordner, und nur, wenn die Datei fehlt.
 Key-ID und API-Token des TURN-Keys, den nur HopIn nutzt (`cloudflare/turn-hopin/key-id` und
 `…/api-token`, Art „token, unverified“), nimmt er ebenso unsichtbar entgegen, nennt vorher, wo
 der Key entsteht (Cloudflare › Realtime › TURN, beide Werte zeigt Cloudflare nur einmal), und
@@ -378,22 +375,11 @@ Jeder Fall druckt eine Zeile `Zeichen Name Ereignis Tatsache` (Ereignisse: `veri
 schon da ist, druckt keine. Nie steht ein Wert in einer Zeile, nur Name, Pfad und Rechte. Ein TURN-Wert
 endet mit `✓ cloudflare/turn-hopin/key-id  stored  not verified · ~/.secrets/cloudflare/turn-hopin/key-id (644)`.
 
-Beispiel (gekürzt, ein abgelehnter Versuch):
+Beispiel (gekürzt):
 
 ```
-  › cloudflare/fleet-read  new token  Cloudflare fills in nothing
-    why: hal apply and hal check hosts read it to see DNS, Access, the tunnel, the zone settings (HSTS) and the visitor-address transform rule at Cloudflare, changing nothing.
-    [ ] Create Token › Custom token › Get started
-    [ ] Token name: cloudflare/fleet-read
-    [ ] Permissions: Zone › DNS › Read
-    [ ] Continue to summary › Create Token, copy the value
-    Enter opens the page in your browser:
-    opened dash.cloudflare.com/profile/api-tokens
-    paste the token, then an empty line (hidden, empty skips):
-  ✗ cloudflare/fleet-read  rejected  Cloudflare answers 401 · paste again or leave empty
-    paste the token, then an empty line (hidden, empty skips):
-  ✓ cloudflare/fleet-read  verified  ~/.secrets/cloudflare/fleet-read (600)
-  ✓ opentofu/state-passphrase  generated  ~/.secrets/opentofu/state-passphrase (600) · never shown
+  ✓ litellm/apps/songmaker  generated  ~/.secrets/litellm/apps/songmaker (644) · never shown
+  ✓ cloudflare/turn-hopin/key-id  stored  not verified · ~/.secrets/cloudflare/turn-hopin/key-id (644)
 ```
 
 `opened` zeigt Host und Pfad der Seite, bei einer Abfrage mit `?…`; öffnet kein Browser die

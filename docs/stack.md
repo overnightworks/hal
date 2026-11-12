@@ -16,10 +16,10 @@ PATH: the operator links it as `hal` (`hal --help` lists its commands).
 
 ## Configure
 
-The first `hal apply --local` writes `.env` itself: `EDGE_DOMAIN` is `fleet.yaml`'s `cloudflare.zone`
+The first `hal apply` writes `.env` itself: `EDGE_DOMAIN` is `fleet.yaml`'s `cloudflare.zone`
 and `DOCKER_GID` the id of this PC's `docker` group (Keycloak's secrets are files). `.env` is local and
 never committed. A `.env` that differs, or lacks one of the two keys, is named and left alone: delete it
-and `hal apply --local` writes it again.
+and `hal apply` writes it again.
 
 ## Start, readiness, stop
 
@@ -32,9 +32,8 @@ and `hal apply --local` writes it again.
 - **The legal unit.** `legal` (nginx, profile `legal`, switched by `services.legal.run.enabled`) serves
   the imprint, the privacy notice and the terms from `legal/built/` for `Host: <zone>` on `127.0.0.1:8081`; the stylesheet and appkit's
   tokens and fonts (`legal/assets/appkit-<version>/`, which `hal apply` writes from the installed appkit) answer under `/_rechtliches/`, every other path with 404. The catalog gives
-  it the apex as its host with `tunnel: platform`: the Cloudflare redirect leaves the three pages, `/favicon.ico` and
-  `/_rechtliches/` (`cloudflare.redirect.serve`) to the apex, whose record points at the platform's tunnel, so the platform serves them and
-  nothing public reaches this unit. It keeps running as the rollback target until the platform's cutover; rolling back is reverting that
+  it the apex as its host with `tunnel: platform`: the apex's record points at the platform's tunnel, which serves the three pages, `/favicon.ico` and
+  `/_rechtliches/`, so nothing public reaches this unit. It keeps running as the rollback target until the platform's cutover; rolling back is reverting that
   key, then the operator's `hal update` and `hal apply`. While the apex is on another tunnel, `hal apply` builds nothing for it and the unit keeps its last build as the rollback target; a rollback that moves the apex back builds again. Only while hal's tunnel serves the apex are the pages built by `hal apply` from `legal/frame`, `legal/sections` and each app's own `legal/` files at its release (the plan names each page that is
   new or changes), and the unit serves them once it has written them; every answer carries `Cache-Control: no-cache`, so a cache that
   stored a page asks again before it shows it; before the first build they answer 404. The unit serves a changed stylesheet once `hal update` has brought the live checkout in; a changed `legal/nginx/default.conf` needs the container restarted with `hal stop legal` and
@@ -43,8 +42,7 @@ and `hal apply --local` writes it again.
   gets 404 on 8081, and Keycloak answers the master realm on 8090; Keycloak's start takes
   longest. No command checks these four facts together (a named gap on overnightworks/edge#222).
   What proves what today: `hal apply` observes the containers running; `docker compose ps` shows
-  their health; the publish phase asks each declared host on hal's tunnel its `ready` path, only for a plan with
-  changes; `keycloak/go-live` probes 8081 and 8090.
+  their health; `keycloak/go-live` probes 8081 and 8090.
 - **Stop.** `docker compose --profile keycloak --profile legal --profile probe down`. Without `--profile keycloak`
   Keycloak and its database keep running, without `--profile probe` a running probe `hello` stays. It
   removes no volume; never add `--volumes`, because that deletes the Keycloak database.
@@ -93,19 +91,17 @@ the person declined the `yes`, 4 when a guard said no (no terminal, the apply lo
 checkout is not the live one or not a clean `main`, a unit is disabled or not set up), 2 for a usage
 error, and 3 for a cannot-plan end (also a git that cannot be asked), a failed step and a partial run;
 the printed line names which (`partial, …` after a step ran and a later one failed). `apply` deviates
-from the grammar only by E2 and E3 below, and by the publish: the published exit of the Cloudflare
-part stays as it is, so a no at the publish step's own `yes` still ends 3 until S6-4 of
-overnightworks/edge#296 cuts the publish's closing lines. `stop`, `start`, `offline` and `online` end
+from the grammar only by E2 and E3 below. `stop`, `start`, `offline` and `online` end
 with 0, 2 for a usage error, or with 3 for every outcome of the stack that is not "applied or nothing
 to do", a declined `yes` and a guard's refusal included; an uncaught Ctrl-C ends with 130. `hal update`
 keeps the grammar (its section below). The deviations are:
 
-- **E2:** a Ctrl-C that the stack catches ends by what the stack then observes, not with 130. `apply`,
-  `stop` and `start` print their `interrupted …` line and end with 3. `offline` drops the interrupt and
+- **E2:** a Ctrl-C that the stack catches ends by what the stack then observes, not with 130. `apply`
+  (once its `yes` is given), `stop` and `start` print their `interrupted …` line and end with 3. `offline` drops the interrupt and
   reports the tunnel as observed: 3 with its `partial …` line while the tunnel still runs, 0 when it did
   stop, the marker is recorded and the boot drop-in is present. A Ctrl-C the stack does not catch ends
   with 130.
-- **E3:** (until overnightworks/edge#296 A5-3, S6 and S8 print rows) the stack's lines keep the form `<label>: …`, not `error:`/`next:`: `hal apply: …`, `hal start: …`, `hal offline: …` and, for the publish, `cloudflare: …`; a
+- **E3:** (until overnightworks/edge#296 A5-3, S6 and S8 print rows) the stack's lines keep the form `<label>: …`, not `error:`/`next:`: `hal apply: …`, `hal start: …` and `hal offline: …`; a
   number in such a line is the stack's own, not hal's process exit.
 
 `hal setup` deviates in one way:
@@ -124,18 +120,12 @@ schaltet das Profil ab; `run.setup` nennt optional den Befehl, der den Schluesse
 `keycloak/go-live`). Wer die Aenderung in welchem Zustand darf, steht in der Zustandstabelle von
 [architecture.md](architecture.md) (Abschnitt 8) und wird hier nicht wiederholt.
 
-**Zwei Teile.** Das blosse `hal apply` fuehrt den lokalen Teil (`hal apply --local`) aus und, nur
-wenn der mit Exit 0 endete, die Publish-Phase (`hal apply`'s publish, [external.md](external.md)). Jeder
-Teil fragt sein eigenes `yes` und nur, wenn er etwas zu aendern hat; gibt es nirgends etwas zu aendern,
-fragt `hal apply` nichts. Endet der lokale Teil nicht mit 0, steht eine Zeile "nothing published", es
-laeuft kein tofu, und der Exit ist der des lokalen Teils. Ein Ctrl-C (SIGINT) vor der Publish-Phase
-endet mit Exit 3 und "interrupted, nothing published"; waehrend der Publish-Phase gelten deren
-Unterbrechungsregeln, und ihr Exit bleibt, sobald sie ihr Urteil festgehalten hat. Kommt eine
-Unterbrechung ohne festgehaltenen Exit aus ihr heraus, endet es mit Exit 3 und der Zeile
-"run `hal check hosts`". Ein SIGTERM (`kill`) vor der Publish-Phase beendet den Prozess
-wie bei `--local`: nichts wird veroeffentlicht. Nur `hal apply --local` endet nach dem `yes` sauber auf
-dem Urteil `✓ applied · N changes · <Zeit>` (N die Zahl, die das `yes` nannte); das blosse `hal apply`
-druckt es nicht und endet mit `hal apply: done`.
+**Nur dieser PC.** `hal apply` aendert nur diesen PC; die Zone und ihre Eintraege gehoeren
+overnightworks/platform. `hal apply --local` ist dasselbe wie `hal apply`. Es fragt ein `yes` und nur,
+wenn es etwas zu aendern hat; gibt es nichts zu aendern, fragt es nichts. Ein Ctrl-C vor dem `yes`
+und ein SIGTERM (`kill`) beenden den Prozess wie jeden Befehl (130 beziehungsweise durch das Signal).
+Nach dem `yes` endet ein Lauf sauber auf dem Urteil `✓ applied · N changes · <Zeit>` (N die Zahl, die
+das `yes` nannte).
 
 **Der lokale Teil.** Er bringt jede Einheit in den Zustand, den `enabled` sagt. An:
 `docker compose --profile <Einheit> up -d` fuer genau die Dienste des Profils. Aus: `stop`, dann `rm -f`
@@ -297,9 +287,7 @@ unlesbar, keine Gruppe `docker`, `cloudflare.zone` ungueltig, git nicht befragba
 Checkout vor oder neben `origin/main`, Checkout hinter `origin/main` (dann mit `next: hal update`),
 Katalog oder Compose ungueltig, `traefik.yml` oder `traefik-mcp.yml` fehlt, ein Setup-Check, der es
 nicht sagen kann, u. a.).
-Das blosse `hal apply` bricht nach einem lokalen Teil, der nicht mit 0
-endete, ab ("nothing published"); die Zahl in "the publish did not end clean (exit N)" ist die der
-Publish-Phase, deren 2 dort zu 1 wird. Dasselbe `3` kommt vom `uv sync` des Starters `bin/hal`; seine
+Dasselbe `3` kommt vom `uv sync` des Starters `bin/hal`; seine
 `error:`-Zeile nennt das Sync.
 
 ## Notschalter: `hal stop`, `hal start`, `hal offline` und `hal online`
