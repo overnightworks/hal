@@ -25,8 +25,8 @@ services:
     repo: {default_branch: main}
     run: {enabled: true}
     hosts:
-      - {name: presentator, exposure: public, reason: "presentator is public behind its own Keycloak login", ready: /health, deny_public: [/auth/backchannel-logout]}
-      - {name: presentator-talk, exposure: public, reason: "the talk app has its own webauth (presentator ADR 0016)", ready: /health, deny_public: [/auth/backchannel-logout]}
+      - {name: presentator, exposure: public, reason: "presentator is public behind its own Keycloak login", tunnel: platform, ready: /health, deny_public: [/auth/backchannel-logout]}
+      - {name: presentator-talk, exposure: public, reason: "the talk app has its own webauth (presentator ADR 0016)", tunnel: platform, ready: /health, deny_public: [/auth/backchannel-logout]}
   speech:
     repo: {default_branch: main}
     run: {enabled: true}
