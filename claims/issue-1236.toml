@@ -1,8 +1,0 @@
-claim_id = "d9c9e2b65c0f46caa6511f25ae51a3b3"
-agent = "Claude c5152a58-7386-427f-aba1-ec451b2731bb"
-role = "builder"
-base = "1a2709b68b61bc271daaf2847c2d510033961623"
-branch = "claude/issue-1236-move-to-quality-v0-12-0-the-pins-and-its"
-scope = [".github/workflows/ci.yml", ".github/workflows/codeql.yml", "AGENTS.md", "quality/baseline.toml"]
-opened_commit = "cf2d2af2f454e3cbc9f0b817cfdc4f234691ec78"
-whole_reason = "One release bump: the pins, the pinned check command and the two job limits move together or the gate disagrees with the local check."
