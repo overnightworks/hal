@@ -63,9 +63,9 @@ CHANGED_ROW = {
 
 GENERATED_SECRET = '''
 [[secret]]
-name = "opentofu/passphrase"
+name = "keystore/passphrase"
 kind = "service-password"
-paths = ["~/.secrets/opentofu/passphrase"]
+paths = ["~/.secrets/keystore/passphrase"]
 read_by = ["hal apply"]
 recreate = "hal setup"
 '''

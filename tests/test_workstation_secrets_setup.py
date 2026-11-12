@@ -126,7 +126,7 @@ def test_every_secret_is_written_0600_in_directories_kept_0700(home: Path, termi
     run_wizard(home, boundaries)
 
     assert {name: stat.S_IMODE((home / name).stat().st_mode) for name in EVERY_FILE} == dict.fromkeys(EVERY_FILE, 0o600)
-    directories = {".secrets", ".secrets/cloudflare", ".secrets/github", ".secrets/opentofu"}
+    directories = {".secrets", ".secrets/cloudflare", ".secrets/github", ".secrets/keystore"}
     assert {name: stat.S_IMODE((home / name).stat().st_mode) for name in directories} == dict.fromkeys(directories, 0o700)
     assert {name: (home / name).read_text() for name in TOKEN_FILES} == dict.fromkeys(TOKEN_FILES, PASTED_VALUE)
 
@@ -577,7 +577,7 @@ def test_each_token_walk_prints_its_announce_why_briefing_and_browser_line_and_a
         "[ ] Generate token, copy the value",
         "opened github.com/settings/personal-access-tokens/new?…",
         "✓ github/read verified ~/.secrets/github/read (600)",
-        "✓ opentofu/passphrase generated ~/.secrets/opentofu/passphrase (600) · never shown",
+        "✓ keystore/passphrase generated ~/.secrets/keystore/passphrase (600) · never shown",
     ]
     assert terminal.prompts == [OPEN_PROMPT, PASTE_PROMPT, OPEN_PROMPT, PASTE_PROMPT]
     under_a_row = [line for line in output.splitlines() if line.lstrip().startswith(("why:", "[ ]", "prefilled:", "opened "))]

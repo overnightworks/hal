@@ -359,9 +359,9 @@ def test_the_view_shows_the_stored_turn_values_as_not_verified(packaged_home: Sa
 
 SECRETS_MANIFEST = """\
 [[secret]]
-name = "opentofu/passphrase"
+name = "keystore/passphrase"
 kind = "service-password"
-paths = ["~/.secrets/opentofu/passphrase"]
+paths = ["~/.secrets/keystore/passphrase"]
 read_by = []
 recreate = "hal setup"
 
@@ -374,7 +374,7 @@ recreate = "hal setup"
 loosest_mode = 0o644
 loosest_mode_reason = "der Container liest es als eigener Nutzer"
 """
-SECRET_FILES = (".secrets/opentofu/passphrase", ".secrets/hopin/session-secret")
+SECRET_FILES = (".secrets/keystore/passphrase", ".secrets/hopin/session-secret")
 
 
 def run_setup_with_secrets(
@@ -411,7 +411,7 @@ def test_the_dry_run_names_the_missing_secrets_and_writes_nothing(
 
     assert (code, lines[-2]) == (
         0,
-        "  ! secrets         missing        opentofu/passphrase, hopin/session-secret",
+        "  ! secrets         missing        keystore/passphrase, hopin/session-secret",
     )
     assert not sandbox.layout.secrets_dir.exists()
 
@@ -424,7 +424,7 @@ def test_apply_names_the_missing_secrets_before_the_wizard_and_says_stored_after
 
     secrets_rows = [line for line in lines if "secrets  " in line]
     assert secrets_rows == [
-        "  ! secrets         2 missing      opentofu/passphrase, hopin/session-secret",
+        "  ! secrets         2 missing      keystore/passphrase, hopin/session-secret",
         "  ✓ secrets         stored",
     ]
     assert lines.index(secrets_rows[0]) + 1 < lines.index(secrets_rows[1])  # the wizard spoke between them
@@ -608,11 +608,11 @@ def test_hal_setup_apply_ends_a_refused_store_with_the_wizards_own_pair_and_no_s
     (sandbox.home / ".secrets").mkdir(mode=0o700)
     (sandbox.home / ".secrets").chmod(0o755)
 
-    code, lines, error = hal_secrets(secret_entry("opentofu/passphrase"))
+    code, lines, error = hal_secrets(secret_entry("keystore/passphrase"))
 
     assert code == ExitCode.FAILURE
-    assert error.splitlines()[-2:] == ["error: setup stopped at secrets · nothing stored for opentofu/passphrase", "next: chmod 700 ~/.secrets"]
-    assert [" ".join(line.split()) for line in lines if "✗" in line] == ["✗ opentofu/passphrase not stored ~/.secrets has mode 755; at most 700 allowed"]
+    assert error.splitlines()[-2:] == ["error: setup stopped at secrets · nothing stored for keystore/passphrase", "next: chmod 700 ~/.secrets"]
+    assert [" ".join(line.split()) for line in lines if "✗" in line] == ["✗ keystore/passphrase not stored ~/.secrets has mode 755; at most 700 allowed"]
     assert not [line for line in lines + error.splitlines() if "still open" in line]
 
 

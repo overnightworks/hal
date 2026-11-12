@@ -34,14 +34,14 @@ scope = ["metadata:read", "organization_secrets:read"]
 expires_in_days = 366
 
 [[secret]]
-name = "opentofu/passphrase"
+name = "keystore/passphrase"
 kind = "service-password"
-paths = ["~/.secrets/opentofu/passphrase"]
+paths = ["~/.secrets/keystore/passphrase"]
 read_by = ["hal apply"]
 recreate = "hal setup"
 purpose = "verschlüsselt den State"
 """
-PASSPHRASE_FILE = ".secrets/opentofu/passphrase"
+PASSPHRASE_FILE = ".secrets/keystore/passphrase"
 
 # A pasted token carries no whitespace, so the canary's parts are joined; each part alone must stay unseen too.
 PASTED_VALUE_PARTS = tuple(FAKE_SECRET_VALUE.split())
