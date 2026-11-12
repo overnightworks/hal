@@ -1,0 +1,7 @@
+claim_id = "ec8d07fdb3744f539287ebe08488435a"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "b5dbf9c0145b457b3a4afe709bb1a4e582f5c229"
+branch = "claude/issue-1230-r-move-the-quality-pins-to-v0-11-1"
+scope = [".github/workflows/ci.yml", ".github/workflows/codeql.yml", "AGENTS.md"]
+opened_commit = "f968e468b0c4bfd9654754dd6dfda392e3aff4e1"
