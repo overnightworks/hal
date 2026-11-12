@@ -965,7 +965,8 @@ github/token            token         retired             revocation confirmed 1
 <pre class="term"><span class="p">$</span> <span class="u">hal secrets --by-service</span>
 <span class="hd">service        reads</span>
 cloudflared    cloudflared
-keycloak       keycloak/db-password, keycloak/bootstrap-admin-password
+keycloak       keycloak/db-password, keycloak/config-cli-secret,
+               keycloak/bootstrap-admin-password
 <span class="n">… one line per service</span>
 <span class="hd">copy                source</span>
 ssh/id_ed25519.ppk  ssh/id_ed25519
