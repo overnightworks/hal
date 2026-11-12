@@ -49,8 +49,8 @@ Keycloak on port 8080 in two ways; the routing rules are the labels of the `keyc
 The catalog host `auth` carries `tunnel: platform`: its record points at the platform's tunnel,
 which serves `auth.<EDGE_DOMAIN>`, and the platform's Keycloak answers it. This unit is switched
 off (`hal stop keycloak`) and stays in the catalog as the rollback target until hal stops. `hal apply`
-leaves it stopped, holds the realm step and the LiteLLM admin rows; the platform owns the record of `auth` and the tunnel ingress;
-it does not ask `auth`'s `ready` path, because a host on another tunnel is not asked. Rolling back
+leaves it stopped, holds the realm step and the LiteLLM admin rows; the platform owns the record of `auth` and the tunnel ingress.
+Rolling back
 is `hal start keycloak`, the platform's change that points `auth` at hal's tunnel, then reverting the key, then `hal update` and `hal apply`. hal's speech
 service and the MCP servers behind traefik-mcp read the key set from this Keycloak at
 `keycloak.mcp.internal`, so while it is stopped they stop accepting tokens when their key cache runs
