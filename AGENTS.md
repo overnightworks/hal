@@ -9,7 +9,7 @@ the one scanner, and it reads `sonar-project.properties` and the tests job's
 `coverage` artifact.
 
 Before pushing, after the last merge of main, a builder or fixer runs the gate's pinned check:
-`uvx --from "git+https://github.com/overnightworks/quality@f7723bafb716c987013d40b5e0eaba18e58f311c" quality check`
+`uvx --from "git+https://github.com/overnightworks/quality@9ced0f5cee689f2c70fb1467513b943484bd65a5" quality check`
 Its closing line starts with `✓ clean`.
 
 ## Rules
