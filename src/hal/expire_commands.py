@@ -8,11 +8,11 @@ from enum import StrEnum
 
 from hal import litellm_expiry
 from hal.backup import host
+from hal.backup.stop_signals import terminate_like_interrupt
 from hal.grammar import Asks, Command, ExitCode
 from hal.litellm_expiry import Expired, ExpiryFailed, Kind, Outcome
 from hal.output import Glyph, Noun, Row, Verdict, counted, write_error, write_row, write_verdict
 from hal.output.command import Verb, command
-from hal.stop_signals import terminate_like_interrupt
 
 HAL_EXPIRE = command(Verb.EXPIRE)
 DAYS = litellm_expiry.RETENTION_DAYS

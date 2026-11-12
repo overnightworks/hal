@@ -245,7 +245,7 @@ Reihenfolge, und wie der Eintrag in `applied.json` gefuehrt wird:
   Neuerstellen der Einheit `hal backup <einheit> --pre-apply` und beweist den Snapshot mit
   `hal restore --test`; erst dann erzeugt es die Datenbank und dann den Dienst neu, und die
   Ergebniszeile nennt den Snapshot. Scheitert Backup oder Test, laeuft der alte Container weiter, der
-  Lauf endet partial (Exit 3) und veroeffentlicht nichts. Wird die Einheit vor dem Neuerstellen
+  Lauf endet partial (Exit 3). Wird die Einheit vor dem Neuerstellen
   ausgeschaltet, nennt die Fehlerzeile nur den Snapshot. Laeuft ein neuer Container danach nicht oder
   bricht Ctrl-C das Neuerstellen ab, nennt die Zeile den Snapshot und `hal restore <einheit> --live`. Eine ausgeschaltete Einheit
   wird nicht angefasst, und `hal start` behaelt den alten Container. Ein nicht angepinntes,

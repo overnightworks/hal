@@ -15,7 +15,7 @@
 "tests/test_keycloak_probe.py" = 955
 "tests/test_stack_apply.py" = 3695
 "tests/test_stack_realm_reconcile.py" = 929
-"tests/test_workstation_secrets_view.py" = 911
+"tests/test_workstation_secrets_view.py" = 869
 
 [function_lines."probe/keycloak/probe.py"]
 "Probe.admin_console_only_on_loopback" = 74

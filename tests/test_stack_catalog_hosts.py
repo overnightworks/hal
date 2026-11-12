@@ -511,10 +511,7 @@ def test_b6_an_app_host_without_ready_is_refused_and_with_ready_is_read(tunnel):
     app = {"repo": {"default_branch": "master"}, "run": {"enabled": True}}
     unready = document(hosted(host("app", **tunnel), key="app", **app))
 
-    assert (
-        refusal(unready)
-        == "services.app.hosts[0].ready: an app's host needs the path the publish asks"
-    )
+    assert refusal(unready) == "services.app.hosts[0].ready: an app's host needs a `ready` path"
     ready = document(hosted(host("app", ready="/health"), key="app", **app))
     assert [one.ready for one in catalog.hosts(ready)] == ["/health"]
 

@@ -20,11 +20,11 @@ from hal.backup.cli import StepExit
 from hal.backup.runner import Interrupted, StepFailed
 from hal.backup.settings import Settings
 from hal.backup.status import ExitCategory
+from hal.backup.stop_signals import signals_ignored, terminate_like_interrupt
 from hal.grammar import Asks, Command, ExitCode
 from hal.output import write_error
 from hal.output.command import Verb, command
 from hal.stack import catalog, compose, emergency, switches, terminal, unit_plans
-from hal.stop_signals import signals_ignored, terminate_like_interrupt
 
 HAL_BACKUP = command(Verb.BACKUP)
 HAL_RESTORE = command(Verb.RESTORE)

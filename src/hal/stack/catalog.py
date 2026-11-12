@@ -376,10 +376,10 @@ def _is_dotted_labels(zone: str) -> bool:
 
 def _require_ready(entered: list[tuple[str, Host]]) -> None:
     """An app's host needs its `ready` path, so planning refuses one without it before anything
-    starts: the publish phase asks it there, or the tunnel's owner does before the host moves."""
+    starts: the tunnel's owner asks it there before the host moves."""
     for path, one in entered:
         if one.ready is None:
-            raise CatalogError(f"{path}.ready: an app's host needs the path the publish asks")
+            raise CatalogError(f"{path}.ready: an app's host needs a `ready` path")
 
 
 def _entry_enabled(key: str, entry: dict) -> bool:

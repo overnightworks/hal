@@ -264,7 +264,7 @@ def _alias_refusals(
 
 def _healthcheck_refusal(health: object) -> str | None:
     if not isinstance(health, dict) or _healthcheck_disabled(health):
-        return "has no healthcheck (healthcheck); the publish phase asks it for ready"
+        return "has no healthcheck (healthcheck)"
     for key in ("test", "disable"):
         if _interpolates(str(health.get(key))):
             return f"interpolates the healthcheck {key} ($); not yet supported"
