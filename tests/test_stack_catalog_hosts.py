@@ -386,12 +386,6 @@ def test_a_redirect_of_the_zones_names_is_accepted():
     assert [one.fqdn for one in catalog.hosts(with_redirect(REDIRECT))] == [f"app.{ZONE}"]
 
 
-def test_the_redirected_names_are_the_zones_apex_and_labels_and_none_without_a_redirect():
-    redirected = catalog.redirected_fqdns(with_redirect({**REDIRECT, "hosts": ["@", "www"]}))
-    assert redirected == {ZONE, f"www.{ZONE}"}
-    assert catalog.redirected_fqdns(document(hosted(host("app")))) == frozenset()
-
-
 @pytest.mark.parametrize(
     ("redirect", "key"),
     [

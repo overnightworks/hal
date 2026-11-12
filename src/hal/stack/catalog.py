@@ -345,16 +345,6 @@ def hosts(document: Any) -> tuple[Host, ...]:
     return tuple(host for _, host in enabled_hosts)
 
 
-def redirected_fqdns(document: Any) -> frozenset[str]:
-    """The names `cloudflare.redirect` answers at the edge; they hold the tunnel record too.
-
-    Valid once `hosts` has accepted the document.
-    """
-    zone_name = zone(document)
-    redirect = document["cloudflare"].get("redirect") or {}
-    return frozenset(fqdn_of(name, zone_name) for name in redirect.get("hosts", []))
-
-
 def fqdn_of(name: str, zone: str) -> str:
     """The full name of a catalog host name: '@' is the zone's apex."""
     return zone if name == APEX else f"{name}.{zone}"
