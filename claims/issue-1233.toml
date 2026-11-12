@@ -1,0 +1,8 @@
+claim_id = "1220e6cd81f1463b9e67ef7225e34a47"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "b5dbf9c0145b457b3a4afe709bb1a4e582f5c229"
+branch = "claude/issue-1233-publish-and-host-check-leave"
+scope = [".github/workflows/ci.yml", "README.md", "docs", "external", "probe/keycloak/README.md", "probe/keycloak/probe.py", "quality/baseline.toml", "quality/config.toml", "src/hal", "tests"]
+opened_commit = "ca26fb55e637456433371427caebb93dfde405f8"
+whole_reason = "A pure removal: everything deleted is reached only through the two removed entry points, and splitting would leave about 2,700 dead production lines on main between the slices."
