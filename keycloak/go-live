@@ -90,7 +90,10 @@ CONTAINER_REALM_ATTRIBUTES = (
     "--realm master --client config-cli --fields attributes"
 )
 
-NEXT_STEP = f"Last: the platform owns the record and the tunnel ingress of {PUBLIC_HOST}; hal publishes nothing."
+NEXT_STEP = (
+    f"Last: the platform owns the record and the tunnel ingress of {PUBLIC_HOST}; "
+    "hal publishes nothing."
+)
 
 
 class StepFailure(Exception):
