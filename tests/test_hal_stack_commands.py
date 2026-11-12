@@ -257,7 +257,7 @@ def test_a_ctrl_c_the_stack_does_not_catch_ends_with_130_and_no_traceback(hal, m
 def test_apply_at_a_terminal_applies_the_local_part_and_ends_on_its_verdict(
     hal, applying, arguments
 ):
-    """A1, A6: one question, the units switched, nothing said on stderr; `--local` is the same."""
+    """One question, the units switched, nothing said on stderr; `--local` is the same."""
     result = hal(*arguments, answers=("yes",))
 
     assert result.exit_code == ExitCode.OK
@@ -299,7 +299,7 @@ def test_apply_behind_origin_names_hal_update(hal, applying, monkeypatch):
 
 
 def test_apply_interrupted_at_the_plan_ends_with_130(hal, applying):
-    """A3: Ctrl-C at the question ends the run as it ends any command."""
+    """Ctrl-C at the question ends the run as it ends any command."""
     result = hal("apply", answers=("yes",), while_prompt_waits=ctrl_c)
 
     assert result.exit_code == ExitCode.INTERRUPTED

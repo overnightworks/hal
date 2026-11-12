@@ -42,7 +42,7 @@ _REDIRECT_KEYS = {"hosts", "target", "serve"}
 _SERVE_KEYS = {"pages", "files"}
 _FILES_PREFIX = re.compile(r"(/[a-z0-9._~-]+)+/")
 _LABEL = re.compile(r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?")
-# A tunnel's name goes unquoted into Cloudflare's tunnel query.
+# A tunnel's name is a DNS label, the same shape as a host's name.
 _TUNNEL_NAME = _LABEL
 # A compose project name: it is also the repository and the directory name of an app.
 _APP_KEY = re.compile(r"[a-z0-9][a-z0-9_-]*")

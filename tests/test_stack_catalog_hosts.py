@@ -51,7 +51,6 @@ def as_expectation(found: tuple[catalog.Host, ...]) -> dict:
 
 @pytest.mark.parametrize("fixture", sorted(path.stem for path in FIXTURES.glob("hosts-*.yaml")))
 def test_the_reader_yields_the_hosts_a_fixture_expects(fixture):
-    """C6"""
     expected = json.loads((FIXTURES / f"{fixture}.expected.json").read_text())
     found = catalog.hosts(catalog.read(FIXTURES / f"{fixture}.yaml"))
     assert as_expectation(found) == expected
