@@ -1,0 +1,7 @@
+claim_id = "2e1f695973884ca589f36754724786c3"
+agent = "Claude afefb687-3c4a-4124-872d-0df87b0327e9"
+role = "builder"
+base = "d1412ac1b34b49250cf8075fd34db82fa86ce556"
+branch = "claude/issue-1228-presentator-hosts-to-platform-tunnel"
+scope = ["docs/architecture.md", "fleet.yaml"]
+opened_commit = "896467474b419e3c632c65c079bfdd26e8ffe355"
