@@ -2,18 +2,10 @@
 tunnel. `hal` is their one door."""
 
 import os
-from collections.abc import Callable
-from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
 
 from hal.output import Stream, write_line
-from hal.output.command import Verb, command
 from hal.stack import api_limits, apply, emergency, switches, tunnel, update
-from hal.stack.external import cli as external_cli
-from hal.stack.external.cloudflare_read import OwnTunnel
-
-COMMAND = command(Verb.APPLY)
 
 
 def tunnel_of_environment(command: str) -> tunnel.Tunnel | None:
@@ -59,76 +51,9 @@ def start_unit(unit: str) -> int:
     return emergency.start_unit(switches.Switches(switches.default_state_directory()), unit)
 
 
-@dataclass
-class _Run:
-    """What the interrupt handler of the composer knows, recorded where each fact is true."""
-
-    publish_started: bool = False
-    publish_exit: int | None = None
-
-
 def update_checkout() -> update.UpdateEnd:
     return update.update_checkout(switches.default_state_directory())
 
 
-def apply_units(api: api_limits.ApiSettings, own_tunnel: Callable[[], OwnTunnel] | None) -> int:
-    """`own_tunnel` reads hal's tunnel, which the publish after the local part goes through;
-    without it the local part runs alone."""
-    if own_tunnel is None:
-        return apply.apply_local(switches.default_state_directory(), api=api)
-    return _apply_then_publish(api, own_tunnel)
-
-
-def _apply_then_publish(api: api_limits.ApiSettings, own_tunnel: Callable[[], OwnTunnel]) -> int:
-    """The local part, then the publish only if the local part ended clean. The exit is the local
-    one unless it is 0, then the publish's with its 2 ("cannot plan") made 1: a 2 from here means
-    the local part could not finish planning, and nothing was published. No signal handler is
-    installed here; the one `except KeyboardInterrupt` (SIGINT) decides by what is recorded.
-
-    Accepted windows, not covered: a SIGINT between the publish's return and the store of its
-    exit (exit 1 and the check line although the publish finished); a SIGTERM after the publish
-    left its own context (default action: the process ends by the signal); a second Ctrl-C while
-    `_exit_after_interrupt` prints (ends with a traceback)."""
-    run = _Run()
-    try:
-        state_directory = switches.default_state_directory()
-        local_exit = apply.apply_local(state_directory, api=api, publish_follows=True)
-        if local_exit != apply.ApplyExit.APPLIED_OR_NOTHING:
-            write_line(f"{COMMAND}: nothing published", stream=Stream.STDERR)
-            return local_exit
-        run.publish_started = True
-        run.publish_exit = _published_exit(
-            external_cli.apply_command(Path.home(), own_tunnel=own_tunnel)
-        )
-        _say_summary(run.publish_exit)
-        return run.publish_exit
-    except KeyboardInterrupt:
-        return _exit_after_interrupt(run)
-
-
-def _published_exit(publish_exit: int) -> int:
-    if publish_exit == apply.ApplyExit.CANNOT_PLAN:
-        return apply.ApplyExit.REFUSED
-    return publish_exit
-
-
-def _say_summary(publish_exit: int) -> None:
-    if publish_exit == apply.ApplyExit.APPLIED_OR_NOTHING:
-        write_line(f"{COMMAND}: done", stream=Stream.STDERR)
-    else:
-        write_line(
-            f"{COMMAND}: the publish did not end clean (exit {publish_exit})", stream=Stream.STDERR
-        )
-
-
-def _exit_after_interrupt(run: _Run) -> int:
-    if run.publish_exit is not None:
-        return run.publish_exit
-    if run.publish_started:
-        write_line(
-            f"{COMMAND}: interrupted during the publish; run `{command(Verb.CHECK, 'hosts')}`",
-            stream=Stream.STDERR,
-        )
-    else:
-        write_line(f"{COMMAND}: interrupted, nothing published", stream=Stream.STDERR)
-    return apply.ApplyExit.REFUSED
+def apply_units(api: api_limits.ApiSettings) -> int:
+    return apply.apply_local(switches.default_state_directory(), api=api)

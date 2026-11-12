@@ -7,8 +7,7 @@ an app: its key is its repository's name under `github.org`, its compose project
 and `apps()` ignore them; `host_only_keys()` reads those with no `repo` either, the apps edge only
 fronts. `hosts()` is the separate reader of every entry's `hosts` list (an entry without `run` is
 enabled). `units()` also reads each unit's hosts, enabled or not, and needs a valid
-`cloudflare.zone` once a unit declares one. The top-level `cloudflare:` and `github:` keys belong
-to OpenTofu, which reads the same file and must agree with these readers.
+`cloudflare.zone` once a unit declares one.
 """
 
 import os
@@ -30,7 +29,7 @@ _BOOL_TAG = "tag:yaml.org,2002:bool"
 _TRUE_OR_FALSE = re.compile(r"^(?:true|false)$")
 _FLOAT_TAG = "tag:yaml.org,2002:float"
 _INT_TAG = "tag:yaml.org,2002:int"
-# Forms tofu reads as numbers and PyYAML leaves as strings, so they must not pass as labels.
+# Forms other YAML readers take as numbers and PyYAML leaves as strings: not labels.
 _EXPONENT_NUMBER = re.compile(r"^[-+]?\d+[eE][-+]?\d+$")
 _OCTAL_NUMBER = re.compile(r"^0o[0-7]+$")
 
@@ -43,7 +42,7 @@ _REDIRECT_KEYS = {"hosts", "target", "serve"}
 _SERVE_KEYS = {"pages", "files"}
 _FILES_PREFIX = re.compile(r"(/[a-z0-9._~-]+)+/")
 _LABEL = re.compile(r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?")
-# A tunnel's name goes unquoted into Cloudflare's tunnel query and into OpenTofu's lookup key.
+# A tunnel's name goes unquoted into Cloudflare's tunnel query.
 _TUNNEL_NAME = _LABEL
 # A compose project name: it is also the repository and the directory name of an app.
 _APP_KEY = re.compile(r"[a-z0-9][a-z0-9_-]*")
@@ -60,11 +59,11 @@ class CatalogError(Exception):
 
 
 class _CatalogLoader(yaml.SafeLoader):
-    """Only `true` and `false` are booleans, and the numbers tofu reads are no strings.
+    """Only `true` and `false` are booleans, and the numbers other readers take are no strings.
 
-    tofu's `yamldecode` also reads YAML 1.1 words (`yes`, `no`, `on`, `off`, `y`, `n`, `True`)
-    as booleans and PyYAML disagrees on some of them; only `true` and `false` mean the same to
-    both readers, so every other spelling is refused.
+    YAML 1.1 words (`yes`, `no`, `on`, `off`, `y`, `n`, `True`) read as booleans in some YAML
+    readers and PyYAML disagrees on some of them; only `true` and `false` mean the same to every
+    reader, so every other spelling is refused.
     """
 
 
@@ -96,7 +95,7 @@ class App:
 
 
 def read(catalog_file: Path) -> Any:
-    """The catalog's document, read the way tofu reads it."""
+    """The catalog's document."""
     return parse(read_bytes(catalog_file), catalog_file.name)
 
 
@@ -521,7 +520,7 @@ def _check_together(enabled_hosts: list[tuple[str, Host]]) -> None:
 def _check_redirect(document: dict, zone: str, taken: set[str]) -> None:
     """`cloudflare.redirect`: the zone's names that leave the tunnel for a redirect at the edge.
 
-    OpenTofu renders it (external/cloudflare.tf); a malformed one is refused before tofu starts.
+    A malformed one is refused when the catalog is read.
     """
     redirect = document["cloudflare"].get("redirect")
     if redirect is None:

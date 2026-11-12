@@ -32,7 +32,6 @@ from support.stack_apply import (
     writing_environment,
 )
 from support.stack_apply_fakes import (
-    ScriptedGit,
     Setup,
 )
 from support.stack_plan_legal_rows import ALL_LABELS, appkit_plan, legal_plan
@@ -51,7 +50,6 @@ from support.stack_plan_rows import (
 
 from hal.stack import checkout
 from hal.stack.apply import ApplyExit
-from hal.stack.external import cli as external_cli
 from hal.stack.legal_step import PageChange
 from hal.stack.plan_rows import PlanEvent, changes_in
 from hal.stack.realm.reconcile import RealmAction, RealmPlan
@@ -260,25 +258,6 @@ def test_a_dirty_tree_is_a_failed_checkout_row_with_its_paths_then_one_error(
         f"next: git -C {checkout.LIVE_CHECKOUT} status",
     ]
     assert scripted.calls == []
-
-
-def test_external_apply_on_a_dirty_tree_prints_the_same_bytes_as_before(
-    repository,  # noqa: F811
-    home,  # noqa: F811
-    capsys,
-):
-    git = ScriptedGit(status=b" M fleet.yaml\0?? dynamic/x.yml\0")
-
-    exit_code = external_cli._refusal_off_clean_live_main(repository, home, git)
-
-    assert exit_code == 2
-    lines = capsys.readouterr().err.splitlines()
-    assert [line.partition(": ")[2] for line in lines] == [
-        "the live checkout has local changes, nothing changed; a change reaches it through a "
-        "pull request and `hal update`:",
-        "  fleet.yaml",
-        "  dynamic/x.yml",
-    ]
 
 
 def test_a_written_environment_is_one_done_row_before_the_checkout_row(switch, repository):  # noqa: F811

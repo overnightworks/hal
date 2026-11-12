@@ -16,6 +16,9 @@ from support.hal_stack_commands import (
     ctrl_c,
     fakes,  # noqa: F401 the fixture, requested by name below
     hal,  # noqa: F401 the fixture, requested by name below
+    home,  # noqa: F401 the fixture, requested by name below
+    live_checkout,  # noqa: F401 the fixture, requested by name below
+    repository,  # noqa: F401 the fixture, requested by name below
     system_commands,  # noqa: F401 the autouse guard that no real system command runs
     systemd,  # noqa: F401 the fixture, used by `fakes`
 )
@@ -41,11 +44,6 @@ from support.stack_apply_apps import (
 )
 from support.stack_apply_fakes import (
     InterruptedWaitForLock,
-)
-from support.stack_apply_publish import repository  # noqa: F401 the fixture, requested by name below
-from support.stack_external import (
-    home,  # noqa: F401 the fixture, requested by name below
-    live_checkout,  # noqa: F401 the fixture, requested by name below
 )
 from support.stack_global_stop import hosts_asked  # noqa: F401 the fixture, used by `fakes`
 

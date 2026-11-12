@@ -12,7 +12,7 @@ from hal.grammar import Asks, Command, ExitCode
 from hal.litellm_expiry import Expired, ExpiryFailed, Kind, Outcome
 from hal.output import Glyph, Noun, Row, Verdict, counted, write_error, write_row, write_verdict
 from hal.output.command import Verb, command
-from hal.stack.external.apply import terminate_like_interrupt
+from hal.stop_signals import terminate_like_interrupt
 
 HAL_EXPIRE = command(Verb.EXPIRE)
 DAYS = litellm_expiry.RETENTION_DAYS

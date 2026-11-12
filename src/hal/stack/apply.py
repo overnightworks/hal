@@ -1,4 +1,4 @@
-"""`hal apply --local`: switches the units of this repository on or off from `fleet.yaml` and its
+"""`hal apply`: switches the units of this repository on or off from `fleet.yaml` and its
 apps on at their newest release (`apps.py`).
 
 Exit 0 applied and observed, or nothing to change; 1 refused, aborted, failed or partial;
@@ -29,7 +29,7 @@ on `yes` its own setup command runs in the operator's terminal (key material is 
 here) and `--check` must then pass before a fresh plan is shown. A unit with an emergency switch
 (`hal stop`) or a barrier a stop left is never started and its switch is never cleared here: only
 `hal start` ends it. If it is enabled in the catalog, declares a setup, and its containers still
-run while it is not set up, the run is refused: nothing is asked or published. After the setups,
+run while it is not set up, the run is refused: nothing is asked. After the setups,
 and before the plan is shown, a service this run creates, or the key step's one-off when the step
 reads, that names a secret file which does not exist refuses the run with that path and
 `next: hal setup`, where Compose would refuse it at `up`.
@@ -289,7 +289,6 @@ def apply_local(
     home: Path | None = None,
     collaborators: Collaborators = PRODUCTION,
     api: api_limits.ApiSettings = api_limits.NONE_SET,
-    publish_follows: bool = False,
 ) -> int:
     started = collaborators.verifier.clock()
     if not at_terminal():
@@ -322,7 +321,6 @@ def apply_local(
             collaborators,
             api,
             lambda: collaborators.verifier.clock() - started,
-            publish_follows,
         )
     finally:
         os.close(lock)
@@ -378,7 +376,6 @@ def _plan_and_apply(
     collaborators: Collaborators,
     api: api_limits.ApiSettings,
     elapsed: Callable[[], float],
-    publish_follows: bool,
 ) -> int:
     repository = live.tree
     log_variables = api_limits.log_environment(api.log_depth)
@@ -427,7 +424,6 @@ def _plan_and_apply(
         _core_phase(planned, repository, record, collaborators),
         completed,
         elapsed,
-        publish_follows,
     )
 
 
@@ -471,7 +467,7 @@ def _missing_setups(planned: Plan, repository: Path, check: setup.SetupCheck) ->
     """The enabled units whose `--check` says not set up, in catalog order.
 
     A unit whose containers already run is checked too: an interrupted setup leaves them up, and
-    the publish must not follow before the setup is done. A unit kept stopped is checked only
+    the setup must be done before the plan is shown. A unit kept stopped is checked only
     while its containers still run."""
     stopped = {p.unit.key: p.running for p in planned.plans if p.action is Action.STAYS_STOPPED}
     missing = []
@@ -671,7 +667,6 @@ def _confirm_and_switch(
     core_phase: CorePhase,
     completed_setups: Sequence[str],
     elapsed: Callable[[], float],
-    publish_follows: bool,
 ) -> int:
     write_groups(plan_groups(planned))
     asked = changes_in(planned)
@@ -680,7 +675,7 @@ def _confirm_and_switch(
         return ApplyExit.DECLINED
     with live_line() as show:
         exit_code = _apply_changes(engine, planned, marks, core_phase, Progress(show=show))
-    return _closed_on_verdict(exit_code, asked, elapsed, publish_follows)
+    return _closed_on_verdict(exit_code, asked, elapsed)
 
 
 def _apply_changes(
@@ -735,10 +730,8 @@ def _apply_changes(
     return _report_switched(bool(withheld or mismatched), later_failed, snapshots)
 
 
-def _closed_on_verdict(
-    exit_code: int, changes: int, elapsed: Callable[[], float], publish_follows: bool
-) -> int:
-    if exit_code == ApplyExit.APPLIED_OR_NOTHING and not publish_follows:
+def _closed_on_verdict(exit_code: int, changes: int, elapsed: Callable[[], float]) -> int:
+    if exit_code == ApplyExit.APPLIED_OR_NOTHING:
         write_verdict(
             Verdict(
                 Glyph.DONE, "applied", ((changes, ChangeNoun.CHANGE),), elapsed_seconds=elapsed()

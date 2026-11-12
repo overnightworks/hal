@@ -2,9 +2,7 @@
 switches behind hal's door. Each calls a typed function of `hal.stack.cli`, so the guards, the
 prompts, the state files and the lines are the stack's own; only the exit number is hal's.
 `hal apply` alone reads `~/.config/hal/config.toml` first and hands its `[api]` numbers down; a
-malformed file ends it with exit 2 before any guard. The other verbs never read the file. Without
-`--local` the publish reads hal's tunnel from `own_tunnel`, the one reader of the machine's tunnel
-config, which `hal check hosts` shares."""
+malformed file ends it with exit 2 before any guard. The other verbs never read the file."""
 
 import argparse
 from pathlib import Path
@@ -15,9 +13,7 @@ from hal.output import write_error
 from hal.output.command import Verb, command
 from hal.stack import apply
 from hal.stack import cli as stack
-from hal.stack.external.cloudflare_read import OwnTunnel, OwnTunnelUnknown
 from hal.stack.update import UpdateEnd
-from hal.workstation import tunnel_config
 
 # `hal apply` ends a declined yes with FINDINGS and a guard that says no with REFUSED; a cannot-plan
 # end, a failed step and a partial run are FAILURE, and the printed line names which. The emergency
@@ -47,16 +43,11 @@ def _exit_of(stack_exit: int) -> ExitCode:
 
 def _configure_apply(parser: argparse.ArgumentParser) -> None:
     parser.description = (
-        "The local part (`--local`: the units of this repository and the apps of the catalog, at a "
-        "terminal, after `yes`), then, only if it ended clean, the publish to Cloudflare (after "
-        "its own `yes`). Each part asks only when it has changes."
+        "Switches the units of this repository and the apps of the catalog (checked out, built "
+        "and run at their newest release) to what `fleet.yaml` declares, at a terminal, after "
+        "`yes`. It changes only this PC."
     )
-    parser.add_argument(
-        "--local",
-        action="store_true",
-        help="the local part alone: units of this repository and the apps of the catalog "
-        "(checked out, built and run at their newest release), at a terminal, after `yes`",
-    )
+    parser.add_argument("--local", action="store_true", help="the same as without it")
 
 
 def _configure_update(parser: argparse.ArgumentParser) -> None:
@@ -82,16 +73,7 @@ def _apply(arguments: argparse.Namespace) -> ExitCode:
     except hal_config.ConfigInvalid as error:
         write_error(f"{error.path}: {error.reason}")
         return ExitCode.USAGE
-    return _exit_of(stack.apply_units(settings.api, None if arguments.local else own_tunnel))
-
-
-def own_tunnel() -> OwnTunnel:
-    """hal's tunnel, by the id in the machine's tunnel config, which the running tunnel reads."""
-    config = tunnel_config.TUNNEL_CONFIG
-    try:
-        return OwnTunnel(tunnel_config.tunnel_id(config), config)
-    except tunnel_config.TunnelIdUnknown as error:
-        raise OwnTunnelUnknown(str(error)) from error
+    return _exit_of(stack.apply_units(settings.api))
 
 
 def _update(_arguments: argparse.Namespace) -> ExitCode:
@@ -117,7 +99,7 @@ def _online(_arguments: argparse.Namespace) -> ExitCode:
 COMMANDS = (
     Command(
         Verb.APPLY,
-        "switch the units of fleet.yaml on or off, then publish to Cloudflare",
+        "switch the units of fleet.yaml on or off on this PC",
         _apply,
         _configure_apply,
         json=False,
