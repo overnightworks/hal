@@ -20,6 +20,8 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
+    # Measured about 7.5 minutes on main.
+    timeout-minutes: 15
     env:
       # Placeholder the compose file interpolates; the real one lives in the uncommitted .env.
       DOCKER_GID: "127"
@@ -298,6 +300,8 @@ jobs:
   # tests/test_litellm_front.py (about 50 MB of images). It re-runs on every Traefik bump.
   front:
     runs-on: ubuntu-latest
+    # Measured about 1 minute on main.
+    timeout-minutes: 10
     env:
       DOCKER_GID: "127"
       EDGE_FRONT_CASES: "1"
@@ -321,7 +325,7 @@ jobs:
     permissions:
       contents: read
       actions: read
-    uses: overnightworks/quality/.github/workflows/gate.yml@9ced0f5cee689f2c70fb1467513b943484bd65a5 # v0.11.1
+    uses: overnightworks/quality/.github/workflows/gate.yml@be32abeb120d29f75ee7ea456d6e510ae001de04 # v0.12.0
     with:
       coverage-artifact: coverage
     secrets:
