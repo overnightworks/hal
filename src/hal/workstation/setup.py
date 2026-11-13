@@ -48,8 +48,8 @@ from hal.workstation.user_units import UnitsApplied, UnitsPartial, UserUnits
 if TYPE_CHECKING:
     from hal.workstation.ports import Downloader, Ports
 
-# Quality v0.10.0. A commit SHA cannot move; a bump is a one-line change here.
-QUALITY_SOURCE = "overnightworks-quality @ git+https://github.com/overnightworks/quality@2d2b68bf3916b34f6f2c72a540c1e3d8a947b750"
+# Quality v0.12.0. A commit SHA cannot move; a bump is a one-line change here.
+QUALITY_SOURCE = "overnightworks-quality @ git+https://github.com/overnightworks/quality@be32abeb120d29f75ee7ea456d6e510ae001de04"
 # The release binary of mise and its sha256 (the same in the release's SHASUMS256.txt); a bump is a two-line change here.
 MISE_VERSION = "2026.11.3"
 MISE_SHA256 = "c2f7e814cb39f60b7f67a0ff36cb805e94128bf2dff09d175309d0f095b8cc3b"
