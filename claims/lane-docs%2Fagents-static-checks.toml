@@ -1,7 +1,0 @@
-claim_id = "f959f2be85c948688b4b0e5e00e5939e"
-agent = "Claude c5152a58-7386-427f-aba1-ec451b2731bb"
-role = "builder"
-base = "81b8165ce17b2e02c307921bdd461091e1a7dabc"
-branch = "docs/agents-static-checks"
-scope = ["AGENTS.md"]
-opened_commit = "d4ff5e1d0c555333457e761f297e4b321ec06048"
