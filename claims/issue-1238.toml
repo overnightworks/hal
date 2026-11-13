@@ -1,7 +1,0 @@
-claim_id = "447876b8984c4887a4df831a007a4a00"
-agent = "Claude c5152a58-7386-427f-aba1-ec451b2731bb"
-role = "builder"
-base = "c56c20654f55c7e1e2409804835f9af12f00f5d4"
-branch = "claude/issue-1238-hal-setup-pins-quality-v0-12-0-the-relea"
-scope = ["src/hal/workstation/setup.py"]
-opened_commit = "638eef9ec1001c76fc21f322e142a34de80870a2"
