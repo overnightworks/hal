@@ -4,7 +4,7 @@ the real front and LiteLLM to the fake Anthropic; 2.8's census (litellm_retentio
 searches the route for the turn's canaries. Before the turn, the same throwaway runner
 calls the wheel's `list_gateway_models` through the front (HAL-2.6m's W models).
 
-    flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \\
+    probe-run \\
         uv run --frozen python3 probe/agent-service/litellm_wheel.py --scratch DIR
 
 Measured: a run took 81 s, teardown included; the teardown is litellm_retention.py's, a few

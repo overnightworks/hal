@@ -5,7 +5,7 @@ file (K0). Its runs: dirty, clean, a wrong answer, a missing container and hopin
 main against the checkout (R3). Nothing live and nothing paid: the stack refuses to start unless
 `internet` is internal and holds only the fakes, and `main` is never called.
 
-    flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \\
+    probe-run \\
         python3 probe/agent-service/litellm_live_canary.py --scratch DIR
 
 The wrapper runs through a `Stack` built from `compose_command(guard=True)` and the guard's own

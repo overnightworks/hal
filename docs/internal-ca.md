@@ -89,7 +89,7 @@ http refused, the network split as ruled, no new host listener, renewal without 
 keeping both volumes, the emergency switch, setup asked by apply, the follower recreate rules). Its
 compose calls and `step-ca/init` run from a copy of `compose.yaml` whose fixed network and volume names are moved into the
 probe's project, and each checks first that it resolves no other network or volume, so it never touches a live
-one. Most of its run is the wait for a renewal; like every probe stack, it runs under `/tmp/probe-stack.lock` with a time cap (its
+one. Most of its run is the wait for a renewal; like every probe stack, it runs through `probe-run` with its time cap (its
 docstring gives the command line). Re-run it for every step-ca or Traefik upgrade.
 
 ## agent-egress

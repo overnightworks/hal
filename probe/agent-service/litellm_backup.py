@@ -5,7 +5,7 @@ its throwaway project. Nothing live and nothing paid: the probe refuses to start
 is internal and holds only the fakes. It runs in hal's environment, which holds the agent-runtime
 client:
 
-    flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \\
+    probe-run \\
         uv run --frozen python3 probe/agent-service/litellm_backup.py --scratch DIR
 
 Measured on two runs: 4 to 7.5 minutes whole, of which the stack's start and B1 to B7 take 2 to

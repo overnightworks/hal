@@ -6,7 +6,7 @@ path exists. It runs on the stack of litellm.py: the front, LiteLLM, its databas
 against a fake Anthropic and a fake OpenAI. Nothing live and nothing paid: the probe refuses to
 start unless the resolved copy marks `internet` internal and holds only the fake hosts.
 
-    flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \\
+    probe-run \\
         python3 probe/agent-service/litellm_network.py --scratch DIR
 
 Measured: a run takes about six minutes and its teardown a few seconds (K 30 s, CAP 1800 s).

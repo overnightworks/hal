@@ -2,7 +2,7 @@
 `probe/keycloak/probe.py hold` keeps up in its throwaway project. Nothing live: it refuses to run
 in the live project, and it holds the live project unchanged after its last cell.
 
-    flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \\
+    probe-run \\
         uv run --frozen python3 probe/keycloak/live_restore.py --scratch DIR
 
 Measured: 124 s whole, of which the hold's teardown is 10 s. `timeout`'s TERM reaches the hold in

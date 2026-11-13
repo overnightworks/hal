@@ -9,7 +9,7 @@ with no `max_budget`.
 Nothing live and nothing paid: the probe refuses to start unless `internet` is internal and holds
 only the fakes.
 
-    flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \\
+    probe-run \\
         python3 probe/agent-service/litellm_admission.py --scratch DIR
 
 Evidence: F is the fake provider's request log (FP the fake OpenAI's), A the callers' status,

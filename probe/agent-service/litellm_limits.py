@@ -4,7 +4,7 @@ key step of litellm_keys.py, against the LiteLLM of litellm.py in its throwaway 
 live and nothing paid: the probe refuses to start unless `internet` is internal and holds only the
 fakes.
 
-    flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \\
+    probe-run \\
         python3 probe/agent-service/litellm_limits.py --scratch DIR
 
 Each cell writes the settings file, plans and runs the step from the rows the step made at the

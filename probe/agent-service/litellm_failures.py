@@ -4,7 +4,7 @@ fake Anthropic) with the fake steered through its control
 file and the caller of litellm.py, a throwaway with an app key. Nothing live and nothing paid: the
 probe refuses to start unless `internet` is internal and holds only the fakes.
 
-    flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \\
+    probe-run \\
         python3 probe/agent-service/litellm_failures.py --scratch DIR
 
 Measured: a run takes about eight minutes (F10 waits for the fake's 120 s hold limit, K10 for
