@@ -21,7 +21,7 @@ repository reached through `url.<file>.insteadOf`) are the
 probe's own. The probe never runs `hal online`, `hal offline` or `--all`, so no tunnel is named. It
 always removes its containers, volumes, networks and images, found by their compose project.
 
-    flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 50 1780 \\
+    probe-run -k 50 1780 \\
         python3 probe/apps/probe.py --scratch DIR [--switch-only]
 
 Measured teardown: 2 s (K 50 s, CAP 1780 s).

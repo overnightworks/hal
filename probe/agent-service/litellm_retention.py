@@ -8,7 +8,7 @@ LiteLLM and its database, and in a `pg_dump` of the database, by
 Nothing live and nothing paid: the probe refuses to start unless `internet` is internal and holds
 only the fakes.
 
-    flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \\
+    probe-run \\
         python3 probe/agent-service/litellm_retention.py --scratch DIR
 
 Measured: a run takes about three minutes and its

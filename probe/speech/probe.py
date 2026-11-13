@@ -1,6 +1,6 @@
 """Probe of the speech app in H's edge copy through `hal apply --local` (#872).
 
-    flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \\
+    probe-run \\
         uv run --frozen python3 probe/speech/probe.py {transition|lifecycle} --scratch DIR
 
 Both modes first establish H's stand at the lane's base (`git show <merge-base>:<path>` for every

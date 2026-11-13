@@ -2,7 +2,7 @@
 `hal restore presentator --live` under a scratch HOME with its own restic repository, against a
 stand-in database the probe writes itself.
 
-    flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \\
+    probe-run \\
         python3 probe/backup/sqlite_live.py --scratch DIR
 
 A scratch `--apps` declares presentator with a probe-unique `compose_project`, so the door's

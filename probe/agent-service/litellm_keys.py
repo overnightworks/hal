@@ -4,7 +4,7 @@ litellm.py in its throwaway project.
 Nothing live and nothing paid: the probe refuses to start unless `internet` is internal and holds
 only the fakes. It runs in hal's environment, which holds the agents library:
 
-    flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \\
+    probe-run \\
         uv run --frozen python3 probe/agent-service/litellm_keys.py --scratch DIR
 
 Measured: a run takes about four minutes and its teardown a few seconds (K 30 s, CAP 1800 s).

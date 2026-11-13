@@ -6,7 +6,7 @@ throwaway on HopIn's network that posts agent-runtime's wire body (`model`, `mes
 on `litellm-backend`. Nothing live and nothing paid: the probe refuses to start unless the resolved
 copy marks `internet` internal and holds only the fake hosts.
 
-    flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \\
+    probe-run \\
         python3 probe/agent-service/litellm.py --scratch DIR
 
 Measured: a run takes about two minutes and its teardown a few seconds (K 30 s, CAP 1800 s).

@@ -2,7 +2,7 @@
 compose.yaml pins, after the unit's pre-apply snapshot is taken and proven. Nothing live and nothing
 paid: no provider key, no route out, no app.
 
-    flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \\
+    probe-run \\
         uv run --frozen python3 probe/agent-service/litellm_move.py --scratch DIR
 
 The copy, its secrets and its `hal apply` are litellm_unit.py's; `edge_copy` points every record

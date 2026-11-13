@@ -167,7 +167,7 @@ own `hal apply --local`, in an edge copy (`probe/edge_copy.py`) under the projec
 `edge-kc-in-copy` and a scratch HOME, beside the live stack. Later probes reuse it to drive
 Keycloak changes through hal itself.
 
-    flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \
+    probe-run \
         uv run --frozen python3 probe/keycloak/in_copy.py --scratch DIR
 
 Measured: a run takes 143 s and its teardown 1.7 s (K 30 s, CAP 1800 s).
@@ -237,10 +237,10 @@ are allowed only the copy's two addresses, and go-live never runs. It never read
 the live configuration: every secret is a scratch value under the scratch HOME. While it runs,
 `hal check exposure` reports its Keycloak as a routing name that is not valid, by design.
 
-After an exit 137 or a teardown that failed, remove the project under the lock, from a directory
+After an exit 137 or a teardown that failed, remove the project through probe-run, from a directory
 without a compose file:
 
-    flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 300 \
+    probe-run -k 30 300 \
         env -u COMPOSE_FILE -u COMPOSE_PROJECT_NAME \
         docker compose --project-name edge-kc-in-copy down --volumes --remove-orphans
 

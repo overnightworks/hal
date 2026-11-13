@@ -3,7 +3,7 @@
 Its cells H1-H6 hold it beside the live stack and isolated from it, so later probes drive Keycloak
 changes through hal itself.
 
-    flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \\
+    probe-run \\
         uv run --frozen python3 probe/keycloak/in_copy.py --scratch DIR
 
 The copy is edge_copy's, under the project `edge-kc-in-copy`. copy_isolation's `install` is the

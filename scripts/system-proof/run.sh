@@ -3,7 +3,7 @@
 # account (#331, cells A1-1 to A1-9), of the mail of `hal check` (#390, cells D1-D8), of rsyslog's removal (#422, cells R0-R7) and of a real Docker engine and the journal as its default log driver and its build cache limit (DK1-DK8, #432): a throwaway Ubuntu 26.04 with systemd as PID 1, never the live PC, never the
 # real /etc or ~/.secrets.
 #
-#   flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \
+#   probe-run \
 #       scripts/system-proof/run.sh <edge checkout> <evidence dir> <part>
 #
 # <part> is `fresh` (the first container: install, fresh, both reboots and their stages), `prepared` (the second:
@@ -11,12 +11,12 @@
 # call runs and judges only its own container's cells. <edge checkout> is a clone whose `origin/main` (or $EDGE_REF)
 # carries tunnel/; only `git archive` reads it. Give each part its own evidence dir (`<evidence dir>/fresh`,
 # `<evidence dir>/prepared`, `<evidence dir>/shapes`): each call truncates cells.txt and containers.txt there.
-# The script takes no lock: the fleet form above does. CAP 1800 plus K 30 stays within 1830, and K 30 is more than the
+# The script takes no lock: the probe-run form above waits for a low load instead. CAP 1800 plus K 30 stays within 1830, and K 30 is more than the
 # teardown of a cut run needs (it left no container within 30 s). Measured under that form on a loaded machine, each
 # part's container time (from its containers.txt to its last cell written) was `fresh` 1092 s, `shapes` 805 s,
 # `prepared` 427 s, each exit 0 with every cell held. That leaves 708 s, 995 s and 1373 s of the 1800 s cap, and
 # 408 s, 695 s and 1073 s of the 1500 s a part may take. The build and the wait for a low load come before the
-# container and count against the cap too: `fresh` took at most about 1277 s from when the lock was free (the estimate
+# container and count against the cap too: `fresh` took at most about 1277 s from when probe-run started it (the estimate
 # from the end of `prepared`), which keeps about 523 s of the cap. Every stage runs inside the cap, so the cap bounds
 # them, and the EXIT trap runs on its TERM.
 # It keeps the container ids in the evidence dir and removes its container, with its volumes and nothing else, on exit.

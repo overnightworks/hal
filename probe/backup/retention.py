@@ -3,7 +3,7 @@ the prune that leaves no unused data (#988 cell P9): the checkout's `hal backup`
 `hal backup <app> --pre-apply` and `hal restore --test` under two scratch HOMEs, each with its own
 restic repository, against two Postgres apps the probe starts itself.
 
-    flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \\
+    probe-run \\
         python3 probe/backup/retention.py --scratch DIR
 
 The apps `alpha` and `bravo` (bravo with an audio volume) run in `docker run` containers without

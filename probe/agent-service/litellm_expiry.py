@@ -3,7 +3,7 @@ litellm.py, with rows planted around the retention period, and the checkout's `h
 pointed at that project. Nothing live and nothing paid: no request is sent, and the probe refuses
 to start unless `internet` is internal and holds only the fakes.
 
-    flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 50 1780 \\
+    probe-run -k 50 1780 \\
         python3 probe/agent-service/litellm_expiry.py --scratch DIR
 
 It starts `litellm-db` and `litellm`, waits until the database records every migration the

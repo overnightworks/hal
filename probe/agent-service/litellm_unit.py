@@ -3,7 +3,7 @@ with the shipped `fleet.yaml` entry starts LiteLLM, its database and its front a
 key step holds while the unit is off or stopped and waits while the run starts LiteLLM or its
 database. Nothing live and nothing paid: no provider key, no route out, no app.
 
-    flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 50 1780 \\
+    probe-run -k 50 1780 \\
         python3 probe/agent-service/litellm_unit.py --scratch DIR
 
 Measured: a run takes about three minutes and its teardown 1 s (K 50 s, CAP 1780 s).

@@ -6,7 +6,7 @@ and runs `hal apply --local`, beside the live stack. The app comes from a scratc
 speech whose newest dated tag carries the copy's network names (`release_origin.py`),
 under a probe key, never the shipped key `speech`, whose project is the live app's.
 
-    flock -o -w 3600 /tmp/probe-stack.lock setpriv --pdeathsig TERM timeout -k 30 1800 \
+    probe-run \
         uv run --frozen python3 probe/speech/probe.py {transition|lifecycle} --scratch DIR
 
 `transition` proves the upgrade (D5a/b, D2), the exposure and networks (D3, N1-N5), egress
