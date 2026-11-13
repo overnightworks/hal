@@ -1,8 +1,0 @@
-claim_id = "d65fe28ca5a84ad79ed1bc5f9bf9fc3f"
-agent = "Claude c5152a58-7386-427f-aba1-ec451b2731bb"
-role = "builder"
-base = "cc01a09fb375d25d3482ed9ee701821a2c9ba310"
-branch = "claude/issue-1241-probes-start-through-probe-run"
-scope = ["docs/home.md", "docs/internal-ca.md", "probe/agent-service/litellm.py", "probe/agent-service/litellm_admission.py", "probe/agent-service/litellm_apps.py", "probe/agent-service/litellm_backup.py", "probe/agent-service/litellm_expiry.py", "probe/agent-service/litellm_failures.py", "probe/agent-service/litellm_keys.py", "probe/agent-service/litellm_limits.py", "probe/agent-service/litellm_live_canary.py", "probe/agent-service/litellm_logs.py", "probe/agent-service/litellm_move.py", "probe/agent-service/litellm_network.py", "probe/agent-service/litellm_retention.py", "probe/agent-service/litellm_unit.py", "probe/agent-service/litellm_wheel.py", "probe/apps/probe.py", "probe/backup/retention.py", "probe/backup/sqlite_live.py", "probe/keycloak/README.md", "probe/keycloak/in_copy.py", "probe/keycloak/live_restore.py", "probe/speech/README.md", "probe/speech/probe.py", "probe/step-ca/probe.py", "probe/switches/probe.py", "scripts/system-proof/run.sh"]
-opened_commit = "f8d10be94983187a1e49bffacd89ab73f185fb4b"
-whole_reason = "One mechanical text swap of the same usage line across every probe; split, the tree would name two forms."
