@@ -8,9 +8,9 @@ jobs). Its required check is `quality / verdict`; the gate's SonarCloud scan is
 the one scanner, and it reads `sonar-project.properties` and the tests job's
 `coverage` artifact.
 
-Before pushing, after the last merge of main, a builder or fixer runs the gate's pinned check:
-`uvx --from "git+https://github.com/overnightworks/quality@be32abeb120d29f75ee7ea456d6e510ae001de04" quality check`
-Its closing line starts with `✓ clean`.
+Before pushing, after the last merge of main, a builder or fixer runs the targeted tests of its
+change and `uv run ruff check` and `uv run ruff format --check`, the static checks of the `check`
+job; the quality gate runs in CI only.
 
 ## Rules
 
