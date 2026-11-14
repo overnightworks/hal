@@ -1,0 +1,8 @@
+claim_id = "da79786d379e430b83d919da98babd6e"
+agent = "Claude c5152a58-7386-427f-aba1-ec451b2731bb"
+role = "builder"
+base = "2a7c454d736a1ec5413e1a2ecd44f566d57b70a0"
+branch = "claude/issue-1244-hal-runs-quality-v0-18-0-the-setup-pin-a"
+scope = [".github/workflows/ci.yml", ".github/workflows/codeql.yml", "quality", "src/hal/workstation/setup.py"]
+opened_commit = "0d709f344e73b947bcdf565bbccfb5100bc2279c"
+whole_reason = "One release moves the hook, the local check and CI together; split, hal would run two quality releases."
